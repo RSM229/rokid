@@ -1,0 +1,10 @@
+/* 玻璃拟态改造（浅色版） */
+.page { padding: 24rpx; }
+.toolbar { margin-bottom: 16rpx; }
+.btn-primary { background: linear-gradient(135deg, var(--brand-l, #3b8cff), var(--brand-d, #0b5fd0)); color: #fff; font-size: 26rpx; border-radius: 12rpx; border: none; }
+.card { padding: 24rpx; margin-bottom: 14rpx; background: rgba(255,255,255,0.34); backdrop-filter: none; -webkit-backdrop-filter: none; border: 2rpx solid rgba(var(--brand-rgb, 22,119,255), 0.14); border-radius: 16rpx; box-shadow: 0 2rpx 8rpx rgba(0,0,0,0.04); }
+.note { position: relative; }
+.note-title { font-size: 29rpx; font-weight: 600; color: var(--ink-2, #243b55); padding-right: 90rpx; }
+.note-time { margin-top: 8rpx; color: #999; font-size: 22rpx; }
+.note-del { position: absolute; top: 24rpx; right: 24rpx; color: #d9534f; font-size: 24rpx; font-weight: 600; }
+.empty { padding: 90rpx 40rpx; text-align: center; color: #999; font-size: 26rpx; }

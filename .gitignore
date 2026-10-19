@@ -1,0 +1,73 @@
+﻿# ===== 敏感信息（必须）=====
+*key*.txt
+*Key*.txt
+*API*.md
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+.env
+.env.*
+**/ssl/
+**/*pwd*hash*
+**/*密码*
+**/*passwd*
+
+# ===== 备份文件 =====
+*.bak
+*.bak[0-9]*
+*.bak-*
+*.orig
+*.tmp
+**/*.rootcopy.*
+
+# ===== macOS 垃圾 =====
+__MACOSX/
+._*
+.DS_Store
+
+# ===== 第三方 SDK 二进制 =====
+**/tmp/sdk/
+*.jar
+*.aar
+*.pom
+**/gradle-wrapper.jar
+
+# ===== 构建/导出/临时目录 =====
+**/exports/
+**/build/
+**/node_modules/
+**/.pytest_cache/
+**/.kotlin/
+**/.workbuddy/
+**/backups/
+**/src.bak/
+
+# ===== 语言/IDE =====
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.vscode/
+.idea/
+Thumbs.db
+
+# ===== 大文件 / 安装包 =====
+*.zip
+*.deb
+*.rpm
+*.exe
+*.msi
+*.dmg
+*.iso
+*.tar.gz
+*.tgz
+**/gradle-*-all.zip
+
+# ===== 前端构建备份 =====
+**/dist_bak_*/
+**/dist_old_*/
+
+# ===== 保留示例 zip（如不需要可删掉这行）=====
+!rokid_glass/rokid_glass/glasses-app/cxrlsampe.zip

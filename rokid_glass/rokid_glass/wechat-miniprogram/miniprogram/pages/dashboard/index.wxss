@@ -1,0 +1,84 @@
+/* 项目看板（2026-09-30 重做为数据可视化大屏）
+   定位：只放项目数据的图形化呈现；快捷入口已移到「智能体侧栏」与「输入框 + 面板」。
+   玻璃拟态沿用全站 token：白底玻璃 = 品牌细线 + 顶白高光 + 品牌柔影。 */
+
+.board-head { display: flex; align-items: center; justify-content: space-between; margin: 6rpx 0 22rpx; }
+.board-head-left { display: flex; align-items: center; gap: 12rpx; }
+.board-bar { width: 8rpx; height: 30rpx; border-radius: 4rpx; background: linear-gradient(180deg, var(--brand-l, #3b8cff), var(--brand-d, #0b5fd0)); }
+.board-title { font-size: 34rpx; font-weight: 700; color: var(--ink, #12253d); }
+.board-sub { font-size: 22rpx; color: #8a9bb0; }
+
+/* ===== ① 核心指标 ===== */
+.kpis { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18rpx; margin-bottom: 22rpx; }
+.kpi { display: flex; flex-direction: column; gap: 10rpx; padding: 24rpx 26rpx; border-radius: 24rpx; background: rgba(255,255,255,0.32); backdrop-filter: blur(40rpx) saturate(1.8); -webkit-backdrop-filter: blur(40rpx) saturate(1.8); border: 2rpx solid rgba(var(--brand-rgb, 22,119,255), 0.14); box-shadow: inset 0 2rpx 0 rgba(255,255,255,0.40), 0 12rpx 36rpx rgba(var(--shadow-rgb, 20,70,140), 0.16); }
+.kpi-top { display: flex; align-items: center; gap: 10rpx; }
+.kpi-dot { width: 12rpx; height: 12rpx; border-radius: 50%; flex-shrink: 0; }
+.kpi-label { font-size: 23rpx; color: #7a8b9f; }
+.kpi-value { display: flex; align-items: baseline; gap: 6rpx; }
+.kpi-num { font-size: 58rpx; font-weight: 700; line-height: 1.05; }
+.kpi-unit { font-size: 22rpx; color: #8a9bb0; }
+.kpi-track { height: 8rpx; border-radius: 4rpx; background: rgba(226,236,248,0.9); overflow: hidden; }
+.kpi-fill { height: 100%; border-radius: 4rpx; transition: width 0.5s ease; }
+.kpi-delta { font-size: 20rpx; color: #5c7086; }
+.kpi-delta.muted { color: #b3bfcd; }
+
+/* ===== 通用卡片 ===== */
+.card { padding: 28rpx; border-radius: 24rpx; background: rgba(255,255,255,0.32); backdrop-filter: blur(40rpx) saturate(1.8); -webkit-backdrop-filter: blur(40rpx) saturate(1.8); border: 2rpx solid rgba(var(--brand-rgb, 22,119,255), 0.14); box-shadow: inset 0 2rpx 0 rgba(255,255,255,0.40), 0 12rpx 36rpx rgba(var(--shadow-rgb, 20,70,140), 0.16); margin-bottom: 22rpx; }
+.card-title { font-size: 30rpx; font-weight: 650; color: var(--ink, #12253d); margin-bottom: 20rpx; }
+.card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20rpx; }
+.card-head .card-title { margin-bottom: 0; }
+.card-empty { padding: 40rpx 0; text-align: center; font-size: 24rpx; color: #9aa9ba; }
+.card-link { margin-top: 8rpx; text-align: right; font-size: 24rpx; color: var(--brand, #1677ff); }
+
+/* ===== ② 处置进度环 ===== */
+.rings { display: flex; justify-content: space-around; padding: 6rpx 0 4rpx; }
+.ring-item { display: flex; flex-direction: column; align-items: center; gap: 10rpx; }
+.ring { width: 180rpx; height: 180rpx; border-radius: 50%; display: flex; align-items: center; justify-content: center; }
+.ring-hole { width: 132rpx; height: 132rpx; border-radius: 50%; background: rgba(255,255,255,0.72); display: flex; align-items: center; justify-content: center; box-shadow: inset 0 2rpx 8rpx rgba(var(--shadow-rgb, 20,70,140), 0.08); }
+.ring-pct { font-size: 34rpx; font-weight: 700; }
+.ring-label { font-size: 24rpx; color: var(--ink, #12253d); }
+.ring-desc { font-size: 20rpx; color: #8a9bb0; }
+
+/* ===== ③ 趋势图 ===== */
+.legend { display: flex; gap: 22rpx; }
+.lg { display: flex; align-items: center; gap: 8rpx; font-size: 21rpx; color: #5c7086; }
+.dot { width: 16rpx; height: 16rpx; border-radius: 50%; flex-shrink: 0; }
+.dot.blue { background: linear-gradient(135deg, var(--brand-l, #3b8cff), var(--brand-d, #0b5fd0)); }
+.line-mark { width: 26rpx; height: 5rpx; border-radius: 3rpx; background: #b93838; }
+
+.chart-frame { display: flex; align-items: stretch; }
+.axis { width: 52rpx; display: flex; flex-direction: column; justify-content: space-between; padding: 2rpx 0; }
+.axis-l { align-items: flex-end; padding-right: 10rpx; }
+.axis-r { align-items: flex-start; padding-left: 10rpx; }
+.axis-num { font-size: 18rpx; color: #9aa9ba; line-height: 1; }
+.plot { flex: 1; height: 300rpx; position: relative; }
+.gridline { position: absolute; left: 0; right: 0; height: 1rpx; background: repeating-linear-gradient(to right, rgba(var(--brand-rgb, 22,119,255), 0.26) 0 8rpx, transparent 8rpx 18rpx); }
+.baseline { position: absolute; left: 0; right: 0; bottom: 0; height: 1rpx; background: rgba(var(--brand-rgb, 22,119,255), 0.30); }
+.bars-row { position: absolute; left: 0; right: 0; top: 0; bottom: 0; display: flex; }
+.trend-col { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; }
+.bar-val { font-size: 18rpx; color: #5c7086; line-height: 1; margin-bottom: 4rpx; text-shadow: 0 0 8rpx #fff, 0 0 8rpx #fff; }
+.bar { width: 26rpx; border-radius: 6rpx 6rpx 0 0; transition: height 0.45s cubic-bezier(0.22, 0.8, 0.28, 1); }
+.bar.blue { background: linear-gradient(180deg, var(--brand-l, #3b8cff), var(--brand-d, #0b5fd0)); box-shadow: 0 4rpx 12rpx rgba(var(--brand-rgb, 22,119,255), 0.28); }
+.poly-layer { position: absolute; left: 0; right: 0; top: 0; bottom: 0; pointer-events: none; }
+.seg { position: absolute; height: 4rpx; border-radius: 2rpx; background: #b93838; opacity: 0.85; transform-origin: 0 50%; }
+.pt { position: absolute; width: 12rpx; height: 12rpx; border-radius: 50%; background: #fff; border: 4rpx solid #b93838; transform: translate(-50%, -50%); box-sizing: content-box; }
+.x-axis { display: flex; margin-top: 12rpx; padding-left: 52rpx; padding-right: 52rpx; }
+.x-label { flex: 1; text-align: center; font-size: 19rpx; color: #8a9bb0; }
+
+/* ===== ④ 隐患类别分布 ===== */
+.donut-wrap { display: flex; align-items: center; gap: 30rpx; }
+.donut { width: 220rpx; height: 220rpx; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.donut-inner { width: 130rpx; height: 130rpx; border-radius: 50%; background: rgba(255,255,255,0.72); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4rpx; box-shadow: inset 0 2rpx 8rpx rgba(var(--shadow-rgb, 20,70,140), 0.08); }
+.donut-num { font-size: 40rpx; font-weight: 700; color: var(--ink, #12253d); }
+.donut-label { font-size: 20rpx; color: #8a9bb0; }
+.donut-legend { flex: 1; display: flex; flex-direction: column; gap: 14rpx; min-width: 0; }
+.donut-name { flex: 1; font-size: 24rpx; color: #5c7086; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.donut-pct { width: 72rpx; text-align: right; font-size: 23rpx; color: var(--brand, #1677ff); font-weight: 600; }
+.donut-count { width: 56rpx; text-align: right; font-size: 24rpx; font-weight: 700; color: var(--ink, #12253d); }
+
+/* ===== ⑤ 工作记录待办构成 ===== */
+.hbar { display: flex; align-items: center; gap: 16rpx; margin-bottom: 18rpx; }
+.hbar-label { width: 64rpx; font-size: 24rpx; color: #5c7086; flex-shrink: 0; }
+.hbar-track { flex: 1; height: 26rpx; border-radius: 13rpx; background: rgba(226,236,248,0.85); overflow: hidden; }
+.hbar-fill { height: 100%; border-radius: 13rpx; transition: width 0.5s ease; }
+.hbar-count { width: 48rpx; text-align: right; font-size: 24rpx; font-weight: 700; color: var(--ink, #12253d); }

@@ -1,0 +1,27 @@
+<view class="page" style="{{themeStyle}}">
+  <glass-nav-bar title="{{isNew ? '新建' : '编辑'}}{{schema.name || '监理记录'}}" left="back" />
+
+  <scroll-view scroll-y class="body" enhanced show-scrollbar="{{false}}">
+    <view class="card">
+      <view class="lbl">文书标题</view>
+      <input
+        class="title-input"
+        value="{{title}}"
+        placeholder="留空则使用表式名称"
+        bindinput="onTitleInput" />
+    </view>
+
+    <view class="card">
+      <prov-form
+        id="pf"
+        schema="{{schema}}"
+        value="{{formValues}}"
+        bind:change="onFormChange" />
+    </view>
+
+    <view class="actions">
+      <button class="btn-save" bindtap="save" disabled="{{saving}}">{{saving ? '保存中…' : '保存'}}</button>
+    </view>
+    <view class="bottom-gap"></view>
+  </scroll-view>
+</view>

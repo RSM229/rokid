@@ -1,0 +1,7 @@
+{
+  "navigationBarTitleText": "微信绑定",
+  "navigationStyle": "custom",
+  "usingComponents": {
+    "glass-nav-bar": "/components/glass-nav-bar/index"
+  }
+}

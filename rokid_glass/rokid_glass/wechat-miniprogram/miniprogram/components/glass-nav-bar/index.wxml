@@ -1,0 +1,12 @@
+<view class="gnb" style="height: {{totalHeight}}px;">
+  <view class="gnb-inner" style="height: {{navBarHeight}}px; top: {{statusBarHeight}}px;">
+    <view wx:if="{{left !== 'none'}}" class="gnb-left" bindtap="onLeftTap">
+      <view class="gnb-icon {{left === 'menu' ? 'gnb-ic-menu' : 'gnb-ic-back'}}"></view>
+    </view>
+    <view class="gnb-title-wrap">
+      <text class="gnb-title">{{title}}</text>
+    </view>
+    <view class="gnb-right"><slot name="right"></slot></view>
+  </view>
+</view>
+<view wx:if="{{spacer}}" style="height: {{totalHeight}}px;"></view>

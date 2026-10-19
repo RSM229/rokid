@@ -1,0 +1,66 @@
+<view class="page" style="{{themeStyle}}">
+  <glass-nav-bar title="{{isNew ? '新建纪要' : '编辑纪要'}}" left="back" />
+
+  <scroll-view scroll-y class="body" enhanced show-scrollbar="{{false}}">
+    <!-- 基本信息：省统表 GD-B-217 schema 驱动 -->
+    <view class="card">
+      <view class="type-row">
+        <view class="lbl">会议类型<text class="req"> *</text></view>
+        <picker mode="selector" range="{{typeOptions}}" value="{{typeIndex}}" bindchange="onTypeChange">
+          <view class="picker-val">{{typeOptions[typeIndex]}} ▾</view>
+        </picker>
+      </view>
+      <prov-form id="pf" schema="{{basicSchema}}" value="{{formValues}}" bind:change="onFormChange" />
+    </view>
+
+    <!-- 议题与待办（议题跟踪） -->
+    <view class="card">
+      <view class="sec-head">
+        <text class="sec-title">议题与待办（{{topics.length}}）</text>
+        <text class="sec-add" bindtap="addTopic">+ 添加议题</text>
+      </view>
+      <view class="empty-tip" wx:if="{{!topics.length}}">暂无议题，点右上角「添加议题」，或用下方 AI 整理自动提取</view>
+      <view wx:for="{{topics}}" wx:key="index" class="topic">
+        <view class="topic-head">
+          <text class="topic-no">{{index + 1}}</text>
+          <text class="topic-status {{item.statusClass}}" data-index="{{index}}" bindtap="cycleStatus">{{item.status}} ⟳</text>
+          <text class="topic-del" data-index="{{index}}" bindtap="removeTopic">删除</text>
+        </view>
+        <input class="t-input" placeholder="议题内容" value="{{item.topic}}" data-index="{{index}}" data-field="topic" bindinput="onTopicInput" />
+        <textarea class="t-area" placeholder="议定结论" value="{{item.conclusion}}" data-index="{{index}}" data-field="conclusion" bindinput="onTopicInput" />
+        <view class="topic-row">
+          <input class="t-input half" placeholder="责任方" value="{{item.owner}}" data-index="{{index}}" data-field="owner" bindinput="onTopicInput" />
+          <picker class="half" mode="date" value="{{item.deadline}}" data-index="{{index}}" bindchange="onTopicDeadline">
+            <view class="picker-val {{item.deadline ? '' : 'empty'}}">{{item.deadline || '完成期限'}}</view>
+          </picker>
+        </view>
+      </view>
+    </view>
+
+    <!-- 纪要正文 -->
+    <view class="card">
+      <view class="sec-title">纪要正文</view>
+      <textarea class="content-area" placeholder="议题讨论要点、议定事项、下一步安排…" value="{{content}}" bindinput="onContentInput" />
+    </view>
+
+    <view class="actions">
+      <button class="btn-ai" bindtap="openAiDialog">AI 整理转写</button>
+      <button class="btn-save" bindtap="save" disabled="{{saving}}">{{saving ? '保存中…' : '保存'}}</button>
+    </view>
+    <view class="bottom-gap"></view>
+  </scroll-view>
+
+  <!-- AI 整理弹层：粘贴录音转写文本 → 结构化草稿 -->
+  <view class="overlay" wx:if="{{showAiDialog}}" catchtouchmove="true">
+    <view class="overlay-mask" bindtap="closeAiDialog"></view>
+    <view class="ai-panel">
+      <view class="ai-title">AI 整理会议纪要</view>
+      <view class="ai-tip">粘贴录音转写文本，AI 将提取会议信息、议题与待办。生成结果会覆盖当前表单，请人工核对后再保存。</view>
+      <textarea class="ai-input" placeholder="粘贴转写文本…" value="{{aiTranscript}}" bindinput="onAiInput" maxlength="20000" />
+      <view class="ai-actions">
+        <button class="btn-cancel" bindtap="closeAiDialog">取消</button>
+        <button class="btn-go" bindtap="runAiDraft" disabled="{{aiLoading}}">{{aiLoading ? '整理中…' : '开始整理'}}</button>
+      </view>
+    </view>
+  </view>
+</view>

@@ -1,0 +1,128 @@
+[
+  {
+    "route": "pages/agent/index",
+    "name": "01-agent",
+    "realPath": "pages/agent/index",
+    "ok": true
+  },
+  {
+    "route": "pages/hazards/index",
+    "name": "02-hazards",
+    "realPath": "pages/hazards/index",
+    "ok": true
+  },
+  {
+    "route": "pages/work/index",
+    "name": "03-work",
+    "realPath": "pages/work/index",
+    "ok": true
+  },
+  {
+    "route": "pages/kb/index",
+    "name": "04-kb",
+    "realPath": "pages/kb/index",
+    "ok": true
+  },
+  {
+    "route": "pages/mine/index",
+    "name": "05-mine",
+    "realPath": "pages/mine/index",
+    "ok": true
+  },
+  {
+    "route": "pages/dashboard/index",
+    "name": "06-dashboard",
+    "realPath": "pages/dashboard/index",
+    "ok": true
+  },
+  {
+    "route": "pages/todo/index",
+    "name": "07-todo",
+    "realPath": "pages/todo/index",
+    "ok": true
+  },
+  {
+    "route": "pages/knowledge/index",
+    "name": "08-knowledge",
+    "realPath": "pages/knowledge/index",
+    "ok": true
+  },
+  {
+    "route": "pages/notes/index",
+    "name": "09-notes",
+    "realPath": "pages/notes/index",
+    "ok": true
+  },
+  {
+    "route": "pages/meeting/index",
+    "name": "10-meeting",
+    "realPath": "pages/meeting/index",
+    "ok": true
+  },
+  {
+    "route": "pages/ai/index",
+    "name": "11-ai",
+    "realPath": "pages/ai/index",
+    "ok": true
+  },
+  {
+    "route": "pages/inspection/index",
+    "name": "12-inspection",
+    "realPath": "pages/inspection/index",
+    "ok": true
+  },
+  {
+    "route": "pages/documents/index",
+    "name": "13-documents",
+    "realPath": "pages/documents/index",
+    "ok": true
+  },
+  {
+    "route": "pages/progress/index",
+    "name": "14-progress",
+    "realPath": "pages/progress/index",
+    "ok": true
+  },
+  {
+    "route": "pages/parallel/index",
+    "name": "15-parallel",
+    "realPath": "pages/parallel/index",
+    "ok": true
+  },
+  {
+    "route": "pages/resources/index",
+    "name": "16-resources",
+    "realPath": "pages/resources/index",
+    "ok": true
+  },
+  {
+    "route": "pages/visa/index",
+    "name": "17-visa",
+    "realPath": "pages/visa/index",
+    "ok": true
+  },
+  {
+    "route": "pages/equipment/index",
+    "name": "18-equipment",
+    "realPath": "pages/equipment/index",
+    "ok": true
+  },
+  {
+    "route": "pages/archive/index",
+    "name": "19-archive",
+    "realPath": "pages/archive/index",
+    "ok": true
+  },
+  {
+    "route": "pages/call/index",
+    "name": "20-call",
+    "realPath": "pages/call/index",
+    "ok": true
+  },
+  {
+    "route": "pages/contacts/index",
+    "name": "21-contacts",
+    "realPath": "pages/contacts/index",
+    "ok": true
+  }
+]

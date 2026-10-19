@@ -1,0 +1,25 @@
+<view class="page" style="{{themeStyle}}">
+  <glass-nav-bar title="规范详情" left="back" />
+
+  <view wx:if="{{loading}}" class="empty">加载中…</view>
+
+  <block wx:elif="{{doc}}">
+    <view class="doc-head">
+      <view class="doc-title">{{doc.name}}</view>
+      <view class="doc-meta">
+        <text class="tag">{{doc.category}}</text>
+        <text class="muted">{{doc.filename}}</text>
+      </view>
+    </view>
+    <view class="doc-body">
+      <view wx:if="{{contentLines.length > 0}}" class="hint">已将原文档打开预览，下方为解析出的文字内容</view>
+      <text wx:for="{{contentLines}}" wx:key="index" class="doc-line">{{item}}</text>
+    </view>
+    <view wx:if="{{contentLines.length === 0}}" class="empty">下方暂无文字内容</view>
+    <view class="footer">
+      <button class="ghost" bindtap="download">重新查看原文件</button>
+    </view>
+  </block>
+
+  <view wx:else class="empty">加载失败</view>
+</view>

@@ -1,0 +1,9 @@
+{
+  "navigationBarTitleText": "资料记录",
+  "navigationStyle": "custom",
+  "enablePullDownRefresh": true,
+  "usingComponents": {
+    "glass-nav-bar": "/components/glass-nav-bar/index",
+    "tab-bar": "/components/tab-bar/index"
+  }
+}
