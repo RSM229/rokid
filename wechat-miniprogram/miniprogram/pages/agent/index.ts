@@ -1,6 +1,6 @@
 import { request } from '../../services/request'
 import { session } from '../../services/session'
-import { uploadAudio, uploadDocument, uploadImage } from '../../services/upload'
+import { uploadAudio, uploadDocument, uploadImage, friendlyServerError } from '../../services/upload'
 import { persistTempFile, uploadQueue } from '../../services/uploadQueue'
 import { absoluteMediaUrl, config } from '../../config'
 import { getCached, invalidateCache, invalidateByPrefix, CACHE_KEYS } from '../../services/cache'
@@ -615,7 +615,6 @@ Page(themed({
             if (res.wm[key] && !wmFields[key]) wmFields[key] = res.wm[key]
           }
         })
-        this.setData({ hazardMode: true, mode: 'hazard' })
       }
       // 文件：逐个解析文本
       for (const file of files) {
@@ -631,15 +630,19 @@ Page(themed({
       }
 
       const material = blocks.join('\n\n')
-      // 办事类（记录/建档/生成）必须走 Agent 工具路由：
-      // 走 /local/llm/chat 只会回一段"结论与建议"，永远不会落库。
-      if (this.wantsActionIntent(note)) {
+      // 🔧 上传图片 ≠ 隐患识别：只有用户明确「只识别/看隐患/纯分析」才走专用隐患通道；
+      // 其余（记录工作、现场情况、今日留痕，甚至空备注）交给 Agent 路由，
+      // 由模型在 create_work_record / create_hazard / navigate / 纯问答 间自行判断。
+      const pureDetect = this.isPureDetection(note)
+      if (!pureDetect) {
         await this.runAgentWithMaterial(
           note || '记录今天的工作', material, this.watermarkPrefill(wmFields), messages, wmFields,
-          images.length > 0,
+          images.length > 0, images.map(i => i.path),
         )
         return
       }
+      // 纯识别通道：进入隐患模式，识别命中后再征求是否建档
+      this.setData({ hazardMode: true, mode: 'hazard' })
 
       const question = note
         ? `${note}\n\n以下是随消息发送的素材内容（系统已识别，你无需再识别）：\n${material}\n\n请结合以上素材回答我的问题。`
@@ -772,7 +775,7 @@ Page(themed({
               reject(new Error('识别返回格式异常'))
             }
           } else {
-            reject(new Error(`识别失败（HTTP ${res.statusCode}）`))
+            reject(new Error(friendlyServerError(res.statusCode)))
           }
         },
         fail: (err) => reject(new Error(err.errMsg || '上传失败')),
@@ -859,6 +862,14 @@ Page(themed({
     return /(记录|记一下|记一条|填写|填表|建档|建单|新建|创建|生成|存档|落库|入库|录入|归档|整理)/.test(note)
   },
 
+  /** 用户是否只想「看一眼 / 识别」，不想落库任何记录。
+   *  命中 → 走专用隐患识别通道（识别后征询是否建档）；
+   *  未命中 → 交给 Agent 路由，由模型判断建工作记录 / 建隐患 / 打开页面 / 纯问答。
+   *  注意：只识别"识别类"关键词，不含"记录/记一下"等办事词，避免把工作留痕误判成纯识别。 */
+  isPureDetection(note: string): boolean {
+    return /(识别|检测|查(一下)?隐患|看看(有没有)?隐患|有无隐患|有没有问题|风险|不用(建档|记录)|只(识别|看)|纯识别|先识别|分析(一下)?|什么(问题|情况))/i.test(note)
+  },
+
   /** 带素材走 Agent 工具路由：办事类消息只有走这里才会真的落库 */
   async runAgentWithMaterial(
     text: string,
@@ -867,6 +878,7 @@ Page(themed({
     messages: Message[],
     wmFields: Record<string, string>,
     hasImage = false,
+    imagePaths: string[] = [],
   ) {
     const selModel = this.data.models.find(m => m.id === this.data.currentModel)
     const history = messages
@@ -905,6 +917,33 @@ Page(themed({
         ].filter(Boolean).join('\n')
       }
       this.applyAgentReply(result, messages)
+      // 上传图片且 Agent 建的是工作记录 → 自动把这张照片挂到该记录
+      // （复用 /media/images business_type=work_record 链路，后端会自动同步 inspection_photos/witness_photos/content_json.media_ids）
+      // 单独 try 包裹：挂图失败绝不能冲掉已建好的记录卡片（落到外层 catch 会用原始 messages 覆盖）。
+      if (imagePaths.length) {
+        try {
+          const recCard =
+            (result.cards && result.cards.find(c => c.kind === 'work_record' && c.id)) ||
+            (result.card && result.card.kind === 'work_record' ? result.card : undefined)
+          if (recCard && recCard.id) {
+            const { ok, failed, lastError } = await this.uploadPhotosToRecord(recCard.id, imagePaths)
+            if (ok) {
+              this.addMessage({
+                role: 'assistant',
+                text: `📎 已自动把这 ${ok} 张照片挂到记录 #${recCard.id}` +
+                  (failed ? `（另有 ${failed} 张失败${lastError ? `：${lastError}` : ''}）` : '') + '。',
+              })
+            } else if (failed) {
+              this.addMessage({
+                role: 'assistant',
+                text: `⚠️ 照片自动挂记录失败${lastError ? `：${lastError}` : ''}，可点记录卡「补充照片」手动添加。`,
+              })
+            }
+          }
+        } catch (attachErr) {
+          console.warn('自动挂照片失败（不影响已建记录）：', attachErr)
+        }
+      }
     } catch (error) {
       this.setData({
         messages: [...messages, { role: 'assistant', text: `调用失败：${(error as Error).message}` }],
@@ -1108,6 +1147,31 @@ Page(themed({
     }
   },
 
+  /** 把给定本地照片路径逐张上传挂到某工作记录（复用 /media/images work_record 链路） */
+  async uploadPhotosToRecord(recordId: number, paths: string[]): Promise<{ ok: number; failed: number; lastError: string }> {
+    let ok = 0
+    let failed = 0
+    let lastError = ''
+    for (const path of paths) {
+      try {
+        await uploadImage<{ id?: number }>(path, {
+          business_type: 'work_record',
+          business_id: recordId,
+          source: 'miniprogram',
+        })
+        ok += 1
+      } catch (error) {
+        failed += 1
+        lastError = (error as Error).message
+      }
+    }
+    if (ok) {
+      invalidateByPrefix('/work-record')
+      invalidateCache(CACHE_KEYS.WORK_RECORD_STATS)
+    }
+    return { ok, failed, lastError }
+  },
+
   /** 工作记录卡「补充照片」：选图（相册/拍摄，最多 9 张）→ 逐张上传挂到该记录 */
   attachPhotoToRecord(recordId: number) {
     wx.chooseMedia({
@@ -1120,27 +1184,12 @@ Page(themed({
         if (!paths.length) return
         this.addMessage({ role: 'user', images: paths, text: `为记录 #${recordId} 补充 ${paths.length} 张照片` })
         wx.showLoading({ title: '上传中...', mask: true })
-        let ok = 0
-        let lastError = ''
-        for (const path of paths) {
-          try {
-            await uploadImage<{ id?: number }>(path, {
-              business_type: 'work_record',
-              business_id: recordId,
-              source: 'miniprogram',
-            })
-            ok += 1
-          } catch (error) {
-            lastError = (error as Error).message
-          }
-        }
+        const { ok, failed, lastError } = await this.uploadPhotosToRecord(recordId, paths)
         wx.hideLoading()
-        invalidateByPrefix('/work-record')
-        invalidateCache(CACHE_KEYS.WORK_RECORD_STATS)
         this.addMessage({
           role: 'assistant',
           text: ok
-            ? `✅ 已为记录 #${recordId} 补充 ${ok} 张照片${paths.length - ok ? `，另有 ${paths.length - ok} 张失败${lastError ? `：${lastError}` : ''}` : ''}。`
+            ? `✅ 已为记录 #${recordId} 补充 ${ok} 张照片${failed ? `，另有 ${failed} 张失败${lastError ? `：${lastError}` : ''}` : ''}。`
             : `照片上传失败${lastError ? `：${lastError}` : ''}，请重试。`,
         })
       },
@@ -1603,9 +1652,9 @@ Page(themed({
           success: (res) => {
             if (res.statusCode >= 200 && res.statusCode < 300) {
               resolve(JSON.parse(res.data))
-            } else {
-              reject(new Error('识别失败'))
-            }
+          } else {
+            reject(new Error(friendlyServerError(res.statusCode)))
+          }
           },
           fail: (err) => reject(new Error(err.errMsg)),
         })
