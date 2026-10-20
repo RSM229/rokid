@@ -59,7 +59,8 @@ export const config = {
   useLocalBackend,
   // 正式版强制关闭 mock 登录，确保线上一定走真实 wx.login；
   // 模拟身份必须显式开启，体验版默认走真实微信登录。
-  mockWechatLogin: !isRelease && currentEnv === 'develop' && ext.mockWechatLogin === true,
+  mockWechatLogin:
+    !useLocalBackend && !isRelease && currentEnv === 'develop' && ext.mockWechatLogin === true,
   mockWechatCode: ext.mockWechatCode || 'mock:demo-device',
 }
 
