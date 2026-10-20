@@ -23,7 +23,7 @@ from app.models.user import Project, User
 from app.routers.auth import get_current_user
 from app.routers.local_ai import _PLAINTEXT_SUFFIX
 from app.services import agent_tools, model_gateway
-from app.services.agent_context import render_context_summary
+from app.services.agent_context import render_context_summary, render_conversation_history
 from app.services.text_clean import strip_markdown
 
 logger = logging.getLogger(__name__)
@@ -32,6 +32,7 @@ router = APIRouter()
 
 class AgentChatRequest(BaseModel):
     message: str
+    conversation_id: Optional[str] = None
     # 最近若干轮对话（前端只传 role/text），用于「把这条生成日志」这类指代消解
     history: list[dict] = Field(default_factory=list)
     """前端当前态：hazard=隐患识别工作台（仅作为轻微提示，不作为硬分流）"""
@@ -307,11 +308,15 @@ async def agent_chat(
     project_id = getattr(user, "project_id", None)
     project = await db.get(Project, project_id) if project_id else None
     prefill = req.prefill if isinstance(req.prefill, dict) else {}
+    conversation_id = (req.conversation_id or "").strip()[:64] or None
+    earlier_messages = await agent_tools.record_conversation_message(
+        db, user.id, conversation_id, message
+    )
 
     # Load durable draft context before the routing model runs.  Recent chat
     # history is not a substitute for this state: users often give date,
     # place and activity in separate turns.
-    pend_for_context = await agent_tools.get_pending(db, user.id)
+    pend_for_context = await agent_tools.get_pending(db, user.id, conversation_id=conversation_id)
     draft_for_context = pend_for_context[1] if pend_for_context else {}
 
     system = _AGENT_SYSTEM.format(catalog=agent_tools.catalog_for_prompt())
@@ -319,7 +324,11 @@ async def agent_chat(
     if pend_for_context:
         messages.append({"role": "system", "content": render_context_summary(
             draft_for_context.get("args"), draft_for_context.get("facts"),
-            draft_for_context.get("missing"))})
+            draft_for_context.get("missing"), draft_for_context.get("messages"))})
+    if earlier_messages:
+        history_summary = render_conversation_history(earlier_messages)
+        if history_summary:
+            messages.append({"role": "user", "content": history_summary})
     messages.extend(_history_messages(req.history))
     material = (req.material or "").strip()
     if material:
@@ -427,7 +436,7 @@ async def agent_chat(
             draft_args["_prefill"] = prefill
         await agent_tools.stash_pending(
             db, user.id, "create_work_record", draft_args, ["记录类型"],
-            message=message, fact_args=turn_fact_args,
+            message=message, fact_args=turn_fact_args, conversation_id=conversation_id,
         )
 
     if tool == "create_work_record":
@@ -461,7 +470,7 @@ async def agent_chat(
             args = agent_tools.normalize_extra_fields(args, _form)
         elif pending_tool and spec.risk != "read":
             # 用户换成了另一个写操作 → 旧草稿作废（纯查询/问答不清草稿，草稿有 24 小时 TTL）
-            await agent_tools.clear_pending(db, user.id, pending_tool)
+            await agent_tools.clear_pending(db, user.id, pending_tool, conversation_id)
         # _prefill is durable context only; it is never a business field.
         args.pop("_prefill", None)
         ctx = agent_tools.ToolContext(db=db, user=user, project_id=project_id, project=project, message=message)
@@ -481,10 +490,10 @@ async def agent_chat(
                 {**args, "_prefill": prefill}
                 if prefill and tool == "create_work_record" else args,
                 result.get("need_more"), message=message,
-                fact_args=turn_fact_args,
+                fact_args=turn_fact_args, conversation_id=conversation_id,
             )
         elif result.get("ok"):
-            await agent_tools.clear_pending(db, user.id, tool)
+            await agent_tools.clear_pending(db, user.id, tool, conversation_id)
         if auto_filled:
             # 让用户一眼看到「水印确实读到了、也确实填进表单了」，而不是被空问一句「要记什么」
             head = "已从照片水印自动填入：" + "、".join(auto_filled)
@@ -551,15 +560,19 @@ async def agent_tools_list(user: User = Depends(get_current_user)):
 class AgentClearDraftsRequest(BaseModel):
     """放弃草稿：指定 tool 只清该工具草稿；省略则清空当前用户全部待补全草稿。"""
     tool: Optional[str] = None
+    conversation_id: Optional[str] = None
 
 
 @router.get("/drafts")
 async def agent_drafts(
+    conversation_id: Optional[str] = None,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """当前用户所有未过期草稿（聊天即操作的半成品，落库持久化、跨会话可见）。"""
-    drafts = await agent_tools.list_pending(db, user.id)
+    drafts = await agent_tools.list_pending(
+        db, user.id, (conversation_id or "").strip()[:64] or None
+    )
     return {"count": len(drafts), "drafts": drafts}
 
 
@@ -570,5 +583,7 @@ async def agent_clear_drafts(
     db: AsyncSession = Depends(get_db),
 ):
     """放弃草稿：清掉当前用户指定工具或全部待补全草稿。"""
-    await agent_tools.clear_pending(db, user.id, req.tool)
+    await agent_tools.clear_pending(
+        db, user.id, req.tool, (req.conversation_id or "").strip()[:64] or None
+    )
     return {"ok": True}

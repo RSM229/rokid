@@ -41,3 +41,29 @@ def test_context_summary_does_not_turn_missing_media_into_missing_user_fact():
     assert "用户消息中已提取 section：3号楼二层" in summary
     assert "当前仍缺少：天气" in summary
     assert "不得覆盖用户已确认值" in summary
+
+
+def test_context_messages_are_bounded_and_deduplicated():
+    context = {}
+    for value in ["第一段", "第二段", "第二段", "第三段", "第四段", "第五段", "第六段", "第七段", "第八段", "第九段"]:
+        context = agent_context.append_context_message(context, value)
+    assert [item["text"] for item in context["messages"]] == [
+        "第二段", "第三段", "第四段", "第五段", "第六段", "第七段", "第八段", "第九段"
+    ]
+
+
+def test_same_value_keeps_all_sources_without_creating_correction():
+    first = agent_context.extract_user_facts({"section": "A区"}, message_ref="m1")
+    second = agent_context.extract_user_facts({"section": "A区"}, message_ref="m2")
+    merged = agent_context.merge_user_facts(first, second)
+    item = merged[0]
+    assert item["value"] == "A区"
+    assert not item.get("history")
+    assert {source["source_ref"] for source in item["sources"]} == {"m1", "m2"}
+
+
+def test_conversation_history_is_reference_only():
+    rendered = agent_context.render_conversation_history([{"text": "在A区施工"}, {"text": "后来补充上午"}])
+    assert rendered.startswith("以下 JSON")
+    assert "强行合并" in rendered
+    assert "在A区施工" in rendered

@@ -61,6 +61,10 @@ interface ChatHistory {
   updatedAt: string
 }
 
+function conversationIdFor(sessionId: number): string {
+  return sessionId ? `wx-${sessionId}` : ''
+}
+
 /** 待发送附件：来自相册/相机/文件的本地临时路径 */
 interface Attachment {
   id: string
@@ -354,7 +358,7 @@ Page(themed({
       const res = await request<{
         count: number
         drafts: Array<{ tool: string; label: string; missing: string[] }>
-      }>('/agent/drafts')
+      }>('/agent/drafts', { data: { conversation_id: conversationIdFor(this.currentSessionId) } })
       const drafts = (res.drafts || []).map(d => ({
         tool: d.tool,
         label: d.label,
@@ -383,7 +387,9 @@ Page(themed({
       success: async (r) => {
         if (!r.confirm) return
         try {
-          await request('/agent/drafts/clear', { method: 'POST', data: { tool: d.tool } })
+          await request('/agent/drafts/clear', { method: 'POST', data: {
+            tool: d.tool, conversation_id: conversationIdFor(this.currentSessionId),
+          } })
           this.setData({ pendingDrafts: [] })
           this.addMessage({ role: 'assistant', text: `已放弃「${d.label}」草稿。` })
         } catch (e) {
@@ -394,6 +400,7 @@ Page(themed({
   },
 
   initMessages() {
+    if (!this.currentSessionId) this.currentSessionId = Date.now()
     // 欢迎语仅作占位：messages.length <= 1 时页面显示 ima 风格 Hero（大问候语 + 竖排建议），不渲染气泡
     this.setData({
       messages: [{
@@ -881,6 +888,7 @@ Page(themed({
         method: 'POST',
         data: {
           message: text,
+          conversation_id: conversationIdFor(this.currentSessionId),
           material: material || undefined,
           prefill,
           history,
@@ -995,6 +1003,7 @@ Page(themed({
         hazardMode: false,
         messages: [...this.data.messages, userMsg, { role: 'assistant', text: route.reply }],
       })
+      this.currentSessionId = 0
       this.initMessages()
       return
     }
@@ -1073,6 +1082,7 @@ Page(themed({
         method: 'POST',
         data: {
           message: text,
+          conversation_id: conversationIdFor(this.currentSessionId),
           history,
           mode: this.data.mode,
           provider: selModel?.provider || undefined,
@@ -1251,6 +1261,7 @@ Page(themed({
         method: 'POST',
         data: {
           message: `请根据下面这份导入文件的内容，创建一条规范的工作记录（自动判断巡视/旁站/验收/见证）并回执给我。\n\n文件《${filename}》内容：\n${brief}`,
+          conversation_id: conversationIdFor(this.currentSessionId),
           history: [],
           mode: this.data.mode,
         },
@@ -2373,7 +2384,9 @@ Page(themed({
         projectSummary: target?.description || '',
       })
       wx.showToast({ title: `已切换至${target?.name || ''}`, icon: 'success' })
+      this.currentSessionId = 0
       this.initMessages()
+      void this.loadPendingDrafts()
     } catch (error) {
       wx.showModal({ title: '切换失败', content: (error as Error).message, showCancel: false })
     } finally {
@@ -2394,6 +2407,7 @@ Page(themed({
       hazardMode: false,
       messages: item.messages,
     })
+    void this.loadPendingDrafts()
   },
 
   deleteHistoryItem(event: WechatMiniprogram.TouchEvent) {
@@ -2405,8 +2419,10 @@ Page(themed({
 
   newChat() {
     this.saveCurrentSession()
+    this.currentSessionId = 0
     this.setData({ showHistory: false })
     this.initMessages()
+    void this.loadPendingDrafts()
     wx.showToast({ title: '已开启新对话', icon: 'none' })
   },
 
