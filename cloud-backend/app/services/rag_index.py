@@ -136,6 +136,7 @@ def get_sync_session() -> Session:
                     settings.database_url
                     .replace("mysql+aiomysql://", "mysql+pymysql://")
                     .replace("mysql+asyncmy://", "mysql+pymysql://")
+                    .replace("sqlite+aiosqlite://", "sqlite://")
                 )
                 _sync_engine = create_engine(
                     url, echo=False, pool_pre_ping=True, pool_recycle=1800

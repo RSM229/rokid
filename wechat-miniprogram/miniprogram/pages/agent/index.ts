@@ -70,7 +70,7 @@ interface Attachment {
   size?: number
 }
 
-const HISTORY_KEY = 'gdjl_chat_history'
+const HISTORY_KEY = `gdjl_${config.storageScope}_chat_history`
 
 interface CommandRoute {
   level1?: string
@@ -294,7 +294,7 @@ Page(themed({
     })
 
     const user = session.getUser()
-    const savedModel = String(wx.getStorageSync('gdjl_agent_model') || 'qwen3.7-max')
+    const savedModel = String(wx.getStorageSync(`gdjl_${config.storageScope}_agent_model`) || 'qwen3.7-max')
     const saved = this.data.models.find(m => m.id === savedModel) || this.data.models[0]
     this.setData({
       userName: user?.real_name || '监理人员',
@@ -2435,7 +2435,7 @@ Page(themed({
     const id = event.currentTarget.dataset.model as string
     const model = this.data.models.find(m => m.id === id)
     if (!model) return
-    wx.setStorageSync('gdjl_agent_model', model.id)
+    wx.setStorageSync(`gdjl_${config.storageScope}_agent_model`, model.id)
     this.setData({ currentModel: model.id, modelName: model.name, showModelMenu: false })
     this.addMessage({ role: 'assistant', text: `已切换为「${model.name}」模型。` })
   },

@@ -64,7 +64,9 @@ def _get_sync_session():
     if _sync_engine is None:
         sync_url = settings.database_url.replace(
             "mysql+aiomysql://", "mysql+pymysql://"
-        ).replace("mysql+asyncmy://", "mysql+pymysql://")
+        ).replace("mysql+asyncmy://", "mysql+pymysql://").replace(
+            "sqlite+aiosqlite://", "sqlite://"
+        )
         _sync_engine = create_engine(sync_url, echo=False, pool_pre_ping=True)
         _sync_session_factory = sessionmaker(_sync_engine, expire_on_commit=False)
     return _sync_session_factory()
