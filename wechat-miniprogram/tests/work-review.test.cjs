@@ -11,6 +11,11 @@ const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.Modu
 const loaded = new Module(file, module)
 loaded.filename = file
 loaded.paths = Module._nodeModulePaths(path.dirname(file))
+loaded.require = (id) => {
+  if (id === './request') return { request: async () => { throw new Error('network call is unavailable in this unit test') } }
+  if (id === '../config') return { absoluteMediaUrl: (value) => value }
+  return require(id)
+}
 loaded._compile(compiled, file)
 const model = loaded.exports
 

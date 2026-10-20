@@ -1,11 +1,23 @@
-// Local interaction prototype. Observations and candidate plans are simulated, not OCR output.
+// Review-plan transport and editing rules shared by the work-review page.
+import { request } from './request'
+import { absoluteMediaUrl } from '../config'
 export const FORM_TYPES = [
-  '巡视记录', '危大工程巡视记录', '旁站记录', '验收记录', '见证记录',
-  '材料台账', '监理通知单', '安全隐患整改通知单', '安全联系单', '监理日志', '监理月报', '会议纪要',
+  '巡视记录', '危大工程巡视记录', '旁站记录', '平行检验记录', '验收记录',
+  '材料台账', '监理通知单', '安全隐患整改通知单', '监理日志', '监理月报', '安全监理日志',
 ]
 export const SCENARIOS = ['混合日期与缺失水印', '九张图片 / 九个日期', '同一历史日期 / 多项工作', '资料不足 / 用途不明', '纯文字 / 无图片']
+const FORM_CODE_BY_LABEL: Record<string, string> = {
+  '旁站记录': 'gd_b_212_pangzhan', '平行检验记录': 'gd_b_213_pingxing',
+  '巡视记录': 'gd_b_214_xunshi', '监理通知单': 'gd_b_215_tongzhi',
+  '安全隐患整改通知单': 'gdaq_30308_yinhuan', '验收记录': 'acceptance_record',
+  '监理日志': 'gd_b_220_rizhi', '监理月报': 'gd_b_221_yuebao',
+  '材料台账': 'gd_b_219_cailiao', '危大工程巡视记录': 'gdaq_30306_weida',
+  '安全监理日志': 'anquan_jianli_rizhi',
+}
+const FORM_LABEL_BY_CODE = Object.fromEntries(Object.entries(FORM_CODE_BY_LABEL).map(([label, code]) => [code, label]))
 export interface Evidence {
   id: string
+  mediaId?: number
   image: string
   observedDate: string
   note: string
@@ -29,6 +41,122 @@ export interface ReviewPlan {
   events: WorkEvent[]
   unassignedIds: string[]
   confirmedRevision: number | null
+  serverId?: number
+  serverRevision?: number
+  conversationId?: string
+  status?: 'draft' | 'confirmed'
+}
+
+export interface ReviewPlanResponse {
+  id: number
+  conversation_id: string
+  revision: number
+  status: 'draft' | 'confirmed'
+  confirmed_revision: number | null
+  plan: Record<string, unknown>
+  issues: string[]
+}
+
+function fromServerPlan(result: ReviewPlanResponse): ReviewPlan {
+  const raw = result.plan as Record<string, unknown>
+  const evidence = (raw.evidence || []) as Array<Record<string, unknown>>
+  const events = (raw.events || []) as Array<Record<string, unknown>>
+  const plan: ReviewPlan = {
+    schemaVersion: 1,
+    scenario: 0,
+    revision: result.revision,
+    requestText: String(raw.request_text || ''),
+    evidence: evidence.map(item => ({
+      id: String(item.id || ''), mediaId: item.media_id == null ? undefined : Number(item.media_id), image: absoluteMediaUrl(String(item.image || '')),
+      observedDate: String(item.observed_date || ''), note: String(item.note || ''),
+    })),
+    events: events.map(item => ({
+      id: String(item.id || ''), title: String(item.title || ''),
+      location: String(item.location || ''), content: String(item.content || ''),
+      date: String(item.date || ''), dateConfirmed: item.date_confirmed === true,
+      evidenceIds: Array.isArray(item.evidence_ids) ? item.evidence_ids.map(String) : [],
+      forms: Array.isArray(item.forms) ? item.forms.map(value => FORM_LABEL_BY_CODE[String(value)] || String(value)) : [],
+    })),
+    unassignedIds: Array.isArray(raw.unassigned_ids) ? raw.unassigned_ids.map(String) : [],
+    confirmedRevision: result.confirmed_revision,
+    serverId: result.id,
+    serverRevision: result.revision,
+    conversationId: result.conversation_id,
+    status: result.status,
+  }
+  validatePlan(plan)
+  return plan
+}
+
+function toServerPlan(plan: ReviewPlan): Record<string, unknown> {
+  return {
+    schema_version: 1, request_text: plan.requestText,
+    evidence: plan.evidence.map(item => ({
+      id: item.id, media_id: item.mediaId, image: item.image, observed_date: item.observedDate, note: item.note,
+    })),
+    events: plan.events.map(item => ({
+      id: item.id, title: item.title, location: item.location, content: item.content,
+      date: item.date, date_confirmed: item.dateConfirmed,
+      evidence_ids: item.evidenceIds, forms: item.forms.map(value => FORM_CODE_BY_LABEL[value] || value),
+    })),
+    unassigned_ids: plan.unassignedIds,
+  }
+}
+
+export async function fetchReviewPlan(id: number): Promise<ReviewPlan> {
+  return fromServerPlan(await request<ReviewPlanResponse>(`/agent/review-plans/${id}`))
+}
+
+export async function createReviewPlan(conversationId: string, plan: ReviewPlan): Promise<ReviewPlan> {
+  try {
+    const result = await request<ReviewPlanResponse>('/agent/review-plans', {
+      method: 'POST', data: { conversation_id: conversationId, plan: toServerPlan(plan) },
+    })
+    return fromServerPlan(result)
+  } catch (error) {
+    if (!(error instanceof Error) || !error.message.includes('已有整理计划')) throw error
+    const existing = (await listReviewPlans(conversationId))[0]
+    if (!existing || existing.status !== 'draft' || !existing.serverId) throw error
+    const prefix = `turn-${Date.now()}-`
+    const idMap = new Map(plan.evidence.map(item => [item.id, prefix + item.id]))
+    const incomingEvents = plan.events.map(event => ({
+      ...event, id: prefix + event.id,
+      evidenceIds: event.evidenceIds.map(id => idMap.get(id) || id),
+    }))
+    const merged: ReviewPlan = {
+      ...existing,
+      revision: existing.revision + 1,
+      requestText: [existing.requestText, plan.requestText].filter(Boolean).join('\n'),
+      evidence: [...existing.evidence, ...plan.evidence.map(item => ({ ...item, id: idMap.get(item.id)! }))],
+      events: [...existing.events, ...incomingEvents],
+      unassignedIds: [...existing.unassignedIds, ...plan.unassignedIds.map(id => idMap.get(id) || id)],
+      confirmedRevision: null,
+    }
+    validatePlan(merged)
+    return saveReviewPlan(merged, existing.serverRevision)
+  }
+}
+
+export async function saveReviewPlan(plan: ReviewPlan, expectedRevision = plan.serverRevision ?? plan.revision - 1): Promise<ReviewPlan> {
+  if (!plan.serverId) throw new Error('整理计划尚未保存到服务端')
+  const result = await request<ReviewPlanResponse>(`/agent/review-plans/${plan.serverId}`, {
+    method: 'PUT', data: { revision: expectedRevision, plan: toServerPlan(plan) },
+  })
+  return fromServerPlan(result)
+}
+
+export async function listReviewPlans(conversationId?: string): Promise<ReviewPlan[]> {
+  const query = conversationId ? `?conversation_id=${encodeURIComponent(conversationId)}` : ''
+  const result = await request<{ plans: ReviewPlanResponse[] }>(`/agent/review-plans${query}`)
+  return (result.plans || []).map(fromServerPlan)
+}
+
+export async function confirmReviewPlan(plan: ReviewPlan, revision = plan.serverRevision ?? plan.revision): Promise<ReviewPlan> {
+  if (!plan.serverId) throw new Error('整理计划尚未保存到服务端')
+  const result = await request<ReviewPlanResponse>(`/agent/review-plans/${plan.serverId}/confirm`, {
+    method: 'POST', data: { revision },
+  })
+  return fromServerPlan(result)
 }
 
 export function newEvent(id: string, evidenceIds: string[] = [], date = ''): WorkEvent {
@@ -73,7 +201,7 @@ export function validatePlan(plan: ReviewPlan): void {
   const ids = plan.evidence.map(photo => photo.id)
   if (new Set(ids).size !== ids.length) throw new Error('资料标识重复')
   for (const photo of plan.evidence) {
-    if (!/^photo-[1-9]$/.test(photo.id) || photo.image !== `/assets/work-review/${photo.id}.jpg` || !validDateOrEmpty(photo.observedDate) || typeof photo.note !== 'string') throw new Error('示例资料无效')
+    if (!photo.id || typeof photo.image !== 'string' || !validDateOrEmpty(photo.observedDate) || typeof photo.note !== 'string') throw new Error('资料信息无效')
   }
   const assigned = [...plan.events.flatMap(event => event.evidenceIds), ...plan.unassignedIds]
   if (assigned.length !== ids.length || new Set(assigned).size !== ids.length || assigned.some(id => !ids.includes(id))) throw new Error('资料归属不完整或重复')
