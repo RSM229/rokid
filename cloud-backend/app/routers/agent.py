@@ -23,6 +23,7 @@ from app.models.user import Project, User
 from app.routers.auth import get_current_user
 from app.routers.local_ai import _PLAINTEXT_SUFFIX
 from app.services import agent_tools, model_gateway
+from app.services.agent_context import render_context_summary
 from app.services.text_clean import strip_markdown
 
 logger = logging.getLogger(__name__)
@@ -106,7 +107,7 @@ station_start_time=9:00、station_end_time=12:00、worker_count=10，结论留�
 🔴 图片与素材（最容易编造的地方）
 --------------------------------
 - 你**看不到图片/照片本身**。只有消息里出现「【图片 N】」素材段（系统已把图交给视觉模型）时，才能引用其中的识别结果。
-- 🔴 素材里一旦出现「【水印】」段：**必须先把水印内容逐项复述给用户**（拍摄时间、地点、天气…），再说清楚哪些栏已经自动填入、还缺哪几栏才问。不许无视素材直接反问用户「要记什么类型」——用户会以为系统没看图。
+- 🔴 素材里一旦出现「【水印】」段：**必须先把水印内容逐项复述给用户**（拍摄时间、地点、天气…），再说明哪些信息已作为证据保存。若业务类型仍不明确，可以在复述后只问一个决定性问题，不能把水印识别失败说成用户没有提供信息。
 - **严禁凭空说「经图片识别」「看图发现」「照片显示」**，也不要在没有素材时描述现场状况——那是编造，监理会据此签字。
 - 素材里没有识别到隐患，就照实说「素材中未提到隐患」，不要补一句「现场安全状况良好」。
 - 用户说「识别水印 / 先识别水印 / 看下水印」：
@@ -118,10 +119,8 @@ station_start_time=9:00、station_end_time=12:00、worker_count=10，结论留�
 「记录今天工作情况」这类模糊请求
 --------------------------------
 - 「记录今天工作情况 / 今天干了什么 / 记一下今天」= 要留痕。
-- 🔴 **本轮带了素材（【图片 N】/【水印】段）时不要空问类型**：直接调用 create_work_record，
-  record_type 填「巡视」，把素材里读到的部位/时间/天气填进对应参数，其余缺项交给服务端逐栏追问。
-  服务端会把水印里的日期、部位、拍摄时间（→开始时间）自动填好，你只要在 answer 里说清楚「已自动填了哪些、还缺什么」。
-- 本轮**没有**素材时，tool 传 null，只问一句：「今天要记的是巡视、旁站、验收还是见证？如果要的是今天的监理日志，直接说『生成今天的监理日志』。」
+- **图片/水印素材不等于巡视，也不等于任何固定表式**。如果用户没有明确说巡视、旁站、验收、见证、材料、日志等目标，tool 传 null，只问一个决定性问题：「你想把这些内容整理成巡视、旁站、验收、见证，还是只整理图片？」
+- 用户明确说了记录类型时才调用 create_work_record。用户已经在前文说过日期、地点、时间、工作内容的，必须沿用，不得因图片没有识别到而说成缺失。
 - 错误示范（严禁）：直接回一段「今日工作情况结论与建议」，甚至还写「经图片识别」。这是答非所问。
 - 用户明确说「生成今天的监理日志 / 月报」时，才用 generate_document（period=day / month）。"""
 
@@ -204,6 +203,21 @@ def _is_daily_record(message: str) -> bool:
     return any(h in text for h in _DAILY_RECORD_HINTS)
 
 
+def _explicit_record_type(message: str) -> str | None:
+    """Return a record type only when the user's own words name one uniquely."""
+    text = str(message or "")
+    matched = set()
+    if any(term in text for term in ("旁站",)):
+        matched.add("旁站")
+    if any(term in text for term in ("巡视", "巡查")):
+        matched.add("巡视")
+    if "验收" in text:
+        matched.add("验收")
+    if "见证" in text:
+        matched.add("见证")
+    return next(iter(matched)) if len(matched) == 1 else None
+
+
 def _history_messages(history: list[dict], limit: int = 6) -> list[dict]:
     """把前端历史压成模型消息（只保留最近 limit 轮，忽略卡片等非文本内容）。"""
     out: list[dict] = []
@@ -284,15 +298,28 @@ async def agent_chat(
     db: AsyncSession = Depends(get_db),
 ):
     """统一入口：意图路由 + 执行 + 回执。识别不到工具时退化为纯问答。"""
+    "用户的问题 message 如果有包括在req 否则为空 "
+    "用户的问题 message 如果有包括在req 否则为空 "
     message = (req.message or "").strip()
     if not message:
         raise HTTPException(status_code=400, detail="消息不能为空")
 
     project_id = getattr(user, "project_id", None)
     project = await db.get(Project, project_id) if project_id else None
+    prefill = req.prefill if isinstance(req.prefill, dict) else {}
+
+    # Load durable draft context before the routing model runs.  Recent chat
+    # history is not a substitute for this state: users often give date,
+    # place and activity in separate turns.
+    pend_for_context = await agent_tools.get_pending(db, user.id)
+    draft_for_context = pend_for_context[1] if pend_for_context else {}
 
     system = _AGENT_SYSTEM.format(catalog=agent_tools.catalog_for_prompt())
     messages: list[dict] = [{"role": "system", "content": system}]
+    if pend_for_context:
+        messages.append({"role": "system", "content": render_context_summary(
+            draft_for_context.get("args"), draft_for_context.get("facts"),
+            draft_for_context.get("missing"))})
     messages.extend(_history_messages(req.history))
     material = (req.material or "").strip()
     if material:
@@ -329,12 +356,35 @@ async def agent_chat(
     if tool in ("null", "None") or tool not in agent_tools.TOOL_BY_NAME:
         tool = ""
     args = (parsed or {}).get("args") if isinstance((parsed or {}).get("args"), dict) else {}
+    turn_fact_args = dict(args)
 
     # 上一轮追问留下的草稿（同用户，已落库）：本轮参数合并到草稿上，避免丢字段
-    pend = await agent_tools.get_pending(db, user.id)
+    pend = pend_for_context
     pending_tool = pend[0] if pend else ""
-    draft = pend[1] if pend else {}
+    """
+    user - message
+    assisent
+    system
+    tools
+    有限的目标
+    1 2 3 4 5
+    1 - 1234
+    2 - 3214
+    3 - 123123
+    4 - 123123
+    5 - 123133132
 
+    整理表
+    整理成模板内容
+    意图 - 对应表
+    填入对应表
+    确认信息
+    登记
+    """
+    draft = pend[1] if pend else {}
+    draft_prefill = (draft.get("args") or {}).get("_prefill")
+    if not prefill and isinstance(draft_prefill, dict):
+        prefill = draft_prefill
     # 模型没选工具、但草稿未完成：把这句当「补充回答」单独抽一次参数
     # （明显是提问/找页面的话不抽，避免「用户中途问规范」被当成补字段）
     if not tool and pending_tool and not any(h in message for h in _SUPPLEMENT_SKIP_HINTS):
@@ -343,24 +393,54 @@ async def agent_chat(
         if agent_tools.supplement_hits(extra, draft.get("args") or {}, draft.get("missing")):
             tool = pending_tool
             args = {**args, **extra}
+            turn_fact_args.update(extra)
+    # A type choice is intentionally kept as a deterministic transition for
+    # the evidence-only draft.  The generic supplement extractor cannot infer
+    # a form before record_type exists.
+    if not tool and pending_tool == "create_work_record":
+        for candidate in ("巡视", "旁站", "验收", "见证"):
+            if candidate in message:
+                tool = pending_tool
+                args = {"record_type": candidate}
+                turn_fact_args = dict(args)
+                break
 
     # 素材里已确定的结构化字段（照片水印的拍摄时间/地点/天气）并入建记录参数。
     # 模型从用户原话听到的值优先，prefill 只补它没填的——水印是相机记的，比转述可靠。
-    # 🔴 带素材 + 「记录今天工作」这类模糊说法：不许空转反问类型。
-    # 先按「巡视」建单、把水印字段填进去，剩下缺什么由服务端逐栏追问（2026-10-19 用户反馈）。
-    prefill = req.prefill if isinstance(req.prefill, dict) else {}
+    # 带素材不等于明确了记录类型。素材只提供证据；类型不明时保留澄清，
+    # 避免用户上传旁站/验收/材料照片却被静默归成巡视。
     auto_filled: list[str] = []
-    if (not tool and material and not pending_tool
-            and _is_daily_record(message)):
-        tool = "create_work_record"
-        args = {"record_type": "巡视"}
-    if tool == "create_work_record":
-        # 带了素材但模型没给类型 → 按巡视兜底（用户已在说「记录今天工作」，先落一张再逐栏补）
-        if material and not str(args.get("record_type") or "").strip():
-            args = {**args, "record_type": "巡视"}
+    needs_record_type = (
+        _is_daily_record(message)
+        and _explicit_record_type(message) is None
+        and not pending_tool
+    )
+    if needs_record_type:
+        # Never accept a model-inferred form for this ambiguous request.
+        tool = ""
+        # Preserve facts stated in this turn even when the only missing
+        # decision is the target record type.  The next reply ("巡视" etc.)
+        # will merge this draft instead of relying on a short chat window.
+        draft_args = dict(args)
+        draft_args.pop("record_type", None)
         if prefill:
-            rtype = agent_tools._norm_record_type(str(args.get("record_type") or "")) or "巡视"
-            args, auto_filled = apply_prefill(args, prefill, rtype)
+            draft_args["_prefill"] = prefill
+        await agent_tools.stash_pending(
+            db, user.id, "create_work_record", draft_args, ["记录类型"],
+            message=message, fact_args=turn_fact_args,
+        )
+
+    if tool == "create_work_record":
+        if prefill:
+            rtype = agent_tools._norm_record_type(str(args.get("record_type") or "")) or ""
+            if not rtype:
+                # Do not apply type-specific prefill when the target form is
+                # unknown.  The values stay in req.prefill for the next step.
+                rtype = ""
+            if not rtype:
+                auto_filled = []
+            else:
+                args, auto_filled = apply_prefill(args, prefill, rtype)
 
     if tool:
         spec = agent_tools.TOOL_BY_NAME[tool]
@@ -382,6 +462,8 @@ async def agent_chat(
         elif pending_tool and spec.risk != "read":
             # 用户换成了另一个写操作 → 旧草稿作废（纯查询/问答不清草稿，草稿有 24 小时 TTL）
             await agent_tools.clear_pending(db, user.id, pending_tool)
+        # _prefill is durable context only; it is never a business field.
+        args.pop("_prefill", None)
         ctx = agent_tools.ToolContext(db=db, user=user, project_id=project_id, project=project, message=message)
         result = await agent_tools.dispatch(ctx, tool, args)
         if result.get("need_more") and tool == pending_tool:
@@ -394,7 +476,13 @@ async def agent_chat(
                 args = refilled
                 result = await agent_tools.dispatch(ctx, tool, args)
         if result.get("need_more"):
-            await agent_tools.stash_pending(db, user.id, tool, args, result.get("need_more"))
+            await agent_tools.stash_pending(
+                db, user.id, tool,
+                {**args, "_prefill": prefill}
+                if prefill and tool == "create_work_record" else args,
+                result.get("need_more"), message=message,
+                fact_args=turn_fact_args,
+            )
         elif result.get("ok"):
             await agent_tools.clear_pending(db, user.id, tool)
         if auto_filled:
@@ -405,6 +493,19 @@ async def agent_chat(
                 head = f"已按「{rtype}」开始记录，{head}。还缺的栏目我一项一项问："
             result["reply"] = head + "\n" + str(result.get("reply") or "").strip()
         return {"kind": "action", "tool": tool, "model": config.model_id, **result}
+
+    # Keep evidence context while asking the one missing business decision.
+    # This is deliberately a draft, not a record: no database side effect is
+    # performed until the user chooses a target type and completes the form.
+    if needs_record_type:
+        return {
+            "kind": "action", "tool": "create_work_record",
+            "reply": "我已收到并保留这些图片和已有信息。你想整理成巡视、旁站、验收还是见证记录？",
+            "card": None, "cards": [], "actions": [],
+            "need_more": ["记录类型"],
+            "options": {"记录类型": ["巡视", "旁站", "验收", "见证"]},
+            "undo": None, "model": config.model_id,
+        }
 
     # 无工具 → 纯问答（把模型已生成的 answer 直接用；空则再调一次）
     answer = str((parsed or {}).get("answer") or "").strip()

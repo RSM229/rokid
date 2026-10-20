@@ -37,6 +37,7 @@ from app.models.security_audit import SecurityAudit
 from app.models.user import Project, User
 from app.models.work_record import WorkRecord, WorkRecordStatus
 from app.services import model_gateway, provform_schema, record_field_spec
+from app.services.agent_context import extract_user_facts, merge_user_facts
 from app.services import acceptance_checklists
 from app.services.period_report_service import doc_type_for
 from app.services.record_fields import project_fields
@@ -1459,7 +1460,9 @@ async def _draft_row(db: AsyncSession, user_id: Any, tool: str) -> AgentDraft | 
 
 
 async def stash_pending(db: AsyncSession, user_id: Any, tool: str,
-                        args: dict | None, missing: list[str] | None) -> None:
+                        args: dict | None, missing: list[str] | None,
+                        *, message: str = "",
+                        fact_args: dict | None = None) -> None:
     """need_more 时暂存「已收集参数 + 仍缺字段」（同用户同工具覆盖旧草稿）。"""
     if not user_id or not tool:
         return
@@ -1467,7 +1470,28 @@ async def stash_pending(db: AsyncSession, user_id: Any, tool: str,
     if row is None:
         row = AgentDraft(user_id=int(user_id), tool=tool)
         db.add(row)
-    row.args_json = json.dumps(_draft_clean_args(args), ensure_ascii=False)
+    clean_args = _draft_clean_args(args)
+    try:
+        old_args = json.loads(row.args_json or "{}")
+    except (TypeError, ValueError):
+        old_args = {}
+    old_context = old_args.pop("_context", {}) if isinstance(old_args, dict) else {}
+    if not isinstance(old_context, dict):
+        old_context = {}
+    old_facts = old_context.get("facts") if isinstance(old_context.get("facts"), list) else []
+    facts = merge_user_facts(
+        old_facts,
+        extract_user_facts(
+            _draft_clean_args(fact_args) if fact_args is not None else clean_args,
+            message_ref=message,
+        ),
+    )
+    clean_args["_context"] = {
+        "facts": facts,
+        "version": int(old_context.get("version") or 0) + 1,
+        "last_message": message[:2000] if message else old_context.get("last_message", ""),
+    }
+    row.args_json = json.dumps(clean_args, ensure_ascii=False)
     row.missing_json = json.dumps([str(x) for x in (missing or [])], ensure_ascii=False)
     row.updated_at = datetime.now()
     await db.commit()
@@ -1496,9 +1520,15 @@ async def get_pending(db: AsyncSession, user_id: Any,
         missing = json.loads(row.missing_json or "[]")
     except (TypeError, ValueError):
         missing = []
+    context = args.pop("_context", {}) if isinstance(args, dict) else {}
+    if not isinstance(context, dict):
+        context = {}
     return row.tool, {
         "args": args if isinstance(args, dict) else {},
         "missing": missing if isinstance(missing, list) else [],
+        "facts": context.get("facts") if isinstance(context.get("facts"), list) else [],
+        "version": int(context.get("version") or 1),
+        "last_message": str(context.get("last_message") or ""),
     }
 
 
@@ -1569,6 +1599,9 @@ async def list_pending(db: AsyncSession, user_id: Any) -> list[dict]:
             missing = json.loads(row.missing_json or "[]")
         except (TypeError, ValueError):
             missing = []
+        context = args.pop("_context", {}) if isinstance(args, dict) else {}
+        if not isinstance(context, dict):
+            context = {}
         out.append({
             "id": row.id,
             "tool": row.tool,
@@ -1576,6 +1609,8 @@ async def list_pending(db: AsyncSession, user_id: Any) -> list[dict]:
             "form_code": _draft_form_code(row.tool, args if isinstance(args, dict) else {}),
             "args": args if isinstance(args, dict) else {},
             "missing": missing if isinstance(missing, list) else [],
+            "facts": context.get("facts") if isinstance(context.get("facts"), list) else [],
+            "version": int(context.get("version") or 1),
             "updated_at": row.updated_at.isoformat(),
         })
     if expired_ids:
@@ -1595,9 +1630,8 @@ TOOLS: tuple[ToolSpec, ...] = (
     ToolSpec(
         "create_work_record",
         "新建工作记录（巡视/旁站/验收/见证/待定）。用户描述现场情况、要求「记录一下/记一条」时用。"
-        "record_type 优先用用户明确说出的类型；用户没说时：本轮带照片/水印素材 → 默认巡视并直接调用，"
-        "没带素材 → 先追问一句让用户选类型。",
-        {"record_type": "记录类型：巡视/旁站/验收/见证（带照片/水印素材且用户没说时可默认巡视；否则先追问）",
+        "record_type 必须优先使用用户明确说出的类型；图片/水印素材本身不能推断记录类型，类型不明时先澄清。",
+        {"record_type": "记录类型：巡视/旁站/验收/见证（用户未明确时必须先追问，不能因有图片默认巡视）",
          "*work_content": "施工内容或现场情况",
          "section": "施工区域，如 3号楼二层", "location": "具体位置", "weather": "天气",
          "problems": "巡视发现的问题及处理情况原文；用户说「符合要求/无异常」时也必须原样传入（如 problems=符合要求），不要省略",
