@@ -1,0 +1,30 @@
+<view class="page">
+  <view class="status">{{incoming && call.status === 'ringing' ? '收到来电' : status}}</view>
+  <view class="hint">{{call.media_type === 'video' ? '视频通话' : '语音通话'}} · 离开页面将结束通话</view>
+  <view wx:if="{{error}}" class="error">{{error}}</view>
+  <view wx:if="{{call.status === 'accepted'}}" class="media">
+    <live-pusher id="pusher" url="{{pusher.url}}" mode="{{pusher.mode || 'RTC'}}"
+      autopush="{{false}}" enable-camera="{{pusher.enableCamera}}" enable-mic="{{pusher.enableMic}}"
+      device-position="{{pusher.frontCamera || 'front'}}" background-mute="{{true}}"
+      bindstatechange="pusherState" bindnetstatus="pusherNet" binderror="pusherError" bindaudiovolumenotify="pusherVolume" />
+    <live-player wx:for="{{playerList}}" wx:key="id" id="{{item.id}}" src="{{item.src}}"
+      data-userid="{{item.userID}}" data-streamid="{{item.streamID}}" data-streamtype="{{item.streamType}}"
+      mode="RTC" autoplay="{{true}}" mute-audio="{{item.muteAudio}}" mute-video="{{item.muteVideo}}"
+      sound-mode="{{speaker ? 'speaker' : 'ear'}}" background-mute="{{true}}"
+      min-cache="{{item.minCache}}" max-cache="{{item.maxCache}}" object-fit="contain"
+      bindstatechange="playerState" bindnetstatus="playerNet" bindaudiovolumenotify="playerVolume" bindfullscreenchange="playerFullscreen" />
+  </view>
+  <view class="controls" wx:if="{{call.status === 'ringing' && incoming}}">
+    <button data-action="accept" bindtap="act" disabled="{{busy}}">接听</button>
+    <button data-action="reject" bindtap="act" disabled="{{busy}}">拒绝</button>
+  </view>
+  <view class="controls" wx:if="{{call.status === 'accepted'}}">
+    <button bindtap="mute">{{muted ? '取消静音' : '静音'}}</button>
+    <button bindtap="speaker">{{speaker ? '切换听筒' : '切换扬声器'}}</button>
+    <button wx:if="{{call.media_type === 'video'}}" bindtap="camera">{{camera ? '关闭摄像头' : '开启摄像头'}}</button>
+    <button wx:if="{{call.media_type === 'video'}}" bindtap="switchCamera">切换摄像头</button>
+    <button bindtap="reconnect">重新连接</button>
+  </view>
+  <button wx:if="{{call.status === 'accepted' || call.status === 'ringing'}}" class="end" data-action="end" bindtap="act" disabled="{{busy}}">挂断</button>
+  <button wx:if="{{error}}" bindtap="settings">查看权限设置</button>
+</view>

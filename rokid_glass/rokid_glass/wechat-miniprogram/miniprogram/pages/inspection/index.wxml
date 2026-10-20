@@ -1,0 +1,102 @@
+<view class="page tab-host" style="{{themeStyle}}">
+  <glass-nav-bar title="巡检记录" left="back" />
+  <tab-bar active="" />
+
+  <view wx:if="{{loading && !session}}" class="empty">正在加载巡检状态…</view>
+
+  <!-- 会话状态卡 -->
+  <view class="card session-card">
+    <block wx:if="{{session}}">
+      <view class="session-head">
+        <view>
+          <view class="title">巡检进行中</view>
+          <view class="muted">会话 #{{session.id}} · {{frequencies[frequencyIndex].label}}</view>
+        </view>
+        <button class="danger" size="mini" loading="{{busy}}" bindtap="stop">结束</button>
+      </view>
+      <view class="stat-row">
+        <view class="stat"><text class="stat-value">{{session.total_captures}}</text><text>采集</text></view>
+        <view class="stat"><text class="stat-value">{{session.total_hazards}}</text><text>隐患</text></view>
+      </view>
+    </block>
+    <block wx:else>
+      <view class="session-head">
+        <view>
+          <view class="title">AI 巡检</view>
+          <view class="muted">开始会话后拍照，由云端视觉模型识别隐患</view>
+        </view>
+        <button class="primary" size="mini" loading="{{busy}}" bindtap="start">开始</button>
+      </view>
+      <picker mode="selector" range="{{frequencies}}" range-key="label" value="{{frequencyIndex}}" bindchange="onFrequencyChange">
+        <view class="field">采集频率：{{frequencies[frequencyIndex].label}} ▾</view>
+      </picker>
+    </block>
+  </view>
+
+  <!-- 摄像头与采集 -->
+  <block wx:if="{{session}}">
+    <view class="camera-wrap">
+      <camera
+        wx:if="{{cameraActive}}"
+        class="camera"
+        device-position="{{cameraPosition}}"
+        flash="auto"
+        bindinitdone="onCameraReady"
+        binderror="onCameraError"
+      ></camera>
+      <view wx:if="{{cameraActive}}" class="camera-status">{{cameraReady ? '摄像头已就绪' : '正在初始化摄像头'}}</view>
+      <view wx:else class="camera-consent">
+        <view>摄像头只在拍照识别时开启</view>
+        <button class="primary" size="mini" bindtap="activateCamera">开启摄像头</button>
+      </view>
+    </view>
+    <view class="capture-actions">
+      <button size="mini" bindtap="switchCamera">翻转</button>
+      <button class="shot" bindtap="takePhoto">拍照识别</button>
+      <button size="mini" bindtap="chooseFromAlbum">相册</button>
+    </view>
+
+    <view class="card">
+      <view class="section-title">识别信息</view>
+      <input class="field" value="{{section}}" data-field="section" placeholder="施工区域（可选）" bindinput="onInput" />
+      <input class="field" value="{{location}}" data-field="location" placeholder="具体位置（可选）" bindinput="onInput" />
+      <input class="field" value="{{weather}}" data-field="weather" placeholder="天气（可选）" bindinput="onInput" />
+    </view>
+
+    <button class="primary upload" loading="{{uploading}}" disabled="{{uploading}}" bindtap="takePhoto">拍摄并识别隐患</button>
+
+    <view wx:if="{{result}}" class="card result-card">
+      <view class="section-title">识别结果</view>
+      <view wx:if="{{result.hazard_id}}" class="risk-hit">
+        <view>命中隐患：{{result.result.top1_risk || result.result.risk_category || '未分类'}}</view>
+        <view class="muted">类别：{{result.result.risk_category}} · 状态：{{result.result.risk_status}}</view>
+        <view class="actions">
+          <button class="primary" size="mini" bindtap="viewHazard">查看隐患 #{{result.hazard_id}}</button>
+        </view>
+      </view>
+      <view wx:elif="{{result.result && result.result.has_hazard === false}}" class="risk-ok">未发现明确安全隐患</view>
+      <view wx:else class="risk-ok">未发现隐患或模型未明确判定</view>
+      <image
+        wx:if="{{result.image_url}}"
+        class="result-photo"
+        src="{{result.image_url}}"
+        mode="aspectFit"
+        data-url="{{result.image_url}}"
+        bindtap="previewImage"
+      ></image>
+    </view>
+  </block>
+
+  <!-- 历史会话 -->
+  <view wx:if="{{history.length}}" class="history">
+    <view class="block-title">历史会话</view>
+    <view wx:for="{{history}}" wx:key="id" class="card history-item">
+      <view class="history-head">
+        <view class="history-title">会话 #{{item.id}}</view>
+        <view class="muted">{{item.status === 'stopped' ? '已结束' : '进行中'}}</view>
+      </view>
+      <view class="muted">采集 {{item.total_captures}} · 隐患 {{item.total_hazards}} · {{item.frequency_seconds}}s/次</view>
+      <view class="muted">{{item.started_at}}</view>
+    </view>
+  </view>
+</view>

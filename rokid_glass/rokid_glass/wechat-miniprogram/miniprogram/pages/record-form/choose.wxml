@@ -1,0 +1,22 @@
+<view class="page" style="{{themeStyle}}">
+  <glass-nav-bar title="监理用表录入" left="back" />
+
+  <scroll-view scroll-y class="body" enhanced show-scrollbar="{{false}}">
+    <view class="tip">选择要填写的省统表，按表式字段录入后保存为文书草稿。工程项目名称、编号、施工单位、项目监理机构由系统自动填充。</view>
+
+    <view
+      class="card form-item"
+      wx:for="{{forms}}"
+      wx:key="code"
+      data-code="{{item.code}}"
+      bindtap="openForm">
+      <view class="form-main">
+        <view class="form-name">{{item.name}}</view>
+        <view class="form-no">{{item.form_number}}</view>
+      </view>
+      <view class="form-arrow">›</view>
+    </view>
+
+    <view class="bottom-gap"></view>
+  </scroll-view>
+</view>

@@ -1,0 +1,5 @@
+-keep class com.rokid.** { *; }
+-keep interface com.rokid.** { *; }
+-keepattributes Signature,InnerClasses,EnclosingMethod,*Annotation*
+-dontwarn org.slf4j.**
+-dontwarn java.lang.invoke.StringConcatFactory

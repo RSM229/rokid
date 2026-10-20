@@ -1,0 +1,17 @@
+# 环境变量与本机配置
+cloud-backend/.env
+glasses-app/local.properties
+wechat-miniprogram/project.private.config.json
+
+# 依赖与构建产物
+**/node_modules/
+web-admin/dist/
+glasses-app/.gradle/
+glasses-app/**/build/
+**/__pycache__/
+*.pyc
+
+# 运行时数据
+cloud-backend/uploads/
+cloud-backend/exports/
+.DS_Store

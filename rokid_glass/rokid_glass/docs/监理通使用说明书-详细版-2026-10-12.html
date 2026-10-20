@@ -1,0 +1,632 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>监理通（白泽）使用说明书 · 详细版</title>
+<style>
+:root{
+  --ink:#1f2733; --ink-2:#4a5568; --line:#e3e8ef; --bg:#eef1f6; --card:#fff;
+  --brand:#0a2e5c; --brand-2:#1a5fb4; --accent:#1890ff;
+}
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:"Microsoft YaHei","PingFang SC","Hiragino Sans GB",system-ui,sans-serif;
+  font-size:15px; line-height:1.85;
+}
+.wrap{display:flex; align-items:flex-start; max-width:1400px; margin:0 auto; padding:0 20px}
+/* ---- 侧边目录 ---- */
+.toc{
+  position:sticky; top:0; align-self:flex-start; flex:0 0 268px;
+  max-height:100vh; overflow-y:auto; padding:26px 14px 40px 0; font-size:13px;
+}
+.toc-title{font-weight:700; color:var(--brand); letter-spacing:.12em; margin:0 0 10px 10px; font-size:12px}
+.toc ul{list-style:none; margin:0; padding:0; border-left:2px solid var(--line)}
+.toc li a{
+  display:block; padding:3px 10px; color:var(--ink-2); text-decoration:none;
+  border-left:2px solid transparent; margin-left:-2px; line-height:1.5;
+}
+.toc li a:hover{color:var(--accent); background:#ffffffa8}
+.toc li.l1 a{font-weight:700; color:var(--brand); margin-top:10px; font-size:13.5px}
+.toc li.l2 a{padding-left:20px}
+/* ---- 正文 ---- */
+main{flex:1 1 auto; min-width:0; padding:26px 0 80px}
+main>.hero, main>*{max-width:960px}
+.card{background:var(--card); border:1px solid var(--line); border-radius:12px;
+  padding:44px 52px; box-shadow:0 2px 18px #0a2e5c0f}
+h1{font-size:27px; color:var(--brand); margin:52px 0 18px; padding-bottom:12px;
+  border-bottom:3px solid var(--brand); letter-spacing:.01em}
+h1:first-child{margin-top:6px}
+h2{font-size:20px; color:var(--brand-2); margin:38px 0 14px; padding-left:12px;
+  border-left:5px solid var(--accent)}
+h3{font-size:17px; color:#243b53; margin:28px 0 10px}
+h4{font-size:15.5px; color:#334e68; margin:22px 0 8px}
+p{margin:10px 0}
+strong{color:#0b2545}
+a{color:var(--brand-2)}
+code{background:#eef3fa; color:#b02a37; padding:1.5px 6px; border-radius:4px;
+  font-family:Consolas,"Courier New",monospace; font-size:13px}
+pre{background:#0f1c2e; color:#dbe6f4; padding:16px 18px; border-radius:9px; overflow:auto; margin:14px 0}
+pre code{background:none; color:inherit; padding:0; font-size:13px; line-height:1.7}
+hr{border:0; border-top:1px dashed #c3cdda; margin:34px 0}
+/* ---- 表格 ---- */
+table{width:100%; border-collapse:collapse; margin:16px 0; font-size:14px; background:#fff}
+th{background:var(--brand); color:#fff; font-weight:600; text-align:left; padding:10px 12px;
+  border:1px solid #0a2e5c; white-space:nowrap}
+td{padding:9px 12px; border:1px solid var(--line); vertical-align:top}
+tbody tr:nth-child(even){background:#f7f9fc}
+tbody tr:hover{background:#eef5ff}
+td code,th code{font-size:12.5px}
+/* ---- 列表 ---- */
+ul,ol{margin:10px 0; padding-left:26px}
+li{margin:5px 0}
+li>strong{color:#0b2545}
+/* ---- 引用块（语义着色） ---- */
+blockquote{margin:16px 0; padding:12px 18px; border-left:5px solid #94a3b8;
+  background:#f6f8fb; border-radius:0 8px 8px 0}
+blockquote p{margin:4px 0}
+blockquote.q-danger{border-left-color:#e5484d; background:#fef2f2}
+blockquote.q-warn{border-left-color:#f5a524; background:#fffaf0}
+blockquote.q-tip{border-left-color:var(--accent); background:#f0f7ff}
+/* ---- 响应式 ---- */
+@media (max-width:920px){
+  .wrap{display:block; padding:0 14px}
+  .toc{position:static; max-height:none; flex:none; padding:20px 0 0}
+  .toc ul{border-left:none; columns:2}
+  .card{padding:26px 20px}
+  h1{font-size:22px}
+}
+@media print{
+  body{background:#fff; font-size:11.5pt}
+  .toc{display:none}
+  .card{border:0; box-shadow:none; padding:0}
+  h1{page-break-before:auto}
+  table,pre,blockquote{page-break-inside:avoid}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+<nav class="toc"><div class="toc-title">目录</div><ul><li class="l1"><a href="#监理通-白泽-使用说明书-详细版">监理通（白泽）使用说明书 · 详细版</a></li><li class="l2"><a href="#阅读指南">阅读指南</a></li><li class="l2"><a href="#目录">目录</a></li><li class="l1"><a href="#第一部分-认识监理通">第一部分　认识监理通</a></li><li class="l2"><a href="#1-1-监理通是什么">1.1 监理通是什么</a></li><li class="l2"><a href="#1-2-系统由哪几部分组成">1.2 系统由哪几部分组成</a></li><li class="l2"><a href="#1-3-访问方式">1.3 访问方式</a></li><li class="l2"><a href="#1-4-三端功能对照">1.4 三端功能对照</a></li><li class="l2"><a href="#1-5-术语表">1.5 术语表</a></li><li class="l1"><a href="#第二部分-账号与登录-从零开始">第二部分　账号与登录（从零开始）</a></li><li class="l2"><a href="#2-1-先搞懂-监理通的账号是-两层-的">2.1 先搞懂：监理通的账号是"两层"的</a></li><li class="l2"><a href="#2-2-九个岗位一览">2.2 九个岗位一览</a></li><li class="l2"><a href="#2-3-获得账号的三条路径">2.3 获得账号的三条路径</a></li><li class="l2"><a href="#2-4-路径-a-用邀请码注册-小程序">2.4 路径 A：用邀请码注册（小程序）</a></li><li class="l2"><a href="#2-5-路径-a-变体-在-web-后台注册">2.5 路径 A 变体：在 Web 后台注册</a></li><li class="l2"><a href="#2-6-等待审批-这段时间发生了什么">2.6 等待审批：这段时间发生了什么</a></li><li class="l2"><a href="#2-7-首次登录-小程序">2.7 首次登录 · 小程序</a></li><li class="l2"><a href="#2-8-首次登录-web-后台">2.8 首次登录 · Web 后台</a></li><li class="l2"><a href="#2-9-让同一账号在两端都能用-设置登录密码">2.9 让同一账号在两端都能用（设置登录密码）</a></li><li class="l2"><a href="#2-10-微信绑定管理">2.10 微信绑定管理</a></li><li class="l2"><a href="#2-11-忘记密码怎么办">2.11 忘记密码怎么办</a></li><li class="l2"><a href="#2-12-账号常见问题速查">2.12 账号常见问题速查</a></li><li class="l1"><a href="#第三部分-微信小程序使用指南-现场作业">第三部分　微信小程序使用指南（现场作业）</a></li><li class="l2"><a href="#3-0-界面总览-底部五个入口">3.0 界面总览：底部五个入口</a></li><li class="l2"><a href="#3-1-工作台-中间标签-一句话干活">3.1 工作台（中间标签）——一句话干活</a></li><li class="l2"><a href="#3-2-隐患识别-左一标签-现场采集">3.2 隐患识别（左一标签）——现场采集</a></li><li class="l2"><a href="#3-3-隐患管理-从工作台-隐患列表-进入">3.3 隐患管理（从工作台「隐患列表」进入）</a></li><li class="l2"><a href="#3-4-工作记录-左二标签-四类记录填报">3.4 工作记录（左二标签）——四类记录填报</a></li><li class="l2"><a href="#3-5-ai-巡检">3.5 AI 巡检</a></li><li class="l2"><a href="#3-6-监理文书">3.6 监理文书</a></li><li class="l2"><a href="#3-7-资料库-规范资料库-我的笔记">3.7 资料库 / 规范资料库 / 我的笔记</a></li><li class="l2"><a href="#3-8-会议纪要">3.8 会议纪要</a></li><li class="l2"><a href="#3-9-其他现场记录类功能">3.9 其他现场记录类功能</a></li><li class="l2"><a href="#3-10-项目看板">3.10 项目看板</a></li><li class="l2"><a href="#3-11-我的派单-待办">3.11 我的派单（待办）</a></li><li class="l2"><a href="#3-12-项目通讯录-音视频通话">3.12 项目通讯录 / 音视频通话</a></li><li class="l2"><a href="#3-13-ai-创作">3.13 AI 创作</a></li><li class="l2"><a href="#3-14-我-个人设置">3.14 「我」——个人设置</a></li><li class="l2"><a href="#3-15-与-rokid-ar-眼镜协同">3.15 与 Rokid AR 眼镜协同</a></li><li class="l2"><a href="#3-16-现场一日动线-建议">3.16 现场一日动线（建议）</a></li><li class="l1"><a href="#第四部分-web-管理后台使用指南">第四部分　Web 管理后台使用指南</a></li><li class="l2"><a href="#4-0-界面总览">4.0 界面总览</a></li><li class="l2"><a href="#4-1-工作台-首页">4.1 工作台（首页）</a></li><li class="l2"><a href="#4-2-公司看板">4.2 公司看板</a></li><li class="l2"><a href="#4-3-现场识别">4.3 现场识别</a></li><li class="l2"><a href="#4-4-工作记录-含-5-个子页面">4.4 工作记录（含 5 个子页面）</a></li><li class="l2"><a href="#4-5-信息库">4.5 信息库</a></li><li class="l2"><a href="#4-6-系统设置">4.6 系统设置</a></li><li class="l2"><a href="#4-7-项目管理">4.7 项目管理</a></li><li class="l2"><a href="#4-8-用户管理">4.8 用户管理</a></li><li class="l2"><a href="#4-9-邀请码管理-仅超管">4.9 邀请码管理（仅超管）</a></li><li class="l2"><a href="#4-10-微信绑定管理-仅超管">4.10 微信绑定管理（仅超管）</a></li><li class="l2"><a href="#4-11-角色权限-step-3-仅超管">4.11 角色权限（Step 3，仅超管）</a></li><li class="l2"><a href="#4-12-派单管理-工作台入口">4.12 派单管理（工作台入口）</a></li><li class="l2"><a href="#4-13-文书审批-工作台入口">4.13 文书审批（工作台入口）</a></li><li class="l2"><a href="#4-14-签章管理-工作台入口">4.14 签章管理（工作台入口）</a></li><li class="l2"><a href="#4-15-验收模板配置-工作台入口">4.15 验收模板配置（工作台入口）</a></li><li class="l2"><a href="#4-16-台账管理-工作台入口">4.16 台账管理（工作台入口）</a></li><li class="l2"><a href="#4-17-图纸管理-档案管理-工作台入口">4.17 图纸管理 / 档案管理（工作台入口）</a></li><li class="l1"><a href="#第五部分-管理员典型工作流">第五部分　管理员典型工作流</a></li><li class="l2"><a href="#5-1-新项目上线-7-步">5.1 新项目上线（7 步）</a></li><li class="l2"><a href="#5-2-新员工入职">5.2 新员工入职</a></li><li class="l2"><a href="#5-3-员工离职">5.3 员工离职</a></li><li class="l2"><a href="#5-4-人员换岗-兼岗">5.4 人员换岗 / 兼岗</a></li><li class="l2"><a href="#5-5-项目结项">5.5 项目结项</a></li><li class="l2"><a href="#5-6-权限调整-什么时候该动-角色权限-页">5.6 权限调整（什么时候该动「角色权限」页）</a></li><li class="l1"><a href="#第六部分-角色与权限速查">第六部分　角色与权限速查</a></li><li class="l2"><a href="#6-1-各岗位默认权限一览">6.1 各岗位默认权限一览</a></li><li class="l2"><a href="#6-2-公司级角色">6.2 公司级角色</a></li><li class="l2"><a href="#6-3-权限是怎么算出来的-三条规则">6.3 权限是怎么算出来的（三条规则）</a></li><li class="l2"><a href="#6-4-权限排查-为什么我看不到某个功能">6.4 权限排查：为什么我看不到某个功能</a></li><li class="l1"><a href="#第七部分-常见问题-faq">第七部分　常见问题（FAQ）</a></li><li class="l2"><a href="#账号与登录">账号与登录</a></li><li class="l2"><a href="#小程序">小程序</a></li><li class="l2"><a href="#web-后台">Web 后台</a></li><li class="l2"><a href="#管理员">管理员</a></li><li class="l1"><a href="#附录">附录</a></li><li class="l2"><a href="#附录-a-业务术语速查">附录 A　业务术语速查</a></li><li class="l2"><a href="#附录-b-状态枚举对照">附录 B　状态枚举对照</a></li><li class="l2"><a href="#附录-c-配套材料索引">附录 C　配套材料索引</a></li><li class="l2"><a href="#附录-d-角色-key-对照表-供技术-配置使用">附录 D　角色 key 对照表（供技术/配置使用）</a></li></ul></nav>
+<main><div class="card">
+<h1 id="监理通-白泽-使用说明书-详细版">监理通（白泽）使用说明书 · 详细版</h1>
+<blockquote class="quote"><p><strong>版本</strong>：v2.0　<strong>发布日期</strong>：2026-10-12　<strong>适用系统版本</strong>：后台 Step 1–4 已上线</p><p><strong>适用对象</strong>：监理员 / 专业监理工程师 / 总监代表 / 总监理工程师 / 资料员 / 见证员 / 安全监理员 / 公司管理员 / 系统超管</p><p><strong>编写依据</strong>：以系统当前实际代码与页面为准（Web 后台 21 个页面、小程序 29 个页面、9 类岗位、27 项权限）</p></blockquote>
+<hr>
+<h2 id="阅读指南">阅读指南</h2>
+<p>这份文档按「从零开始」的顺序编写。第一次接触系统的人，建议<strong>从第一部分顺着读</strong>；只想查某个操作，直接跳到对应章节即可。</p>
+<table><thead><tr><th>你是……</th><th>建议重点阅读</th></tr></thead><tbody><tr><td>刚拿到账号的监理员 / 专监</td><td>第 1、2、3 部分</td></tr><tr><td>总监 / 总监代表</td><td>第 1、2、4.7–4.13、5、6 部分</td></tr><tr><td>公司超管 / 管理员</td><td>第 2、4.7–4.11、5、6 部分</td></tr><tr><td>只想解决一个具体问题</td><td>第 7 部分（常见问题）+ 第 6.4 节（权限排查）</td></tr></tbody></table>
+<p><strong>符号约定</strong></p>
+<ul>
+<li>🔴 表示<strong>容易出错、请务必注意</strong>的地方</li>
+<li>💡 表示<strong>设计说明</strong>——告诉你为什么这样设计，理解了就不容易操作错</li>
+<li>⚠️ 表示<strong>风险提示</strong>（尤其是管理员操作）</li>
+<li><code>等宽字体</code> 表示页面上的按钮名、菜单名、字段名</li>
+</ul>
+<hr>
+<h2 id="目录">目录</h2>
+<ul>
+<li><strong>第一部分　认识监理通</strong></li>
+<li><strong>第二部分　账号与登录（从零开始）</strong></li>
+<li><strong>第三部分　微信小程序使用指南（现场作业）</strong></li>
+<li><strong>第四部分　Web 管理后台使用指南</strong></li>
+<li><strong>第五部分　管理员典型工作流</strong></li>
+<li><strong>第六部分　角色与权限速查</strong></li>
+<li><strong>第七部分　常见问题（FAQ）</strong></li>
+<li><strong>附录</strong></li>
+</ul>
+<hr>
+<hr>
+<h1 id="第一部分-认识监理通">第一部分　认识监理通</h1>
+<h2 id="1-1-监理通是什么">1.1 监理通是什么</h2>
+<p>监理通（内部代号「白泽」）是一套面向建设工程监理行业的 <strong>AI 工程监理智能体</strong>。它把监理人员日常最繁重的四件事——<strong>现场记录、隐患发现、文书编制、台账归集</strong>——搬到了手机和 AI 上。</p>
+<p>一句话概括：<strong>在现场用手机（或 AR 眼镜）说一句、拍一张，系统自动帮你生成规范的监理记录与文书。</strong></p>
+<h2 id="1-2-系统由哪几部分组成">1.2 系统由哪几部分组成</h2>
+<p>监理通不是一个"单一软件"，而是<strong>三端协同 + 一个后端</strong>：</p>
+<table><thead><tr><th>组成</th><th>载体</th><th>定位</th><th>谁用</th></tr></thead><tbody><tr><td><strong>微信小程序</strong></td><td>手机微信</td><td><strong>现场作业主力</strong>：拍照、录音、填报、查看</td><td>全体监理人员</td></tr><tr><td><strong>Web 管理后台</strong></td><td>电脑浏览器</td><td><strong>管理与看板主力</strong>：立项、建号、审批、派单、台账、配置</td><td>总监及以上</td></tr><tr><td><strong>Rokid AR 眼镜端</strong></td><td>智能眼镜</td><td><strong>第一视角免手作业</strong>（语音指令 + 第一视角拍摄）</td><td>现场监理人员</td></tr><tr><td><strong>云端后端</strong></td><td>服务器</td><td>三端共用同一套数据与权限</td><td>——</td></tr></tbody></table>
+<p>💡 <strong>为什么要三端？</strong> 现场监理的两只手往往被图纸、卷尺、安全帽占用，掏手机都费劲——眼镜解决"免手"，手机解决"精细填报"，电脑解决"批量管理与看板"。<strong>三者数据实时同步</strong>：小程序上刚拍下的隐患，Web 后台刷新即见。</p>
+<h2 id="1-3-访问方式">1.3 访问方式</h2>
+<ul>
+<li><strong>微信小程序</strong>：微信内搜索小程序名，或扫描项目组提供的二维码</li>
+<li><strong>Web 管理后台</strong>：浏览器打开 <code>https://www.baize.gdces.cn:4432/admin/</code></li>
+</ul>
+<blockquote class="quote q-danger"><p>🔴 <strong>注意地址带端口 <code>:4432</code></strong>，且必须带 <code>/admin/</code> 前缀。建议第一次打开后加入浏览器收藏夹。</p><p>🔴 登录后请勿在浏览器直接按 <code>F5</code> 刷新子页面（历史遗留问题，已在修复中）；如遇白屏或 404，回到上述完整地址重新进入即可。</p></blockquote>
+<h2 id="1-4-三端功能对照">1.4 三端功能对照</h2>
+<table><thead><tr><th>业务能力</th><th>小程序</th><th>Web 后台</th><th>眼镜端</th></tr></thead><tbody><tr><td>工作台（AI 对话）</td><td>✅</td><td>✅</td><td>语音</td></tr><tr><td>隐患识别（拍照 + AI）</td><td>✅</td><td>✅</td><td>✅（第一视角）</td></tr><tr><td>巡视 / 旁站 / 验收 / 见证</td><td>✅</td><td>✅</td><td>语音记录</td></tr><tr><td>监理文书生成与审批</td><td>✅（生成/查看）</td><td>✅（审批/导出）</td><td>—</td></tr><tr><td>台账归集与导出 Excel/PDF</td><td>✅（查看/导出）</td><td>✅（归档/批量导出）</td><td>—</td></tr><tr><td>派单与接单</td><td>✅（接单）</td><td>✅（派单）</td><td>—</td></tr><tr><td>项目看板 / 公司看板</td><td>✅</td><td>✅</td><td>—</td></tr><tr><td>立项 / 建号 / 权限配置</td><td>❌</td><td>✅</td><td>—</td></tr><tr><td>音视频通话 / 通讯录</td><td>✅</td><td>❌</td><td>—</td></tr></tbody></table>
+<h2 id="1-5-术语表">1.5 术语表</h2>
+<table><thead><tr><th>术语</th><th>含义</th></tr></thead><tbody><tr><td><strong>工作台</strong></td><td>进入系统后的首页，是一个 AI 对话界面，用说话或打字的方式调起各项功能</td></tr><tr><td><strong>项目</strong></td><td>一个具体的监理工程（有项目名称、项目编号、简称、地点）</td></tr><tr><td><strong>岗位（角色）</strong></td><td>你在项目中的职责身份，决定你能看到什么、能做什么（见第二部分）</td></tr><tr><td><strong>公司级角色</strong></td><td>跨项目生效的角色：<code>超级管理员</code>、<code>管理员</code></td></tr><tr><td><strong>项目级岗位</strong></td><td>在某一个项目内生效的岗位：总监、总代、专监、监理员等 7 类</td></tr><tr><td><strong>邀请码</strong></td><td>管理员发放的注册凭证，<strong>决定注册者的岗位</strong></td></tr><tr><td><strong>派单</strong></td><td>总监/总代把一项任务指派给某人，对方可接单、拒单、完成</td></tr><tr><td><strong>文书</strong></td><td>系统生成的规范化监理文件（旁站记录、监理日志、整改通知单、周报、月报等 10 类）</td></tr><tr><td><strong>台账</strong></td><td>按类型归集的记录册（影像、旁站、日志、整改、隐患、周报、月报、见证共 8 类）</td></tr><tr><td><strong>待审批</strong></td><td>新注册账号的状态，需管理员批准后才能登录</td></tr><tr><td><strong>信息库 / 规范资料库</strong></td><td>规范法规检索与 AI 问答。Web 端菜单名为「信息库」，小程序端名为「规范资料库」</td></tr><tr><td><strong>资料库</strong></td><td>小程序底部的个人/共享资料库（可建库、凭邀请码加入），2026-10-09 由"知识库"更名而来</td></tr></tbody></table>
+<hr>
+<hr>
+<h1 id="第二部分-账号与登录-从零开始">第二部分　账号与登录（从零开始）</h1>
+<h2 id="2-1-先搞懂-监理通的账号是-两层-的">2.1 先搞懂：监理通的账号是"两层"的</h2>
+<p>这是初学者最容易混淆的地方，先看清楚：</p>
+<pre><code>                 ┌──────────────────────────────┐
+   公司级（跨项目） │  超级管理员  |  管理员         │   ← 管人、管项目、管配置
+                 └──────────────────────────────┘
+                 ┌──────────────────────────────┐
+   项目级（本工程） │  总监 / 总代 / 专监 / 监理员   │   ← 干活、记录、报审
+                 │  资料员 / 见证员 / 安全监理员   │
+                 └──────────────────────────────┘</code></pre>
+<ul>
+<li><strong>公司级角色</strong>：由超管在「用户管理」里授予，跨所有项目生效</li>
+<li><strong>项目级岗位</strong>：由项目成员管理分配，<strong>只在被分配的那个项目里生效</strong></li>
+<li><strong>一个人可以同时拥有两层、以及多个项目级岗位</strong>——权限取<strong>并集</strong></li>
+</ul>
+<p>💡 <strong>为什么这么设计？</strong> 因为监理行业的真实情况是"一人多岗、一岗多项目"。传统系统把"身份"写死，导致一个人兼岗就得开两个账号，数据也分裂。监理通用"岗位集合"模型，一个账号走遍所有项目。</p>
+<h2 id="2-2-九个岗位一览">2.2 九个岗位一览</h2>
+<table><thead><tr><th>岗位（中文）</th><th>系统 key</th><th>级别</th><th>典型职责</th><th>岗位性质</th></tr></thead><tbody><tr><td>总监理工程师</td><td><code>chief_supervisor</code></td><td>项目级</td><td>项目负责人：派单、审批文书、成员管理、看板</td><td>🔒 每项目限 1 名</td></tr><tr><td>总监代表</td><td><code>deputy_chief</code></td><td>项目级</td><td>代行总监职责（除成员管理与系统设置）</td><td>🔒 每项目限 1 名</td></tr><tr><td>专业监理工程师</td><td><code>special_supervisor</code></td><td>项目级</td><td>巡视、验收、旁站、见证、签章</td><td>可叠加</td></tr><tr><td>监理员</td><td><code>inspector</code></td><td>项目级</td><td>巡视、隐患识别、工作记录</td><td>可叠加</td></tr><tr><td>资料员</td><td><code>documenter</code></td><td>项目级</td><td>资料登记、台账管理</td><td>可叠加</td></tr><tr><td>见证员</td><td><code>witness</code></td><td>项目级</td><td>见证取样</td><td>可叠加</td></tr><tr><td>安全监理员</td><td><code>safety_supervisor</code></td><td>项目级</td><td>安全巡视、隐患识别</td><td>可叠加</td></tr><tr><td>超级管理员</td><td><code>super_admin</code></td><td>公司级</td><td>一切：立项、建号、发邀请码、解绑微信、配置权限</td><td>跨项目</td></tr><tr><td>管理员</td><td><code>admin</code></td><td>公司级</td><td>人员审批、成员管理（跨项目）</td><td>跨项目</td></tr></tbody></table>
+<blockquote class="quote q-danger"><p>🔴 <strong>"可叠加"的含义</strong>：一个人可以同时是"专业监理工程师 + 见证员"，权限自动合并。但<strong>总监与总监代表是排他的</strong>——一个项目只能有一名总监（监理规范要求），也不会出现在"兼岗"选项中。</p></blockquote>
+<h2 id="2-3-获得账号的三条路径">2.3 获得账号的三条路径</h2>
+<table><thead><tr><th>路径</th><th>适用场景</th><th>操作方</th></tr></thead><tbody><tr><td><strong>A. 邀请码自助注册</strong>（推荐）</td><td>新员工入职</td><td>你注册，管理员发码</td></tr><tr><td><strong>B. 管理员直接建号</strong></td><td>批量/特殊账号</td><td>全部由管理员完成</td></tr><tr><td><strong>C. 已有账号 + 微信绑定</strong></td><td>账号最早在 Web 建的</td><td>你绑定</td></tr></tbody></table>
+<p>无论哪条路，<strong>最终都需要管理员把你"分配进项目"</strong>，你才能在项目里干活。</p>
+<h2 id="2-4-路径-a-用邀请码注册-小程序">2.4 路径 A：用邀请码注册（小程序）</h2>
+<ol>
+<li>打开监理通小程序，在登录页点「<strong>还没有账号？立即注册</strong>」</li>
+<li>依次填写：</li>
+</ol>
+<table><thead><tr><th>字段</th><th>说明</th></tr></thead><tbody><tr><td>用户名</td><td>登录用，建议用姓名拼音，如 <code>zhangsan</code></td></tr><tr><td>真实姓名</td><td>用于文书署名、通讯录显示，<strong>务必填真名</strong></td></tr><tr><td>手机号</td><td>联系方式</td></tr><tr><td>密码</td><td><strong>至少 8 位</strong></td></tr><tr><td>确认密码</td><td>再输一次</td></tr><tr><td><strong>公司邀请码</strong></td><td>🔴 <strong>必填</strong>，向管理员索取</td></tr></tbody></table>
+<ol>
+<li>页面会显示「岗位：xxx　由邀请码决定」——<strong>你无法自选岗位</strong>，这是防止越权注册的设计</li>
+<li>点「<strong>注册</strong>」提交</li>
+</ol>
+<p>⚠️ <strong>提交后不等于能登录</strong>：页面提示「提交后需管理员审核，并分配到项目，审核通过后即可登录」。请等待管理员审批。</p>
+<h2 id="2-5-路径-a-变体-在-web-后台注册">2.5 路径 A 变体：在 Web 后台注册</h2>
+<p>Web 登录页点「<strong>立即注册</strong>」，字段与小程序一致，另需填写「<strong>公司/团队名称</strong>」。同样必须持邀请码，同样需要管理员审核。</p>
+<blockquote class="quote q-danger"><p>🔴 <strong>Web 与小程序注册的岗位规则完全一致</strong>：都强制校验邀请码，岗位一律取自邀请码上绑定的角色。</p></blockquote>
+<h2 id="2-6-等待审批-这段时间发生了什么">2.6 等待审批：这段时间发生了什么</h2>
+<ol>
+<li>你的账号状态为 <strong>待审批（pending）</strong></li>
+<li>有「人员审批」权限的管理员会在「<strong>用户管理</strong>」中看到你，并选择：</li>
+</ol>
+<ul>
+<li><strong>批准</strong> → 账号可用；同时完成分配项目等动作</li>
+<li><strong>驳回</strong> → 需填写理由，你可在注册/登录时看到驳回原因</li>
+</ul>
+<ol>
+<li>审批通过后，用你的用户名 + 密码登录</li>
+</ol>
+<blockquote class="quote q-tip"><p>💡 为什么注册也要审核？监理文件是有法律效力的工程资料，人员准入必须留痕、可控。系统对每一次批准/驳回都记录了操作人与时间。</p></blockquote>
+<h2 id="2-7-首次登录-小程序">2.7 首次登录 · 小程序</h2>
+<ol>
+<li>打开小程序 → 微信授权 → 点「<strong>微信登录</strong>」</li>
+<li><strong>首次使用</strong>会提示「首次使用需要绑定已有监理通账号」，填写：</li>
+</ol>
+<ul>
+<li>用户名</li>
+<li>密码</li>
+<li>登记角色</li>
+</ul>
+<p>然后点「<strong>确认绑定并登录</strong>」</p>
+<ol>
+<li>绑定成功后，之后每次打开小程序直接「微信登录」即可，无需再输密码</li>
+</ol>
+<blockquote class="quote q-tip"><p>💡 微信登录与密码登录是<strong>同一个账号</strong>，只是身份验证方式不同。绑定后手机端免密，电脑端仍用账号密码。</p></blockquote>
+<h2 id="2-8-首次登录-web-后台">2.8 首次登录 · Web 后台</h2>
+<ol>
+<li>打开 <code>https://www.baize.gdces.cn:4432/admin/</code></li>
+<li>输入 <strong>用户名 + 密码</strong></li>
+<li>🔴 <strong>「选择角色」保持空（自动识别，推荐）</strong> ——系统会根据你的账号岗位自动加载对应权限</li>
+</ol>
+<ul>
+<li>只有在你明确知道自己在做什么、且账号确实有多重身份需要指定时才手动选择</li>
+<li>选错角色会提示「无效角色」或进入错误的功能集</li>
+</ul>
+<h2 id="2-9-让同一账号在两端都能用-设置登录密码">2.9 让同一账号在两端都能用（设置登录密码）</h2>
+<p>如果你的账号最早是通过<strong>微信</strong>创建的，那么它默认没有密码，无法登 Web 后台。解决办法：</p>
+<ol>
+<li>小程序 → 底部「<strong>我</strong>」→「<strong>我的工作</strong>」区域上方找到<strong>设置登录密码</strong>入口</li>
+<li>设置一个 <strong>≥8 位</strong> 的密码</li>
+<li>之后即可用「用户名 + 密码」登录 Web 后台，<strong>数据完全同步</strong></li>
+</ol>
+<h2 id="2-10-微信绑定管理">2.10 微信绑定管理</h2>
+<ul>
+<li><strong>查看绑定</strong>：「我」页面可看到当前微信的<strong>绑定时间</strong>与<strong>最近登录</strong>时间</li>
+<li><strong>解绑</strong>：点击解绑后，<strong>退出登录并重新登录即可绑定当前微信</strong>（页面顶部有说明）</li>
+<li><strong>被占用的提示</strong>：</li>
+<li>提示「该微信身份已绑定其他账号」→ 如果旧账号是公司级账号或已停用，系统会<strong>自动释放</strong>；否则请联系超管在「微信绑定管理」中解绑旧账号</li>
+<li>注册页提示微信被占 → 同上</li>
+</ul>
+<blockquote class="quote q-warn"><p>⚠️ <strong>不要用超管/公司级账号绑定微信</strong>（会导致该微信在注册/绑定时占用冲突）。公司级账号请在 Web 后台使用。</p></blockquote>
+<h2 id="2-11-忘记密码怎么办">2.11 忘记密码怎么办</h2>
+<table><thead><tr><th>你的情况</th><th>处理方式</th></tr></thead><tbody><tr><td>微信已绑定</td><td>小程序「我」→ 设置登录密码，<strong>免旧密码重设</strong></td></tr><tr><td>未绑微信</td><td>联系超管，在「用户管理」中重置密码</td></tr><tr><td>记得密码想改</td><td>「我」→ 设置登录密码</td></tr></tbody></table>
+<h2 id="2-12-账号常见问题速查">2.12 账号常见问题速查</h2>
+<table><thead><tr><th>现象</th><th>原因</th><th>解决</th></tr></thead><tbody><tr><td>登录提示「无效角色」</td><td>角色下拉与账号岗位不符</td><td>清空「选择角色」，用自动识别</td></tr><tr><td>提示「账号待审批」</td><td>注册后管理员未批</td><td>联系管理员审批</td></tr><tr><td>登录后菜单很少</td><td>未被分配进项目</td><td>请管理员在「项目成员管理」加入你</td></tr><tr><td>小程序 403 / 打不开</td><td>账号被停用或公司级账号误绑微信</td><td>联系超管</td></tr><tr><td>换了微信号</td><td>旧微信仍绑定</td><td>超管在「微信绑定管理」解绑后重新绑定</td></tr></tbody></table>
+<hr>
+<hr>
+<h1 id="第三部分-微信小程序使用指南-现场作业">第三部分　微信小程序使用指南（现场作业）</h1>
+<h2 id="3-0-界面总览-底部五个入口">3.0 界面总览：底部五个入口</h2>
+<p>小程序底部固定五个标签，<strong>工作台在正中间</strong>：</p>
+<pre><code>┌──────────┬──────────┬──────────┬──────────┬──────────┐
+│ 隐患识别  │ 工作记录  │  工作台   │  资料库   │    我    │
+└──────────┴──────────┴──────────┴──────────┴──────────┘
+      拍照识别       填报与查阅     对话式入口     知识检索    个人设置</code></pre>
+<p>💡 为什么把「工作台」放中间？因为它是最常用的入口——用一句话就能调起任何功能，相当于整个 App 的"总控台"。</p>
+<h2 id="3-1-工作台-中间标签-一句话干活">3.1 工作台（中间标签）——一句话干活</h2>
+<p>工作台是一个 <strong>AI 对话界面</strong>（智能体名叫「白泽」）。你可以<strong>按住说话</strong>，也可以<strong>打字</strong>。</p>
+<h3 id="3-1-1-三个快捷卡片">3.1.1 三个快捷卡片</h3>
+<p>对话页顶部通常有三个常用卡片，点一下即执行：</p>
+<table><thead><tr><th>卡片</th><th>效果</th></tr></thead><tbody><tr><td>拍照识别安全隐患</td><td>打开相机 → 选中照片 → AI 识别隐患</td></tr><tr><td>查询规范资料库</td><td>进入规范检索问答</td></tr><tr><td>生成今日监理日志</td><td>自动汇总当天工作，生成监理日志</td></tr></tbody></table>
+<h3 id="3-1-2-可识别的语音-文字指令">3.1.2 可识别的语音/文字指令</h3>
+<p>直接说这些话，系统会跳到对应功能：</p>
+<table><thead><tr><th>你说</th><th>系统做什么</th></tr></thead><tbody><tr><td>巡视 / 巡视记录</td><td>打开「工作记录」页</td></tr><tr><td>隐患识别 / 启动隐患识别</td><td>准备拍照识别隐患</td></tr><tr><td>隐患列表</td><td>打开「隐患管理」页</td></tr><tr><td>拍照</td><td>打开现场采集相机</td></tr><tr><td>生成监理日志 / 监理日志</td><td>选择日期生成监理日志</td></tr><tr><td>知识库</td><td>选择资料范围后提问</td></tr><tr><td>我的知识库 / 知识库管理</td><td>打开「资料库」</td></tr><tr><td>AI 巡检 / 巡检</td><td>打开「AI 巡检」页</td></tr></tbody></table>
+<h3 id="3-1-3-导入文件生成记录">3.1.3 导入文件生成记录</h3>
+<p>工作台支持<strong>导入微信聊天里的文件或本地文档</strong>（pdf / docx / txt），AI 会读取内容并<strong>自动生成对应的工作记录</strong>（巡视/旁站/见证/验收），输出时间、部位、内容、结论等关键字段。</p>
+<h3 id="3-1-4-模型选择">3.1.4 模型选择</h3>
+<p>对话页可切换 AI 模型（共 3 个可选，选择会记忆在你的手机上）。日常用默认即可。</p>
+<h3 id="3-1-5-拍照识别隐患">3.1.5 拍照识别隐患</h3>
+<ol>
+<li>在工作台点拍照/导入现场图片</li>
+<li>可附加一句检查要求（如"重点看临边防护"）</li>
+<li>AI 返回：</li>
+</ol>
+<pre><code>   风险状态：存在隐患
+   风险类别：xxx
+   主要风险：xxx
+   证据：xxx、xxx
+   复查建议：xxx、xxx</code></pre>
+<ol>
+<li>未发现隐患时会提示「✅ 未识别到明显安全隐患」</li>
+</ol>
+<h2 id="3-2-隐患识别-左一标签-现场采集">3.2 隐患识别（左一标签）——现场采集</h2>
+<p>这是"拍照 → AI 判断 → 形成隐患记录"的完整通路。</p>
+<p><strong>操作步骤</strong></p>
+<ol>
+<li>点底部「隐患识别」（或工作台拍照入口）</li>
+<li>拍摄现场照片（可从相册选）</li>
+<li>等待 AI 识别，返回风险状态、类别、主要风险、证据、复查建议</li>
+<li>确认后生成<strong>隐患记录</strong>，进入「隐患管理」</li>
+</ol>
+<h2 id="3-3-隐患管理-从工作台-隐患列表-进入">3.3 隐患管理（从工作台「隐患列表」进入）</h2>
+<p><strong>隐患的完整生命周期</strong></p>
+<pre><code>发现隐患 → 生成隐患记录 → （可选）生成整改通知单 → 整改 → 复查 → 复查合格 / 驳回</code></pre>
+<p><strong>页面能做什么</strong></p>
+<table><thead><tr><th>操作</th><th>说明</th></tr></thead><tbody><tr><td>查看隐患列表</td><td>显示风险状态、隐患描述、关联影像</td></tr><tr><td>生成整改通知单</td><td>一键把隐患转成正式整改文书，<strong>并进入整改流程</strong></td></tr><tr><td>设置整改期限</td><td>指定整改截止时间</td></tr><tr><td>复查</td><td>填写复查意见、复查结果，选择「复查合格」或「驳回」</td></tr><tr><td>分享</td><td>把隐患记录/影像分享给相关人</td></tr><tr><td>关联影像</td><td>查看现场照片</td></tr></tbody></table>
+<h2 id="3-4-工作记录-左二标签-四类记录填报">3.4 工作记录（左二标签）——四类记录填报</h2>
+<p>工作记录是现场作业的<strong>主填报入口</strong>，支持四类记录：<strong>巡视、旁站、验收、见证</strong>。</p>
+<h3 id="3-4-1-查看与筛选">3.4.1 查看与筛选</h3>
+<ul>
+<li>顶部可按「<strong>全部</strong>」或按类型筛选（类型抽屉）</li>
+<li>支持「<strong>时间范围</strong>」筛选（日期/范围）</li>
+<li>列表卡片可点开查看详情</li>
+</ul>
+<h3 id="3-4-2-新建记录">3.4.2 新建记录</h3>
+<p>在对应类型下点新增，填写字段（不同记录类型字段不同）：</p>
+<table><thead><tr><th>记录类型</th><th>主要字段</th></tr></thead><tbody><tr><td><strong>巡视</strong></td><td>施工区域、部位、天气、工作内容、巡视备注</td></tr><tr><td><strong>验收</strong></td><td>验收类型、验收结果、工作内容、部位</td></tr><tr><td><strong>旁站</strong></td><td>工程名称、旁站内容、旁站结论、开始/结束时间</td></tr><tr><td><strong>见证</strong></td><td>材料名称、规格型号、见证信息、证据</td></tr></tbody></table>
+<p>填写过程中可以点「<strong>使用 AI 润色内容</strong>」把口语化描述改写为规范书面语。</p>
+<h3 id="3-4-3-列表批量操作">3.4.3 列表批量操作</h3>
+<table><thead><tr><th>按钮</th><th>作用</th></tr></thead><tbody><tr><td>批量选择</td><td>进入多选模式（可全选）</td></tr><tr><td><strong>提交审批</strong></td><td>把选中的记录批量提交给总监审批</td></tr><tr><td><strong>生成报告</strong></td><td>把记录汇总成报告文档</td></tr><tr><td>删除</td><td>删除记录（⚠️ 不可恢复，请谨慎）</td></tr><tr><td>编辑记录</td><td>修改已保存的记录</td></tr></tbody></table>
+<blockquote class="quote q-danger"><p>🔴 <strong>注意</strong>：记录提交后进入审批流，总监在 Web 后台「文书审批」处理。<strong>提交前请核对部位与内容</strong>，退回重填会影响效率。</p></blockquote>
+<h2 id="3-5-ai-巡检">3.5 AI 巡检</h2>
+<p><strong>用途</strong>：开展一次"带会话"的现场安全巡检。</p>
+<p><strong>操作</strong></p>
+<ol>
+<li>进入「AI 巡检」页</li>
+<li>填写可选项：施工区域、具体位置、天气</li>
+<li>点「<strong>开始</strong>」开启巡检会话（摄像头仅在拍照识别时开启）</li>
+<li>点「<strong>拍摄并识别隐患</strong>」→ 选择「相册」或直接「拍照识别」</li>
+<li>AI 返回识别信息与结果；未发现隐患会明确提示</li>
+<li>可查看「<strong>历史会话</strong>」，点「<strong>结束</strong>」完成本次巡检</li>
+</ol>
+<p>💡 每次巡检是一个"会话"（编号如"会话 #12"），同一次巡检的多张照片归到一起，便于追溯。</p>
+<h2 id="3-6-监理文书">3.6 监理文书</h2>
+<p><strong>用途</strong>：查看和管理项目上的各类监理文书。</p>
+<ul>
+<li>支持按<strong>标题 / 位置 / 编号</strong>搜索，按<strong>区域</strong>筛选，按<strong>日期</strong>筛选</li>
+<li>列表显示文书类型、状态（草稿/待审批/已审批/已归档/已驳回）、创建时间</li>
+<li>内置<strong>台账视图</strong>：可切换查看</li>
+<li>支持<strong>导出 Excel / 导出 PDF</strong></li>
+</ul>
+<p><strong>系统支持的 10 类文书</strong></p>
+<table><thead><tr><th>文书类型</th><th>说明</th></tr></thead><tbody><tr><td>旁站记录</td><td>关键工序旁站</td></tr><tr><td>监理日志</td><td>每日监理工作记录</td></tr><tr><td>监理工程师通知单（质量类）</td><td>质量问题通知</td></tr><tr><td>安全隐患整改通知单</td><td>隐患整改（<strong>需总监签发</strong>）</td></tr><tr><td>安全隐患整改回复单</td><td>整改回复</td></tr><tr><td>巡视记录</td><td>日常巡视</td></tr><tr><td>验收记录</td><td>检验批/分项验收</td></tr><tr><td>见证取样记录</td><td>见证取样送检</td></tr><tr><td>监理周报</td><td>每周汇总（<strong>需总监签发</strong>）</td></tr><tr><td>监理月报</td><td>每月汇总（<strong>需总监签发</strong>）</td></tr></tbody></table>
+<h2 id="3-7-资料库-规范资料库-我的笔记">3.7 资料库 / 规范资料库 / 我的笔记</h2>
+<p>三个不同层级的"资料"概念，别搞混：</p>
+<table><thead><tr><th>名称</th><th>定位</th><th>入口</th></tr></thead><tbody><tr><td><strong>规范资料库</strong></td><td>规范、法规、标准的<strong>检索问答</strong></td><td>工作台「知识库」指令</td></tr><tr><td><strong>资料库</strong></td><td>你的<strong>个人资料库 / 共享资料库</strong>（可建库、可凭邀请码加入）</td><td>底部「资料库」标签</td></tr><tr><td><strong>我的笔记</strong></td><td>个人随手记，AI 生成内容也可存为笔记</td><td>「我」页面 / 工作台</td></tr></tbody></table>
+<h3 id="资料库操作">资料库操作</h3>
+<ol>
+<li>点「<strong>+ 新建资料库</strong>」：填写名称（如"项目规范库"）、描述（一句话说明），创建为<strong>个人库</strong></li>
+<li>或点「<strong>加入共享资料库</strong>」：输入<strong>邀请码</strong>加入他人共享的库</li>
+<li>切换「<strong>我的 / 广场</strong>」查看自己的库或公开库</li>
+</ol>
+<h3 id="我的笔记">我的笔记</h3>
+<ul>
+<li>点「<strong>+ 新建笔记</strong>」记录；列表按更新时间排序；可删除</li>
+<li>AI 生成的报告、播客文案可一键「<strong>保存为笔记</strong>」</li>
+</ul>
+<h2 id="3-8-会议纪要">3.8 会议纪要</h2>
+<ol>
+<li>点「<strong>+ 新建纪要</strong>」：填写标题、会议日期、地点、会议类型、负责人、议题</li>
+<li>可用「<strong>AI 整理</strong>」把记录内容整理成规范纪要</li>
+<li>列表可查看截止时间、状态；可删除</li>
+</ol>
+<h2 id="3-9-其他现场记录类功能">3.9 其他现场记录类功能</h2>
+<table><thead><tr><th>功能</th><th>用途</th><th>关键字段</th></tr></thead><tbody><tr><td><strong>进度记录</strong></td><td>记录施工进度</td><td>施工部位、记录日期、计划进度%、实际进度%、情况描述</td></tr><tr><td><strong>平行检验</strong></td><td>平行检验记录</td><td>检验部位、检验项目、检验日期、检验依据、检验结果、结论、处理意见</td></tr><tr><td><strong>资源投入</strong></td><td>记录人材机投入</td><td>出勤人数、人工明细、材料（名称/规格/数量/单位）、机械（名称/台数/单位）</td></tr><tr><td><strong>工程签证</strong></td><td>签证事项登记</td><td>签证标题、编号（如 QZ-2026-001）、金额、原因、内容、状态</td></tr><tr><td><strong>测量设备</strong></td><td>设备台账与检定提醒</td><td>设备名称、型号、出厂编号、检定单位、<strong>剩余检定天数</strong></td></tr><tr><td><strong>资料记录</strong></td><td>收发资料登记</td><td>资料名称、编号、部位、对方单位、经办人、方向（收/发）</td></tr></tbody></table>
+<p>以上功能均支持「<strong>+ 新建/记录</strong>」→ 填写 → 保存，并可在列表中点开查看、删除。</p>
+<h2 id="3-10-项目看板">3.10 项目看板</h2>
+<ul>
+<li><strong>项目数据总览</strong>：隐患总数、巡检次数、任务与处置进度</li>
+<li><strong>工作记录待办构成</strong>：未查看 / 未处理的数量</li>
+<li><strong>隐患类别分布</strong>（环形图）</li>
+<li><strong>近 7 日巡检趋势</strong></li>
+<li>快捷操作：「查看工作记录 ›」「管理隐患 ›」</li>
+</ul>
+<h2 id="3-11-我的派单-待办">3.11 我的派单（待办）</h2>
+<p>总监派给你的任务在这里处理：</p>
+<table><thead><tr><th>按钮</th><th>作用</th></tr></thead><tbody><tr><td><strong>接单</strong></td><td>接受任务</td></tr><tr><td><strong>拒绝</strong></td><td>拒单（可说明原因）</td></tr><tr><td><strong>开始</strong></td><td>开始执行</td></tr><tr><td><strong>上传取证</strong></td><td>上传现场照片等证据</td></tr><tr><td><strong>完成</strong></td><td>提交完成</td></tr></tbody></table>
+<p>列表显示任务标题、类别、优先级、状态、截止时间。</p>
+<h2 id="3-12-项目通讯录-音视频通话">3.12 项目通讯录 / 音视频通话</h2>
+<ul>
+<li><strong>项目通讯录</strong>：显示同项目成员（真实姓名 + 岗位），支持<strong>语音 / 视频</strong>通话</li>
+<li><strong>通话中</strong>可切换摄像头、挂断；对方可接听或拒绝</li>
+</ul>
+<h2 id="3-13-ai-创作">3.13 AI 创作</h2>
+<p>三个 AI 生成能力：</p>
+<table><thead><tr><th>能力</th><th>输入</th><th>输出</th></tr></thead><tbody><tr><td><strong>AI 生图</strong></td><td>画面描述（如"施工现场塔吊与安全网，写实风格"）</td><td>图片</td></tr><tr><td><strong>生成报告</strong></td><td>任务标题 + 任务要求（如"根据资料库，写一份'旁站监理工作要点'报告"）</td><td>报告文本，可<strong>保存为笔记</strong></td></tr><tr><td><strong>生成播客</strong></td><td>粘贴一段内容</td><td>改写成口播文案 + <strong>合成语音</strong>（可播放）</td></tr></tbody></table>
+<h2 id="3-14-我-个人设置">3.14 「我」——个人设置</h2>
+<table><thead><tr><th>功能</th><th>说明</th></tr></thead><tbody><tr><td><strong>项目看板入口</strong></td><td>快速进入看板</td></tr><tr><td>我的工作</td><td>工作表单完成率、待处理隐患、待接任务</td></tr><tr><td><strong>主题配色</strong></td><td>可调色相/明度，整个小程序跟随变色</td></tr><tr><td><strong>服务通知订阅</strong></td><td>「订阅审批通知」「订阅派单与隐患通知」</td></tr><tr><td><strong>眼镜端扫码登录</strong></td><td>生成二维码，用 Rokid 眼镜扫描登录</td></tr><tr><td>微信绑定</td><td>显示绑定时间、最近登录</td></tr><tr><td>隐私保护指引</td><td>隐私说明与权限管理</td></tr><tr><td>版本</td><td>当前版本号</td></tr><tr><td><strong>退出登录</strong></td><td>退出当前账号</td></tr></tbody></table>
+<h2 id="3-15-与-rokid-ar-眼镜协同">3.15 与 Rokid AR 眼镜协同</h2>
+<ol>
+<li>手机小程序「我」→「<strong>眼镜端扫码登录</strong>」→ 显示二维码</li>
+<li>戴上眼镜，用眼镜端扫描二维码登录</li>
+<li>眼镜端以<strong>第一视角</strong>拍照/录音，数据回传同一项目</li>
+</ol>
+<blockquote class="quote q-tip"><p>💡 眼镜端适合"双手不便"的场景：爬脚手架、钻管沟、高处巡检。语音一句话即可记录。</p></blockquote>
+<h2 id="3-16-现场一日动线-建议">3.16 现场一日动线（建议）</h2>
+<pre><code>早上到岗
+  └─ 打开小程序 → 工作台看今日待办 / 派单
+  └─ 现场巡视 → 「工作记录」新建巡视记录（或眼镜语音记录）
+       └─ 发现问题 → 「隐患识别」拍照 → AI 判定 → 生成隐患记录
+            └─ 需整改 → 「生成整改通知单」→ 设置整改期限
+下班前
+  └─ 工作台 → 「生成今日监理日志」一键汇总当天工作
+  └─ 检查「我的派单」是否有未完成任务</code></pre>
+<hr>
+<hr>
+<h1 id="第四部分-web-管理后台使用指南">第四部分　Web 管理后台使用指南</h1>
+<h2 id="4-0-界面总览">4.0 界面总览</h2>
+<p>左侧为导航菜单，<strong>菜单项会随你的权限自动增减</strong>——没权限的功能直接不显示（这是正常现象，不是系统故障）。</p>
+<p>主菜单顺序：<strong>工作台 → 公司看板 → 现场识别 → 工作记录 → 信息库 → 系统设置 → 项目管理 → 用户管理 → 邀请码管理 → 微信绑定管理 → 角色权限</strong>。</p>
+<blockquote class="quote q-danger"><p>🔴 <strong>重要</strong>：<strong>「台账管理」「文书审批」「派单管理」「签章管理」「验收模板配置」「图纸管理」「档案管理」不在左侧菜单里</strong>，它们统一从<strong>「工作台」的对话/快捷入口</strong>进入。例如在工作台输入「台账」或点「查看台账」，即可打开台账页。</p></blockquote>
+<h2 id="4-1-工作台-首页">4.1 工作台（首页）</h2>
+<p>与小程序类似，是一个<strong>对话式工作台</strong>，是后台的"总入口"。</p>
+<ul>
+<li>顶部有统计数据：<strong>隐患待处理、工作记录（未查看 / 未处理）</strong></li>
+<li>中间的对话区支持<strong>上传现场图片</strong>做隐患识别</li>
+<li>可切换 <strong>AI 模型</strong></li>
+<li>右侧「<strong>知识库</strong>」「<strong>知识图谱</strong>」快捷按钮</li>
+<li>支持<strong>生成监理日志</strong>（选择日期）</li>
+</ul>
+<p><strong>工作台可识别的指令（示例）</strong></p>
+<table><thead><tr><th>输入</th><th>跳转/动作</th></tr></thead><tbody><tr><td>新建巡视记录 / 新建验收记录 / 新建旁站记录 / 新建见证记录</td><td>打开对应工作记录页</td></tr><tr><td>隐患识别 / 启动隐患识别</td><td>准备图片识别</td></tr><tr><td>启动安全 AI 巡检 / 停止安全 AI 巡检</td><td>开关巡检</td></tr><tr><td>现场识别 / 拍照</td><td>打开现场识别（摄像头）页</td></tr><tr><td>生成监理日志 / 监理日志</td><td>选择日期生成</td></tr><tr><td>台账 / 查看台账</td><td>打开台账管理</td></tr><tr><td>知识库 / 查看规范</td><td>打开信息库</td></tr><tr><td><strong>文书审批</strong></td><td>打开文书审批页</td></tr></tbody></table>
+<h2 id="4-2-公司看板">4.2 公司看板</h2>
+<p>多项目横向对比（总监及以上）。可比较各项目的巡检量、隐患处置、工作记录等指标。</p>
+<h2 id="4-3-现场识别">4.3 现场识别</h2>
+<p>用<strong>电脑摄像头</strong>模拟眼镜端现场采集与 AI 识别，适合在办公室做演示或补充采集。</p>
+<h2 id="4-4-工作记录-含-5-个子页面">4.4 工作记录（含 5 个子页面）</h2>
+<p>左侧菜单「工作记录」是一个可展开的分组，包含：</p>
+<table><thead><tr><th>子项</th><th>说明</th></tr></thead><tbody><tr><td><strong>巡视记录</strong></td><td>查看/新增巡视</td></tr><tr><td><strong>验收管理</strong></td><td>检验批与分项验收</td></tr><tr><td><strong>旁站记录</strong></td><td>旁站监理记录</td></tr><tr><td><strong>见证取样</strong></td><td>见证取样记录</td></tr><tr><td><strong>AI 巡检统计</strong></td><td>巡检数据统计（需「隐患识别」权限）</td></tr></tbody></table>
+<h2 id="4-5-信息库">4.5 信息库</h2>
+<p>承载两类内容：</p>
+<ol>
+<li><strong>规范知识库</strong>：规范、法规、条文检索与 AI 问答</li>
+<li><strong>知识图谱</strong>：以图谱方式呈现规范/隐患/工序之间的关联</li>
+</ol>
+<h2 id="4-6-系统设置">4.6 系统设置</h2>
+<p>项目级设置（总监持有），例如<strong>法规版本管理</strong>等。</p>
+<h2 id="4-7-项目管理">4.7 项目管理</h2>
+<p><strong>谁能用</strong>：超管（可新建）；持有「成员管理」的总监（可查看/切换/分配人员）。</p>
+<h3 id="4-7-1-新建项目-仅超管">4.7.1 新建项目（仅超管）</h3>
+<p>点「<strong>新建项目</strong>」，填写：</p>
+<table><thead><tr><th>字段</th><th>说明</th></tr></thead><tbody><tr><td>项目名称</td><td>完整工程名称</td></tr><tr><td>项目编号（code）</td><td>🔴 <strong>同一公司内唯一</strong></td></tr><tr><td>工程名称简称</td><td>用于列表与文书抬头</td></tr><tr><td>项目地点</td><td>工程所在地</td></tr><tr><td>项目描述</td><td>可选</td></tr></tbody></table>
+<p>创建后项目状态默认为 <strong>进行中（active）</strong>。</p>
+<h3 id="4-7-2-项目状态">4.7.2 项目状态</h3>
+<table><thead><tr><th>状态</th><th>含义</th></tr></thead><tbody><tr><td><code>active</code></td><td>进行中</td></tr><tr><td><code>completed</code></td><td>已完工（结项）</td></tr><tr><td><code>archived</code></td><td>已归档</td></tr></tbody></table>
+<h3 id="4-7-3-项目结项-step-5">4.7.3 项目结项（Step 5）</h3>
+<p><strong>这是公司级管理动作</strong>（权限 <code>project_complete</code>，默认仅超管）。结项时会：</p>
+<ul>
+<li>把项目状态置为<strong>已完工</strong></li>
+<li><strong>批量把在岗成员置为离场</strong>（记录离场时间，形成转场留痕）</li>
+<li>项目从各方列表中收口</li>
+</ul>
+<p>⚠️ <strong>结项会影响所有在岗人员</strong>，执行前请确认项目确实结束。支持<strong>恢复</strong>操作。</p>
+<h2 id="4-8-用户管理">4.8 用户管理</h2>
+<p>后台里与"人"相关的核心页面。</p>
+<h3 id="4-8-1-账号列表">4.8.1 账号列表</h3>
+<ul>
+<li>显示用户名、真实姓名、手机号、<strong>公司级角色</strong>、<strong>审批状态</strong>、所属项目等</li>
+<li>🔴 <strong>「审批状态」列 + 筛选</strong>已上线：可筛选出 <strong>待审批 / 已批准 / 已驳回</strong> 的人员</li>
+<li>未通过的行会出现「<strong>审批</strong>」按钮</li>
+</ul>
+<h3 id="4-8-2-人员审批">4.8.2 人员审批</h3>
+<p>对「待审批」的注册申请：</p>
+<ul>
+<li><strong>批准</strong>：一个事务内完成"置为已批准 + 记录审批人与时间 + 关联项目与岗位"等动作</li>
+<li><strong>驳回</strong>：需填写<strong>驳回理由</strong>（申请人可见）</li>
+</ul>
+<p>🔴 <strong>限制</strong>：管理员<strong>不能审批自己</strong>，且只能审批<strong>本组织</strong>的人员。</p>
+<h3 id="4-8-3-新增-编辑用户">4.8.3 新增 / 编辑用户</h3>
+<ul>
+<li>超管可「<strong>新增用户</strong>」直接建号并设置初始密码，把账号密码交给对方</li>
+<li>编辑可修改真实姓名、手机号等资料</li>
+<li>可重置密码</li>
+</ul>
+<h3 id="4-8-4-公司级角色授予-仅超管">4.8.4 公司级角色授予（仅超管）</h3>
+<p>在「公司级角色」列可授予：</p>
+<table><thead><tr><th>值</th><th>效果</th></tr></thead><tbody><tr><td>留空 / <code>none</code> / <code>null</code> / <code>0</code></td><td><strong>清除</strong>公司级角色</td></tr><tr><td><code>admin</code></td><td>授予「管理员」</td></tr><tr><td><code>super_admin</code></td><td>授予「超级管理员」</td></tr></tbody></table>
+<p>🔴 <strong>两条安全铁律</strong>（系统强制）：</p>
+<ol>
+<li>超管<strong>不能给自己降级</strong></li>
+<li>系统<strong>必须保留至少一名启用中的超管</strong></li>
+</ol>
+<blockquote class="quote q-tip"><p>💡 为什么？公司级角色是"最高权限"，如果允许自我降级或允许把最后一个超管取消，整个公司就再也没人能授权了——系统会永久锁死。</p></blockquote>
+<h2 id="4-9-邀请码管理-仅超管">4.9 邀请码管理（仅超管）</h2>
+<p><strong>用途</strong>：发放给外部人员自助注册。</p>
+<h3 id="4-9-1-新建邀请码">4.9.1 新建邀请码</h3>
+<table><thead><tr><th>字段</th><th>说明</th></tr></thead><tbody><tr><td>岗位</td><td>🔴 <strong>决定注册者的岗位</strong>，发码前务必确认</td></tr><tr><td>使用次数上限</td><td>默认 1 次，可设多次</td></tr><tr><td>有效期</td><td>截止时间</td></tr><tr><td>组织</td><td>自动继承发码管理员的组织</td></tr></tbody></table>
+<blockquote class="quote q-danger"><p>🔴 邀请码<strong>不能发放公司级角色</strong>（防止越权扩散）。</p></blockquote>
+<h3 id="4-9-2-停用与查看">4.9.2 停用与查看</h3>
+<ul>
+<li>列表<strong>只显示启用中的邀请码</strong>（这是设计如此，不是数据丢失）</li>
+<li>可对某码执行「<strong>停用（revoke）</strong>」</li>
+</ul>
+<h2 id="4-10-微信绑定管理-仅超管">4.10 微信绑定管理（仅超管）</h2>
+<p><strong>用途</strong>：处理微信占用、换微信号等场景。</p>
+<table><thead><tr><th>场景</th><th>操作</th></tr></thead><tbody><tr><td>员工换微信号</td><td>解绑旧微信 → 对方重新绑定</td></tr><tr><td>提示"该微信已绑定其他账号"</td><td>解绑那个旧账号（若旧账号是公司级或已停用，系统会自动释放）</td></tr><tr><td>微信被离职员工占用</td><td>解绑 → 新员工即可绑定</td></tr></tbody></table>
+<blockquote class="quote"><p>每一次绑定/解绑都有<strong>审计记录</strong>。</p></blockquote>
+<h2 id="4-11-角色权限-step-3-仅超管">4.11 角色权限（Step 3，仅超管）</h2>
+<p>这是本系统的"权限总开关"。</p>
+<h3 id="4-11-1-界面结构">4.11.1 界面结构</h3>
+<p>按 <strong>5 个分组</strong> 展示全部 <strong>27 项权限</strong>，每个角色一列，勾选即授权：</p>
+<table><thead><tr><th>分组</th><th>权限项</th></tr></thead><tbody><tr><td><strong>现场作业</strong></td><td>工作记录、巡视检查、验收、见证、旁站、隐患识别</td></tr><tr><td><strong>任务协同</strong></td><td>任务派发、任务管理、任务承接、待办中心</td></tr><tr><td><strong>数据档案</strong></td><td>台账、文书审批、验收模板、信息库、知识图谱管理、签章管理</td></tr><tr><td><strong>智能工具</strong></td><td>工作台、本地智能体</td></tr><tr><td><strong>系统与人员</strong></td><td>系统设置、个人中心、成员管理、账号管理*、人员审批*、角色授权*、项目立项*、项目编辑*、项目结项*</td></tr></tbody></table>
+<p>（带 <code>*</code> 的为<strong>仅公司级角色可持有</strong>，给项目级岗位勾选会被拒绝）</p>
+<h3 id="4-11-2-修改权限的-5-条约束">4.11.2 修改权限的 5 条约束</h3>
+<ol>
+<li>不能授予你自己都没有的权限</li>
+<li>项目级岗位不能持有公司级权限</li>
+<li>目录之外的权限键会被拒绝（不能凭空造权限）</li>
+<li><strong><code>super_admin</code> 不可修改</strong>（它恒定拥有全部权限）</li>
+<li>所有修改写入<strong>审计日志</strong></li>
+</ol>
+<h3 id="4-11-3-即时生效">4.11.3 即时生效</h3>
+<p>改完保存后，正在使用系统的用户会在<strong>下一次请求时自动刷新权限</strong>（无需重新登录）。</p>
+<blockquote class="quote q-danger"><p>⚠️ <strong>改权限前请想清楚</strong>：例如把「文书审批」从总监身上取消，总监就再也批不了文书了。</p><p>🔴 角色 key（如 <code>chief_supervisor</code>）<strong>不可在界面上增删</strong>——角色是系统级定义，不是配置项。</p></blockquote>
+<h2 id="4-12-派单管理-工作台入口">4.12 派单管理（工作台入口）</h2>
+<p><strong>谁能用</strong>：持有「任务派发」的总监/总代。</p>
+<p><strong>派单流程</strong></p>
+<pre><code>总监派单 → 待接单 → 员工接单 → 进行中 → 已完成
+                     └─ 拒单 / 发起人取消</code></pre>
+<p><strong>派单类别</strong>：巡视检查、验收管理、见证取样、旁站监督、隐患处理、文书处理、整改跟踪、其他事务<strong>优先级</strong>：低 / 中 / 高 / 紧急</p>
+<p>页面支持：新建派单、<strong>催办</strong>、<strong>改派</strong>、<strong>取消</strong>。</p>
+<h2 id="4-13-文书审批-工作台入口">4.13 文书审批（工作台入口）</h2>
+<p><strong>谁能用</strong>：持有「文书审批」的总监/总代。</p>
+<p><strong>流程</strong>：监理人员提交 → <strong>待审批</strong> → 总监「<strong>批准</strong>」或「<strong>驳回</strong>」（可填理由）</p>
+<p><strong>需要总监签发的文书类型</strong>（其余提交后直接归档）：</p>
+<ul>
+<li>安全隐患整改通知单</li>
+<li>监理周报</li>
+<li>监理月报</li>
+</ul>
+<p>页面还支持：<strong>导出 PDF</strong>（文书下载）。</p>
+<h2 id="4-14-签章管理-工作台入口">4.14 签章管理（工作台入口）</h2>
+<p>上传与管理<strong>个人签名/印章</strong>，用于签署电子文书。需要「签章管理」权限（默认授予总监、总监代表、专监）。</p>
+<h2 id="4-15-验收模板配置-工作台入口">4.15 验收模板配置（工作台入口）</h2>
+<p>维护验收流程模板，规范不同分项工程的验收步骤。需要「验收模板」权限。</p>
+<h2 id="4-16-台账管理-工作台入口">4.16 台账管理（工作台入口）</h2>
+<p>台账是监理资料的"册子"，系统支持 <strong>8 类台账</strong>：</p>
+<table><thead><tr><th>台账类型</th><th>内容来源</th></tr></thead><tbody><tr><td>影像台账</td><td>现场照片/影像</td></tr><tr><td>旁站台账</td><td>旁站记录</td></tr><tr><td>监理日志台账</td><td>监理日志</td></tr><tr><td>整改通知单台账</td><td>安全隐患整改通知单</td></tr><tr><td>AI 安全巡检台账</td><td>隐患识别记录</td></tr><tr><td>周报台账</td><td>监理周报</td></tr><tr><td>月报台账</td><td>监理月报</td></tr><tr><td>见证取样台账</td><td>见证取样记录</td></tr></tbody></table>
+<p><strong>操作能力</strong></p>
+<ul>
+<li>按<strong>台账类型</strong>筛选、按<strong>时间范围 / 部位</strong>查询</li>
+<li><strong>导出 Excel</strong> / <strong>导出 PDF</strong></li>
+<li><strong>批量导出 Excel</strong>（多类型打包，生成 ZIP）</li>
+<li><strong>台账归档管理</strong>：把某段时间的台账打包归档（填写归档名称，如"2026年5月监理台账归档"）；支持<strong>归档下载/删除</strong></li>
+</ul>
+<h2 id="4-17-图纸管理-档案管理-工作台入口">4.17 图纸管理 / 档案管理（工作台入口）</h2>
+<ul>
+<li><strong>图纸管理</strong>：项目图纸上传、查阅（<code>work_record</code> 权限）</li>
+<li><strong>档案管理</strong>：项目档案归集（<code>work_record</code> 权限）</li>
+</ul>
+<hr>
+<hr>
+<h1 id="第五部分-管理员典型工作流">第五部分　管理员典型工作流</h1>
+<h2 id="5-1-新项目上线-7-步">5.1 新项目上线（7 步）</h2>
+<pre><code>1. 立项      → 项目管理 → 新建项目（名称/编号/简称/地点）  【超管】
+2. 定岗位    → 想清楚这个项目需要哪些岗位、各几人
+3. 发码/建号 → 邀请码管理 发码（选对岗位）  或  用户管理 新增用户  【超管】
+4. 人员注册  → 员工用邀请码注册，等待审批
+5. 审批      → 用户管理 → 批准（记审批人与时间）      【管理员/超管】
+6. 分配项目  → 项目管理 → 项目成员管理 → 加入项目并定岗  【总监/超管】
+7. 交底      → 把本说明书第 3 部分发给现场人员</code></pre>
+<h2 id="5-2-新员工入职">5.2 新员工入职</h2>
+<ol>
+<li>超管在「邀请码管理」新建邀请码：<strong>选对该员工岗位</strong>，设使用次数与有效期</li>
+<li>把邀请码给员工</li>
+<li>员工在小程序或 Web 注册（详见 2.4 / 2.5）</li>
+<li>管理员「批准」</li>
+<li>总监在「项目成员管理」把他加入项目并设定主岗（如需兼岗，再加兼职岗位）</li>
+</ol>
+<h2 id="5-3-员工离职">5.3 员工离职</h2>
+<ol>
+<li><strong>项目成员管理</strong> → 移出项目（记录离场时间）</li>
+<li><strong>用户管理</strong> → 停用账号</li>
+<li><strong>微信绑定管理</strong> → 解绑微信（释放给下一个使用者）</li>
+</ol>
+<blockquote class="quote"><p>顺序很重要：先移出项目、再停用账号、最后解绑微信。</p></blockquote>
+<h2 id="5-4-人员换岗-兼岗">5.4 人员换岗 / 兼岗</h2>
+<ul>
+<li><strong>换岗</strong>：项目成员管理中修改其<strong>主岗</strong></li>
+<li><strong>兼岗</strong>：在兼职岗位上追加（可叠加的 5 类岗位）。权限自动取并集</li>
+<li>🔴 总监与总监代表每项目各限 1 名，且<strong>不能作为兼职岗位</strong>添加</li>
+</ul>
+<h2 id="5-5-项目结项">5.5 项目结项</h2>
+<ul>
+<li>「项目管理」→ 对目标项目执行<strong>结项</strong>：状态→已完工，<strong>在岗成员批量离场</strong></li>
+<li>如需恢复，执行<strong>恢复</strong>操作</li>
+</ul>
+<h2 id="5-6-权限调整-什么时候该动-角色权限-页">5.6 权限调整（什么时候该动「角色权限」页）</h2>
+<table><thead><tr><th>场景</th><th>建议</th></tr></thead><tbody><tr><td>想让监理员也能看台账</td><td>「数据档案 → 台账」勾给 <code>inspector</code></td></tr><tr><td>想让专监也能批文书</td><td>慎重——审批权通常只给总监</td></tr><tr><td>新角色需求</td><td>⚠️ 角色不可新增，应通过"权限配置"组合实现</td></tr></tbody></table>
+<hr>
+<hr>
+<h1 id="第六部分-角色与权限速查">第六部分　角色与权限速查</h1>
+<h2 id="6-1-各岗位默认权限一览">6.1 各岗位默认权限一览</h2>
+<p>下表为<strong>系统默认</strong>（可在「角色权限」页调整）。✅ 表示默认拥有。</p>
+<table><thead><tr><th>权限（中文）</th><th>权限键</th><th>总监</th><th>总代</th><th>专监</th><th>监理员</th><th>资料员</th><th>见证员</th><th>安全员</th></tr></thead><tbody><tr><td>工作台</td><td><code>dashboard</code></td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td></tr><tr><td>工作记录</td><td><code>work_record</code></td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td></tr><tr><td>巡视检查</td><td><code>inspection</code></td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td></td><td></td><td>✅</td></tr><tr><td>验收</td><td><code>acceptance</code></td><td>✅</td><td>✅</td><td>✅</td><td></td><td></td><td></td><td></td></tr><tr><td>见证</td><td><code>witness</code></td><td>✅</td><td>✅</td><td>✅</td><td></td><td></td><td>✅</td><td></td></tr><tr><td>旁站</td><td><code>station</code></td><td>✅</td><td>✅</td><td>✅</td><td></td><td></td><td></td><td></td></tr><tr><td>隐患识别</td><td><code>hazard_ai</code></td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td></td><td></td><td>✅</td></tr><tr><td>信息库</td><td><code>knowledge_base</code></td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td></td><td></td><td>✅</td></tr><tr><td>知识图谱管理</td><td><code>kg_manage</code></td><td>✅</td><td>✅</td><td></td><td></td><td></td><td></td><td></td></tr><tr><td>任务派发</td><td><code>task_assign</code></td><td>✅</td><td>✅</td><td></td><td></td><td></td><td></td><td></td></tr><tr><td>任务管理</td><td><code>task_manage</code></td><td>✅</td><td>✅</td><td></td><td></td><td></td><td></td><td></td></tr><tr><td>任务承接</td><td><code>task_receive</code></td><td></td><td></td><td>✅</td><td>✅</td><td></td><td></td><td>✅</td></tr><tr><td>待办中心</td><td><code>todo_center</code></td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td></tr><tr><td>台账</td><td><code>ledger</code></td><td>✅</td><td>✅</td><td>✅</td><td></td><td>✅</td><td></td><td></td></tr><tr><td>文书审批</td><td><code>document_approve</code></td><td>✅</td><td>✅</td><td></td><td></td><td></td><td></td><td></td></tr><tr><td>验收模板</td><td><code>acceptance_template</code></td><td>✅</td><td>✅</td><td></td><td></td><td></td><td></td><td></td></tr><tr><td>签章管理</td><td><code>signature_manage</code></td><td>✅</td><td>✅</td><td>✅</td><td></td><td></td><td></td><td></td></tr><tr><td>系统设置</td><td><code>settings</code></td><td>✅</td><td></td><td></td><td></td><td></td><td></td><td></td></tr><tr><td>个人中心</td><td><code>user_center</code></td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td></tr><tr><td>成员管理</td><td><code>member_manage</code></td><td>✅</td><td></td><td></td><td></td><td></td><td></td><td></td></tr><tr><td>本地智能体</td><td><code>local_ai</code></td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td></tr></tbody></table>
+<blockquote class="quote"><p>「成员管理」是唯一<strong>跨两层</strong>的权限：公司级角色 = 管全公司所有项目；项目级总监 = 只管本项目。</p></blockquote>
+<h2 id="6-2-公司级角色">6.2 公司级角色</h2>
+<table><thead><tr><th>权限</th><th>超管 <code>super_admin</code></th><th>管理员 <code>admin</code></th></tr></thead><tbody><tr><td>项目立项 <code>project_create</code></td><td>✅</td><td></td></tr><tr><td>项目编辑 <code>project_edit</code></td><td>✅</td><td></td></tr><tr><td>项目结项 <code>project_complete</code></td><td>✅</td><td></td></tr><tr><td>账号管理 <code>user_manage</code></td><td>✅</td><td></td></tr><tr><td>人员审批 <code>user_approve</code></td><td>✅</td><td>✅</td></tr><tr><td>角色授权 <code>role_grant</code></td><td>✅</td><td></td></tr><tr><td>成员管理 <code>member_manage</code></td><td>✅</td><td>✅</td></tr><tr><td><strong>其余全部权限</strong></td><td>✅（恒为全量）</td><td>无</td></tr></tbody></table>
+<h2 id="6-3-权限是怎么算出来的-三条规则">6.3 权限是怎么算出来的（三条规则）</h2>
+<ol>
+<li><strong>并集</strong>：公司级角色权限 ∪ 各项目岗位权限，全部合并</li>
+<li><strong>跨两层</strong>：<code>member_manage</code> 是唯一同时出现在两层的键</li>
+<li>🔴 <strong><code>super_admin</code> 恒为全量</strong>：无论矩阵怎么配，超管永远拥有全部 27 项权限，且该角色<strong>不可被修改</strong>（这是系统的"逃生通道"）</li>
+</ol>
+<h2 id="6-4-权限排查-为什么我看不到某个功能">6.4 权限排查：为什么我看不到某个功能</h2>
+<table><thead><tr><th>现象</th><th>排查方向</th></tr></thead><tbody><tr><td>左侧菜单少了某项</td><td>你的岗位默认没有该权限 → 请超管在「角色权限」勾选</td></tr><tr><td>看不见「新建项目」「新增用户」</td><td>这些是<strong>公司级</strong>动作，需要超管/管理员</td></tr><tr><td>点按钮提示 403</td><td>前端显示了但后端拒绝了 → 权限未授予，或授权刚被改（刷新页面重试）</td></tr><tr><td>小程序某标签点不动</td><td>该功能随岗位变化，低权限岗位部分入口隐藏</td></tr><tr><td>之前能用突然不能</td><td>管理员改了权限矩阵（即时生效）→ 联系管理员确认</td></tr></tbody></table>
+<hr>
+<hr>
+<h1 id="第七部分-常见问题-faq">第七部分　常见问题（FAQ）</h1>
+<h2 id="账号与登录">账号与登录</h2>
+<p><strong>Q1　登录提示「无效角色」？</strong>角色下拉与账号实际岗位不符。<strong>把「选择角色」清空</strong>（用自动识别）再登录。</p>
+<p><strong>Q2　微信登录提示「该微信身份已绑定其他账号」？</strong>该微信绑过别的账号。若旧账号是公司级或已停用，系统会<strong>自动释放</strong>；否则联系超管在「微信绑定管理」解绑。</p>
+<p><strong>Q3　微信注册的用户怎么登 Web 后台？</strong>小程序「我」→ <strong>设置登录密码</strong>（≥8 位）→ Web 用「用户名 + 密码」登录，角色留空。两端数据同步。</p>
+<p><strong>Q4　邀请码从哪里获取？</strong>联系超级管理员，在后台「邀请码管理」生成。<strong>码决定你的岗位</strong>，务必和管理员确认岗位正确。</p>
+<p><strong>Q5　注册提交后为什么还不能登录？</strong>注册后账号处于<strong>待审批</strong>状态，需管理员批准。请等待或联系管理员。</p>
+<p><strong>Q6　忘记密码？</strong>微信已绑定：小程序「设置登录密码」可免旧密码重设；未绑微信：联系超管重置。</p>
+<p><strong>Q7　注册时提示微信被占用？</strong>同 Q2。小程序会自动释放"小程序端不可用"的旧绑定。</p>
+<h2 id="小程序">小程序</h2>
+<p><strong>Q8　底部怎么只有五个标签？</strong>这是设计：隐患识别 / 工作记录 / 工作台 / 资料库 / 我。<strong>其余功能都从「工作台」用一句话或快捷卡片调起</strong>。</p>
+<p><strong>Q9　工作台说话没反应？</strong>检查是否授予了<strong>麦克风权限</strong>；或改用打字输入。日常可用指令见 3.1.2。</p>
+<p><strong>Q10　拍照识别不出隐患？</strong>AI 会明确返回「未识别到明显安全隐患」，这不代表系统故障。可换更清晰的角度、更近的距离重拍。</p>
+<p><strong>Q11　在电脑上拍的隐患，手机上多久能看到？</strong>三端数据<strong>实时同步</strong>，刷新即可见。</p>
+<p><strong>Q12　「资料库」和「规范资料库」是一回事吗？</strong>不是。「规范资料库」是规范法规检索；「资料库」是你的个人/共享资料库（可建库、可凭邀请码加入）。</p>
+<p><strong>Q13　通知收不到？</strong>在「我」→ <strong>服务通知订阅</strong>，订阅「审批通知」「派单与隐患通知」。</p>
+<h2 id="web-后台">Web 后台</h2>
+<p><strong>Q14　网页刷新后 404 / 白屏？</strong>历史遗留问题（在子页面按 F5 会 404）。回到 <code>https://www.baize.gdces.cn:4432/admin/</code> 重新进入即可。</p>
+<p><strong>Q15　左侧菜单和说明书里写的不一样？</strong>菜单<strong>随权限自动增减</strong>。没有权限的项不显示，这是正常的。</p>
+<p><strong>Q16　台账 / 文书审批 / 派单在哪里？</strong>不在左侧菜单，<strong>从「工作台」输入指令进入</strong>（如输入"台账""文书审批"）。</p>
+<p><strong>Q17　为什么系统提示我"不能审批自己"？</strong>人员审批有互斥约束：管理员不能批自己的申请，且只能批本组织的人。请让其他管理员处理。</p>
+<p><strong>Q18　为什么不能取消最后一个超管的角色？</strong>系统强制保留至少一名启用中的超管——否则公司将永久失去授权能力。</p>
+<h2 id="管理员">管理员</h2>
+<p><strong>Q19　邀请码列表是空的，码丢了吗？</strong>不是。列表<strong>只显示启用中的邀请码</strong>，已停用/用尽的码不显示。</p>
+<p><strong>Q20　邀请码能发公司级角色吗？</strong>不能。公司级角色只能由超管在「用户管理」中授予。</p>
+<p><strong>Q21　一个项目能有几个总监？</strong><strong>1 个</strong>。总监与总监代表都是排他岗位，每项目各限一名。</p>
+<p><strong>Q22　改了权限要通知用户重启吗？</strong>不需要，<strong>即时生效</strong>。</p>
+<p><strong>Q23　项目结项后人员还在项目里吗？</strong>不在。结项会<strong>批量把在岗成员置为离场</strong>并记录时间。如需恢复，可执行恢复操作。</p>
+<hr>
+<h1 id="附录">附录</h1>
+<h2 id="附录-a-业务术语速查">附录 A　业务术语速查</h2>
+<table><thead><tr><th>词</th><th>一句话解释</th></tr></thead><tbody><tr><td>巡视</td><td>日常现场巡查</td></tr><tr><td>旁站</td><td>对关键工序全过程现场监督</td></tr><tr><td>见证取样</td><td>见证材料取样送检</td></tr><tr><td>平行检验</td><td>监理独立进行的检验</td></tr><tr><td>检验批</td><td>验收的最小单位</td></tr><tr><td>整改通知单</td><td>要求施工方整改的正式文书</td></tr><tr><td>转场留痕</td><td>人员进场/离场的时间记录</td></tr><tr><td>台账</td><td>按类别归集的记录册</td></tr></tbody></table>
+<h2 id="附录-b-状态枚举对照">附录 B　状态枚举对照</h2>
+<p><strong>文书状态（5 种）</strong><code>草稿</code> → <code>待审批</code> → <code>已审批</code> → <code>已归档</code>；或 <code>已驳回</code></p>
+<p><strong>派单状态（6 种）</strong><code>待接单</code> / <code>已接单</code> / <code>已拒单</code> / <code>进行中</code> / <code>已完成</code> / <code>已取消</code></p>
+<p><strong>项目状态（3 种）</strong><code>active</code> 进行中 / <code>completed</code> 已完工 / <code>archived</code> 已归档</p>
+<p><strong>账号审批状态（3 种）</strong><code>pending</code> 待审批 / <code>approved</code> 已批准 / <code>rejected</code> 已驳回</p>
+<h2 id="附录-c-配套材料索引">附录 C　配套材料索引</h2>
+<table><thead><tr><th>材料</th><th>位置</th></tr></thead><tbody><tr><td>Web 后台逐页截图（38 张）</td><td><code>docs/测试产物/截图/web/</code></td></tr><tr><td>小程序逐页截图（23 张）</td><td><code>docs/测试产物/截图/miniprogram/</code></td></tr><tr><td>功能演示视频（Web + 小程序）</td><td><code>docs/测试产物/视频/</code></td></tr><tr><td>后端接口只读权限矩阵报告</td><td><code>docs/测试产物/后端接口测试报告-只读权限矩阵-2026-10-10.md</code></td></tr><tr><td>Web 后台功能测试清单</td><td><code>docs/测试产物/Web后台功能测试清单-2026-10-10.md</code></td></tr><tr><td>小程序功能测试清单</td><td><code>docs/测试产物/小程序功能测试清单-2026-10-10.md</code></td></tr><tr><td>用户体系设计说明</td><td><code>docs/用户体系结构设计说明-2026-10-09.md</code></td></tr><tr><td>简明速查版说明书</td><td><code>docs/监理通使用说明书-2026-10-10.md</code></td></tr></tbody></table>
+<h2 id="附录-d-角色-key-对照表-供技术-配置使用">附录 D　角色 key 对照表（供技术/配置使用）</h2>
+<table><thead><tr><th>中文</th><th>key</th><th>级别</th><th>可叠加</th></tr></thead><tbody><tr><td>总监理工程师</td><td><code>chief_supervisor</code></td><td>项目级</td><td>🔒 排他</td></tr><tr><td>总监代表</td><td><code>deputy_chief</code></td><td>项目级</td><td>🔒 排他</td></tr><tr><td>专业监理工程师</td><td><code>special_supervisor</code></td><td>项目级</td><td>✅</td></tr><tr><td>监理员</td><td><code>inspector</code></td><td>项目级</td><td>✅</td></tr><tr><td>资料员</td><td><code>documenter</code></td><td>项目级</td><td>✅</td></tr><tr><td>见证员</td><td><code>witness</code></td><td>项目级</td><td>✅</td></tr><tr><td>安全监理员</td><td><code>safety_supervisor</code></td><td>项目级</td><td>✅</td></tr><tr><td>超级管理员</td><td><code>super_admin</code></td><td>公司级</td><td>—</td></tr><tr><td>管理员</td><td><code>admin</code></td><td>公司级</td><td>—</td></tr></tbody></table>
+<hr>
+<p>*本说明书基于 2026-10-12 系统实际状态编写（后台权限体系 Step 1–4 已上线）。系统功能迭代后，请核对「角色权限」页与各端菜单是否与本说明一致。*</p>
+</div></main>
+</div>
+</body>
+</html>

@@ -1,0 +1,7 @@
+{
+  "navigationBarTitleText": "身份信息",
+  "navigationStyle": "custom",
+  "usingComponents": {
+    "glass-nav-bar": "/components/glass-nav-bar/index"
+  }
+}

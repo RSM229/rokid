@@ -1,0 +1,10 @@
+{
+  "navigationBarTitleText": "监理文书",
+  "enablePullDownRefresh": true,
+  "onReachBottomDistance": 120,
+  "navigationStyle": "custom",
+  "usingComponents": {
+    "glass-nav-bar": "/components/glass-nav-bar/index",
+    "tab-bar": "/components/tab-bar/index"
+  }
+}

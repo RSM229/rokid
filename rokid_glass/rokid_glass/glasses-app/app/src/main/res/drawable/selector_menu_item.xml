@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 焦点选中状态 → 凸起效果（阴影+边框+放大） -->
+    <item android:state_focused="true">
+        <layer-list>
+            <!-- 阴影层 -->
+            <item>
+                <shape android:shape="rectangle">
+                    <solid android:color="#40FFFFFF" />
+                    <corners android:radius="16dp" />
+                </shape>
+            </item>
+            <!-- 主体层 -->
+            <item android:bottom="4dp" android:left="4dp" android:right="4dp" android:top="0dp">
+                <shape android:shape="rectangle">
+                    <solid android:color="#1A237E" />
+                    <corners android:radius="16dp" />
+                    <stroke android:width="2dp" android:color="#64B5F6" />
+                </shape>
+            </item>
+        </layer-list>
+    </item>
+    
+    <!-- 默认状态 -->
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="#00000000" />
+            <corners android:radius="16dp" />
+        </shape>
+    </item>
+</selector>

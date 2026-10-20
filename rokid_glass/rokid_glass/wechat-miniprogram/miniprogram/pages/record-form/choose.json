@@ -1,0 +1,7 @@
+{
+  "navigationBarTitleText": "监理用表录入",
+  "navigationStyle": "custom",
+  "usingComponents": {
+    "glass-nav-bar": "/components/glass-nav-bar/index"
+  }
+}

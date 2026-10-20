@@ -1,0 +1,3293 @@
+[
+ {
+  "method": "GET",
+  "path": "",
+  "full_path": "/api/acceptance-templates",
+  "module": "acceptance_template",
+  "fn": "list_acceptance_templates",
+  "perm": [
+   "acceptance_template"
+  ],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "/types",
+  "full_path": "/api/acceptance-templates/types",
+  "module": "acceptance_template",
+  "fn": "list_acceptance_types",
+  "perm": [
+   "acceptance_template"
+  ],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "/{template_id}",
+  "full_path": "/api/acceptance-templates/{template_id}",
+  "module": "acceptance_template",
+  "fn": "get_acceptance_template",
+  "perm": [
+   "acceptance_template",
+   "acceptance_template"
+  ],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "",
+  "full_path": "/api/acceptance-templates",
+  "module": "acceptance_template",
+  "fn": "create_acceptance_template",
+  "perm": [
+   "acceptance_template",
+   "acceptance_template"
+  ],
+  "role": [],
+  "auth": false
+ },
+ {
+  "method": "PUT",
+  "path": "/{template_id}",
+  "full_path": "/api/acceptance-templates/{template_id}",
+  "module": "acceptance_template",
+  "fn": "update_acceptance_template",
+  "perm": [
+   "acceptance_template"
+  ],
+  "role": [],
+  "auth": false
+ },
+ {
+  "method": "DELETE",
+  "path": "/{template_id}",
+  "full_path": "/api/acceptance-templates/{template_id}",
+  "module": "acceptance_template",
+  "fn": "delete_acceptance_template",
+  "perm": [
+   "acceptance_template"
+  ],
+  "role": [],
+  "auth": false
+ },
+ {
+  "method": "POST",
+  "path": "/task",
+  "full_path": "/api/ai/task",
+  "module": "ai_extras",
+  "fn": "run_task",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/podcast",
+  "full_path": "/api/ai/podcast",
+  "module": "ai_extras",
+  "fn": "make_podcast",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/image",
+  "full_path": "/api/ai/image",
+  "module": "ai_extras",
+  "fn": "generate_image",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "/records",
+  "full_path": "/api/archive/records",
+  "module": "archive",
+  "fn": "list_records",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/records",
+  "full_path": "/api/archive/records",
+  "module": "archive",
+  "fn": "create_record",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "/records/{rid}",
+  "full_path": "/api/archive/records/{rid}",
+  "module": "archive",
+  "fn": "get_record",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "PUT",
+  "path": "/records/{rid}",
+  "full_path": "/api/archive/records/{rid}",
+  "module": "archive",
+  "fn": "update_record",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "DELETE",
+  "path": "/records/{rid}",
+  "full_path": "/api/archive/records/{rid}",
+  "module": "archive",
+  "fn": "delete_record",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "/issues",
+  "full_path": "/api/archive/issues",
+  "module": "archive",
+  "fn": "list_issues",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/issues",
+  "full_path": "/api/archive/issues",
+  "module": "archive",
+  "fn": "create_issue",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "/issues/{iid}",
+  "full_path": "/api/archive/issues/{iid}",
+  "module": "archive",
+  "fn": "get_issue",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "PUT",
+  "path": "/issues/{iid}",
+  "full_path": "/api/archive/issues/{iid}",
+  "module": "archive",
+  "fn": "update_issue",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "DELETE",
+  "path": "/issues/{iid}",
+  "full_path": "/api/archive/issues/{iid}",
+  "module": "archive",
+  "fn": "delete_issue",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "/invite-codes/validate",
+  "full_path": "/api/auth/invite-codes/validate",
+  "module": "auth",
+  "fn": "check_invite_code",
+  "perm": [],
+  "role": [],
+  "auth": false
+ },
+ {
+  "method": "GET",
+  "path": "/invite-codes",
+  "full_path": "/api/auth/invite-codes",
+  "module": "auth",
+  "fn": "list_invite_codes",
+  "perm": [
+   "user_manage"
+  ],
+  "role": [],
+  "auth": false
+ },
+ {
+  "method": "POST",
+  "path": "/invite-codes",
+  "full_path": "/api/auth/invite-codes",
+  "module": "auth",
+  "fn": "create_invite_code",
+  "perm": [
+   "user_manage"
+  ],
+  "role": [],
+  "auth": false
+ },
+ {
+  "method": "POST",
+  "path": "/invite-codes/{code}/revoke",
+  "full_path": "/api/auth/invite-codes/{code}/revoke",
+  "module": "auth",
+  "fn": "revoke_invite_code",
+  "perm": [
+   "user_manage",
+   "user_manage"
+  ],
+  "role": [],
+  "auth": false
+ },
+ {
+  "method": "GET",
+  "path": "/wechat-bindings",
+  "full_path": "/api/auth/wechat-bindings",
+  "module": "auth",
+  "fn": "list_wechat_bindings",
+  "perm": [
+   "user_manage"
+  ],
+  "role": [],
+  "auth": false
+ },
+ {
+  "method": "GET",
+  "path": "/roles",
+  "full_path": "/api/auth/roles",
+  "module": "auth",
+  "fn": "get_available_roles",
+  "perm": [],
+  "role": [],
+  "auth": false
+ },
+ {
+  "method": "POST",
+  "path": "/login",
+  "full_path": "/api/auth/login",
+  "module": "auth",
+  "fn": "login",
+  "perm": [],
+  "role": [],
+  "auth": false
+ },
+ {
+  "method": "POST",
+  "path": "/logout",
+  "full_path": "/api/auth/logout",
+  "module": "auth",
+  "fn": "logout",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/register",
+  "full_path": "/api/auth/register",
+  "module": "auth",
+  "fn": "register",
+  "perm": [],
+  "role": [],
+  "auth": false
+ },
+ {
+  "method": "GET",
+  "path": "/me",
+  "full_path": "/api/auth/me",
+  "module": "auth",
+  "fn": "get_me",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "PUT",
+  "path": "/me/profile",
+  "full_path": "/api/auth/me/profile",
+  "module": "auth",
+  "fn": "update_profile",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "PUT",
+  "path": "/me/password",
+  "full_path": "/api/auth/me/password",
+  "module": "auth",
+  "fn": "change_password",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "/users",
+  "full_path": "/api/auth/users",
+  "module": "auth",
+  "fn": "list_users",
+  "perm": [
+   "settings"
+  ],
+  "role": [],
+  "auth": false
+ },
+ {
+  "method": "POST",
+  "path": "/users",
+  "full_path": "/api/auth/users",
+  "module": "auth",
+  "fn": "create_user",
+  "perm": [
+   "user_manage"
+  ],
+  "role": [],
+  "auth": false
+ },
+ {
+  "method": "PUT",
+  "path": "/users/{user_id}",
+  "full_path": "/api/auth/users/{user_id}",
+  "module": "auth",
+  "fn": "update_user",
+  "perm": [
+   "user_manage"
+  ],
+  "role": [],
+  "auth": false
+ },
+ {
+  "method": "DELETE",
+  "path": "/users/{user_id}/wechat-binding",
+  "full_path": "/api/auth/users/{user_id}/wechat-binding",
+  "module": "auth",
+  "fn": "unbind_user_wechat",
+  "perm": [
+   "user_manage"
+  ],
+  "role": [],
+  "auth": false
+ },
+ {
+  "method": "POST",
+  "path": "/glasses/qr-create",
+  "full_path": "/api/auth/glasses/qr-create",
+  "module": "auth",
+  "fn": "create_glasses_qr",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/glasses/scan",
+  "full_path": "/api/auth/glasses/scan",
+  "module": "auth",
+  "fn": "glasses_scan_login",
+  "perm": [],
+  "role": [],
+  "auth": false
+ },
+ {
+  "method": "POST",
+  "path": "/create",
+  "full_path": "/api/document/create",
+  "module": "document",
+  "fn": "create_document",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "/list",
+  "full_path": "/api/document/list",
+  "module": "document",
+  "fn": "list_documents",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "/{doc_id}",
+  "full_path": "/api/document/{doc_id}",
+  "module": "document",
+  "fn": "get_document",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "PUT",
+  "path": "/{doc_id}",
+  "full_path": "/api/document/{doc_id}",
+  "module": "document",
+  "fn": "update_document",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/{doc_id}/submit",
+  "full_path": "/api/document/{doc_id}/submit",
+  "module": "document",
+  "fn": "submit_for_approval",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/{doc_id}/approve",
+  "full_path": "/api/document/{doc_id}/approve",
+  "module": "document",
+  "fn": "approve_document",
+  "perm": [],
+  "role": [
+   "\"总监理工程师\""
+  ],
+  "auth": false
+ },
+ {
+  "method": "POST",
+  "path": "/{doc_id}/reject",
+  "full_path": "/api/document/{doc_id}/reject",
+  "module": "document",
+  "fn": "reject_document",
+  "perm": [],
+  "role": [
+   "\"总监理工程师\""
+  ],
+  "auth": false
+ },
+ {
+  "method": "GET",
+  "path": "/{doc_id}/export-pdf",
+  "full_path": "/api/document/{doc_id}/export-pdf",
+  "module": "document",
+  "fn": "export_pdf",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "/{doc_id}/download-pdf",
+  "full_path": "/api/document/{doc_id}/download-pdf",
+  "module": "document",
+  "fn": "download_pdf",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "DELETE",
+  "path": "/{doc_id}",
+  "full_path": "/api/document/{doc_id}",
+  "module": "document",
+  "fn": "delete_document",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/generate-with-llm",
+  "full_path": "/api/document/generate-with-llm",
+  "module": "document",
+  "fn": "generate_with_llm",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/generate-daily-log",
+  "full_path": "/api/document/generate-daily-log",
+  "module": "document",
+  "fn": "generate_daily_log",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "",
+  "full_path": "/api/equipment",
+  "module": "equipment",
+  "fn": "list_devices",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "/expiring",
+  "full_path": "/api/equipment/expiring",
+  "module": "equipment",
+  "fn": "expiring_devices",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "",
+  "full_path": "/api/equipment",
+  "module": "equipment",
+  "fn": "create_device",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "/{did}",
+  "full_path": "/api/equipment/{did}",
+  "module": "equipment",
+  "fn": "get_device",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "PUT",
+  "path": "/{did}",
+  "full_path": "/api/equipment/{did}",
+  "module": "equipment",
+  "fn": "update_device",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "DELETE",
+  "path": "/{did}",
+  "full_path": "/api/equipment/{did}",
+  "module": "equipment",
+  "fn": "delete_device",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "/forms",
+  "full_path": "/api/form-docs/forms",
+  "module": "form_doc",
+  "fn": "list_forms",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "/record/{record_id}/forms",
+  "full_path": "/api/form-docs/record/{record_id}/forms",
+  "module": "form_doc",
+  "fn": "list_record_forms",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/generate",
+  "full_path": "/api/form-docs/generate",
+  "module": "form_doc",
+  "fn": "generate_doc_from_record",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/aggregate",
+  "full_path": "/api/form-docs/aggregate",
+  "module": "form_doc",
+  "fn": "aggregate_generate",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "/{doc_id}/export",
+  "full_path": "/api/form-docs/{doc_id}/export",
+  "module": "form_doc",
+  "fn": "export_form_doc",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/detect",
+  "full_path": "/api/hazard/detect",
+  "module": "hazard",
+  "fn": "detect_hazard",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/detect-and-save",
+  "full_path": "/api/hazard/detect-and-save",
+  "module": "hazard",
+  "fn": "detect_and_save",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "/list",
+  "full_path": "/api/hazard/list",
+  "module": "hazard",
+  "fn": "list_hazards",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "/{hazard_id}",
+  "full_path": "/api/hazard/{hazard_id}",
+  "module": "hazard",
+  "fn": "get_hazard",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "DELETE",
+  "path": "/{hazard_id}",
+  "full_path": "/api/hazard/{hazard_id}",
+  "module": "hazard",
+  "fn": "delete_hazard",
+  "perm": [
+   "hazard_ai",
+   "hazard_ai"
+  ],
+  "role": [],
+  "auth": false
+ },
+ {
+  "method": "POST",
+  "path": "/{hazard_id}/recheck",
+  "full_path": "/api/hazard/{hazard_id}/recheck",
+  "module": "hazard",
+  "fn": "recheck_hazard",
+  "perm": [
+   "hazard_ai"
+  ],
+  "role": [],
+  "auth": false
+ },
+ {
+  "method": "POST",
+  "path": "/{hazard_id}/rectify-image",
+  "full_path": "/api/hazard/{hazard_id}/rectify-image",
+  "module": "hazard",
+  "fn": "upload_rectification_image",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/{hazard_id}/rectify-media",
+  "full_path": "/api/hazard/{hazard_id}/rectify-media",
+  "module": "hazard",
+  "fn": "attach_rectification_media",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/{hazard_id}/create-rectification-doc",
+  "full_path": "/api/hazard/{hazard_id}/create-rectification-doc",
+  "module": "hazard",
+  "fn": "create_rectification_doc",
+  "perm": [
+   "hazard_ai"
+  ],
+  "role": [],
+  "auth": false
+ },
+ {
+  "method": "POST",
+  "path": "/{hazard_id}/generate-rectification",
+  "full_path": "/api/hazard/{hazard_id}/generate-rectification",
+  "module": "hazard",
+  "fn": "create_rectification_doc",
+  "perm": [
+   "hazard_ai"
+  ],
+  "role": [],
+  "auth": false
+ },
+ {
+  "method": "POST",
+  "path": "/{hazard_id}/notify-doc",
+  "full_path": "/api/hazard/{hazard_id}/notify-doc",
+  "module": "hazard",
+  "fn": "create_notify_doc",
+  "perm": [
+   "hazard_ai"
+  ],
+  "role": [],
+  "auth": false
+ },
+ {
+  "method": "POST",
+  "path": "/{hazard_id}/reply-doc",
+  "full_path": "/api/hazard/{hazard_id}/reply-doc",
+  "module": "hazard",
+  "fn": "create_reply_doc",
+  "perm": [
+   "hazard_ai"
+  ],
+  "role": [],
+  "auth": false
+ },
+ {
+  "method": "POST",
+  "path": "/start",
+  "full_path": "/api/inspection/start",
+  "module": "inspection",
+  "fn": "start_inspection",
+  "perm": [
+   "inspection",
+   "inspection"
+  ],
+  "role": [],
+  "auth": false
+ },
+ {
+  "method": "POST",
+  "path": "/{session_id}/stop",
+  "full_path": "/api/inspection/{session_id}/stop",
+  "module": "inspection",
+  "fn": "stop_inspection",
+  "perm": [
+   "inspection",
+   "inspection"
+  ],
+  "role": [],
+  "auth": false
+ },
+ {
+  "method": "GET",
+  "path": "/active",
+  "full_path": "/api/inspection/active",
+  "module": "inspection",
+  "fn": "get_active_session",
+  "perm": [
+   "inspection",
+   "inspection"
+  ],
+  "role": [],
+  "auth": false
+ },
+ {
+  "method": "GET",
+  "path": "/stats",
+  "full_path": "/api/inspection/stats",
+  "module": "inspection",
+  "fn": "get_project_stats",
+  "perm": [
+   "inspection"
+  ],
+  "role": [],
+  "auth": false
+ },
+ {
+  "method": "GET",
+  "path": "/trend",
+  "full_path": "/api/inspection/trend",
+  "module": "inspection",
+  "fn": "get_project_trend",
+  "perm": [
+   "inspection"
+  ],
+  "role": [],
+  "auth": false
+ },
+ {
+  "method": "GET",
+  "path": "/category-distribution",
+  "full_path": "/api/inspection/category-distribution",
+  "module": "inspection",
+  "fn": "get_category_distribution",
+  "perm": [
+   "inspection",
+   "inspection"
+  ],
+  "role": [],
+  "auth": false
+ },
+ {
+  "method": "GET",
+  "path": "/recent",
+  "full_path": "/api/inspection/recent",
+  "module": "inspection",
+  "fn": "get_recent_inspections",
+  "perm": [
+   "inspection",
+   "inspection"
+  ],
+  "role": [],
+  "auth": false
+ },
+ {
+  "method": "GET",
+  "path": "/{session_id}/stats",
+  "full_path": "/api/inspection/{session_id}/stats",
+  "module": "inspection",
+  "fn": "get_session_stats",
+  "perm": [
+   "inspection",
+   "inspection"
+  ],
+  "role": [],
+  "auth": false
+ },
+ {
+  "method": "GET",
+  "path": "/history",
+  "full_path": "/api/inspection/history",
+  "module": "inspection",
+  "fn": "list_history",
+  "perm": [
+   "inspection",
+   "inspection"
+  ],
+  "role": [],
+  "auth": false
+ },
+ {
+  "method": "POST",
+  "path": "/{session_id}/capture-media",
+  "full_path": "/api/inspection/{session_id}/capture-media",
+  "module": "inspection",
+  "fn": "capture_uploaded_media",
+  "perm": [
+   "inspection"
+  ],
+  "role": [],
+  "auth": false
+ },
+ {
+  "method": "POST",
+  "path": "/{session_id}/capture",
+  "full_path": "/api/inspection/{session_id}/capture",
+  "module": "inspection",
+  "fn": "capture",
+  "perm": [
+   "inspection"
+  ],
+  "role": [],
+  "auth": false
+ },
+ {
+  "method": "GET",
+  "path": "/regulations/versions",
+  "full_path": "/api/knowledge/regulations/versions",
+  "module": "knowledge",
+  "fn": "api_list_versions",
+  "perm": [
+   "settings"
+  ],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/regulations/versions",
+  "full_path": "/api/knowledge/regulations/versions",
+  "module": "knowledge",
+  "fn": "api_create_version",
+  "perm": [
+   "settings"
+  ],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "/regulations/versions/{filename}",
+  "full_path": "/api/knowledge/regulations/versions/{filename}",
+  "module": "knowledge",
+  "fn": "api_version_history",
+  "perm": [
+   "settings",
+   "settings"
+  ],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/regulations/versions/rollback",
+  "full_path": "/api/knowledge/regulations/versions/rollback",
+  "module": "knowledge",
+  "fn": "api_rollback_version",
+  "perm": [
+   "settings",
+   "settings"
+  ],
+  "role": [],
+  "auth": false
+ },
+ {
+  "method": "POST",
+  "path": "/regulations/versions/sync",
+  "full_path": "/api/knowledge/regulations/versions/sync",
+  "module": "knowledge",
+  "fn": "api_sync_versions",
+  "perm": [
+   "settings"
+  ],
+  "role": [],
+  "auth": false
+ },
+ {
+  "method": "GET",
+  "path": "/regulations/search",
+  "full_path": "/api/knowledge/regulations/search",
+  "module": "knowledge",
+  "fn": "search_regulations",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/regulations/search",
+  "full_path": "/api/knowledge/regulations/search",
+  "module": "knowledge",
+  "fn": "search_regulations_post",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "/regulations/categories",
+  "full_path": "/api/knowledge/regulations/categories",
+  "module": "knowledge",
+  "fn": "get_categories",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "/regulations/list",
+  "full_path": "/api/knowledge/regulations/list",
+  "module": "knowledge",
+  "fn": "list_regulations",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "/regulations/content",
+  "full_path": "/api/knowledge/regulations/content",
+  "module": "knowledge",
+  "fn": "get_regulation_content",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "/regulations/download/{filename}",
+  "full_path": "/api/knowledge/regulations/download/{filename}",
+  "module": "knowledge",
+  "fn": "download_regulation",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/acceptance-guide",
+  "full_path": "/api/knowledge/acceptance-guide",
+  "module": "knowledge",
+  "fn": "acceptance_guide",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "/acceptance-guide",
+  "full_path": "/api/knowledge/acceptance-guide",
+  "module": "knowledge",
+  "fn": "acceptance_guide_get",
+  "perm": [
+   "kg_manage"
+  ],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "/doc-template/{doc_type}",
+  "full_path": "/api/knowledge/doc-template/{doc_type}",
+  "module": "knowledge",
+  "fn": "get_document_template",
+  "perm": [
+   "kg_manage"
+  ],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/regulations/maintain",
+  "full_path": "/api/knowledge/regulations/maintain",
+  "module": "knowledge",
+  "fn": "maintain_regulations",
+  "perm": [
+   "kg_manage"
+  ],
+  "role": [],
+  "auth": false
+ },
+ {
+  "method": "POST",
+  "path": "/regulations/import",
+  "full_path": "/api/knowledge/regulations/import",
+  "module": "knowledge",
+  "fn": "import_regulation",
+  "perm": [
+   "kg_manage"
+  ],
+  "role": [],
+  "auth": false
+ },
+ {
+  "method": "POST",
+  "path": "/regulations/import-batch",
+  "full_path": "/api/knowledge/regulations/import-batch",
+  "module": "knowledge",
+  "fn": "import_regulations_batch",
+  "perm": [
+   "kg_manage"
+  ],
+  "role": [],
+  "auth": false
+ },
+ {
+  "method": "POST",
+  "path": "/llm-query",
+  "full_path": "/api/knowledge/llm-query",
+  "module": "knowledge",
+  "fn": "llm_query",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "",
+  "full_path": "/api/kb",
+  "module": "knowledge_base",
+  "fn": "list_knowledge_bases",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "",
+  "full_path": "/api/kb",
+  "module": "knowledge_base",
+  "fn": "create_knowledge_base",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "/rag/stats",
+  "full_path": "/api/kb/rag/stats",
+  "module": "knowledge_base",
+  "fn": "rag_stats",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "/plaza",
+  "full_path": "/api/kb/plaza",
+  "module": "knowledge_base",
+  "fn": "list_plaza",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/{kb_id}/publish",
+  "full_path": "/api/kb/{kb_id}/publish",
+  "module": "knowledge_base",
+  "fn": "publish_knowledge_base",
+  "perm": [],
+  "role": [
+   "db, kb, user, \"admin\""
+  ],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/{kb_id}/subscribe",
+  "full_path": "/api/kb/{kb_id}/subscribe",
+  "module": "knowledge_base",
+  "fn": "subscribe_knowledge_base",
+  "perm": [],
+  "role": [
+   "db, kb, user, \"viewer\""
+  ],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "/{kb_id}",
+  "full_path": "/api/kb/{kb_id}",
+  "module": "knowledge_base",
+  "fn": "get_knowledge_base",
+  "perm": [],
+  "role": [
+   "db, kb, user, \"viewer\""
+  ],
+  "auth": true
+ },
+ {
+  "method": "PUT",
+  "path": "/{kb_id}",
+  "full_path": "/api/kb/{kb_id}",
+  "module": "knowledge_base",
+  "fn": "update_knowledge_base",
+  "perm": [],
+  "role": [
+   "db, kb, user, \"admin\""
+  ],
+  "auth": true
+ },
+ {
+  "method": "DELETE",
+  "path": "/{kb_id}",
+  "full_path": "/api/kb/{kb_id}",
+  "module": "knowledge_base",
+  "fn": "delete_knowledge_base",
+  "perm": [],
+  "role": [
+   "db, kb, user, \"viewer\""
+  ],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "/{kb_id}/members",
+  "full_path": "/api/kb/{kb_id}/members",
+  "module": "knowledge_base",
+  "fn": "list_members",
+  "perm": [],
+  "role": [
+   "db, kb, user, \"viewer\""
+  ],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/{kb_id}/members",
+  "full_path": "/api/kb/{kb_id}/members",
+  "module": "knowledge_base",
+  "fn": "add_member",
+  "perm": [],
+  "role": [
+   "db, kb, user, \"admin\""
+  ],
+  "auth": true
+ },
+ {
+  "method": "PUT",
+  "path": "/{kb_id}/members/{member_user_id}",
+  "full_path": "/api/kb/{kb_id}/members/{member_user_id}",
+  "module": "knowledge_base",
+  "fn": "update_member_role",
+  "perm": [],
+  "role": [
+   "db, kb, user, \"admin\""
+  ],
+  "auth": true
+ },
+ {
+  "method": "DELETE",
+  "path": "/{kb_id}/members/{member_user_id}",
+  "full_path": "/api/kb/{kb_id}/members/{member_user_id}",
+  "module": "knowledge_base",
+  "fn": "remove_member",
+  "perm": [],
+  "role": [
+   "db, kb, user, \"admin\""
+  ],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/{kb_id}/invite",
+  "full_path": "/api/kb/{kb_id}/invite",
+  "module": "knowledge_base",
+  "fn": "get_invite",
+  "perm": [],
+  "role": [
+   "db, kb, user, \"admin\""
+  ],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/join/{invite_code}",
+  "full_path": "/api/kb/join/{invite_code}",
+  "module": "knowledge_base",
+  "fn": "join_knowledge_base",
+  "perm": [],
+  "role": [
+   "db, kb, user, \"viewer\""
+  ],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "/{kb_id}/documents",
+  "full_path": "/api/kb/{kb_id}/documents",
+  "module": "knowledge_base",
+  "fn": "list_documents",
+  "perm": [],
+  "role": [
+   "db, kb, user, \"viewer\""
+  ],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/{kb_id}/documents",
+  "full_path": "/api/kb/{kb_id}/documents",
+  "module": "knowledge_base",
+  "fn": "upload_document",
+  "perm": [],
+  "role": [
+   "db, kb, user, \"editor\""
+  ],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/{kb_id}/documents/audio",
+  "full_path": "/api/kb/{kb_id}/documents/audio",
+  "module": "knowledge_base",
+  "fn": "upload_audio_transcript",
+  "perm": [],
+  "role": [
+   "db, kb, user, \"editor\""
+  ],
+  "auth": true
+ },
+ {
+  "method": "DELETE",
+  "path": "/{kb_id}/documents/{doc_id}",
+  "full_path": "/api/kb/{kb_id}/documents/{doc_id}",
+  "module": "knowledge_base",
+  "fn": "delete_document",
+  "perm": [],
+  "role": [
+   "db, kb, user, \"editor\""
+  ],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "/{kb_id}/documents/{doc_id}/content",
+  "full_path": "/api/kb/{kb_id}/documents/{doc_id}/content",
+  "module": "knowledge_base",
+  "fn": "get_document_content",
+  "perm": [],
+  "role": [
+   "db, kb, user, \"viewer\""
+  ],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "/{kb_id}/documents/{doc_id}/download",
+  "full_path": "/api/kb/{kb_id}/documents/{doc_id}/download",
+  "module": "knowledge_base",
+  "fn": "download_document",
+  "perm": [],
+  "role": [
+   "db, kb, user, \"viewer\""
+  ],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "/{kb_id}/search",
+  "full_path": "/api/kb/{kb_id}/search",
+  "module": "knowledge_base",
+  "fn": "search_documents",
+  "perm": [],
+  "role": [
+   "db, kb, user, \"viewer\""
+  ],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/{kb_id}/query",
+  "full_path": "/api/kb/{kb_id}/query",
+  "module": "knowledge_base",
+  "fn": "query_knowledge_base",
+  "perm": [],
+  "role": [
+   "db, kb, user, \"viewer\""
+  ],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/entities",
+  "full_path": "/api/kg/entities",
+  "module": "knowledge_graph",
+  "fn": "create_entity",
+  "perm": [
+   "knowledge_base"
+  ],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "/entities",
+  "full_path": "/api/kg/entities",
+  "module": "knowledge_graph",
+  "fn": "list_entities",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/entities/search",
+  "full_path": "/api/kg/entities/search",
+  "module": "knowledge_graph",
+  "fn": "search_entities",
+  "perm": [
+   "knowledge_base"
+  ],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "DELETE",
+  "path": "/entities/{entity_id}",
+  "full_path": "/api/kg/entities/{entity_id}",
+  "module": "knowledge_graph",
+  "fn": "delete_entity",
+  "perm": [
+   "knowledge_base",
+   "knowledge_base"
+  ],
+  "role": [],
+  "auth": false
+ },
+ {
+  "method": "POST",
+  "path": "/relations",
+  "full_path": "/api/kg/relations",
+  "module": "knowledge_graph",
+  "fn": "create_relation",
+  "perm": [
+   "knowledge_base"
+  ],
+  "role": [],
+  "auth": false
+ },
+ {
+  "method": "GET",
+  "path": "/graph/subgraph",
+  "full_path": "/api/kg/graph/subgraph",
+  "module": "knowledge_graph",
+  "fn": "get_subgraph",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/extract",
+  "full_path": "/api/kg/extract",
+  "module": "knowledge_graph",
+  "fn": "extract_entities_relations",
+  "perm": [
+   "knowledge_base"
+  ],
+  "role": [],
+  "auth": false
+ },
+ {
+  "method": "GET",
+  "path": "/stats",
+  "full_path": "/api/kg/stats",
+  "module": "knowledge_graph",
+  "fn": "kg_stats",
+  "perm": [
+   "knowledge_base"
+  ],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/import-from-knowledge-base",
+  "full_path": "/api/kg/import-from-knowledge-base",
+  "module": "knowledge_graph",
+  "fn": "import_from_knowledge_base",
+  "perm": [
+   "knowledge_base"
+  ],
+  "role": [],
+  "auth": false
+ },
+ {
+  "method": "GET",
+  "path": "/types",
+  "full_path": "/api/ledger/types",
+  "module": "ledger",
+  "fn": "get_ledger_types",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "/list",
+  "full_path": "/api/ledger/list",
+  "module": "ledger",
+  "fn": "list_ledger",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "/export",
+  "full_path": "/api/ledger/export",
+  "module": "ledger",
+  "fn": "export_ledger",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "/download/{filename}",
+  "full_path": "/api/ledger/download/{filename}",
+  "module": "ledger",
+  "fn": "download_ledger",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/batch-export",
+  "full_path": "/api/ledger/batch-export",
+  "module": "ledger",
+  "fn": "batch_export_ledger",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/batch-archive",
+  "full_path": "/api/ledger/batch-archive",
+  "module": "ledger",
+  "fn": "batch_archive_ledger",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "/archives",
+  "full_path": "/api/ledger/archives",
+  "module": "ledger",
+  "fn": "list_archives",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "/archives/{archive_id}/download",
+  "full_path": "/api/ledger/archives/{archive_id}/download",
+  "module": "ledger",
+  "fn": "download_archive",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "DELETE",
+  "path": "/archives/{archive_id}",
+  "full_path": "/api/ledger/archives/{archive_id}",
+  "module": "ledger",
+  "fn": "delete_archive",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/batch-print",
+  "full_path": "/api/ledger/batch-print",
+  "module": "ledger",
+  "fn": "batch_print_ledger",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "/print-jobs/{job_id}",
+  "full_path": "/api/ledger/print-jobs/{job_id}",
+  "module": "ledger",
+  "fn": "get_print_job",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "/{ledger_type}/{record_id}",
+  "full_path": "/api/ledger/{ledger_type}/{record_id}",
+  "module": "ledger",
+  "fn": "ledger_record_detail",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/stt/transcribe",
+  "full_path": "/api/local/stt/transcribe",
+  "module": "local_ai",
+  "fn": "transcribe_audio",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/llm/chat",
+  "full_path": "/api/local/llm/chat",
+  "module": "local_ai",
+  "fn": "local_llm_chat",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "/llm/status",
+  "full_path": "/api/local/llm/status",
+  "module": "local_ai",
+  "fn": "llm_status",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/tts/synthesize",
+  "full_path": "/api/local/tts/synthesize",
+  "module": "local_ai",
+  "fn": "synthesize_speech",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/voice-command",
+  "full_path": "/api/local/voice-command",
+  "module": "local_ai",
+  "fn": "voice_command_match",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "/workflow-guide",
+  "full_path": "/api/local/workflow-guide",
+  "module": "local_ai",
+  "fn": "get_workflow_guide",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/images",
+  "full_path": "/api/media/images",
+  "module": "media",
+  "fn": "upload_image",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/videos",
+  "full_path": "/api/media/videos",
+  "module": "media",
+  "fn": "upload_video",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/audio/transcribe",
+  "full_path": "/api/media/audio/transcribe",
+  "module": "media",
+  "fn": "upload_audio_and_transcribe",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/document/parse",
+  "full_path": "/api/media/document/parse",
+  "module": "media",
+  "fn": "parse_document",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "",
+  "full_path": "/api/media",
+  "module": "media",
+  "fn": "list_media",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/link",
+  "full_path": "/api/media/link",
+  "module": "media",
+  "fn": "link_media",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/{media_id}/detect",
+  "full_path": "/api/media/{media_id}/detect",
+  "module": "media",
+  "fn": "detect_media",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/{media_id}/detect-and-save",
+  "full_path": "/api/media/{media_id}/detect-and-save",
+  "module": "media",
+  "fn": "detect_media_and_save",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "/{media_id}",
+  "full_path": "/api/media/{media_id}",
+  "module": "media",
+  "fn": "get_media",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/{recording_id}/merge",
+  "full_path": "/api/media/{recording_id}/merge",
+  "module": "media_segments",
+  "fn": "merge",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "/{recording_id}/download",
+  "full_path": "/api/media/{recording_id}/download",
+  "module": "media_segments",
+  "fn": "download",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/{recording_id}/{index}",
+  "full_path": "/api/media/{recording_id}/{index}",
+  "module": "media_segments",
+  "fn": "upload_segment",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "",
+  "full_path": "/api/meeting",
+  "module": "meeting",
+  "fn": "list_meetings",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "/topics/pending",
+  "full_path": "/api/meeting/topics/pending",
+  "module": "meeting",
+  "fn": "pending_topics",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "",
+  "full_path": "/api/meeting",
+  "module": "meeting",
+  "fn": "create_meeting",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "/{meeting_id}",
+  "full_path": "/api/meeting/{meeting_id}",
+  "module": "meeting",
+  "fn": "get_meeting",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "PUT",
+  "path": "/{meeting_id}",
+  "full_path": "/api/meeting/{meeting_id}",
+  "module": "meeting",
+  "fn": "update_meeting",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "DELETE",
+  "path": "/{meeting_id}",
+  "full_path": "/api/meeting/{meeting_id}",
+  "module": "meeting",
+  "fn": "delete_meeting",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/ai-draft",
+  "full_path": "/api/meeting/ai-draft",
+  "module": "meeting",
+  "fn": "ai_draft",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/login",
+  "full_path": "/api/miniprogram/auth/login",
+  "module": "miniprogram_auth",
+  "fn": "wechat_login",
+  "perm": [],
+  "role": [],
+  "auth": false
+ },
+ {
+  "method": "POST",
+  "path": "/bind",
+  "full_path": "/api/miniprogram/auth/bind",
+  "module": "miniprogram_auth",
+  "fn": "bind_account",
+  "perm": [],
+  "role": [],
+  "auth": false
+ },
+ {
+  "method": "POST",
+  "path": "/register",
+  "full_path": "/api/miniprogram/auth/register",
+  "module": "miniprogram_auth",
+  "fn": "register_account",
+  "perm": [],
+  "role": [],
+  "auth": false
+ },
+ {
+  "method": "POST",
+  "path": "/password",
+  "full_path": "/api/miniprogram/auth/password",
+  "module": "miniprogram_auth",
+  "fn": "set_password",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/unbind",
+  "full_path": "/api/miniprogram/auth/unbind",
+  "module": "miniprogram_auth",
+  "fn": "unbind_account",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "/status",
+  "full_path": "/api/miniprogram/auth/status",
+  "module": "miniprogram_auth",
+  "fn": "binding_status",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "",
+  "full_path": "/api/model-settings",
+  "module": "model_settings",
+  "fn": "list_model_settings",
+  "perm": [
+   "settings",
+   "settings"
+  ],
+  "role": [],
+  "auth": false
+ },
+ {
+  "method": "PUT",
+  "path": "/{model_type}",
+  "full_path": "/api/model-settings/{model_type}",
+  "module": "model_settings",
+  "fn": "update_model_setting",
+  "perm": [
+   "settings",
+   "settings"
+  ],
+  "role": [],
+  "auth": false
+ },
+ {
+  "method": "POST",
+  "path": "/{model_type}/reset",
+  "full_path": "/api/model-settings/{model_type}/reset",
+  "module": "model_settings",
+  "fn": "reset_model_setting",
+  "perm": [
+   "settings"
+  ],
+  "role": [],
+  "auth": false
+ },
+ {
+  "method": "GET",
+  "path": "",
+  "full_path": "/api/notes",
+  "module": "note",
+  "fn": "list_notes",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "",
+  "full_path": "/api/notes",
+  "module": "note",
+  "fn": "create_note",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "/{note_id}",
+  "full_path": "/api/notes/{note_id}",
+  "module": "note",
+  "fn": "get_note",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "PUT",
+  "path": "/{note_id}",
+  "full_path": "/api/notes/{note_id}",
+  "module": "note",
+  "fn": "update_note",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "DELETE",
+  "path": "/{note_id}",
+  "full_path": "/api/notes/{note_id}",
+  "module": "note",
+  "fn": "delete_note",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "/status",
+  "full_path": "/api/omni/status",
+  "module": "omni",
+  "fn": "get_omni_status",
+  "perm": [
+   "local_ai",
+   "local_ai",
+   "local_ai"
+  ],
+  "role": [],
+  "auth": false
+ },
+ {
+  "method": "POST",
+  "path": "/load",
+  "full_path": "/api/omni/load",
+  "module": "omni",
+  "fn": "load_omni_model",
+  "perm": [
+   "local_ai",
+   "local_ai"
+  ],
+  "role": [],
+  "auth": false
+ },
+ {
+  "method": "POST",
+  "path": "/transcribe",
+  "full_path": "/api/omni/transcribe",
+  "module": "omni",
+  "fn": "transcribe",
+  "perm": [
+   "local_ai"
+  ],
+  "role": [],
+  "auth": false
+ },
+ {
+  "method": "POST",
+  "path": "/stt",
+  "full_path": "/api/omni/stt",
+  "module": "omni",
+  "fn": "stt_compat",
+  "perm": [
+   "local_ai",
+   "local_ai"
+  ],
+  "role": [],
+  "auth": false
+ },
+ {
+  "method": "POST",
+  "path": "/voice-chat",
+  "full_path": "/api/omni/voice-chat",
+  "module": "omni",
+  "fn": "voice_chat",
+  "perm": [
+   "local_ai"
+  ],
+  "role": [],
+  "auth": false
+ },
+ {
+  "method": "POST",
+  "path": "/tts",
+  "full_path": "/api/omni/tts",
+  "module": "omni",
+  "fn": "tts_compat",
+  "perm": [],
+  "role": [],
+  "auth": false
+ },
+ {
+  "method": "GET",
+  "path": "",
+  "full_path": "/api/parallel",
+  "module": "parallel",
+  "fn": "list_inspections",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "",
+  "full_path": "/api/parallel",
+  "module": "parallel",
+  "fn": "create_inspection",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "/{pid}",
+  "full_path": "/api/parallel/{pid}",
+  "module": "parallel",
+  "fn": "get_inspection",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "PUT",
+  "path": "/{pid}",
+  "full_path": "/api/parallel/{pid}",
+  "module": "parallel",
+  "fn": "update_inspection",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "DELETE",
+  "path": "/{pid}",
+  "full_path": "/api/parallel/{pid}",
+  "module": "parallel",
+  "fn": "delete_inspection",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "",
+  "full_path": "/api/progress",
+  "module": "progress",
+  "fn": "list_records",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "/latest",
+  "full_path": "/api/progress/latest",
+  "module": "progress",
+  "fn": "latest_record",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "",
+  "full_path": "/api/progress",
+  "module": "progress",
+  "fn": "create_record",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "/{rid}",
+  "full_path": "/api/progress/{rid}",
+  "module": "progress",
+  "fn": "get_record",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "PUT",
+  "path": "/{rid}",
+  "full_path": "/api/progress/{rid}",
+  "module": "progress",
+  "fn": "update_record",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "DELETE",
+  "path": "/{rid}",
+  "full_path": "/api/progress/{rid}",
+  "module": "progress",
+  "fn": "delete_record",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "/list",
+  "full_path": "/api/project/list",
+  "module": "project",
+  "fn": "list_projects",
+  "perm": [
+   "project_create"
+  ],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/create",
+  "full_path": "/api/project/create",
+  "module": "project",
+  "fn": "create_project",
+  "perm": [
+   "project_create"
+  ],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "PUT",
+  "path": "/{project_id}",
+  "full_path": "/api/project/{project_id}",
+  "module": "project",
+  "fn": "update_project",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/{project_id}/switch",
+  "full_path": "/api/project/{project_id}/switch",
+  "module": "project",
+  "fn": "switch_project",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "/{project_id}/members",
+  "full_path": "/api/project/{project_id}/members",
+  "module": "project",
+  "fn": "list_members",
+  "perm": [
+   "member_manage"
+  ],
+  "role": [],
+  "auth": false
+ },
+ {
+  "method": "POST",
+  "path": "/{project_id}/members",
+  "full_path": "/api/project/{project_id}/members",
+  "module": "project",
+  "fn": "add_member",
+  "perm": [
+   "member_manage"
+  ],
+  "role": [],
+  "auth": false
+ },
+ {
+  "method": "DELETE",
+  "path": "/{project_id}/members/{user_id}",
+  "full_path": "/api/project/{project_id}/members/{user_id}",
+  "module": "project",
+  "fn": "remove_member",
+  "perm": [
+   "member_manage"
+  ],
+  "role": [],
+  "auth": false
+ },
+ {
+  "method": "GET",
+  "path": "/drawings/list",
+  "full_path": "/api/project/drawings/list",
+  "module": "project",
+  "fn": "list_drawings",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/drawings/upload",
+  "full_path": "/api/project/drawings/upload",
+  "module": "project",
+  "fn": "upload_drawing",
+  "perm": [],
+  "role": [
+   "\"总监理工程师\", \"总监代表\""
+  ],
+  "auth": true
+ },
+ {
+  "method": "DELETE",
+  "path": "/drawings/{drawing_id}",
+  "full_path": "/api/project/drawings/{drawing_id}",
+  "module": "project",
+  "fn": "delete_drawing",
+  "perm": [],
+  "role": [
+   "\"总监理工程师\", \"总监代表\""
+  ],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "/archives/list",
+  "full_path": "/api/project/archives/list",
+  "module": "project",
+  "fn": "list_archives",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/archives/upload",
+  "full_path": "/api/project/archives/upload",
+  "module": "project",
+  "fn": "upload_archive",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "DELETE",
+  "path": "/archives/{archive_id}",
+  "full_path": "/api/project/archives/{archive_id}",
+  "module": "project",
+  "fn": "delete_archive",
+  "perm": [],
+  "role": [
+   "\"总监理工程师\", \"总监代表\""
+  ],
+  "auth": false
+ },
+ {
+  "method": "GET",
+  "path": "/schemas",
+  "full_path": "/api/provform/schemas",
+  "module": "provform",
+  "fn": "list_schemas",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "/schemas/{form_code}",
+  "full_path": "/api/provform/schemas/{form_code}",
+  "module": "provform",
+  "fn": "get_schema",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/schemas/{form_code}/validate",
+  "full_path": "/api/provform/schemas/{form_code}/validate",
+  "module": "provform",
+  "fn": "validate_schema_values",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "",
+  "full_path": "/api/resources",
+  "module": "resources",
+  "fn": "list_resources",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "/summary",
+  "full_path": "/api/resources/summary",
+  "module": "resources",
+  "fn": "resource_summary",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "",
+  "full_path": "/api/resources",
+  "module": "resources",
+  "fn": "create_resource",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "/{rid}",
+  "full_path": "/api/resources/{rid}",
+  "module": "resources",
+  "fn": "get_resource",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "PUT",
+  "path": "/{rid}",
+  "full_path": "/api/resources/{rid}",
+  "module": "resources",
+  "fn": "update_resource",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "DELETE",
+  "path": "/{rid}",
+  "full_path": "/api/resources/{rid}",
+  "module": "resources",
+  "fn": "delete_resource",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "/status",
+  "full_path": "/api/rtc/status",
+  "module": "rtc",
+  "fn": "status",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "/users",
+  "full_path": "/api/rtc/users",
+  "module": "rtc",
+  "fn": "users",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/calls",
+  "full_path": "/api/rtc/calls",
+  "module": "rtc",
+  "fn": "create_call",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "/calls",
+  "full_path": "/api/rtc/calls",
+  "module": "rtc",
+  "fn": "calls",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "/calls/{call_id}",
+  "full_path": "/api/rtc/calls/{call_id}",
+  "module": "rtc",
+  "fn": "detail",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/calls/{call_id}/credentials",
+  "full_path": "/api/rtc/calls/{call_id}/credentials",
+  "module": "rtc",
+  "fn": "credentials",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/calls/{call_id}/heartbeat",
+  "full_path": "/api/rtc/calls/{call_id}/heartbeat",
+  "module": "rtc",
+  "fn": "heartbeat",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/calls/{call_id}/joined",
+  "full_path": "/api/rtc/calls/{call_id}/joined",
+  "module": "rtc",
+  "fn": "joined",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "/calls/{call_id}/audit",
+  "full_path": "/api/rtc/calls/{call_id}/audit",
+  "module": "rtc",
+  "fn": "audit",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/calls/{call_id}/{action_name}",
+  "full_path": "/api/rtc/calls/{call_id}/{action_name}",
+  "module": "rtc",
+  "fn": "action",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/signatures/upload",
+  "full_path": "/api/signatures/upload",
+  "module": "signature",
+  "fn": "upload_signature",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "/signatures/me",
+  "full_path": "/api/signatures/me",
+  "module": "signature",
+  "fn": "list_my_signatures",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "DELETE",
+  "path": "/signatures/{signature_id}",
+  "full_path": "/api/signatures/{signature_id}",
+  "module": "signature",
+  "fn": "delete_signature",
+  "perm": [
+   "document_approve"
+  ],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/documents/{doc_id}/sign",
+  "full_path": "/api/documents/{doc_id}/sign",
+  "module": "signature",
+  "fn": "sign_document",
+  "perm": [
+   "document_approve"
+  ],
+  "role": [],
+  "auth": false
+ },
+ {
+  "method": "GET",
+  "path": "/documents/{doc_id}/signed-pdf",
+  "full_path": "/api/documents/{doc_id}/signed-pdf",
+  "module": "signature",
+  "fn": "download_signed_pdf",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "/simulator/status",
+  "full_path": "/api/simulator/status",
+  "module": "simulator",
+  "fn": "simulator_status",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/simulator/send-command",
+  "full_path": "/api/simulator/send-command",
+  "module": "simulator",
+  "fn": "send_command_to_simulator",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/simulator/take-photo",
+  "full_path": "/api/simulator/take-photo",
+  "module": "simulator",
+  "fn": "simulator_take_photo",
+  "perm": [
+   "settings"
+  ],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/simulator/start-audio",
+  "full_path": "/api/simulator/start-audio",
+  "module": "simulator",
+  "fn": "simulator_start_audio",
+  "perm": [
+   "settings"
+  ],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/simulator/stop-audio",
+  "full_path": "/api/simulator/stop-audio",
+  "module": "simulator",
+  "fn": "simulator_stop_audio",
+  "perm": [
+   "settings"
+  ],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/simulator/broadcast",
+  "full_path": "/api/simulator/broadcast",
+  "module": "simulator",
+  "fn": "broadcast_to_simulator",
+  "perm": [
+   "settings"
+  ],
+  "role": [],
+  "auth": false
+ },
+ {
+  "method": "GET",
+  "path": "/company",
+  "full_path": "/api/stats/company",
+  "module": "stats_company",
+  "fn": "company_stats",
+  "perm": [
+   "task_assign"
+  ],
+  "role": [],
+  "auth": false
+ },
+ {
+  "method": "POST",
+  "path": "",
+  "full_path": "/api/task",
+  "module": "task",
+  "fn": "create_task",
+  "perm": [
+   "task_assign"
+  ],
+  "role": [],
+  "auth": false
+ },
+ {
+  "method": "GET",
+  "path": "/assignable-users",
+  "full_path": "/api/task/assignable-users",
+  "module": "task",
+  "fn": "get_assignable_users",
+  "perm": [
+   "task_assign"
+  ],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "/my-tasks",
+  "full_path": "/api/task/my-tasks",
+  "module": "task",
+  "fn": "get_my_tasks",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "/assigned-by-me",
+  "full_path": "/api/task/assigned-by-me",
+  "module": "task",
+  "fn": "get_assigned_by_me",
+  "perm": [
+   "task_assign"
+  ],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "/todo-stats",
+  "full_path": "/api/task/todo-stats",
+  "module": "task",
+  "fn": "get_todo_stats",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "/notifications",
+  "full_path": "/api/task/notifications",
+  "module": "task",
+  "fn": "get_my_notifications",
+  "perm": [
+   "task_receive"
+  ],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/notifications/clear",
+  "full_path": "/api/task/notifications/clear",
+  "module": "task",
+  "fn": "clear_my_notifications",
+  "perm": [
+   "task_receive"
+  ],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "/{task_id}",
+  "full_path": "/api/task/{task_id}",
+  "module": "task",
+  "fn": "get_task_detail",
+  "perm": [
+   "task_receive"
+  ],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/{task_id}/respond",
+  "full_path": "/api/task/{task_id}/respond",
+  "module": "task",
+  "fn": "respond_task",
+  "perm": [
+   "task_receive"
+  ],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/{task_id}/start",
+  "full_path": "/api/task/{task_id}/start",
+  "module": "task",
+  "fn": "start_task",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/{task_id}/complete-with-files",
+  "full_path": "/api/task/{task_id}/complete-with-files",
+  "module": "task",
+  "fn": "complete_task_with_files",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/{task_id}/complete",
+  "full_path": "/api/task/{task_id}/complete",
+  "module": "task",
+  "fn": "complete_task",
+  "perm": [
+   "task_assign"
+  ],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/{task_id}/reassign",
+  "full_path": "/api/task/{task_id}/reassign",
+  "module": "task",
+  "fn": "reassign_task",
+  "perm": [
+   "task_assign"
+  ],
+  "role": [],
+  "auth": false
+ },
+ {
+  "method": "POST",
+  "path": "/{task_id}/urge",
+  "full_path": "/api/task/{task_id}/urge",
+  "module": "task",
+  "fn": "urge_task",
+  "perm": [
+   "task_assign"
+  ],
+  "role": [],
+  "auth": false
+ },
+ {
+  "method": "POST",
+  "path": "/{task_id}/cancel",
+  "full_path": "/api/task/{task_id}/cancel",
+  "module": "task",
+  "fn": "cancel_task",
+  "perm": [
+   "task_assign"
+  ],
+  "role": [],
+  "auth": false
+ },
+ {
+  "method": "GET",
+  "path": "",
+  "full_path": "/api/visa",
+  "module": "visa",
+  "fn": "list_visas",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "",
+  "full_path": "/api/visa",
+  "module": "visa",
+  "fn": "create_visa",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "/{vid}",
+  "full_path": "/api/visa/{vid}",
+  "module": "visa",
+  "fn": "get_visa",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "PUT",
+  "path": "/{vid}",
+  "full_path": "/api/visa/{vid}",
+  "module": "visa",
+  "fn": "update_visa",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "DELETE",
+  "path": "/{vid}",
+  "full_path": "/api/visa/{vid}",
+  "module": "visa",
+  "fn": "delete_visa",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/{vid}/submit",
+  "full_path": "/api/visa/{vid}/submit",
+  "module": "visa",
+  "fn": "submit_visa",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/{vid}/review",
+  "full_path": "/api/visa/{vid}/review",
+  "module": "visa",
+  "fn": "review_visa",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/apply",
+  "full_path": "/api/watermark/apply",
+  "module": "watermark",
+  "fn": "apply_watermark",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/apply-stream",
+  "full_path": "/api/watermark/apply-stream",
+  "module": "watermark",
+  "fn": "apply_watermark_stream",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/upload-photos",
+  "full_path": "/api/watermark/upload-photos",
+  "module": "watermark",
+  "fn": "upload_photos",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/notice/send",
+  "full_path": "/api/wechat/notice/send",
+  "module": "wechat_notice",
+  "fn": "send_notice",
+  "perm": [
+   "settings"
+  ],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/notice/subscribe",
+  "full_path": "/api/wechat/notice/subscribe",
+  "module": "wechat_notice",
+  "fn": "subscribe_notice",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "/notice/templates",
+  "full_path": "/api/wechat/notice/templates",
+  "module": "wechat_notice",
+  "fn": "list_templates",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "/notice/status",
+  "full_path": "/api/wechat/notice/status",
+  "module": "wechat_notice",
+  "fn": "get_subscription_status",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/create-with-photos",
+  "full_path": "/api/work-record/create-with-photos",
+  "module": "work_record",
+  "fn": "create_work_record_with_photos",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/other",
+  "full_path": "/api/work-record/other",
+  "module": "work_record",
+  "fn": "create_other_work_record",
+  "perm": [
+   "inspection"
+  ],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/inspection-with-photo",
+  "full_path": "/api/work-record/inspection-with-photo",
+  "module": "work_record",
+  "fn": "create_inspection_with_photo",
+  "perm": [
+   "inspection"
+  ],
+  "role": [],
+  "auth": false
+ },
+ {
+  "method": "POST",
+  "path": "/inspection",
+  "full_path": "/api/work-record/inspection",
+  "module": "work_record",
+  "fn": "create_inspection",
+  "perm": [
+   "inspection"
+  ],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/inspection/{record_id}/photos",
+  "full_path": "/api/work-record/inspection/{record_id}/photos",
+  "module": "work_record",
+  "fn": "upload_inspection_photos",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/inspection/{record_id}/submit",
+  "full_path": "/api/work-record/inspection/{record_id}/submit",
+  "module": "work_record",
+  "fn": "submit_inspection",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/{record_id}/submit",
+  "full_path": "/api/work-record/{record_id}/submit",
+  "module": "work_record",
+  "fn": "submit_work_record",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/{record_id}/approve",
+  "full_path": "/api/work-record/{record_id}/approve",
+  "module": "work_record",
+  "fn": "approve_work_record",
+  "perm": [
+   "document_approve",
+   "document_approve"
+  ],
+  "role": [],
+  "auth": false
+ },
+ {
+  "method": "POST",
+  "path": "/{record_id}/reject",
+  "full_path": "/api/work-record/{record_id}/reject",
+  "module": "work_record",
+  "fn": "reject_work_record",
+  "perm": [
+   "document_approve",
+   "document_approve"
+  ],
+  "role": [],
+  "auth": false
+ },
+ {
+  "method": "POST",
+  "path": "/{record_id}/archive",
+  "full_path": "/api/work-record/{record_id}/archive",
+  "module": "work_record",
+  "fn": "archive_work_record",
+  "perm": [
+   "document_approve",
+   "acceptance"
+  ],
+  "role": [],
+  "auth": false
+ },
+ {
+  "method": "POST",
+  "path": "/acceptance",
+  "full_path": "/api/work-record/acceptance",
+  "module": "work_record",
+  "fn": "create_acceptance",
+  "perm": [
+   "acceptance"
+  ],
+  "role": [],
+  "auth": false
+ },
+ {
+  "method": "POST",
+  "path": "/witness",
+  "full_path": "/api/work-record/witness",
+  "module": "work_record",
+  "fn": "create_witness",
+  "perm": [
+   "witness"
+  ],
+  "role": [],
+  "auth": false
+ },
+ {
+  "method": "POST",
+  "path": "/witness/{record_id}/photos",
+  "full_path": "/api/work-record/witness/{record_id}/photos",
+  "module": "work_record",
+  "fn": "upload_witness_photos",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/witness/{record_id}/report",
+  "full_path": "/api/work-record/witness/{record_id}/report",
+  "module": "work_record",
+  "fn": "generate_witness_report",
+  "perm": [
+   "witness"
+  ],
+  "role": [],
+  "auth": false
+ },
+ {
+  "method": "POST",
+  "path": "/station",
+  "full_path": "/api/work-record/station",
+  "module": "work_record",
+  "fn": "create_station",
+  "perm": [
+   "station"
+  ],
+  "role": [],
+  "auth": false
+ },
+ {
+  "method": "PUT",
+  "path": "/station/{record_id}",
+  "full_path": "/api/work-record/station/{record_id}",
+  "module": "work_record",
+  "fn": "update_station_end_time",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "/list",
+  "full_path": "/api/work-record/list",
+  "module": "work_record",
+  "fn": "list_work_records",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "/stats",
+  "full_path": "/api/work-record/stats",
+  "module": "work_record",
+  "fn": "work_record_stats",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "PUT",
+  "path": "/{record_id}/viewed",
+  "full_path": "/api/work-record/{record_id}/viewed",
+  "module": "work_record",
+  "fn": "mark_record_viewed",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "/guides",
+  "full_path": "/api/work-record/guides",
+  "module": "work_record",
+  "fn": "list_guides",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "GET",
+  "path": "/{record_id}",
+  "full_path": "/api/work-record/{record_id}",
+  "module": "work_record",
+  "fn": "get_work_record",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "PUT",
+  "path": "/{record_id}",
+  "full_path": "/api/work-record/{record_id}",
+  "module": "work_record",
+  "fn": "update_work_record",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "DELETE",
+  "path": "/{record_id}",
+  "full_path": "/api/work-record/{record_id}",
+  "module": "work_record",
+  "fn": "delete_work_record",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/other",
+  "full_path": "/api/work-record/other",
+  "module": "work_record",
+  "fn": "create_other_record",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/quality",
+  "full_path": "/api/work-record/quality",
+  "module": "work_record",
+  "fn": "create_quality_record",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/{record_id}/set-type",
+  "full_path": "/api/work-record/{record_id}/set-type",
+  "module": "work_record",
+  "fn": "update_record_type",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/{record_id}/share",
+  "full_path": "/api/work-record/{record_id}/share",
+  "module": "work_record",
+  "fn": "share_work_record",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/extract",
+  "full_path": "/api/work-session/extract",
+  "module": "work_session",
+  "fn": "extract_work_session",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/voice-create",
+  "full_path": "/api/work-session/voice-create",
+  "module": "work_session",
+  "fn": "voice_create_work_record",
+  "perm": [],
+  "role": [],
+  "auth": true
+ },
+ {
+  "method": "POST",
+  "path": "/voice-create-text",
+  "full_path": "/api/work-session/voice-create-text",
+  "module": "work_session",
+  "fn": "voice_create_work_record_text",
+  "perm": [],
+  "role": [],
+  "auth": true
+ }
+]

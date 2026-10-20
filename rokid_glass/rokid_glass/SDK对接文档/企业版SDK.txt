@@ -1,0 +1,8 @@
+企业版sdk开发文档
+https://x-docs.rokid.com/docs/
+
+灵眸平台使用说明书
+https://x-docs.rokid.com/docs/lingmou_manual.pdf
+
+灵伴科技企业端官网
+https://www.lingban-ar.com/

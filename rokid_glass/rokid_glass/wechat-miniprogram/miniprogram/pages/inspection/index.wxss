@@ -1,0 +1,28 @@
+.session-head { display: flex; align-items: center; justify-content: space-between; gap: 20rpx; }
+.session-head .title { font-size: 34rpx; }
+.stat-row { display: flex; gap: 16rpx; margin-top: 22rpx; }
+.stat { flex: 1; display: flex; flex-direction: column; gap: 8rpx; padding: 20rpx 10rpx; text-align: center; border-radius: 18rpx; background: #f1f7f4; color: #6b7c90; font-size: 23rpx; }
+.stat-value { color: var(--ink, #12253d); font-size: 38rpx; font-weight: 700; }
+.session-card button { margin: 0; }
+
+.camera-wrap { position: relative; overflow: hidden; margin-top: 24rpx; border-radius: 28rpx; background: var(--brand-deep, #0a2e5c); }
+.camera { width: 100%; height: 520rpx; }
+.camera-consent { display: flex; height: 520rpx; flex-direction: column; align-items: center; justify-content: center; gap: 26rpx; color: var(--wash, var(--wash, #e8f2ff)); }
+.camera-status { position: absolute; left: 20rpx; bottom: 18rpx; padding: 8rpx 16rpx; border-radius: 20rpx; color: #fff; background: rgba(0,0,0,.45); font-size: 23rpx; }
+.capture-actions { display: flex; justify-content: center; align-items: center; gap: 12rpx; margin: 22rpx 0; }
+.capture-actions button { margin: 0; }
+.shot { width: 120rpx; height: 120rpx; padding: 0; border: 10rpx solid var(--wash, var(--wash, #e8f2ff)); border-radius: 60rpx; line-height: 100rpx; color: #fff; background: linear-gradient(135deg, var(--brand-l, #3b8cff), var(--brand-d, #0b5fd0)); }
+
+.section-title { margin-bottom: 14rpx; font-size: 30rpx; font-weight: 650; }
+.upload { margin-top: 24rpx; }
+.result-card { margin-top: 24rpx; line-height: 1.8; }
+.risk-hit { color: #9b351f; font-size: 28rpx; font-weight: 600; }
+.risk-ok { color: var(--brand, #1677ff); font-size: 28rpx; font-weight: 600; }
+.actions { display: flex; justify-content: flex-end; gap: 12rpx; margin-top: 18rpx; }
+.actions button { margin: 0; }
+.result-photo { width: 100%; height: 360rpx; margin-top: 18rpx; border-radius: 16rpx; background: #0f1815; }
+
+.history { margin-top: 30rpx; }
+.block-title { margin-bottom: 18rpx; font-size: 32rpx; font-weight: 700; }
+.history-head { display: flex; justify-content: space-between; gap: 20rpx; margin-bottom: 10rpx; }
+.history-title { font-size: 29rpx; font-weight: 650; }

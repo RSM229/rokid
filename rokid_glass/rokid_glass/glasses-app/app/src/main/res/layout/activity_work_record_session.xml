@@ -1,0 +1,177 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="#1a1a2e">
+
+    <!-- 顶部状态栏 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingHorizontal="16dp"
+        android:background="#16213e">
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="📷 工作记录"
+            android:textColor="#FFFFFF"
+            android:textSize="18sp"
+            android:textStyle="bold"/>
+
+        <TextView
+            android:id="@+id/tv_timer"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="00:00"
+            android:textColor="#4CAF50"
+            android:textSize="16sp"
+            android:textStyle="bold"/>
+
+        <TextView
+            android:id="@+id/tv_status"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="就绪"
+            android:textColor="#aaaaaa"
+            android:textSize="12sp"
+            android:layout_marginStart="12dp"/>
+    </LinearLayout>
+
+    <!-- 相机预览 -->
+    <androidx.camera.view.PreviewView
+        android:id="@+id/camera_preview"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:background="#000000"/>
+
+    <!-- 分类状态 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingHorizontal="16dp"
+        android:paddingVertical="8dp"
+        android:background="#1a1a2e">
+
+        <TextView
+            android:id="@+id/tv_classification_status"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="等待采集..."
+            android:textColor="#ffaa00"
+            android:textSize="14sp"/>
+
+        <TextView
+            android:id="@+id/tv_work_type"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="待定"
+            android:textColor="#F44336"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:paddingHorizontal="12dp"
+            android:paddingVertical="4dp"
+            android:background="@drawable/type_badge"/>
+    </LinearLayout>
+
+    <!-- 媒体计数 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center"
+        android:paddingVertical="4dp"
+        android:background="#2a2a4a">
+
+        <TextView
+            android:id="@+id/tv_photo_count"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="📷 0张"
+            android:textColor="#aaaaaa"
+            android:layout_marginEnd="24dp"/>
+
+        <TextView
+            android:id="@+id/tv_video_count"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="🎥 0段"
+            android:textColor="#aaaaaa"/>
+    </LinearLayout>
+
+    <!-- 语音内容显示 -->
+    <TextView
+        android:id="@+id/tv_voice_text"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingHorizontal="16dp"
+        android:paddingVertical="8dp"
+        android:text="按住说话..."
+        android:textColor="#cccccc"
+        android:textSize="14sp"
+        android:background="#1a1a2e"
+        android:maxLines="2"
+        android:visibility="gone"/>
+
+    <!-- 操作提示 -->
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingVertical="4dp"
+        android:text="单击拍照 | 双击录像 | 按住说话"
+        android:textColor="#666666"
+        android:textSize="12sp"
+        android:gravity="center"
+        android:background="#2a2a4a"/>
+
+    <!-- 触摸板 -->
+    <View
+        android:id="@+id/touchpad"
+        android:layout_width="match_parent"
+        android:layout_height="80dp"
+        android:background="@drawable/touchpad_background"
+        android:clickable="true"
+        android:focusable="true"
+        android:longClickable="true"/>
+
+    <!-- 底部操作栏 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="60dp"
+        android:orientation="horizontal"
+        android:gravity="center"
+        android:background="#2a2a4a"
+        android:paddingHorizontal="16dp">
+
+        <Button
+            android:id="@+id/btn_record"
+            android:layout_width="0dp"
+            android:layout_height="40dp"
+            android:layout_weight="1"
+            android:layout_marginEnd="12dp"
+            android:background="@drawable/btn_rounded"
+            android:text="录像"
+            android:textColor="#FFFFFF"
+            android:textSize="14sp"/>
+
+        <Button
+            android:id="@+id/btn_complete"
+            android:layout_width="0dp"
+            android:layout_height="40dp"
+            android:layout_weight="1"
+            android:background="@drawable/btn_rounded_primary"
+            android:text="✅ 完成"
+            android:textColor="#FFFFFF"
+            android:textSize="14sp"
+            android:textStyle="bold"/>
+    </LinearLayout>
+
+</LinearLayout>

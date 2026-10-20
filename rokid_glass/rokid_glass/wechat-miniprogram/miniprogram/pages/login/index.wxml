@@ -1,0 +1,38 @@
+<view class="page login-page" style="{{themeStyle}}">
+  <glass-nav-bar title="监理通" left="none" />
+
+  <view class="brand">
+    <view class="brand-mark">监</view>
+    <view class="title">监理通</view>
+    <view class="muted">工程监理智能体 · 微信小程序端</view>
+  </view>
+
+  <view class="card" wx:if="{{!needBind}}">
+    <view class="section-title">微信身份登录</view>
+    <view class="muted note">首次使用需要绑定已有监理通账号。</view>
+    <button class="primary action" loading="{{loading}}" bindtap="login">微信登录</button>
+  </view>
+
+  <view class="card" wx:else>
+    <view class="section-title">绑定监理通账号</view>
+    <view class="muted note">请输入要绑定的监理通账号（用户名 + 密码 + 登记角色）。</view>
+    <input class="field" placeholder="用户名" value="{{username}}" data-field="username" bindinput="onInput" />
+    <input class="field" password placeholder="密码" value="{{password}}" data-field="password" bindinput="onInput" />
+    <picker mode="selector" range="{{roleLabels}}" value="{{roleIndex}}" bindchange="onRoleChange">
+      <view class="field picker">账号登记角色：{{roleLabels[roleIndex]}}</view>
+    </picker>
+    <!-- 微信昵称：微信平台不提供真实微信号，管理员在后台凭昵称/头像识别绑定者 -->
+    <input class="field" type="nickname" placeholder="你的微信昵称（便于管理员确认，选填）" value="{{wxNickname}}" data-field="wxNickname" bindinput="onInput" bindblur="onInput" />
+    <view class="muted note">请选择该账号在系统中登记的角色，后端会校验一致性，选错将无法绑定。</view>
+    <button class="primary action" loading="{{loading}}" bindtap="bind">确认绑定并登录</button>
+  </view>
+
+  <view class="error" wx:if="{{error}}">{{error}}</view>
+
+  <view class="footer-links">
+    <view class="link-item" bindtap="goRegister">还没有账号？立即注册</view>
+    <view class="link-item" bindtap="goForgot">忘记密码？</view>
+  </view>
+
+  <view class="privacy">摄像头和麦克风仅在您主动拍摄或录音时启用。</view>
+</view>

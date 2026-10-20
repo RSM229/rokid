@@ -1,0 +1,49 @@
+<view class="page tab-host" style="{{themeStyle}}">
+  <glass-nav-bar title="会议纪要" left="back" />
+  <tab-bar active="" />
+
+  <view class="toolbar">
+    <picker mode="selector" range="{{typeOptions}}" value="{{typeIndex}}" bindchange="onTypeChange">
+      <view class="type-filter">{{typeOptions[typeIndex]}} ▾</view>
+    </picker>
+    <button class="btn-primary" bindtap="create">+ 新建纪要</button>
+  </view>
+
+  <!-- 议题跟踪：跨会议未完成议题 -->
+  <view class="pending" wx:if="{{pendingTopics.length}}">
+    <view class="pending-head">待跟进议题（{{pendingTopics.length}}）</view>
+    <view
+      wx:for="{{pendingTopics}}"
+      wx:key="meeting_id"
+      class="pending-item"
+      data-id="{{item.meeting_id}}"
+      bindtap="open">
+      <view class="pending-topic">{{item.topic}}</view>
+      <view class="pending-meta">
+        <text wx:if="{{item.owner}}" class="pending-owner">{{item.owner}}</text>
+        <text wx:if="{{item.deadline}}" class="pending-deadline {{item.overdue ? 'overdue' : ''}}">{{item.deadline}}</text>
+        <text class="pending-status {{item.statusClass}}">{{item.status}}</text>
+      </view>
+      <view class="pending-from">来自：{{item.meeting_title}}</view>
+    </view>
+  </view>
+
+  <view wx:if="{{loading && !meetings.length}}" class="empty">加载中…</view>
+  <view wx:elif="{{!meetings.length}}" class="empty">还没有会议纪要，点上方「新建纪要」</view>
+  <view wx:for="{{meetings}}" wx:key="id" class="card meeting" data-id="{{item.id}}" bindtap="open">
+    <view class="meeting-head">
+      <text class="meeting-title">{{item.title}}</text>
+      <text class="meeting-type">{{item.meeting_type}}</text>
+    </view>
+    <view class="meeting-meta">
+      <text wx:if="{{item.meeting_date}}">{{item.meeting_date}}</text>
+      <text wx:if="{{item.location}}" class="meeting-loc">{{item.location}}</text>
+    </view>
+    <view class="meeting-foot">
+      <text class="meeting-topics" wx:if="{{item.topic_total}}">议题 {{item.topic_open}}/{{item.topic_total}} 待跟进</text>
+      <text class="meeting-topics done" wx:elif="{{item.topic_total === 0}}">无议题</text>
+      <text class="meeting-ai" wx:if="{{item.source === 'ai'}}">AI 整理</text>
+    </view>
+    <text class="meeting-del" catchtap="del" data-id="{{item.id}}">删除</text>
+  </view>
+</view>

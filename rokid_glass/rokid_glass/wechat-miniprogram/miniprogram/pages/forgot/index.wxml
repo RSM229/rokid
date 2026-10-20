@@ -1,0 +1,68 @@
+<view class="page" style="{{themeStyle}}">
+  <glass-nav-bar title="忘记密码" left="back" />
+
+  <view class="header">
+    <view class="title">重置密码</view>
+    <view class="subtitle">通过密保问题自助重置</view>
+  </view>
+
+  <!-- 步骤条 -->
+  <view class="steps">
+    <view class="step {{step >= 0 ? 'active' : ''}}">1 验证账号</view>
+    <view class="step {{step >= 1 ? 'active' : ''}}">2 回答密保</view>
+    <view class="step {{step >= 2 ? 'active' : ''}}">3 设置密码</view>
+  </view>
+
+  <view class="form">
+    <!-- 第一步 -->
+    <block wx:if="{{step === 0}}">
+      <view class="form-item">
+        <view class="label">用户名</view>
+        <input class="input" placeholder="请输入登录用户名" value="{{username}}" bindinput="onUsernameInput" />
+      </view>
+      <view class="notice">若未设置过密保问题，将无法自助重置，请联系管理员重置密码。</view>
+    </block>
+
+    <!-- 第二步 -->
+    <block wx:elif="{{step === 1}}">
+      <view class="form-item" wx:for="{{questions}}" wx:key="index">
+        <view class="label">问题 {{index + 1}}：{{item}}</view>
+        <input class="input" placeholder="请输入答案" value="{{answers[index]}}" data-index="{{index}}" bindinput="onAnswerInput" />
+      </view>
+    </block>
+
+    <!-- 第三步 -->
+    <block wx:elif="{{step === 2}}">
+      <view class="form-item">
+        <view class="label">新密码</view>
+        <input class="input" password placeholder="至少 8 位" value="{{newPassword}}" data-field="newPassword" bindinput="onPasswordInput" />
+      </view>
+      <view class="form-item">
+        <view class="label">确认新密码</view>
+        <input class="input" password placeholder="请再次输入新密码" value="{{confirmPassword}}" data-field="confirmPassword" bindinput="onPasswordInput" />
+      </view>
+    </block>
+
+    <!-- 完成 -->
+    <block wx:else>
+      <view class="done">
+        <view class="done-icon">✓</view>
+        <view class="done-text">密码已重置</view>
+        <view class="done-sub">请用新密码登录</view>
+      </view>
+    </block>
+  </view>
+
+  <view wx:if="{{error}}" class="error">{{error}}</view>
+
+  <block wx:if="{{step < 3}}">
+    <button wx:if="{{step > 0}}" class="btn-plain" bindtap="goPrev">上一步</button>
+    <button class="btn-primary" loading="{{loading}}" disabled="{{loading}}" bindtap="goNext">
+      {{step === 0 ? '下一步' : step === 1 ? '验证' : '重置密码'}}
+    </button>
+  </block>
+
+  <view class="footer">
+    <text class="link" bindtap="goLogin">返回登录</text>
+  </view>
+</view>

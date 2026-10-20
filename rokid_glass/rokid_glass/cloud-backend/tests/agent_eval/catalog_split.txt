@@ -1,0 +1,48 @@
+- create_xunshi_record：新建**巡视**记录（GD-B-214）。用户说「记一条巡视」「巡视了XX」「日常巡查」时用。
+  参数：*work_content=巡视的施工内容或现场情况、section=巡视的工程部位（具体施工部位，如 3号楼二层临边洞口防护）、location=更细的具体位置、weather=天气、problems=巡视发现的问题及处理情况原文；用户说「符合要求/无异常」时也必须原样传入（如 problems=符合要求），不要省略、treatment=处理意见及措施、worker_count=施工作业人数（整数）、record_date=业务日期 YYYY-MM-DD（默认今天）、inspection_start_time=巡视开始时间 HH:MM（如 9:00）、inspection_end_time=巡视结束时间 HH:MM（如 11:00）、inspection_time=巡视时间段原文（如「9:00 到 17:30」）；中文时间如「九点到五点半」也原样传入，服务端会换算、extra_fields=字段表栏目（对象，键用字段 key 如 3_08；上面没单列的栏目放这里，值填用户原话）
+  示例说法：3号楼二层临边防护，9:00 到 11:00，符合要求，记一条巡视 / 记一条巡视：10月9日8:30到17:30，巡视了3号楼二层临边洞口防护，未发现问题
+- create_pangzhan_record：新建**旁站**记录（GD-B-212）。用户说「记一条旁站」「旁站了XX工序」时用。
+  参数：*work_content=旁站的施工内容概述、station_part=旁站的关键部位（**只填部位**，如 屋面、2号楼三层、西楼A区十层墙柱；🔴 不要把工序动作填进来）、station_process=旁站的关键工序（**只填工序名**，如 混凝土浇筑、屋面防水卷材铺贴、钢筋绑扎；🔴 不要把部位填进来）、station_content=旁站的关键部位、关键工序施工情况原文（人员/机械/材料/方量等，保留用户原话要点）、station_conclusion=旁站结论；用户说「符合要求/无异常」时必须原样传入、station_start_time=旁站开始时间 HH:MM、station_end_time=旁站结束时间 HH:MM、section=施工区域（与 station_part 同义时可省略）、weather=天气、worker_count=施工人数（整数）、record_date=业务日期 YYYY-MM-DD（默认今天）、problems=旁站发现的问题及处理情况原文、treatment=处理意见及措施、extra_fields=字段表栏目（对象，键用字段 key；上面没单列的栏目放这里）
+  示例说法：记一条旁站：屋面防水卷材铺贴，9:00 到 12:00，10人 → station_part=屋面、station_process=防水卷材铺贴 / 旁站记录：2号楼三层混凝土浇筑 → station_part=2号楼三层、station_process=混凝土浇筑
+- create_yanshou_record：新建**验收**记录。用户说「记一条验收」「XX验收合格」「隐蔽工程验收」时用。
+  参数：*work_content=验收内容或验收要点、section=验收部位（如 2号楼三层墙柱钢筋）、location=更细的具体位置、acceptance_result=验收结果：合格/不合格/待整改、acceptance_participants=参验单位及人员、acceptance_basis=检验依据（规范/图纸编号）、weather=天气、record_date=业务日期 YYYY-MM-DD（默认今天）、problems=验收发现的问题、treatment=处理意见及措施、extra_fields=字段表栏目（对象，键用字段 key；上面没单列的栏目放这里）
+  示例说法：记一条验收：2号楼三层墙柱钢筋隐蔽工程验收，验收合格 / 钢筋笼验收，符合设计及规范要求
+- create_jianzheng_record：新建**见证**（取样）记录。用户说「见证取样」「记一条见证」「取样送检」时用。
+  参数：*work_content=见证取样情况概述、witness_material_name=材料名称（如 钢筋、混凝土试块）、witness_material_spec=规格型号（如 HRB400 Φ25）、witness_quantity=取样数量、witness_unit=计量单位（如 吨、组、m³）、witness_cert_no=合格证/检测报告编号、section=使用部位、weather=天气、record_date=业务日期 YYYY-MM-DD（默认今天）、extra_fields=字段表栏目（对象，键用字段 key；上面没单列的栏目放这里）
+  示例说法：记一条见证取样：钢筋 HRB400 Φ25，取样数量5吨 / 混凝土试块见证取样3组
+- create_weida_record：新建**危大工程巡视**记录（GDAQ30306）。用户说「危大巡视」「危大工程巡视」「记一条危大」，或提到脚手架/模板支撑/深基坑/起重吊装/装配式吊装等危大工程时用。
+  参数：*work_content=巡视的施工内容或现场情况、hazard_type=危大工程名称/类型（如「落地式钢管脚手架工程-一般危大工程」；含类型名会据此带出检查表）、section=危大工程部位（如 西楼装配式楼梯吊装部位）、location=更细的具体位置、weather=天气、wind=风力（无风/微风/和风）、subcontract_unit=专业分包单位、inspection_start_time=巡视开始时间 HH:MM、inspection_end_time=巡视结束时间 HH:MM、inspection_time=巡视时间段原文；中文时间也原样传入、problems=巡视发现的问题及处理情况原文；用户说「符合要求/无异常」时必须原样传入、treatment=处理意见及措施、worker_count=施工人数（整数）、record_date=业务日期 YYYY-MM-DD（默认今天）、extra_fields=字段表栏目（对象，键用字段 key 如 10_14；上面没单列的栏目放这里，值填用户原话）
+  示例说法：记一条危大巡视：西楼落地式钢管脚手架，一般危大工程，符合要求 / 记一条危大工程巡视：今天晴、无风，8:30到15:32，西楼装配式楼梯吊装部位
+- create_pending_record：新建**待定**记录。仅当用户明确说「待定」「不确定归哪类」「先记着」时才用；🔴 用户只是没说清类型时**不要**用本工具，应追问类型。
+  参数：*work_content=施工内容或现场情况、section=施工区域、location=具体位置、weather=天气、record_date=业务日期 YYYY-MM-DD（默认今天）、problems=发现的问题、treatment=处理意见及措施、extra_fields=字段表栏目（对象，键用字段 key；上面没单列的栏目放这里）
+  示例说法：先记一条待定的：现场有积水
+- create_hazard：新建隐患记录（文字描述即可，含风险类别/主要风险/证据/复查建议）。
+  参数：*description=现场情况描述、section=施工区域、location=具体位置
+  示例说法：楼面积水还有碎石，有滑倒风险
+- create_provform_doc：新建省统表文书（11 类记录表：旁站/平行检验/巡视/监理通知单/安全隐患整改/验收/监理日志/监理月报/材料台账/危大巡视/安全监理日志）。
+  参数：*form_code=表式代码或表名，如 gd_b_215_tongzhi 或「监理工程师通知单」、fields=字段对象，键用表式字段 key（如 1_01/1_15）、title=文书标题（可省略）
+  示例说法：建一份监理工程师通知单：要求整改脚手架搭设
+- generate_document：生成监理文书：基于某条工作记录渲染省统表，或按 日/周/月 聚合生成监理日志/周报/月报。
+  参数：record_id=工作记录 id（省略则用最近一条）、form_code=指定表式代码（可省略）、period=聚合周期：day/week/month 或 日/周/月、date=聚合基准日期 YYYY-MM-DD
+  示例说法：把这条记录生成监理日志 / 生成今天的监理日志 / 生成本月监理月报
+- undo_last_action：撤销最近一次由聊天新建的记录/隐患/文书（24 小时内）。用户说「撤销」「删掉刚才那条」「说错了」时用。
+  参数：（无参数）
+  示例说法：撤销 / 刚才那条删掉
+- query_work_records：查询工作记录列表（可按区域/类型/关键词筛选，也可问「今天记了几条」）。
+  参数：section=施工区域关键词、record_type=记录类型、keyword=内容关键词
+  示例说法：我今天记了几条 / 3号楼有哪些记录
+- query_hazards：查询隐患记录列表（可按状态/区域筛选，如「未整改的隐患」）。
+  参数：status=状态关键词，如 已提报/整改中/已闭环、section=施工区域关键词
+  示例说法：未整改的隐患有哪些
+- query_documents：查询监理文书列表（可按文书类型筛选，如「有没有监理月报」）。
+  参数：doc_type=文书类型关键词，如 监理月报/通知单、keyword=标题关键词
+  示例说法：有没有监理月报
+- query_regulation：检索规范依据（规范/标准/条文问答）。问「规范怎么要求」「依据是哪条」时用。
+  参数：*keyword=检索关键词、question=用户原始问法（可省略）
+  示例说法：模板支撑验收规范怎么要求
+- query_weather：查询指定日期（默认今天）项目所在地天气。
+  参数：date=日期 YYYY-MM-DD（可省略）
+  示例说法：今天天气怎么样
+- navigate：打开系统页面（工作记录/隐患识别/文书/待办/看板/资料库/省统表录入/我的）。用户说「打开XX」时用。
+  参数：*page=页面名，如 工作记录
+  示例说法：打开工作记录 / 打开隐患识别
