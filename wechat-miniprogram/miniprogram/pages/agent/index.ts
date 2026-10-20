@@ -1,5 +1,6 @@
 import { request } from '../../services/request'
 import { session } from '../../services/session'
+import { needsHazardDetection } from '../../services/attachment-intent'
 import { uploadAudio, uploadDocument, uploadImage, friendlyServerError } from '../../services/upload'
 import { persistTempFile, uploadQueue } from '../../services/uploadQueue'
 import { absoluteMediaUrl, config } from '../../config'
@@ -591,26 +592,26 @@ Page(themed({
     })
 
     const blocks: string[] = []
+    const runHazardDetection = needsHazardDetection(note)
     /** 每张图的原始识别结果：聊天里只展示结论，落库时复用同一份结论（不再调一次视觉模型） */
     const detections: { path: string; raw: any }[] = []
     /** 水印读到的拍摄时间/地点/天气——相机记的比转述可靠，用来预填记录字段 */
     const wmFields: Record<string, string> = {}
     try {
-      // 图片：并行做「隐患识别」与「水印 OCR」，水印失败不影响识别
+      // 普通记录只提取水印；只有用户明确提到隐患/安全问题时才调用隐患视觉模型。
       if (images.length) {
         const results = await Promise.all(images.map(async (img) => {
-          const [det, wm] = await Promise.all([
-            this.detectImageOnce(img.path),
-            this.readWatermark(img.path),
-          ])
+          const wm = await this.readWatermark(img.path)
+          const det = runHazardDetection ? await this.detectImageOnce(img.path) : null
           return { path: img.path, det, wm }
         }))
         results.forEach((res, i) => {
-          detections.push({ path: res.path, raw: res.det.raw })
+          if (res.det) detections.push({ path: res.path, raw: res.det.raw })
           const wmLine = this.formatWatermark(res.wm)
+          const detectionLine = res.det ? `\n${res.det.text}` : ''
           blocks.push(wmLine
-            ? `【图片 ${i + 1}】\n${wmLine}\n${res.det.text}`
-            : `【图片 ${i + 1}】\n${res.det.text}`)
+            ? `【图片 ${i + 1}】\n${wmLine}${detectionLine}`
+            : `【图片 ${i + 1}】${detectionLine || '\n已收到图片，未进行隐患识别'}`)
           for (const key of Object.keys(res.wm)) {
             if (res.wm[key] && !wmFields[key]) wmFields[key] = res.wm[key]
           }
@@ -630,18 +631,14 @@ Page(themed({
       }
 
       const material = blocks.join('\n\n')
-      // 🔧 上传图片 ≠ 隐患识别：只有用户明确「只识别/看隐患/纯分析」才走专用隐患通道；
-      // 其余（记录工作、现场情况、今日留痕，甚至空备注）交给 Agent 路由，
-      // 由模型在 create_work_record / create_hazard / navigate / 纯问答 间自行判断。
-      const pureDetect = this.isPureDetection(note)
-      if (!pureDetect) {
+      if (!runHazardDetection) {
         await this.runAgentWithMaterial(
           note || '记录今天的工作', material, this.watermarkPrefill(wmFields), messages, wmFields,
           images.length > 0, images.map(i => i.path),
         )
         return
       }
-      // 纯识别通道：进入隐患模式，识别命中后再征求是否建档
+      // 明确的隐患分析通道：识别命中后再征求是否建档
       this.setData({ hazardMode: true, mode: 'hazard' })
 
       const question = note
@@ -860,14 +857,6 @@ Page(themed({
   /** 是否「办事」（记录/建档/生成）——决定带图消息走 Agent 还是纯问答 */
   wantsActionIntent(note: string): boolean {
     return /(记录|记一下|记一条|填写|填表|建档|建单|新建|创建|生成|存档|落库|入库|录入|归档|整理)/.test(note)
-  },
-
-  /** 用户是否只想「看一眼 / 识别」，不想落库任何记录。
-   *  命中 → 走专用隐患识别通道（识别后征询是否建档）；
-   *  未命中 → 交给 Agent 路由，由模型判断建工作记录 / 建隐患 / 打开页面 / 纯问答。
-   *  注意：只识别"识别类"关键词，不含"记录/记一下"等办事词，避免把工作留痕误判成纯识别。 */
-  isPureDetection(note: string): boolean {
-    return /(识别|检测|查(一下)?隐患|看看(有没有)?隐患|有无隐患|有没有问题|风险|不用(建档|记录)|只(识别|看)|纯识别|先识别|分析(一下)?|什么(问题|情况))/i.test(note)
   },
 
   /** 带素材走 Agent 工具路由：办事类消息只有走这里才会真的落库 */
