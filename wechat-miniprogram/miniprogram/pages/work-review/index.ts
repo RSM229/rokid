@@ -1,8 +1,10 @@
-import { addEvent, assignEvidence, candidateDates, confirmPlan, createExample, editEvent, editRequest, FORM_TYPES, mergeEvents, releaseEvidence, removeEvent, restorePlan, reviewIssues, SCENARIOS, splitEvidence, validatePlan, type ReviewPlan } from '../../services/work-review'
-const KEY = 'work_review_prototype_v1'
+import { addEvent, assignEvidence, candidateDates, confirmPlan, editEvent, editRequest, fetchReviewPlan, FORM_TYPES, mergeEvents, releaseEvidence, removeEvent, reviewIssues, saveReviewPlan, confirmReviewPlan, splitEvidence, validatePlan, type ReviewPlan } from '../../services/work-review'
+function emptyPlan(): ReviewPlan {
+  return { schemaVersion: 1, scenario: 0, revision: 1, requestText: '', evidence: [], events: [], unassignedIds: [], confirmedRevision: null }
+}
 function pageView(plan: ReviewPlan, selectedIds: string[] = []) {
   return {
-    plan, scenarioLabel: SCENARIOS[plan.scenario], issues: reviewIssues(plan), confirmed: plan.confirmedRevision === plan.revision,
+    plan, issues: reviewIssues(plan), confirmed: plan.confirmedRevision === plan.revision,
     canMerge: selectedIds.length >= 2,
     events: plan.events.map((event, index) => {
       const dates = candidateDates(plan, event)
@@ -13,20 +15,32 @@ function pageView(plan: ReviewPlan, selectedIds: string[] = []) {
   }
 }
 Page({
-  data: { ...pageView(createExample()), scenarios: SCENARIOS, selectedIds: [] as string[], activeId: 'event-1', formEditorId: '', showPreview: false },
-  onLoad() { const plan = restorePlan(wx.getStorageSync(KEY)); if (plan) this.setData({ ...pageView(plan), activeId: plan.events[0]?.id || '' }) },
-  save(plan: ReviewPlan) {
+  saveQueue: Promise.resolve(),
+  serverRevision: 0,
+  data: { ...pageView(emptyPlan()), hasServerPlan: false, loadingPlan: true, selectedIds: [] as string[], activeId: '', formEditorId: '', showPreview: false },
+  async onLoad(options: Record<string, string>) {
+    const planId = Number(options.planId || 0)
+    if (!planId) { this.setData({ ...pageView(emptyPlan()), loadingPlan: false, hasServerPlan: false }); return }
+    try { const plan = await fetchReviewPlan(planId); this.serverRevision = plan.serverRevision || plan.revision; this.setData({ ...pageView(plan), hasServerPlan: true, loadingPlan: false, activeId: plan.events[0]?.id || '' }) }
+    catch (error) { this.setData({ loadingPlan: false }); wx.showModal({ title: '整理计划加载失败', content: (error as Error).message, showCancel: false }) }
+  },
+  async save(plan: ReviewPlan) {
     validatePlan(plan)
     const selectedIds = this.data.selectedIds.filter(id => plan.events.some(event => event.id === id))
     this.setData({ ...pageView(plan, selectedIds), selectedIds, showPreview: false })
-    try { wx.setStorageSync(KEY, plan) } catch { wx.showToast({ title: '本地保存失败，当前编辑仍保留', icon: 'none' }) }
-  },
-  chooseScenario(e: WechatMiniprogram.PickerChange) {
-    const scenario = Number(e.detail.value); if (scenario === this.data.plan.scenario) return
-    wx.showModal({ title: '切换示例场景', content: '将替换当前本地草稿。', success: result => {
-      if (!result.confirm) return
-      this.setData({ selectedIds: [], formEditorId: '', activeId: 'event-1' }); this.save(createExample(scenario))
-    } })
+    if (!plan.serverId || !this.data.hasServerPlan) return
+    const snapshot = plan
+    this.saveQueue = this.saveQueue.then(async () => {
+      if (!snapshot.serverId || snapshot.revision <= this.serverRevision) return
+      try {
+        const saved = await saveReviewPlan(snapshot, this.serverRevision)
+        this.serverRevision = saved.serverRevision || saved.revision
+        const latest = this.data.plan as ReviewPlan
+        if (latest.revision === snapshot.revision) this.setData({ ...pageView(saved, this.data.selectedIds as string[]), hasServerPlan: true })
+        else this.setData({ plan: { ...latest, revision: saved.revision + Math.max(0, latest.revision - snapshot.revision), serverRevision: saved.serverRevision } })
+      } catch (error) { wx.showToast({ title: `保存失败：${(error as Error).message}`, icon: 'none' }) }
+    })
+    await this.saveQueue
   },
   updateRequest(e: WechatMiniprogram.Input) { if (e.detail.value !== this.data.plan.requestText) this.save(editRequest(this.data.plan, e.detail.value)) },
   updateText(e: WechatMiniprogram.Input) {
@@ -63,9 +77,19 @@ Page({
     wx.showModal({ title: '移除事项', content: '关联图片将放回待分配区。', success: result => { if (result.confirm) this.save(removeEvent(this.data.plan, id)) } })
   },
   preview() { this.setData({ showPreview: true }) },
-  confirm() { try { this.save(confirmPlan(this.data.plan)); this.setData({ showPreview: true }) } catch (error) { wx.showModal({ title: '分组信息待补充', content: (error as Error).message, showCancel: false }) } },
+  async confirm() {
+    try {
+      await this.saveQueue
+      const candidate = confirmPlan(this.data.plan)
+      if (!candidate.serverId) throw new Error('当前不是服务端整理计划')
+      if (candidate.serverRevision !== this.serverRevision) throw new Error('最新修改尚未保存，请稍后重试')
+      const saved = await confirmReviewPlan(candidate, this.serverRevision)
+      this.setData({ ...pageView(saved), showPreview: true, hasServerPlan: true })
+      wx.showToast({ title: '整理计划已确认', icon: 'success' })
+    } catch (error) { wx.showModal({ title: '分组信息待补充', content: (error as Error).message, showCancel: false }) }
+  },
   closePreview() { this.setData({ showPreview: false }) },
-  reset() { wx.showModal({ title: '重置当前示例', content: '将清除当前示例的编辑。', success: result => { if (result.confirm) { this.setData({ selectedIds: [], activeId: 'event-1', formEditorId: '' }); this.save(createExample(this.data.plan.scenario)) } } }) },
+  reset() { wx.showToast({ title: '真实计划不支持重置为示例', icon: 'none' }) },
   previewImage(e: WechatMiniprogram.TouchEvent) {
     const plan = this.data.plan as ReviewPlan, photo = plan.evidence.find(item => item.id === e.currentTarget.dataset.id)
     if (photo) wx.previewImage({ current: photo.image, urls: plan.evidence.map(item => item.image) })

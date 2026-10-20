@@ -12,18 +12,23 @@ from __future__ import annotations
 import json
 import logging
 import re
+from datetime import datetime
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
 from app.models.user import Project, User
+from app.models.agent_draft import AgentReviewPlan
+from app.models.miniprogram import MediaRecord, MediaType
 from app.routers.auth import get_current_user
 from app.routers.local_ai import _PLAINTEXT_SUFFIX
 from app.services import agent_tools, model_gateway
 from app.services.agent_context import render_context_summary, render_conversation_history
+from app.services import agent_review_plan
 from app.services.text_clean import strip_markdown
 
 logger = logging.getLogger(__name__)
@@ -50,6 +55,58 @@ class AgentChatRequest(BaseModel):
 class AgentUndoRequest(BaseModel):
     entity: str
     id: int
+
+
+class ReviewPlanCreate(BaseModel):
+    conversation_id: str
+    plan: dict[str, Any]
+
+
+class ReviewPlanUpdate(BaseModel):
+    revision: int
+    plan: dict[str, Any]
+
+
+class ReviewPlanConfirm(BaseModel):
+    revision: int
+
+
+async def _validate_review_plan_media(
+    db: AsyncSession, user: User, plan: dict[str, Any]
+) -> None:
+    """确保计划中的证据引用当前用户当前项目已上传的媒体。"""
+    media_ids: list[int] = []
+    for item in plan.get("evidence", []):
+        if not isinstance(item, dict):
+            continue
+        if item.get("image") and item.get("media_id") is None:
+            raise HTTPException(422, "图片资料必须携带服务端 media_id")
+        if item.get("media_id") is None:
+            continue
+        try:
+            media_id = int(item["media_id"])
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(422, "资料 media_id 无效") from exc
+        if media_id <= 0:
+            raise HTTPException(422, "资料 media_id 无效")
+        media_ids.append(media_id)
+    if len(set(media_ids)) != len(media_ids):
+        raise HTTPException(422, "资料 media_id 重复")
+    if not media_ids:
+        return
+    project_id = getattr(user, "project_id", None)
+    if not project_id:
+        raise HTTPException(400, "请先选择项目")
+    rows = (await db.execute(select(MediaRecord).where(
+        MediaRecord.id.in_(media_ids),
+        MediaRecord.uploader_id == user.id,
+        MediaRecord.project_id == project_id,
+        MediaRecord.media_type == MediaType.IMAGE.value,
+    ))).scalars().all()
+    found = {row.id for row in rows}
+    missing = [str(media_id) for media_id in media_ids if media_id not in found]
+    if missing:
+        raise HTTPException(403, f"资料不存在、不是图片或不属于当前项目：{', '.join(missing)}")
 
 
 # 🔴 2026-10-16 改版（跑分 75.0% → 97.5%，repeat=3 严格模式）：
@@ -587,3 +644,150 @@ async def agent_clear_drafts(
         db, user.id, req.tool, (req.conversation_id or "").strip()[:64] or None
     )
     return {"ok": True}
+
+
+def _review_plan_payload(row: AgentReviewPlan) -> dict[str, Any]:
+    try:
+        plan = json.loads(row.plan_json or "{}")
+    except (TypeError, ValueError):
+        plan = {}
+    return {
+        "id": row.id, "conversation_id": row.conversation_id,
+        "revision": row.revision, "status": row.status,
+        "confirmed_revision": row.confirmed_revision,
+        "plan": plan, "issues": agent_review_plan.review_issues(plan),
+        "updated_at": row.updated_at.isoformat(),
+    }
+
+
+@router.post("/review-plans")
+async def create_review_plan(
+    req: ReviewPlanCreate,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Create a persistent, unconfirmed multi-event review plan."""
+    conversation_id = req.conversation_id.strip()[:64]
+    if not conversation_id:
+        raise HTTPException(400, "conversation_id 不能为空")
+    try:
+        agent_review_plan.validate_plan(req.plan)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    await _validate_review_plan_media(db, user, req.plan)
+    existing = (await db.execute(select(AgentReviewPlan).where(
+        AgentReviewPlan.user_id == user.id,
+        AgentReviewPlan.project_id == getattr(user, "project_id", None),
+        AgentReviewPlan.conversation_id == conversation_id,
+    ))).scalars().first()
+    if existing:
+        raise HTTPException(409, "该会话已有整理计划，请读取并修订现有计划")
+    row = AgentReviewPlan(
+        user_id=user.id, conversation_id=conversation_id,
+        project_id=getattr(user, "project_id", None),
+        revision=1, status="draft", plan_json=json.dumps(req.plan, ensure_ascii=False),
+    )
+    db.add(row)
+    await db.commit()
+    await db.refresh(row)
+    return _review_plan_payload(row)
+
+
+@router.get("/review-plans")
+async def list_review_plans(
+    conversation_id: Optional[str] = None,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    stmt = select(AgentReviewPlan).where(
+        AgentReviewPlan.user_id == user.id,
+        AgentReviewPlan.project_id == getattr(user, "project_id", None),
+    )
+    if conversation_id and conversation_id.strip():
+        stmt = stmt.where(AgentReviewPlan.conversation_id == conversation_id.strip()[:64])
+    rows = (await db.execute(stmt.order_by(AgentReviewPlan.updated_at.desc()))).scalars().all()
+    return {"plans": [_review_plan_payload(row) for row in rows]}
+
+
+@router.get("/review-plans/{plan_id}")
+async def get_review_plan(
+    plan_id: int,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    row = (await db.execute(select(AgentReviewPlan).where(
+        AgentReviewPlan.id == plan_id, AgentReviewPlan.user_id == user.id,
+    ))).scalars().first()
+    if not row:
+        raise HTTPException(404, "整理计划不存在")
+    if row.project_id != getattr(user, "project_id", None):
+        raise HTTPException(403, "整理计划不属于当前项目")
+    return _review_plan_payload(row)
+
+
+@router.put("/review-plans/{plan_id}")
+async def update_review_plan(
+    plan_id: int,
+    req: ReviewPlanUpdate,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    row = (await db.execute(select(AgentReviewPlan).where(
+        AgentReviewPlan.id == plan_id, AgentReviewPlan.user_id == user.id,
+    ))).scalars().first()
+    if not row:
+        raise HTTPException(404, "整理计划不存在")
+    if row.project_id != getattr(user, "project_id", None):
+        raise HTTPException(403, "整理计划不属于当前项目")
+    if row.status != "draft":
+        raise HTTPException(409, "已确认的整理计划不能修改")
+    if row.revision != req.revision:
+        raise HTTPException(409, "整理计划已在其他请求中更新，请重新加载")
+    try:
+        agent_review_plan.validate_plan(req.plan)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    await _validate_review_plan_media(db, user, req.plan)
+    row.revision += 1
+    row.plan_json = json.dumps(req.plan, ensure_ascii=False)
+    row.confirmed_revision = None
+    row.updated_at = datetime.now()
+    await db.commit()
+    await db.refresh(row)
+    return _review_plan_payload(row)
+
+
+@router.post("/review-plans/{plan_id}/confirm")
+async def confirm_review_plan(
+    plan_id: int,
+    req: ReviewPlanConfirm,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Confirm only the exact reviewed revision; formal writes are a later command."""
+    row = (await db.execute(select(AgentReviewPlan).where(
+        AgentReviewPlan.id == plan_id, AgentReviewPlan.user_id == user.id,
+    ))).scalars().first()
+    if not row:
+        raise HTTPException(404, "整理计划不存在")
+    if row.project_id != getattr(user, "project_id", None):
+        raise HTTPException(403, "整理计划不属于当前项目")
+    if row.status == "confirmed" and row.confirmed_revision == req.revision:
+        return _review_plan_payload(row)
+    if row.status != "draft" or row.revision != req.revision:
+        raise HTTPException(409, "整理计划版本已变化，请重新核对")
+    plan = json.loads(row.plan_json or "{}")
+    try:
+        agent_review_plan.validate_plan(plan)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    await _validate_review_plan_media(db, user, plan)
+    issues = agent_review_plan.review_issues(plan)
+    if issues:
+        raise HTTPException(422, {"message": "整理计划仍有待确认项", "issues": issues})
+    row.status = "confirmed"
+    row.confirmed_revision = row.revision
+    row.updated_at = datetime.now()
+    await db.commit()
+    await db.refresh(row)
+    return _review_plan_payload(row)
