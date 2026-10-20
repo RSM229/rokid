@@ -40,3 +40,33 @@ class AgentDraft(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.now, index=True, comment="最后更新时间（超 TTL 视为过期）"
     )
+
+
+class AgentConversationDraft(Base):
+    """会话隔离的智能体草稿；独立建表以免改动旧草稿表的唯一索引。"""
+    __tablename__ = "agent_conversation_drafts"
+    __table_args__ = (
+        Index("ix_agent_conv_drafts_user_session_tool", "user_id", "conversation_id", "tool", unique=True),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, index=True)
+    conversation_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    tool: Mapped[str] = mapped_column(String(64), nullable=False)
+    args_json: Mapped[str] = mapped_column(Text, default="{}")
+    missing_json: Mapped[str] = mapped_column(Text, default="[]")
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, index=True)
+
+
+class AgentConversationMemory(Base):
+    """最近会话原话，独立于业务草稿保存，支持稍后回顾早先分段提供的信息。"""
+    __tablename__ = "agent_conversation_memory"
+    __table_args__ = (
+        Index("ix_agent_conversation_memory_user_session", "user_id", "conversation_id", unique=True),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, index=True)
+    conversation_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    messages_json: Mapped[str] = mapped_column(Text, default="[]")
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, index=True)
