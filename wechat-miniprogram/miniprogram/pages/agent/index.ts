@@ -595,22 +595,37 @@ Page(themed({
     const detections: { path: string; raw: any }[] = []
     /** 水印读到的拍摄时间/地点/天气——相机记的比转述可靠，用来预填记录字段 */
     const wmFields: Record<string, string> = {}
+    // 只有明确「只识别/看隐患/纯分析」才把 VLM 识别当必需步骤；
+    // 其余（记录工作/现场情况/空备注）视觉识别仅作素材增强，VLM 不可用不能拖垮整条链路。
+    const pureDetect = this.isPureDetection(note)
+    let visionFailed = false
     try {
       // 图片：并行做「隐患识别」与「水印 OCR」，水印失败不影响识别
       if (images.length) {
         const results = await Promise.all(images.map(async (img) => {
-          const [det, wm] = await Promise.all([
-            this.detectImageOnce(img.path),
-            this.readWatermark(img.path),
-          ])
+          const wm = await this.readWatermark(img.path)
+          let det: { text: string; raw: any } | null = null
+          if (pureDetect) {
+            // 纯识别意图：VLM 是必需步骤，失败要如实报错
+            det = await this.detectImageOnce(img.path)
+          } else {
+            // 记录工作等意图：视觉识别只当素材增强，VLM 不可用降级为「仅用文字/水印」
+            det = await this.detectImageOnce(img.path).catch(() => null)
+          }
           return { path: img.path, det, wm }
         }))
         results.forEach((res, i) => {
-          detections.push({ path: res.path, raw: res.det.raw })
+          if (res.det) {
+            detections.push({ path: res.path, raw: res.det.raw })
+          } else {
+            visionFailed = true
+          }
           const wmLine = this.formatWatermark(res.wm)
-          blocks.push(wmLine
-            ? `【图片 ${i + 1}】\n${wmLine}\n${res.det.text}`
-            : `【图片 ${i + 1}】\n${res.det.text}`)
+          const detText = res.det?.text || ''
+          const parts = [`【图片 ${i + 1}】`]
+          if (wmLine) parts.push(wmLine)
+          if (detText) parts.push(detText)
+          blocks.push(parts.join('\n'))
           for (const key of Object.keys(res.wm)) {
             if (res.wm[key] && !wmFields[key]) wmFields[key] = res.wm[key]
           }
@@ -633,12 +648,17 @@ Page(themed({
       // 🔧 上传图片 ≠ 隐患识别：只有用户明确「只识别/看隐患/纯分析」才走专用隐患通道；
       // 其余（记录工作、现场情况、今日留痕，甚至空备注）交给 Agent 路由，
       // 由模型在 create_work_record / create_hazard / navigate / 纯问答 间自行判断。
-      const pureDetect = this.isPureDetection(note)
       if (!pureDetect) {
         await this.runAgentWithMaterial(
           note || '记录今天的工作', material, this.watermarkPrefill(wmFields), messages, wmFields,
           images.length > 0, images.map(i => i.path),
         )
+        if (visionFailed) {
+          this.addMessage({
+            role: 'assistant',
+            text: '（提示：视觉识别服务暂时不可用，本次仅按文字与水印信息处理；稍后可重发图片重试识别。）',
+          })
+        }
         return
       }
       // 纯识别通道：进入隐患模式，识别命中后再征求是否建档
