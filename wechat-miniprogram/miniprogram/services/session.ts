@@ -1,10 +1,11 @@
+import { config } from '../config'
 import type { UserInfo } from '../types/index'
 
-const TOKEN_KEY = 'gdjl_access_token'
-const USER_KEY = 'gdjl_user_info'
-const BIND_TOKEN_KEY = 'gdjl_bind_token'
+const TOKEN_KEY = `gdjl_${config.storageScope}_access_token`
+const USER_KEY = `gdjl_${config.storageScope}_user_info`
+const BIND_TOKEN_KEY = `gdjl_${config.storageScope}_bind_token`
 /** 「稍后设置密码」的跳过标记：记当前 user_id，本次登录会话内不再拦改密页 */
-const SKIP_FORCE_PWD_KEY = 'gdjl_force_pwd_skipped_user'
+const SKIP_FORCE_PWD_KEY = `gdjl_${config.storageScope}_force_pwd_skipped_user`
 
 export const session = {
   getToken(): string {

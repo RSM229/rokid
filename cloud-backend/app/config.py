@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         # 始终读取后端目录内的配置文件，避免从项目根目录、systemd 或容器
         # 启动时因当前工作目录不同而丢失默认模型密钥。
-        env_file=BACKEND_DIR / ".env",
+        env_file=os.getenv("GDJL_ENV_FILE", str(BACKEND_DIR / ".env")),
         env_file_encoding="utf-8",
         extra="ignore",
         protected_namespaces=("settings_",),
