@@ -1,0 +1,34 @@
+<view class="screen">
+  <view class="status-line"><text>交互原型 · 模拟分析数据</text><text class="local-status">本地草稿 v{{plan.revision}}</text></view>
+  <picker mode="selector" range="{{scenarios}}" value="{{plan.scenario}}" bindchange="chooseScenario"><view class="scenario"><text class="section-label">示例场景</text><text class="scenario-name">{{scenarioLabel}}</text><text class="chevron">▾</text></view></picker>
+  <view class="request"><text class="section-label">本次要求</text><textarea class="request-text" value="{{plan.requestText}}" maxlength="500" auto-height bindblur="updateRequest"/><text class="request-meta">图片仅作展示，分组及日期线索为模拟数据。</text></view>
+  <view class="metrics"><view><text class="metric-number">{{plan.evidence.length}}</text><text>张资料</text></view><view><text class="metric-number">{{events.length}}</text><text>个事项</text></view><view><text class="metric-number">{{records.length}}</text><text>份计划记录</text></view></view>
+  <view class="toolbar"><text class="section-title">现场事项</text><view class="toolbar-actions"><button class="text-button" bindtap="add">新增事项</button><button class="text-button {{canMerge ? '' : 'disabled-action'}}" bindtap="merge">合并 {{selectedIds.length}}</button></view></view>
+  <view wx:if="{{!events.length}}" class="empty-state">用途和事项尚未确定</view>
+  <view class="event" wx:for="{{events}}" wx:for-item="event" wx:key="id">
+    <view class="event-heading"><checkbox checked="{{event.selected}}" color="#245f56" data-id="{{event.id}}" bindtap="toggleEvent"/><view class="event-summary" data-id="{{event.id}}" bindtap="expand"><text class="event-title">{{event.number}}. {{event.title}}</text><text class="event-meta">{{event.evidenceIds.length}} 张资料 · {{event.dateConfirmed ? event.date : '日期待确认'}}</text></view><text class="expand" data-id="{{event.id}}" bindtap="expand">{{activeId === event.id ? '收起' : '展开'}}</text></view>
+    <text class="event-forms">{{event.formText}}</text>
+    <view wx:if="{{activeId === event.id}}" class="event-details">
+      <text class="field-label">事项名称</text><input class="field-input" value="{{event.title}}" data-id="{{event.id}}" data-field="title" bindblur="updateText" maxlength="80"/>
+      <text class="field-label">工程部位</text><input class="field-input" placeholder="待补充" value="{{event.location}}" data-id="{{event.id}}" data-field="location" bindblur="updateText" maxlength="100"/>
+      <view class="field-label">业务日期 <text class="{{event.dateConfirmed ? 'confirmed-label' : 'pending-label'}}">{{event.dateConfirmed ? '已确认' : '待确认'}}</text></view>
+      <picker mode="date" value="{{event.date}}" data-id="{{event.id}}" bindchange="updateDate"><view class="date-picker">{{event.date || '选择业务日期'}}<text>▾</text></view></picker>
+      <view class="date-clue {{event.dateConflict ? 'date-conflict' : ''}}"><text>资料日期线索：{{event.dateClue}}</text><text wx:if="{{event.dateConflict}}" class="conflict-note">存在多个日期，请核对是否需要拆分事项。</text></view>
+      <button wx:if="{{event.hasSuggestedDate}}" class="adopt-date" data-id="{{event.id}}" data-date="{{event.suggestedDate}}" bindtap="adoptDate">确认采用 {{event.suggestedDate}}</button>
+      <view class="form-heading"><text class="field-label">拟生成表式</text><button class="text-button" data-id="{{event.id}}" bindtap="editForms">{{formEditorId === event.id ? '收起选择' : '选择表式'}}</button></view>
+      <checkbox-group wx:if="{{formEditorId === event.id}}" data-id="{{event.id}}" bindchange="changeForms" class="form-list"><label wx:for="{{event.formOptions}}" wx:for-item="form" wx:key="value" class="form-option"><checkbox value="{{form.value}}" checked="{{form.checked}}" color="#245f56"/><text>{{form.value}}</text></label></checkbox-group>
+      <text class="field-label">工作情况 / 补充说明</text><textarea class="content-input" value="{{event.content}}" placeholder="待补充" data-id="{{event.id}}" data-field="content" bindblur="updateText" maxlength="1500" auto-height/>
+      <view wx:if="{{event.photos.length}}" class="evidence-grid"><view class="evidence" wx:for="{{event.photos}}" wx:for-item="photo" wx:key="id"><image src="{{photo.image}}" mode="aspectFill" data-id="{{photo.id}}" bindtap="previewImage"/><text class="photo-date">{{photo.note}}</text><view class="photo-actions"><button data-id="{{photo.id}}" bindtap="split">拆分</button><button data-id="{{photo.id}}" bindtap="release">移出</button></view></view></view>
+      <button class="remove-event" data-id="{{event.id}}" bindtap="remove">移除事项</button>
+    </view>
+  </view>
+  <view class="unassigned" wx:if="{{unassigned.length}}"><text class="section-title">待分配资料 · {{unassigned.length}}</text><view class="unassigned-item" wx:for="{{unassigned}}" wx:for-item="photo" wx:key="id"><image src="{{photo.image}}" mode="aspectFill" data-id="{{photo.id}}" bindtap="previewImage"/><view class="unassigned-detail"><text class="photo-date">{{photo.note}}</text><view class="assign-actions"><button wx:for="{{events}}" wx:for-item="target" wx:key="id" class="assign-link" data-evidence="{{photo.id}}" data-event="{{target.id}}" bindtap="assign">放入事项 {{target.number}}</button></view></view></view></view>
+  <view class="review-status"><text class="section-title">{{confirmed ? '分组已确认' : '待核对项'}} · {{issues.length}}</text><text wx:for="{{issues}}" wx:key="*this" class="issue">{{item}}</text><text wx:if="{{!issues.length}}" class="ready-note">事项、日期和表式均已确认。记录内容仍需核对。</text></view>
+  <view class="bottom-note"><text>仅本地预览，未创建正式记录</text><button bindtap="reset" class="text-button">重置示例</button></view>
+  <view class="footer-actions"><button class="preview-button" bindtap="preview">预览草稿</button><button class="confirm-button" bindtap="confirm">{{confirmed ? '查看已确认分组' : '确认分组'}}</button></view>
+  <view class="preview-mask" wx:if="{{showPreview}}"><view class="preview-backdrop" bindtap="closePreview"></view><view class="preview-sheet">
+    <view class="preview-head"><text class="preview-title">计划记录 · {{records.length}} 份</text><button class="text-button" bindtap="closePreview">关闭</button></view>
+    <text class="preview-note">{{confirmed ? '分组已确认' : '分组待确认'}} · 字段待补齐 · 未提交</text>
+    <scroll-view scroll-y class="preview-scroll"><view class="preview-event" wx:for="{{records}}" wx:for-item="record" wx:key="id"><text class="preview-form">{{record.form}}</text><text class="preview-name">事项 {{record.eventNumber}} · {{record.title}}</text><view class="preview-row"><text>业务日期</text><text>{{record.date}}</text></view><view class="preview-row"><text>工程部位</text><text>{{record.location}}</text></view><view class="preview-row"><text>关联资料</text><text>{{record.photoCount}} 张</text></view><text class="preview-content">{{record.content}}</text><text class="pending-fields">专用字段、结论及签章待后续补充</text></view><view wx:if="{{!records.length}}" class="empty-state">尚未选择记录表式</view><text wx:for="{{issues}}" wx:key="*this" class="issue">{{item}}</text></scroll-view>
+  </view></view>
+</view>
