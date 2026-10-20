@@ -44,6 +44,19 @@ test('local backend is explicit and limited to develop; production URL stays unc
   }
 })
 
+test('local simulator defaults to loopback when no ext config is injected', () => {
+  for (const envVersion of ['develop', 'trial', 'release']) {
+    const { config } = load('config.ts', { wx: {
+      getExtConfigSync: () => ({}),
+      getAccountInfoSync: () => ({ miniProgram: { envVersion } }),
+    } })
+    assert.equal(config.useLocalBackend, envVersion === 'develop')
+    assert.equal(config.apiBaseUrl, envVersion === 'develop'
+      ? 'http://127.0.0.1:8000/api'
+      : 'https://www.baize.gdces.cn:4432/api')
+  }
+})
+
 test('old in-flight response cannot overwrite a fresh account/project cache', async () => {
   const cache = load('services/cache.ts')
   let resolveOld
