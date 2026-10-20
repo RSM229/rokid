@@ -595,30 +595,25 @@ Page(themed({
     const detections: { path: string; raw: any }[] = []
     /** 水印读到的拍摄时间/地点/天气——相机记的比转述可靠，用来预填记录字段 */
     const wmFields: Record<string, string> = {}
-    // 只有明确「只识别/看隐患/纯分析」才把 VLM 识别当必需步骤；
-    // 其余（记录工作/现场情况/空备注）视觉识别仅作素材增强，VLM 不可用不能拖垮整条链路。
+    // 仅「只识别/看隐患/纯分析」才调 VLM 隐患识别；记录工作等意图下图片只是工作记录的附件，
+    // 不调 VLM（避免"一上传图片就跑隐患识别"），只做轻量水印 OCR 预填字段。
     const pureDetect = this.isPureDetection(note)
-    let visionFailed = false
     try {
-      // 图片：并行做「隐患识别」与「水印 OCR」，水印失败不影响识别
+      // 图片：水印 OCR（轻量、无 VLM）；仅纯识别意图追加 VLM 隐患识别
       if (images.length) {
         const results = await Promise.all(images.map(async (img) => {
           const wm = await this.readWatermark(img.path)
-          let det: { text: string; raw: any } | null = null
           if (pureDetect) {
             // 纯识别意图：VLM 是必需步骤，失败要如实报错
-            det = await this.detectImageOnce(img.path)
-          } else {
-            // 记录工作等意图：视觉识别只当素材增强，VLM 不可用降级为「仅用文字/水印」
-            det = await this.detectImageOnce(img.path).catch(() => null)
+            const det = await this.detectImageOnce(img.path)
+            return { path: img.path, det, wm }
           }
-          return { path: img.path, det, wm }
+          // 记录工作等意图：图片仅作附件，不调视觉模型
+          return { path: img.path, det: null, wm }
         }))
         results.forEach((res, i) => {
           if (res.det) {
             detections.push({ path: res.path, raw: res.det.raw })
-          } else {
-            visionFailed = true
           }
           const wmLine = this.formatWatermark(res.wm)
           const detText = res.det?.text || ''
@@ -653,12 +648,6 @@ Page(themed({
           note || '记录今天的工作', material, this.watermarkPrefill(wmFields), messages, wmFields,
           images.length > 0, images.map(i => i.path),
         )
-        if (visionFailed) {
-          this.addMessage({
-            role: 'assistant',
-            text: '（提示：视觉识别服务暂时不可用，本次仅按文字与水印信息处理；稍后可重发图片重试识别。）',
-          })
-        }
         return
       }
       // 纯识别通道：进入隐患模式，识别命中后再征求是否建档
