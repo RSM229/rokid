@@ -15,6 +15,7 @@ venv/
 **/node_modules/
 **/dist/
 web-admin/dist/
+web-admin/dist_ws/
 mobile-h5/dist/
 
 # ===== Android (glasses-app) 构建产物 =====
