@@ -25,14 +25,22 @@ test('real WeChat login is default in develop, trial and release', () => {
   }
 })
 
-test('mock opt-in is limited to develop; custom HTTPS port is preserved', () => {
+test('local backend is explicit and limited to develop; production URL stays unchanged', () => {
   for (const envVersion of ['develop', 'trial', 'release']) {
     const { config } = load('config.ts', { wx: {
-      getExtConfigSync: () => ({ mockWechatLogin: true, apiBaseUrl: 'https://test.example:4432/api/' }),
+      getExtConfigSync: () => ({
+        mockWechatLogin: true,
+        useLocalBackend: true,
+        localApiBaseUrl: 'http://127.0.0.1:8000/api/',
+        apiBaseUrl: 'https://test.example:4432/api/',
+      }),
       getAccountInfoSync: () => ({ miniProgram: { envVersion } }),
     } })
     assert.equal(config.mockWechatLogin, envVersion === 'develop')
-    assert.equal(config.apiBaseUrl, 'https://test.example:4432/api')
+    assert.equal(config.useLocalBackend, envVersion === 'develop')
+    assert.equal(config.apiBaseUrl, envVersion === 'develop'
+      ? 'http://127.0.0.1:8000/api'
+      : 'https://test.example:4432/api')
   }
 })
 
@@ -45,6 +53,29 @@ test('old in-flight response cannot overwrite a fresh account/project cache', as
   resolveOld('old account')
   await old
   assert.equal(await cache.getCached('records', async () => 'unexpected request'), 'new account')
+})
+
+test('local and production sessions cannot read or clear each other', () => {
+  const storage = new Map()
+  const wx = {
+    getStorageSync: key => storage.get(key),
+    setStorageSync: (key, value) => storage.set(key, value),
+    removeStorageSync: key => storage.delete(key),
+  }
+  const sessionFor = storageScope => load('services/session.ts', {
+    wx,
+    require: () => ({ config: { storageScope } }),
+  }).session
+  const local = sessionFor('http_127_0_0_1_8000_api')
+  const production = sessionFor('https_production_api')
+  production.save('production-token', { username: 'production-user' })
+  production.saveBindToken('production-binding')
+  assert.equal(local.getToken(), '')
+  assert.equal(local.getUser(), null)
+  local.save('local-token', { username: 'local-user' })
+  local.clear()
+  assert.equal(production.getToken(), 'production-token')
+  assert.equal(production.getBindToken(), 'production-binding')
 })
 
 test('old failed request cannot evict a fresh account/project cache', async () => {

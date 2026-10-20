@@ -1,8 +1,9 @@
 import { createIdempotencyKey } from '../utils/idempotency'
+import { config } from '../config'
 import type { UploadFields } from './upload'
 import { UploadError, uploadAudio, uploadImage, uploadVideo } from './upload'
 
-const QUEUE_KEY = 'gdjl_media_upload_queue'
+const QUEUE_KEY = `gdjl_${config.storageScope}_media_upload_queue`
 
 /** PRD 19.5：拍照、录像和录音上传失败都要进入本地待同步队列 */
 export type UploadMediaType = 'image' | 'video' | 'audio'

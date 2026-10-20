@@ -54,13 +54,10 @@ export function request<T>(
       },
       fail(error) {
         const raw = error.errMsg || ''
-        // 本地联调最常见的失败：后端（本地桩 127.0.0.1:8000）没启动，
-        // wx.request 直接抛 request:fail，用户只看到一行无从下手的报错。
-        // 这里翻译成「怎么办」，只在开发/体验版（mock 开关打开）时提示。
-        if (config.mockWechatLogin && /request:fail/i.test(raw)) {
+        if (config.useLocalBackend && /request:fail/i.test(raw)) {
           reject(
             new Error(
-              '连不上本地联调服务（127.0.0.1:8000）。请先启动本地桩：双击 D:\\rokid\\start_mock_backend.bat，然后重新编译小程序',
+              `连不上本地后端（${config.apiBaseUrl}）。请确认后端服务已启动，并在微信开发者工具中重新编译。`,
             ),
           )
           return

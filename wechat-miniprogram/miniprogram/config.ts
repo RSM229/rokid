@@ -1,5 +1,7 @@
 interface ExtRuntimeConfig {
   apiBaseUrl?: string
+  localApiBaseUrl?: string
+  useLocalBackend?: boolean
   mockWechatLogin?: boolean
   mockWechatCode?: string
 }
@@ -26,7 +28,8 @@ function envVersion(): 'develop' | 'trial' | 'release' {
 }
 
 const ext = externalConfig()
-const isRelease = envVersion() === 'release'
+const currentEnv = envVersion()
+const isRelease = currentEnv === 'release'
 // 必须是已备案的 HTTPS 域名。微信服务器域名**允许带端口**（官方文档：
 // 「对于 https 域名，可以配置端口，如 https://myserver.com:8080，但配置后只能向
 // https://myserver.com:8080 发起请求，向 myserver.com 或 :9091 请求会失败」），
@@ -35,9 +38,16 @@ const isRelease = envVersion() === 'release'
 //   request / uploadFile / downloadFile 合法域名 -> https://www.baize.gdces.cn:4432
 //   socket 合法域名（wss）-> wss://www.baize.gdces.cn  （wss 域名免配端口，默认放行该域名下所有端口）
 // 注意：一旦后台配了带端口域名，代码里的 apiBaseUrl 就必须带完全相同的端口，两者不一致会被拦截。
-const apiBaseUrl = trimTrailingSlash(
+const productionApiBaseUrl = trimTrailingSlash(
   ext.apiBaseUrl || 'https://www.baize.gdces.cn:4432/api',
 )
+const useLocalBackend = currentEnv === 'develop' && ext.useLocalBackend === true
+const apiBaseUrl = trimTrailingSlash(
+  useLocalBackend
+    ? ext.localApiBaseUrl || 'http://127.0.0.1:8000/api'
+    : productionApiBaseUrl,
+)
+const storageScope = encodeURIComponent(apiBaseUrl)
 
 /**
  * 部署环境优先从微信第三方平台 ext.json / ext 配置读取地址。
@@ -45,9 +55,11 @@ const apiBaseUrl = trimTrailingSlash(
  */
 export const config = {
   apiBaseUrl,
+  storageScope,
+  useLocalBackend,
   // 正式版强制关闭 mock 登录，确保线上一定走真实 wx.login；
   // 模拟身份必须显式开启，体验版默认走真实微信登录。
-  mockWechatLogin: !isRelease && envVersion() === 'develop' && ext.mockWechatLogin === true,
+  mockWechatLogin: !isRelease && currentEnv === 'develop' && ext.mockWechatLogin === true,
   mockWechatCode: ext.mockWechatCode || 'mock:demo-device',
 }
 
