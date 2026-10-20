@@ -8,6 +8,7 @@ import { getCached, invalidateCache, invalidateByPrefix, CACHE_KEYS } from '../.
 import { ensurePrivacy } from '../../utils/privacy'
 import { themed } from '../../utils/theme'
 import { cleanMarkdown } from '../../utils/markdown'
+import { createReviewPlan, type ReviewPlan } from '../../services/work-review'
 
 const recorder = wx.getRecorderManager()
 const player = wx.createInnerAudioContext()
@@ -639,6 +640,10 @@ Page(themed({
 
       const material = blocks.join('\n\n')
       if (!runHazardDetection) {
+        if (images.length) {
+          await this.createReviewPlanFromAttachments(note, images)
+          return
+        }
         await this.runAgentWithMaterial(
           note || '记录今天的工作', material, this.watermarkPrefill(wmFields), messages, wmFields,
           images.length > 0, images.map(i => i.path),
@@ -672,6 +677,68 @@ Page(themed({
       })
     } catch (error) {
       this.addMessage({ role: 'assistant', text: `识别失败：${(error as Error).message}` })
+    } finally {
+      this.setData({ loading: false })
+    }
+  },
+
+  async createReviewPlanFromAttachments(note: string, images: Attachment[]) {
+    try {
+      if (!this.currentSessionId) this.currentSessionId = Date.now()
+      const conversationId = conversationIdFor(this.currentSessionId)
+      const evidence: ReviewPlan['evidence'] = []
+      for (const image of images) {
+        const uploaded = await uploadImage<{ id: number; url: string; watermark?: Record<string, string> }>(image.path, {
+          source: 'agent_review_plan', trigger_detection: false,
+        })
+        const watermark = uploaded.watermark || {}
+        const takenAt = String(watermark.taken_at || '')
+        const matched = takenAt.match(/(\d{4})\s*[-/年]\s*(\d{1,2})\s*[-/月]\s*(\d{1,2})/)
+        const observedDate = matched
+          ? `${matched[1]}-${matched[2].padStart(2, '0')}-${matched[3].padStart(2, '0')}`
+          : ''
+        const details = [watermark.location, watermark.section, takenAt].filter(Boolean).join(' · ')
+        evidence.push({
+          id: String(uploaded.id), mediaId: uploaded.id,
+          image: absoluteMediaUrl(uploaded.url), observedDate,
+          note: details || '未读取到水印信息',
+        })
+      }
+      const dateGroups = new Map<string, string[]>()
+      for (const item of evidence) {
+        if (!item.observedDate) continue
+        dateGroups.set(item.observedDate, [...(dateGroups.get(item.observedDate) || []), item.id])
+      }
+      const hasActionIntent = this.wantsActionIntent(note)
+      const events: ReviewPlan['events'] = hasActionIntent ? [...dateGroups.entries()].map(([date, evidenceIds], index) => ({
+        id: `event-${index + 1}`, title: note.trim().slice(0, 80) || '现场工作事项（待核对）',
+        location: '', date, dateConfirmed: false, evidenceIds, forms: [], content: note.trim(),
+      })) : []
+      const datedIds = new Set(events.flatMap(event => event.evidenceIds))
+      const undatedIds = hasActionIntent ? evidence.filter(item => !datedIds.has(item.id)).map(item => item.id) : []
+      if (note.trim() && undatedIds.length) events.push({
+        id: `event-${events.length + 1}`, title: note.trim().slice(0, 80) || '现场工作事项（待核对）',
+        location: '', date: '', dateConfirmed: false, evidenceIds: undatedIds, forms: [], content: note.trim(),
+      })
+      if (hasActionIntent && events.length === 0) events.push({
+        id: 'event-1', title: note.trim().slice(0, 80) || '现场工作事项（待核对）',
+        location: '', date: '', dateConfirmed: false, evidenceIds: evidence.map(item => item.id), forms: [], content: note.trim(),
+      })
+      const assigned = new Set(events.flatMap(event => event.evidenceIds))
+      const plan: ReviewPlan = {
+        schemaVersion: 1, scenario: 0, revision: 1, requestText: note.trim() || '用户仅上传图片，尚未说明整理用途',
+        evidence, events, unassignedIds: evidence.filter(item => !assigned.has(item.id)).map(item => item.id),
+        confirmedRevision: null,
+      }
+      const saved = await createReviewPlan(conversationId, plan)
+      this.addMessage({
+        role: 'assistant',
+        text: `已把 ${evidence.length} 张图片保存为整理资料，水印日期用于生成候选分组，用户描述已原样保留。计划尚未创建正式业务记录，请核对事项、日期和表式。`,
+        actions: [{ label: '整理资料', command: `navigate:/pages/work-review/index?planId=${saved.serverId}` }],
+      })
+      wx.navigateTo({ url: `/pages/work-review/index?planId=${saved.serverId}` })
+    } catch (error) {
+      this.addMessage({ role: 'assistant', text: `整理计划创建失败：${(error as Error).message}。已上传的资料不会自动创建业务记录。` })
     } finally {
       this.setData({ loading: false })
     }

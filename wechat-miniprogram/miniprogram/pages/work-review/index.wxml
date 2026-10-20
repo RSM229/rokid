@@ -1,9 +1,9 @@
 <view class="screen">
-  <view class="status-line"><text>交互原型 · 模拟分析数据</text><text class="local-status">本地草稿 v{{plan.revision}}</text></view>
-  <picker mode="selector" range="{{scenarios}}" value="{{plan.scenario}}" bindchange="chooseScenario"><view class="scenario"><text class="section-label">示例场景</text><text class="scenario-name">{{scenarioLabel}}</text><text class="chevron">▾</text></view></picker>
-  <view class="request"><text class="section-label">本次要求</text><textarea class="request-text" value="{{plan.requestText}}" maxlength="500" auto-height bindblur="updateRequest"/><text class="request-meta">图片仅作展示，分组及日期线索为模拟数据。</text></view>
+  <view class="status-line"><text wx:if="{{loadingPlan}}">正在加载整理计划</text><text wx:elif="{{hasServerPlan}}">服务端整理计划</text><text wx:else>等待从智能体导入资料</text><text wx:if="{{hasServerPlan}}" class="local-status">版本 {{plan.revision}}</text></view>
+  <view class="request" wx:if="{{hasServerPlan}}"><text class="section-label">本次要求</text><textarea class="request-text" value="{{plan.requestText}}" maxlength="500" auto-height bindblur="updateRequest"/><text class="request-meta">用户描述优先保留；资料日期仅作为核对线索。</text></view>
   <view class="metrics"><view><text class="metric-number">{{plan.evidence.length}}</text><text>张资料</text></view><view><text class="metric-number">{{events.length}}</text><text>个事项</text></view><view><text class="metric-number">{{records.length}}</text><text>份计划记录</text></view></view>
-  <view class="toolbar"><text class="section-title">现场事项</text><view class="toolbar-actions"><button class="text-button" bindtap="add">新增事项</button><button class="text-button {{canMerge ? '' : 'disabled-action'}}" bindtap="merge">合并 {{selectedIds.length}}</button></view></view>
+  <view wx:if="{{!loadingPlan && !hasServerPlan}}" class="empty-state">请在智能体对话中发送资料并说明整理要求。</view>
+  <view class="toolbar" wx:if="{{hasServerPlan}}"><text class="section-title">现场事项</text><view class="toolbar-actions"><button class="text-button" bindtap="add">新增事项</button><button class="text-button {{canMerge ? '' : 'disabled-action'}}" bindtap="merge">合并 {{selectedIds.length}}</button></view></view>
   <view wx:if="{{!events.length}}" class="empty-state">用途和事项尚未确定</view>
   <view class="event" wx:for="{{events}}" wx:for-item="event" wx:key="id">
     <view class="event-heading"><checkbox checked="{{event.selected}}" color="#245f56" data-id="{{event.id}}" bindtap="toggleEvent"/><view class="event-summary" data-id="{{event.id}}" bindtap="expand"><text class="event-title">{{event.number}}. {{event.title}}</text><text class="event-meta">{{event.evidenceIds.length}} 张资料 · {{event.dateConfirmed ? event.date : '日期待确认'}}</text></view><text class="expand" data-id="{{event.id}}" bindtap="expand">{{activeId === event.id ? '收起' : '展开'}}</text></view>
@@ -24,8 +24,8 @@
   </view>
   <view class="unassigned" wx:if="{{unassigned.length}}"><text class="section-title">待分配资料 · {{unassigned.length}}</text><view class="unassigned-item" wx:for="{{unassigned}}" wx:for-item="photo" wx:key="id"><image src="{{photo.image}}" mode="aspectFill" data-id="{{photo.id}}" bindtap="previewImage"/><view class="unassigned-detail"><text class="photo-date">{{photo.note}}</text><view class="assign-actions"><button wx:for="{{events}}" wx:for-item="target" wx:key="id" class="assign-link" data-evidence="{{photo.id}}" data-event="{{target.id}}" bindtap="assign">放入事项 {{target.number}}</button></view></view></view></view>
   <view class="review-status"><text class="section-title">{{confirmed ? '分组已确认' : '待核对项'}} · {{issues.length}}</text><text wx:for="{{issues}}" wx:key="*this" class="issue">{{item}}</text><text wx:if="{{!issues.length}}" class="ready-note">事项、日期和表式均已确认。记录内容仍需核对。</text></view>
-  <view class="bottom-note"><text>仅本地预览，未创建正式记录</text><button bindtap="reset" class="text-button">重置示例</button></view>
-  <view class="footer-actions"><button class="preview-button" bindtap="preview">预览草稿</button><button class="confirm-button" bindtap="confirm">{{confirmed ? '查看已确认分组' : '确认分组'}}</button></view>
+  <view class="bottom-note" wx:if="{{hasServerPlan}}"><text>确认只冻结整理计划，不会创建正式业务记录</text></view>
+  <view class="footer-actions" wx:if="{{hasServerPlan}}"><button class="preview-button" bindtap="preview">预览草稿</button><button class="confirm-button" bindtap="confirm">{{confirmed ? '查看已确认分组' : '确认分组'}}</button></view>
   <view class="preview-mask" wx:if="{{showPreview}}"><view class="preview-backdrop" bindtap="closePreview"></view><view class="preview-sheet">
     <view class="preview-head"><text class="preview-title">计划记录 · {{records.length}} 份</text><button class="text-button" bindtap="closePreview">关闭</button></view>
     <text class="preview-note">{{confirmed ? '分组已确认' : '分组待确认'}} · 字段待补齐 · 未提交</text>
