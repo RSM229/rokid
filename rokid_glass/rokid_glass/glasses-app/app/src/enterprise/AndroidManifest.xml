@@ -1,8 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:tools="http://schemas.android.com/tools">
-    <!-- 企业 SDK 的 aicore manifest 会开启备份；业务数据端必须显式覆盖为关闭。 -->
-    <application
-        android:allowBackup="false"
-        tools:replace="android:allowBackup" />
-</manifest>

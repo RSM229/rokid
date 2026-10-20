@@ -1,4 +1,0 @@
-# 代码走 bind mount，不进镜像；构建期只需要 requirements.txt。
-# 这样 build context 从 147MB 降到几 KB（models/ 嵌入模型 92MB 不必发送）。
-*
-!requirements.txt

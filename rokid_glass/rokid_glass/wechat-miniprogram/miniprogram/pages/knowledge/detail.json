@@ -1,8 +1,0 @@
-{
-  "navigationBarTitleText": "规范文档",
-  "enablePullDownRefresh": false,
-  "navigationStyle": "custom",
-  "usingComponents": {
-    "glass-nav-bar": "/components/glass-nav-bar/index"
-  }
-}

@@ -1,8 +1,0 @@
-{
-  "navigationBarTitleText": "资料库",
-  "navigationStyle": "custom",
-  "usingComponents": {
-    "glass-nav-bar": "/components/glass-nav-bar/index",
-    "tab-bar": "/components/tab-bar/index"
-  }
-}

@@ -1,7 +1,0 @@
-{
-  "navigationBarTitleText": "注册账号",
-  "navigationStyle": "custom",
-  "usingComponents": {
-    "glass-nav-bar": "/components/glass-nav-bar/index"
-  }
-}

@@ -1,6 +1,0 @@
-page { background: #10263f; color: white; }.page { padding: 24rpx; }
-.status { text-align: center; font-size: 40rpx; margin-top: 24rpx; }.hint { text-align: center; color: #b9c9db; margin: 18rpx 0; font-size: 24rpx; }
-.error { color: #ffcaab; padding: 16rpx; }.media { display: flex; gap: 12rpx; }
-live-pusher, live-player { width: 48%; height: 420rpx; background: #07192c; }
-.controls { display: flex; flex-wrap: wrap; gap: 16rpx; margin: 24rpx 0; }
-.controls button { font-size: 26rpx; width: 45%; }.end { background: #b73b45; color: white; margin: 24rpx 0; }

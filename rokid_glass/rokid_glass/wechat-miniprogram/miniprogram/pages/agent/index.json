@@ -1,7 +1,0 @@
-{
-  "navigationBarTitleText": "监理通",
-  "navigationStyle": "custom",
-  "usingComponents": {
-    "tab-bar": "/components/tab-bar/index"
-  }
-}

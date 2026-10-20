@@ -1,8 +1,0 @@
-{
-  "extEnable": true,
-  "extAppid": "wx8a825eb12de461fb",
-  "ext": {
-    "apiBaseUrl": "https://www.baize.gdces.cn:4432/api",
-    "mockWechatLogin": true
-  }
-}

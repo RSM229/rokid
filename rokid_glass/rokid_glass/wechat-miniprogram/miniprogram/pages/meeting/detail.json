@@ -1,8 +1,0 @@
-{
-  "navigationBarTitleText": "会议纪要",
-  "navigationStyle": "custom",
-  "usingComponents": {
-    "glass-nav-bar": "/components/glass-nav-bar/index",
-    "prov-form": "/components/prov-form/index"
-  }
-}

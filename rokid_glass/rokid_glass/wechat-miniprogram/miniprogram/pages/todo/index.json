@@ -1,9 +1,0 @@
-{
-  "navigationBarTitleText": "我的派单",
-  "enablePullDownRefresh": true,
-  "navigationStyle": "custom",
-  "usingComponents": {
-    "glass-nav-bar": "/components/glass-nav-bar/index",
-    "tab-bar": "/components/tab-bar/index"
-  }
-}
