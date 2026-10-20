@@ -36,6 +36,11 @@
             <text>{{act.text}}</text>
           </view>
         </view>
+        <view class="review-entry" bindtap="navigateTo" data-url="/pages/work-review/index">
+          <text class="review-entry-title">整理多张现场资料</text>
+          <text class="review-entry-detail">核对事项、日期和拟生成记录</text>
+          <text class="review-entry-arrow">›</text>
+        </view>
       </view>
       <block wx:else>
         <view wx:for="{{messages}}" wx:key="index" class="message {{item.role}}" id="msg-{{index}}">
