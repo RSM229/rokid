@@ -1,0 +1,80 @@
+<view class="page tab-host" style="{{themeStyle}}">
+  <glass-nav-bar title="平行检验" left="back" />
+  <tab-bar active="" />
+
+  <view class="toolbar">
+    <input
+      class="search-input"
+      value="{{keyword}}"
+      placeholder="搜索部位 / 检验项目"
+      confirm-type="search"
+      bindinput="onKeywordInput"
+      bindconfirm="onSearch" />
+    <button class="btn-primary" bindtap="openCreate">+ 新建检验</button>
+  </view>
+
+  <view wx:if="{{loading && !records.length}}" class="empty">加载中…</view>
+  <view wx:elif="{{!records.length}}" class="empty">还没有平行检验记录，点上方「新建检验」</view>
+  <view wx:for="{{records}}" wx:key="id" class="card record" data-id="{{item.id}}" bindtap="openEdit">
+    <view class="record-head">
+      <text class="record-date">{{item.inspect_date}}</text>
+      <text class="record-badge {{item.statusClass}}">{{item.conclusion}}</text>
+    </view>
+    <view class="record-part">{{item.part}}</view>
+    <view class="record-item">{{item.item}}</view>
+  </view>
+
+  <!-- 检验表单弹层：新建 / 编辑共用 -->
+  <view class="overlay" wx:if="{{showForm}}" catchtouchmove="true">
+    <view class="overlay-mask" bindtap="closeForm"></view>
+    <view class="overlay-panel">
+      <view class="panel-header">
+        <text class="panel-title">{{editingId ? '编辑检验记录' : '新建平行检验'}}</text>
+      </view>
+      <view class="form-group">
+        <text class="form-label">检验日期 *</text>
+        <picker mode="date" value="{{form.inspect_date}}" bindchange="onDateChange">
+          <view class="form-input picker-value">{{form.inspect_date || '选择日期'}}</view>
+        </picker>
+      </view>
+      <view class="form-group">
+        <text class="form-label">检验部位 *</text>
+        <input class="form-input" value="{{form.part}}" placeholder="请输入检验部位" bindinput="onPartInput" />
+      </view>
+      <view class="form-group">
+        <text class="form-label">检验项目 *</text>
+        <input class="form-input" value="{{form.item}}" placeholder="请输入检验项目" bindinput="onItemInput" />
+      </view>
+      <view class="form-group">
+        <text class="form-label">检查方法</text>
+        <textarea class="form-textarea" value="{{form.method}}" placeholder="如目测、实测实量、试验" bindinput="onMethodInput" auto-height maxlength="2000" />
+      </view>
+      <view class="form-group">
+        <text class="form-label">检验依据</text>
+        <textarea class="form-textarea" value="{{form.basis}}" placeholder="规范条文 / 设计要求（可选）" bindinput="onBasisInput" auto-height maxlength="2000" />
+      </view>
+      <view class="form-group">
+        <text class="form-label">检验结果记录 *</text>
+        <textarea class="form-textarea" value="{{form.result_detail}}" placeholder="实测实量数据、检查情况（必填）" bindinput="onResultInput" auto-height maxlength="2000" />
+      </view>
+      <view class="form-group">
+        <text class="form-label">结论 *</text>
+        <picker mode="selector" range="{{conclusionOptions}}" bindchange="onConclusionChange">
+          <view class="form-input picker-value">{{form.conclusion || '请选择'}}</view>
+        </picker>
+      </view>
+      <view class="form-group">
+        <text class="form-label">处理意见</text>
+        <textarea class="form-textarea" value="{{form.treatment}}" placeholder="不合格时的处理意见（可选）" bindinput="onTreatmentInput" auto-height maxlength="2000" />
+      </view>
+      <view class="panel-actions">
+        <button class="btn-cancel" bindtap="closeForm">取消</button>
+        <button class="btn-submit" loading="{{saving}}" bindtap="save">保存</button>
+      </view>
+      <button wx:if="{{editingId}}" class="doc-btn" bindtap="generateDocument">查看文书 / 签认 / 导出</button>
+      <view class="del-row" wx:if="{{editingId}}">
+        <button class="btn-del" bindtap="removeRecord">删除该记录</button>
+      </view>
+    </view>
+  </view>
+</view>

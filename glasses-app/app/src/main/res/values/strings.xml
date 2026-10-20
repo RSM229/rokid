@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 应用名称 -->
+    <string name="app_name">监理智能体</string>
+
+    <!-- 登录页 -->
+    <string name="login_title">监理通 · 眼镜端</string>
+    <string name="login_username_hint">账号</string>
+    <string name="login_password_hint">密码</string>
+    <string name="login_role_hint">角色</string>
+    <string name="login_submit">登录</string>
+    <string name="login_progress">登录中…</string>
+    <string name="login_failed">登录失败，请检查账号密码与角色</string>
+    <string name="login_empty">账号或密码不能为空</string>
+
+    <!-- 主页 -->
+    <string name="main_status_ready">监理智能体已就绪</string>
+    <string name="main_voice_btn">语音指令</string>
+    <string name="main_photo_btn">拍照</string>
+    <string name="main_inspection_start">启动巡检</string>
+    <string name="main_inspection_stop">停止巡检</string>
+    <string name="main_listening">聆听中…</string>
+    <string name="main_idle">点击说出指令</string>
+
+    <!-- 通用 -->
+    <string name="back">返回</string>
+    <string name="cancel">取消</string>
+    <string name="submit">提交</string>
+    <string name="search">搜索</string>
+    <string name="query">查询</string>
+    <string name="approve">审批通过</string>
+    <string name="reject">驳回</string>
+    <string name="take_photo">拍照</string>
+    <string name="voice_input">语音输入</string>
+    <string name="voice_input_context">语音输入正文</string>
+    <string name="voice_query">语音查询</string>
+    <string name="voice_ask">语音提问</string>
+    <string name="empty_list">暂无数据</string>
+    <string name="confirm_logout">确认退出</string>
+    <string name="confirm_delete">确认删除</string>
+    <string name="save_draft">保存草稿</string>
+
+    <!-- 主菜单 -->
+    <string name="menu_title">功能菜单</string>
+    <string name="menu_voice_select">语音选择菜单</string>
+
+    <!-- 工作记录 -->
+    <string name="work_record_title">工作记录</string>
+    <string name="work_record_create">新建工作记录</string>
+    <string name="work_record_detail">工作记录详情</string>
+    <string name="work_record_type">记录类型</string>
+    <string name="work_record_section">施工部位（楼栋/楼层/部位）</string>
+    <string name="work_record_weather">天气（如 晴 28℃）</string>
+    <string name="work_record_content">记录正文</string>
+    <string name="work_record_no_photo">未拍摄照片</string>
+    <string name="work_record_submit">提交审批</string>
+
+    <!-- 监理文书 -->
+    <string name="document_title">监理文书</string>
+    <string name="document_create">新建文书</string>
+    <string name="document_detail">文书详情</string>
+    <string name="document_type">文书类型</string>
+    <string name="document_title_hint">标题</string>
+    <string name="document_context_hint">正文上下文（可语音口述）</string>
+    <string name="document_llm_generate">AI 生成并提交</string>
+    <string name="document_submit">提交审批</string>
+    <string name="document_export_pdf">导出 PDF</string>
+    <string name="document_sign">电子签章</string>
+
+    <!-- 隐患管理 -->
+    <string name="hazard_title">隐患管理</string>
+    <string name="hazard_detail">隐患详情</string>
+    <string name="hazard_detect">拍照识别隐患</string>
+    <string name="hazard_detect_tip">点击下方按钮拍照识别安全隐患</string>
+    <string name="hazard_detect_photo">拍照识别</string>
+    <string name="hazard_create_rect">一键开具整改通知单</string>
+    <string name="hazard_upload_image">上传整改影像</string>
+    <string name="hazard_recheck_pass">复查合格</string>
+    <string name="hazard_recheck_reject">驳回整改</string>
+
+    <!-- 派单任务 -->
+    <string name="task_title">派单任务</string>
+    <string name="task_detail">任务详情</string>
+    <string name="task_note_hint">回执备注（可语音输入）</string>
+    <string name="task_accept">接单</string>
+    <string name="task_reject">拒单</string>
+    <string name="task_start">开始执行</string>
+    <string name="task_complete">完成（语音回执）</string>
+
+    <!-- 规范查询 -->
+    <string name="knowledge_search_title">规范查询</string>
+    <string name="knowledge_keyword_hint">关键词（如 钢筋绑扎）</string>
+    <string name="acceptance_guide_title">验收指引</string>
+    <string name="acceptance_type">验收类型</string>
+    <string name="acceptance_guide_tip">选择验收类型或语音提问生成验收指引</string>
+
+    <!-- AI 巡检 -->
+    <string name="inspection_title">AI 巡检</string>
+    <string name="inspection_interval">采集间隔</string>
+    <string name="inspection_running">巡检进行中</string>
+    <string name="inspection_stopped">已停止</string>
+    <string name="inspection_capture_zero">采集数：0</string>
+    <string name="inspection_hazard_zero">隐患数：0</string>
+    <string name="inspection_no_capture">上次采集：无</string>
+    <string name="inspection_result">实时识别结果</string>
+    <string name="inspection_no_result">尚未开始巡检</string>
+    <string name="inspection_history">巡检历史</string>
+    <string name="inspection_start">启动巡检</string>
+    <string name="inspection_stop">停止巡检</string>
+
+    <!-- 我的签章 -->
+    <string name="signature_title">我的签章</string>
+    <string name="signature_pick">选择签章</string>
+    <string name="signature_empty">暂无签章，请上传</string>
+    <string name="signature_upload">上传签章（相册选择 PNG）</string>
+    <string name="signature_delete_pwd_hint">输入登录密码以确认删除</string>
+
+    <!-- 角色 -->
+    <string-array name="roles">
+        <item>总监理工程师</item>
+        <item>总监代表</item>
+        <item>专业监理工程师</item>
+        <item>监理员</item>
+    </string-array>
+
+    <!-- 权限 -->
+    <string name="perm_rationale">监理智能体需要相机、麦克风和定位权限以完成现场作业</string>
+    <string name="perm_denied">缺少必要权限，部分功能不可用</string>
+</resources>

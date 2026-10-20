@@ -1,0 +1,303 @@
+<view class="page tab-host" style="{{themeStyle}}">
+  <glass-nav-bar title="工作记录" left="back" />
+  <tab-bar active="work" />
+
+  <view class="toolbar">
+    <view class="title">工作记录</view>
+    <view class="toolbar-right">
+      <view class="select-btn" bindtap="createRecord">新建记录</view>
+      <view class="time-btn" bindtap="openTimeSheet">{{timeRangeLabel}} ▾</view>
+      <view class="select-btn" bindtap="toggleSelectMode">
+        {{selectMode ? '完成' : '选择'}}
+      </view>
+    </view>
+  </view>
+
+  <view class="type-tabs-container">
+    <view class="type-tab {{selectedType === 'all' ? 'active' : ''}}" data-type="all" bindtap="toggleTypeDrawer">
+      <text>全部</text>
+      <text class="arrow {{showTypeDrawer ? 'up' : ''}}">▸</text>
+    </view>
+    <view wx:if="{{showTypeDrawer}}" class="type-tabs-expand">
+      <view class="type-tab {{selectedType === item.label ? 'active' : ''}}" wx:for="{{typeTabs}}" wx:key="key" data-type="{{item.label}}" bindtap="selectType">
+        <text>{{item.label}}</text>
+      </view>
+    </view>
+  </view>
+
+  <!-- 全部模式：同时显示工作记录和隐患 -->
+  <block wx:if="{{selectedType === 'all'}}">
+    <view wx:if="{{selectMode}}" class="select-hint">点击卡片勾选记录，勾选后可在底部操作栏批量处理</view>
+    <view wx:if="{{loading && !records.length && !hazards.length}}" class="empty">正在加载…</view>
+    <view wx:elif="{{!records.length && !hazards.length}}" class="empty">暂无记录</view>
+    
+    <!-- 工作记录 -->
+    <view wx:for="{{records}}" wx:key="id" class="card record" data-type="record" data-id="{{item.id}}">
+      <view wx:if="{{selectMode}}" class="record-checkbox-inline" data-type="record" data-id="{{item.id}}" bindtap="onCardTap">
+        <checkbox value="{{item.id}}" checked="{{item.checked}}" data-type="record" />
+      </view>
+      <view class="card-content" bindtap="onCardTap" data-type="record" data-id="{{item.id}}">
+        <view class="record-head">
+          <view class="type">{{item.record_type}}记录 #{{item.id}}</view>
+          <view class="status">{{item.status}}</view>
+        </view>
+        <view class="muted">{{item.section || '未填写区域'}} · {{item.location || '未填写位置'}}</view>
+        <view wx:if="{{item.work_content}}" class="record-desc">{{item.work_content}}</view>
+        <view class="muted">{{item.created_at}}</view>
+      </view>
+      <view class="card-menu" wx:if="{{!selectMode}}" bindtap="openRecordMenu" data-type="record" data-id="{{item.id}}">⋯</view>
+    </view>
+    
+    <!-- 隐患记录 -->
+    <view wx:for="{{hazards}}" wx:key="id" class="card hazard" data-type="hazard" data-id="{{item.id}}">
+      <view wx:if="{{selectMode}}" class="record-checkbox-inline" data-type="hazard" data-id="{{item.id}}" bindtap="onCardTap">
+        <checkbox value="{{item.id}}" checked="{{item.checked}}" data-type="hazard" />
+      </view>
+      <view class="card-content" bindtap="onCardTap" data-type="hazard" data-id="{{item.id}}">
+        <image wx:if="{{item.image_url}}" class="photo" src="{{item.image_url}}" mode="aspectFill" catchtap="preview" data-url="{{item.image_url}}"></image>
+        <view class="hazard-content">
+          <view class="head">
+            <view class="hazard-title">{{item.top1_risk || item.risk_category || '现场隐患'}}</view>
+            <view class="status">{{item.status}}</view>
+          </view>
+          <view class="muted">#{{item.id}} · {{item.section || '未填写区域'}} · {{item.location || '未填写位置'}}</view>
+          <view wx:if="{{item.evidence_text}}" class="evidence">依据：{{item.evidence_text}}</view>
+        </view>
+      </view>
+      <view class="card-menu" wx:if="{{!selectMode}}" bindtap="openRecordMenu" data-type="hazard" data-id="{{item.id}}">⋯</view>
+    </view>
+  </block>
+
+  <!-- 隐患列表 -->
+  <block wx:elif="{{selectedType === '隐患'}}">
+    <view wx:if="{{selectMode}}" class="select-hint">点击卡片勾选记录，勾选后可在底部操作栏批量处理</view>
+    <view wx:if="{{loading && !hazards.length}}" class="empty">正在加载隐患…</view>
+    <view wx:elif="{{!hazards.length}}" class="empty">当前项目暂无隐患记录</view>
+    <view wx:for="{{hazards}}" wx:key="id" class="card hazard" data-type="hazard" data-id="{{item.id}}">
+      <view wx:if="{{selectMode}}" class="record-checkbox-inline" data-type="hazard" data-id="{{item.id}}" bindtap="onCardTap">
+        <checkbox value="{{item.id}}" checked="{{item.checked}}" data-type="hazard" />
+      </view>
+      <view class="card-content" bindtap="onCardTap" data-type="hazard" data-id="{{item.id}}">
+        <image wx:if="{{item.image_url}}" class="photo" src="{{item.image_url}}" mode="aspectFill" catchtap="preview" data-url="{{item.image_url}}"></image>
+        <view class="hazard-content">
+          <view class="head">
+            <view class="hazard-title">{{item.top1_risk || item.risk_category || '现场隐患'}}</view>
+            <view class="status">{{item.status}}</view>
+          </view>
+          <view class="muted">#{{item.id}} · {{item.section || '未填写区域'}} · {{item.location || '未填写位置'}}</view>
+          <view wx:if="{{item.evidence_text}}" class="evidence">依据：{{item.evidence_text}}</view>
+        </view>
+      </view>
+      <view class="card-menu" wx:if="{{!selectMode}}" bindtap="openRecordMenu" data-type="hazard" data-id="{{item.id}}">⋯</view>
+    </view>
+  </block>
+
+  <!-- 工作记录列表 -->
+  <block wx:else>
+    <view wx:if="{{selectMode}}" class="select-hint">点击卡片勾选记录，勾选后可在底部操作栏批量处理</view>
+    <view wx:if="{{loading && !records.length}}" class="empty">正在加载工作记录…</view>
+    <view wx:elif="{{!records.length}}" class="empty">暂无工作记录</view>
+    <view wx:for="{{records}}" wx:key="id" class="card record" data-type="record" data-id="{{item.id}}">
+      <view wx:if="{{selectMode}}" class="record-checkbox-inline" data-type="record" data-id="{{item.id}}" bindtap="onCardTap">
+        <checkbox value="{{item.id}}" checked="{{item.checked}}" data-type="record" />
+      </view>
+      <view class="card-content" bindtap="onCardTap" data-type="record" data-id="{{item.id}}">
+        <view class="record-head">
+          <view class="type">{{item.record_type}}记录 #{{item.id}}</view>
+          <view class="status">{{item.status}}</view>
+        </view>
+        <view class="muted">{{item.section || '未填写区域'}} · {{item.location || '未填写位置'}}</view>
+        <view wx:if="{{item.work_content}}" class="record-desc">{{item.work_content}}</view>
+        <view class="muted">{{item.created_at}}</view>
+      </view>
+      <view class="card-menu" wx:if="{{!selectMode}}" bindtap="openRecordMenu" data-type="record" data-id="{{item.id}}">⋯</view>
+    </view>
+  </block>
+
+  <!-- 批量操作栏（任何弹层打开时隐藏，避免压住弹层） -->
+  <view wx:if="{{selectMode && selectedCount > 0 && !showTimeSheet && !showRecordMenu && !showDetail && !showReportModal && !showEditModal}}" class="batch-bar">
+    <view class="batch-top">
+      <view class="batch-info">已选 {{selectedCount}} 条</view>
+      <view class="batch-select-all" bindtap="toggleSelectAll">{{allSelected ? '取消全选' : '全选'}}</view>
+    </view>
+    <view class="batch-actions">
+      <button size="mini" class="primary" bindtap="batchSubmit" loading="{{submittingBatch}}">提交审批</button>
+      <button size="mini" class="primary" bindtap="generateReport" loading="{{generatingReport}}">生成报告</button>
+      <button size="mini" class="danger" bindtap="batchDelete" loading="{{deletingBatch}}">删除</button>
+    </view>
+  </view>
+
+  <!-- 时间筛选弹窗 -->
+  <view wx:if="{{showTimeSheet}}" class="mask" bindtap="closeTimeSheet"></view>
+  <view wx:if="{{showTimeSheet}}" class="sheet">
+    <view class="sheet-head">
+      <view class="title">时间范围</view>
+      <text class="close" bindtap="closeTimeSheet">×</text>
+    </view>
+    <view wx:for="{{timeRanges}}" wx:key="key" class="sheet-item {{timeRange === item.key ? 'active' : ''}}" data-key="{{item.key}}" bindtap="selectTimeRange">{{item.label}}</view>
+  </view>
+
+  <!-- 记录操作菜单 -->
+  <view wx:if="{{showRecordMenu}}" class="mask" bindtap="closeRecordMenu"></view>
+  <view wx:if="{{showRecordMenu}}" class="menu-sheet">
+    <view wx:for="{{recordMenuItems}}" wx:key="key" class="menu-item" bindtap="onMenuAction" data-action="{{item.key}}">{{item.label}}</view>
+    <view class="menu-item cancel" bindtap="closeRecordMenu">取消</view>
+  </view>
+
+  <!-- 详情弹窗 -->
+  <view wx:if="{{showDetail}}" class="mask" bindtap="closeDetail"></view>
+  <view wx:if="{{showDetail}}" class="detail-sheet" style="top: {{navHeight}}px;">
+    <view class="sheet-head">
+      <view class="title">{{detail.record_type || '隐患'}}记录详情</view>
+      <text class="close" bindtap="closeDetail">×</text>
+    </view>
+    <scroll-view scroll-y class="detail-scroll">
+      <!-- 基本信息 -->
+      <view class="detail-section">
+        <view class="detail-row"><text class="detail-label">状态</text><text class="detail-value status-tag {{detail.status === '已提交' ? 'ok' : ''}}">{{detail.status}}</text></view>
+        <view class="detail-row"><text class="detail-label">区域</text><text class="detail-value">{{detail.section || '未填写'}}</text></view>
+        <view class="detail-row"><text class="detail-label">位置</text><text class="detail-value {{detail.location ? '' : 'detail-empty'}}">{{detail.location || '未填写（可在编辑记录中补充）'}}</text></view>
+        <view class="detail-row"><text class="detail-label">创建时间</text><text class="detail-value">{{detail.created_at || '-'}}</text></view>
+      </view>
+
+      <!-- 巡视信息（栏目对齐房建 GD-B-214「巡视记录」表） -->
+      <view wx:if="{{detail.record_type === '巡视'}}" class="detail-section">
+        <view class="detail-title">巡视记录</view>
+        <view class="detail-row"><text class="detail-label">工程项目名称</text><text class="detail-value">{{detail.project_name || '-'}}</text></view>
+        <view class="detail-row"><text class="detail-label">巡视的工程部位</text><text class="detail-value">{{detail.section || '未填写'}}</text></view>
+        <view class="detail-row"><text class="detail-label">施工单位</text><text class="detail-value">{{detail.construction_unit || '-'}}</text></view>
+        <view class="detail-row"><text class="detail-label">巡视时间</text><text class="detail-value">{{detail.inspection_time_text || '-'}}</text></view>
+        <view class="detail-row"><text class="detail-label">巡视监理人员</text><text class="detail-value">{{detail.supervisor || '-'}}</text></view>
+        <view class="detail-row"><text class="detail-label">问题及处理情况</text><text class="detail-value">{{detail.problem_text || '-'}}</text></view>
+      </view>
+
+      <!-- 验收信息 -->
+      <view wx:if="{{detail.record_type === '验收'}}" class="detail-section">
+        <view class="detail-title">验收信息</view>
+        <view class="detail-row"><text class="detail-label">验收类型</text><text class="detail-value">{{detail.acceptance_guide_ref || '-'}}</text></view>
+        <view class="detail-row"><text class="detail-label">验收结果</text><text class="detail-value">{{detail.acceptance_result || '-'}}</text></view>
+        <view class="detail-row"><text class="detail-label">工作内容</text><text class="detail-value">{{detail.work_content || '-'}}</text></view>
+      </view>
+
+      <!-- 旁站信息 -->
+      <view wx:if="{{detail.record_type === '旁站'}}" class="detail-section">
+        <view class="detail-title">旁站信息</view>
+        <view class="detail-row"><text class="detail-label">工程名称</text><text class="detail-value">{{detail.station_project_name || '-'}}</text></view>
+        <view class="detail-row"><text class="detail-label">旁站内容</text><text class="detail-value">{{detail.station_content || detail.work_content || '-'}}</text></view>
+        <view class="detail-row"><text class="detail-label">旁站结论</text><text class="detail-value">{{detail.station_conclusion || '-'}}</text></view>
+        <view class="detail-row"><text class="detail-label">开始时间</text><text class="detail-value">{{detail.station_start_time || '-'}}</text></view>
+        <view class="detail-row"><text class="detail-label">结束时间</text><text class="detail-value">{{detail.station_end_time || '-'}}</text></view>
+      </view>
+
+      <!-- 见证信息 -->
+      <view wx:if="{{detail.record_type === '见证'}}" class="detail-section">
+        <view class="detail-title">见证信息</view>
+        <view class="detail-row"><text class="detail-label">材料名称</text><text class="detail-value">{{detail.witness_material_name || '-'}}</text></view>
+        <view class="detail-row"><text class="detail-label">规格型号</text><text class="detail-value">{{detail.witness_material_spec || '-'}}</text></view>
+        <view class="detail-row"><text class="detail-label">工作内容</text><text class="detail-value">{{detail.work_content || '-'}}</text></view>
+      </view>
+
+      <!-- 隐患信息 -->
+      <view wx:if="{{detailType === 'hazard'}}" class="detail-section">
+        <view class="detail-title">隐患信息</view>
+        <view class="detail-row"><text class="detail-label">风险类型</text><text class="detail-value">{{detail.top1_risk || detail.risk_category || '-'}}</text></view>
+        <view class="detail-row"><text class="detail-label">风险状态</text><text class="detail-value">{{detail.risk_status || '-'}}</text></view>
+        <view class="detail-row"><text class="detail-label">证据</text><text class="detail-value">{{detail.evidence_text || '-'}}</text></view>
+        <view class="detail-row"><text class="detail-label">整改建议</text><text class="detail-value">{{detail.suggestion || '-'}}</text></view>
+      </view>
+
+      <!-- 影像资料 -->
+      <view wx:if="{{detailPhotos.length}}" class="detail-section">
+        <view class="detail-title">影像资料 ({{detailPhotos.length}})</view>
+        <view class="photo-grid">
+          <image wx:for="{{detailPhotos}}" wx:key="*this" class="detail-photo" src="{{item}}" mode="aspectFill" bindtap="previewDetailPhoto" data-url="{{item}}"></image>
+        </view>
+      </view>
+
+      <!-- 文书操作：编辑修改 + 生成文书/查看文书（导出 PDF/Word 在工作文书详情页） -->
+      <view class="doc-btn-row">
+        <button class="doc-btn ghost" bindtap="editDetailRecord">编辑修改</button>
+        <button wx:if="{{detail.generated_doc_id}}" class="doc-btn" bindtap="openRecordDocument">查看文书</button>
+        <button wx:else class="doc-btn" bindtap="generateRecordDocument" loading="{{generatingDoc}}">生成文书</button>
+      </view>
+    </scroll-view>
+  </view>
+
+  <!-- 报告生成弹窗 -->
+  <view wx:if="{{showReportModal}}" class="mask" bindtap="closeReportModal"></view>
+  <view wx:if="{{showReportModal}}" class="sheet">
+    <view class="sheet-head">
+      <view class="title">生成报告</view>
+      <text class="close" bindtap="closeReportModal">×</text>
+    </view>
+    <view class="report-options">
+      <view class="report-type" wx:for="{{reportTypes}}" wx:key="key" data-type="{{item.key}}" bindtap="selectReportType">
+        <view class="type-icon">{{item.icon}}</view>
+        <view class="type-info">
+          <view class="type-name">{{item.label}}</view>
+          <view class="type-desc">{{item.desc}}</view>
+        </view>
+        <view class="type-check {{reportType === item.key ? 'checked' : ''}}">✓</view>
+      </view>
+    </view>
+    <view class="report-date">
+      <text>日期/范围</text>
+      <input value="{{reportDate}}" placeholder="YYYY-MM-DD" bindinput="onReportDateChange" />
+    </view>
+    <view wx:if="{{reportType !== 'day'}}" class="report-options-row">
+      <label class="checkbox-label">
+        <checkbox value="{{useLlm}}" checked="{{useLlm}}" bindchange="onLlmChange" />
+        <text>使用 AI 润色内容</text>
+      </label>
+    </view>
+    <view class="sheet-actions">
+      <button class="primary" bindtap="confirmGenerateReport" loading="{{generatingReport}}">生成</button>
+      <button bindtap="closeReportModal">取消</button>
+    </view>
+  </view>
+
+  <!-- 编辑记录弹窗 -->
+  <view wx:if="{{showEditModal}}" class="mask" bindtap="closeEditModal"></view>
+  <view wx:if="{{showEditModal}}" class="sheet">
+    <view class="sheet-head">
+      <view class="title">编辑记录</view>
+      <text class="close" bindtap="closeEditModal">×</text>
+    </view>
+    <scroll-view scroll-y class="edit-scroll">
+      <input class="edit-field" value="{{editForm.record_date}}" placeholder="业务日期 YYYY-MM-DD" bindinput="onEditInput" data-field="record_date" />
+      <input wx:if="{{editForm.record_type === '巡视'}}" class="edit-field" type="number" value="{{editForm.worker_count}}" placeholder="施工人数（必填，可填0）" bindinput="onEditInput" data-field="worker_count" />
+      <input wx:if="{{editForm.record_type === '巡视'}}" class="edit-field" value="{{editForm.inspection_start_time}}" placeholder="巡视开始时间 YYYY-MM-DD HH:mm" bindinput="onEditInput" data-field="inspection_start_time" />
+      <input wx:if="{{editForm.record_type === '巡视'}}" class="edit-field" value="{{editForm.inspection_end_time}}" placeholder="巡视结束时间 YYYY-MM-DD HH:mm" bindinput="onEditInput" data-field="inspection_end_time" />
+      <input wx:if="{{editForm.record_type === '旁站'}}" class="edit-field" value="{{editForm.station_location}}" placeholder="旁站关键部位（必填）" bindinput="onEditInput" data-field="station_location" />
+      <input wx:if="{{editForm.record_type === '旁站'}}" class="edit-field" value="{{editForm.station_process}}" placeholder="旁站关键工序（必填）" bindinput="onEditInput" data-field="station_process" />
+      <textarea wx:if="{{editForm.record_type === '验收'}}" class="edit-field textarea" value="{{editForm.acceptance_content}}" placeholder="验收内容（必填）" bindinput="onEditInput" data-field="acceptance_content" />
+      <textarea wx:if="{{editForm.record_type === '验收'}}" class="edit-field textarea" value="{{editForm.acceptance_participants}}" placeholder="实际参验单位及人员（可从项目资料带出后确认）" bindinput="onEditInput" data-field="acceptance_participants" />
+      <input class="edit-field" value="{{editForm.section}}" placeholder="施工区域" bindinput="onEditInput" data-field="section" />
+      <input class="edit-field" value="{{editForm.location}}" placeholder="具体位置" bindinput="onEditInput" data-field="location" />
+      <textarea class="edit-field textarea" value="{{editForm.work_content}}" placeholder="工作内容" bindinput="onEditInput" data-field="work_content" />
+      <input class="edit-field" value="{{editForm.weather}}" placeholder="天气" bindinput="onEditInput" data-field="weather" wx:if="{{editForm.record_type === '巡视'}}" />
+      <textarea class="edit-field textarea" value="{{editForm.inspection_remark}}" placeholder="巡视备注" bindinput="onEditInput" data-field="inspection_remark" wx:if="{{editForm.record_type === '巡视'}}" />
+      <textarea class="edit-field textarea" value="{{editForm.problems}}" placeholder="发现的问题" bindinput="onEditInput" data-field="problems" wx:if="{{editForm.record_type === '巡视' || editForm.record_type === '旁站'}}" />
+      <textarea class="edit-field textarea" value="{{editForm.treatment}}" placeholder="处理意见及措施" bindinput="onEditInput" data-field="treatment" wx:if="{{editForm.record_type === '巡视' || editForm.record_type === '旁站' || editForm.record_type === '验收'}}" />
+      <input class="edit-field" value="{{editForm.acceptance_guide_ref}}" placeholder="验收类型" bindinput="onEditInput" data-field="acceptance_guide_ref" wx:if="{{editForm.record_type === '验收'}}" />
+      <picker wx:if="{{editForm.record_type === '验收'}}" range="{{acceptanceResults}}" bindchange="onAcceptanceResultChange"><view class="edit-field">验收结论：{{editForm.acceptance_result || '请人工确认'}}</view></picker>
+      <textarea class="edit-field textarea" value="{{editForm.acceptance_basis}}" placeholder="检验依据" bindinput="onEditInput" data-field="acceptance_basis" wx:if="{{editForm.record_type === '验收'}}" />
+      <input class="edit-field" value="{{editForm.station_project_name}}" placeholder="工程名称" bindinput="onEditInput" data-field="station_project_name" wx:if="{{editForm.record_type === '旁站'}}" />
+      <textarea class="edit-field textarea" value="{{editForm.station_content}}" placeholder="旁站内容" bindinput="onEditInput" data-field="station_content" wx:if="{{editForm.record_type === '旁站'}}" />
+      <textarea class="edit-field textarea" value="{{editForm.station_supervision_status}}" placeholder="旁站监理情况" bindinput="onEditInput" data-field="station_supervision_status" wx:if="{{editForm.record_type === '旁站'}}" />
+      <textarea class="edit-field textarea" value="{{editForm.station_conclusion}}" placeholder="旁站结论" bindinput="onEditInput" data-field="station_conclusion" wx:if="{{editForm.record_type === '旁站'}}" />
+      <input class="edit-field" value="{{editForm.station_start_time}}" placeholder="开始时间" bindinput="onEditInput" data-field="station_start_time" wx:if="{{editForm.record_type === '旁站'}}" />
+      <input class="edit-field" value="{{editForm.station_end_time}}" placeholder="结束时间" bindinput="onEditInput" data-field="station_end_time" wx:if="{{editForm.record_type === '旁站'}}" />
+      <input class="edit-field" value="{{editForm.witness_material_name}}" placeholder="材料名称" bindinput="onEditInput" data-field="witness_material_name" wx:if="{{editForm.record_type === '见证'}}" />
+      <input class="edit-field" value="{{editForm.witness_material_spec}}" placeholder="规格型号" bindinput="onEditInput" data-field="witness_material_spec" wx:if="{{editForm.record_type === '见证'}}" />
+      <input class="edit-field" value="{{editForm.witness_quantity}}" placeholder="取样数量" bindinput="onEditInput" data-field="witness_quantity" wx:if="{{editForm.record_type === '见证'}}" />
+      <input class="edit-field" value="{{editForm.witness_unit}}" placeholder="单位" bindinput="onEditInput" data-field="witness_unit" wx:if="{{editForm.record_type === '见证'}}" />
+      <input class="edit-field" value="{{editForm.witness_cert_no}}" placeholder="合格证/检测报告编号" bindinput="onEditInput" data-field="witness_cert_no" wx:if="{{editForm.record_type === '见证'}}" />
+      <input class="edit-field" value="{{editForm.witness_accept_result}}" placeholder="进场验收结论" bindinput="onEditInput" data-field="witness_accept_result" wx:if="{{editForm.record_type === '见证'}}" />
+    </scroll-view>
+    <view class="sheet-actions">
+      <button class="primary" bindtap="saveEditRecord" loading="{{savingEdit}}">保存</button>
+      <button bindtap="closeEditModal">取消</button>
+    </view>
+  </view>
+</view>

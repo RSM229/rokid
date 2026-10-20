@@ -1,0 +1,84 @@
+<view class="page tab-host" style="{{themeStyle}}">
+  <glass-nav-bar title="资料库" left="back" />
+  <!-- 2026-10-08 起「资料库」是底部第 4 个 tab，本页即其落点 -->
+  <tab-bar active="kb" />
+
+  <view class="tabs">
+    <view class="{{tab === 'mine' ? 'active' : ''}}" data-tab="mine" bindtap="onTab">我的</view>
+    <view class="{{tab === 'shared' ? 'active' : ''}}" data-tab="shared" bindtap="onTab">共享</view>
+    <view class="{{tab === 'plaza' ? 'active' : ''}}" data-tab="plaza" bindtap="onTab">广场</view>
+  </view>
+
+  <view class="toolbar">
+    <button class="btn-primary" size="mini" bindtap="showCreate">+ 新建资料库</button>
+    <button class="btn-green" size="mini" bindtap="showJoin">加入共享库</button>
+  </view>
+
+  <block wx:if="{{tab !== 'plaza'}}">
+    <view wx:if="{{loading && !list.length}}" class="empty">正在加载…</view>
+    <view wx:elif="{{!list.length}}" class="empty">还没有资料库，点上方“新建资料库”</view>
+    <view wx:for="{{list}}" wx:key="id" class="card kb" data-id="{{item.id}}" bindtap="open">
+      <view class="kb-head">
+        <view class="kb-name">{{item.name}}</view>
+        <view class="kb-tag {{item.kb_type}}">{{item.is_builtin ? '内置' : (item.kb_type === 'shared' ? '共享' : '个人')}}</view>
+      </view>
+      <view wx:if="{{item.description}}" class="kb-desc">{{item.description}}</view>
+      <view class="kb-sub">{{item.document_count}} 份文档 · {{item.member_count}} 位成员 · {{roleLabel[item.role]}}</view>
+    </view>
+  </block>
+
+  <block wx:else>
+    <view wx:if="{{plazaLoading && !list.length}}" class="empty">正在加载广场…</view>
+    <view wx:elif="{{!list.length}}" class="empty">广场暂无公开资料库</view>
+    <view wx:for="{{list}}" wx:key="id" class="card kb">
+      <view class="kb-head">
+        <view class="kb-name">{{item.name}}</view>
+        <view class="kb-tag {{item.is_builtin ? 'builtin' : 'shared'}}">{{item.is_builtin ? '内置' : '公开'}}</view>
+      </view>
+      <view wx:if="{{item.description}}" class="kb-desc">{{item.description}}</view>
+      <view class="kb-sub">{{item.owner_name}} · {{item.document_count}} 份文档 · {{item.member_count}} 人订阅</view>
+      <view class="plaza-actions">
+        <button class="btn-primary" size="mini" data-id="{{item.id}}" bindtap="subscribe">{{item.joined ? '进入资料库' : '订阅'}}</button>
+      </view>
+    </view>
+  </block>
+
+  <view wx:if="{{showCreate}}" class="mask" bindtap="hideCreate">
+    <view class="modal" catchtap="">
+      <view class="modal-title">新建资料库</view>
+      <view class="field-group">
+        <text class="field-label">名称</text>
+        <input class="field-input" value="{{createName}}" data-field="createName" placeholder="如：项目规范库" bindinput="onCreateInput" />
+      </view>
+      <view class="field-group">
+        <text class="field-label">类型</text>
+        <view class="type-row">
+          <view class="type-opt {{createType === 'personal' ? 'on' : ''}}" data-type="personal" bindtap="onCreateType">个人</view>
+          <view class="type-opt {{createType === 'shared' ? 'on' : ''}}" data-type="shared" bindtap="onCreateType">共享</view>
+        </view>
+      </view>
+      <view class="field-group">
+        <text class="field-label">描述（可选）</text>
+        <input class="field-input" value="{{createDesc}}" data-field="createDesc" placeholder="一句话说明" bindinput="onCreateInput" />
+      </view>
+      <view class="modal-btns">
+        <button class="btn-cancel" bindtap="hideCreate">取消</button>
+        <button class="btn-primary" loading="{{creating}}" bindtap="confirmCreate">创建</button>
+      </view>
+    </view>
+  </view>
+
+  <view wx:if="{{showJoin}}" class="mask" bindtap="hideJoin">
+    <view class="modal" catchtap="">
+      <view class="modal-title">加入共享资料库</view>
+      <view class="field-group">
+        <text class="field-label">邀请码</text>
+        <input class="field-input" value="{{joinCode}}" placeholder="输入邀请码" bindinput="onJoinInput" />
+      </view>
+      <view class="modal-btns">
+        <button class="btn-cancel" bindtap="hideJoin">取消</button>
+        <button class="btn-primary" loading="{{joining}}" bindtap="confirmJoin">加入</button>
+      </view>
+    </view>
+  </view>
+</view>

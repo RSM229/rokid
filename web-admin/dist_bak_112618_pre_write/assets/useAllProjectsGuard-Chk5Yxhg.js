@@ -1,0 +1,1 @@
+import"./rolldown-runtime-QTnfLwEv.js";import{r as e}from"./element-plus-C6tcqj56.js";import{t}from"./index-vLWBwh7g.js";function n(n=`新建`){return t().allProjects?(e.warning(`「全部项目」视图仅供查看，请先在顶部切换到具体项目再${n}`),!1):!0}export{n as t};

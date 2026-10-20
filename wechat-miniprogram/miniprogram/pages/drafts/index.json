@@ -1,0 +1,8 @@
+{
+  "navigationBarTitleText": "待补全草稿",
+  "navigationStyle": "custom",
+  "enablePullDownRefresh": true,
+  "usingComponents": {
+    "glass-nav-bar": "/components/glass-nav-bar/index"
+  }
+}

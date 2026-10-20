@@ -1,0 +1,10 @@
+<view class="page" style="{{themeStyle}}">
+  <glass-nav-bar title="笔记详情" left="back" />
+
+  <input class="title-input" value="{{title}}" placeholder="标题" bindinput="onTitleInput" />
+  <textarea class="content-input" value="{{content}}" placeholder="开始记录…（支持 Markdown 文本）" bindinput="onContentInput" auto-height maxlength="20000" />
+  <view class="btns">
+    <button class="btn-primary" loading="{{saving}}" bindtap="save">保存</button>
+    <button class="btn-cancel" bindtap="del">删除</button>
+  </view>
+</view>

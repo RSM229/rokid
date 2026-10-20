@@ -1,0 +1,95 @@
+/* ============ 列表卡片基元（2026-10-12 抽出） ============
+   背景：「我的」拆出二级页「设置」后，两页都要用同一套 .section / .cell 语言。
+   复制一份必然随迭代漂移（改了一页忘了另一页），故收敛为单一来源，
+   页面各自 @import 引入。改这里 = 两页同时生效。
+
+   用法：@import "../../styles/cell-list.wxss";  置于页面 wxss 首行，
+   页面自有规则写在其后即可正常覆盖（同优先级后段压前段）。 */
+
+/* 玻璃卡片外壳 */
+.section {
+  margin-top: 24rpx;
+  background: rgba(255, 255, 255, 0.32);
+  backdrop-filter: blur(40rpx) saturate(1.8);
+  -webkit-backdrop-filter: blur(40rpx) saturate(1.8);
+  border: 2rpx solid rgba(var(--brand-rgb, 22,119,255), 0.14);
+  box-shadow: inset 0 2rpx 0 rgba(255, 255, 255, 0.40), 0 12rpx 36rpx rgba(var(--shadow-rgb, 20,70,140), 0.16);
+  border-radius: 18rpx;
+  overflow: hidden;
+}
+
+/* 一行设置项：左列文字、右列取值/箭头 */
+.cell {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 28rpx 30rpx;
+  border-bottom: 1rpx solid rgba(var(--deep-rgb, 10,46,92), 0.08);
+  font-size: 29rpx;
+}
+.cell:last-child { border-bottom: none; }
+.cell-label { color: #6b7c90; }
+.cell-value { color: var(--ink, #12253d); }
+.cell-arrow { color: #b9c6d6; font-size: 34rpx; }
+.cell-right { display: flex; align-items: center; gap: 12rpx; }
+
+/* cell 左列：主标题 + 副提示竖排。
+   原先「说明」独占一个 cell，同一段里连出两三条，白占两屏高度又打断视线；
+   收进对应项下方做小字副提示 —— 信息不丢，视觉退到背景。 */
+.cell-main { display: flex; flex-direction: column; gap: 6rpx; flex: 1; min-width: 0; }
+.cell-sub { font-size: 22rpx; color: #9aa9bb; line-height: 1.5; }
+
+/* 分组标题：缩进 = 页边距 28rpx + cell 内边距 30rpx，与卡片内文字左对齐 */
+.group-title {
+  margin: 36rpx 30rpx 12rpx;
+  font-size: 25rpx;
+  font-weight: 600;
+  color: #6b7c90;
+}
+
+/* 可点击入口行：主题色玻璃微染，一眼看出「这行能进去」 */
+.cell.entry-tint {
+  background: rgba(var(--brand-rgb, 22,119,255), 0.05);
+  box-shadow: inset 0 1rpx 0 rgba(255, 255, 255, 0.60);
+}
+
+/* ============ 带图标的目录行（2026-10-12 上收，mine 与 account-security 共用） ============
+   结构：图标底板 + 标题/副提示 + 箭头。图标本体（mask 数据 URI + 颜色）是页面资产，
+   各页自定 .ic-*；这里只定布局与底板。 */
+.cell.entry-item { padding: 24rpx 30rpx; }
+.entry-main { display: flex; align-items: center; gap: 22rpx; }
+.entry-text { display: flex; flex-direction: column; gap: 6rpx; }
+.entry-title { font-size: 30rpx; font-weight: 600; color: var(--ink, #12253d); }
+.entry-desc { font-size: 23rpx; color: rgba(var(--deep-rgb, 10,46,92), 0.55); }
+.entry-icon {
+  position: relative;
+  flex-shrink: 0;
+  width: 64rpx;
+  height: 64rpx;
+  border-radius: 18rpx;
+  background: rgba(var(--brand-rgb, 22,119,255), 0.10);
+  border: 2rpx solid rgba(var(--brand-rgb, 22,119,255), 0.18);
+}
+/* mask 只落在 ::before（裸类规则会误伤同名的组合类）；具体图形由页面 .ic-* 提供 */
+.entry-icon::before {
+  content: '';
+  position: absolute;
+  left: 16rpx;
+  top: 16rpx;
+  width: 32rpx;
+  height: 32rpx;
+  -webkit-mask-position: center;
+  -webkit-mask-size: 100% 100%;
+  -webkit-mask-repeat: no-repeat;
+  mask-position: center;
+  mask-size: 100% 100%;
+  mask-repeat: no-repeat;
+}
+
+/* 修：.muted 本是给 hero 深底用的白字，落在白底卡片里等于隐形（版本号、绑定时间都看不见）。
+   限定作用域后，卡片内的次要文字改用深色调 + 缩一号（25rpx），
+   与 .cell 的 29rpx 正文拉开层级 —— 字号原先来自 mine 的 .muted，基元抽出后随行补上。 */
+.section .muted {
+  color: rgba(var(--deep-rgb, 10,46,92), 0.55);
+  font-size: 25rpx;
+}

@@ -1,0 +1,11 @@
+-keep class com.gdjl.phone.** { *; }
+-keep class com.rokid.** { *; }
+-keep interface com.rokid.** { *; }
+-keepattributes Signature,InnerClasses,EnclosingMethod,*Annotation*
+-dontwarn org.slf4j.**
+-dontwarn java.lang.invoke.StringConcatFactory
+-dontwarn android.app.ActivityThread
+-dontwarn android.app.AppGlobals
+-dontwarn android.os.SystemProperties
+-dontwarn android.util.Pools$SimplePool
+-dontwarn kotlinx.parcelize.Parcelize

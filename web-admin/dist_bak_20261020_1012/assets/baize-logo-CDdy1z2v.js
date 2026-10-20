@@ -1,0 +1,1 @@
+var e=`/baize-logo.png`;export{e as t};

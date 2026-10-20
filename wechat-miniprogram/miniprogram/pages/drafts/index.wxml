@@ -1,0 +1,35 @@
+<view class="page tab-host" style="{{themeStyle}}">
+  <glass-nav-bar title="待补全草稿" left="back" />
+
+  <view class="section" wx:if="{{drafts.length}}">
+    <view class="draft-item" wx:for="{{drafts}}" wx:key="tool">
+      <view class="di-main">
+        <view class="di-title">待补全 · {{item.label}}</view>
+        <view class="di-sub">已填：{{item.summary}}</view>
+        <view class="di-missing" wx:if="{{item.missingText}}">还差：{{item.missingText}}</view>
+        <view class="di-time">{{item.timeText}}</view>
+      </view>
+      <view class="di-actions">
+        <button class="di-btn ghost" size="mini" data-tool="{{item.tool}}" bindtap="discardDraft">放弃</button>
+        <button
+          wx:if="{{item.form_code}}"
+          class="di-btn ghost"
+          size="mini"
+          bindtap="continueDraft">聊天补全</button>
+        <button
+          wx:if="{{item.form_code}}"
+          class="di-btn"
+          size="mini"
+          data-code="{{item.form_code}}"
+          data-id="{{item.id}}"
+          bindtap="useForm">用表单填</button>
+        <button wx:else class="di-btn" size="mini" bindtap="continueDraft">继续填写</button>
+      </view>
+    </view>
+  </view>
+
+  <view class="empty" wx:else>
+    <text class="empty-text">没有待补全的记录</text>
+    <text class="empty-sub">在聊天里说「记一条巡视」，没填完系统也会自动帮你留着</text>
+  </view>
+</view>

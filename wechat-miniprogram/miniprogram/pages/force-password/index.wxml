@@ -1,0 +1,29 @@
+<view class="page" style="{{themeStyle}}">
+  <glass-nav-bar title="设置新密码" left="none" />
+
+  <view class="header">
+    <view class="title">请设置新密码</view>
+    <view class="subtitle">管理员已把你的密码重置为一次性临时口令</view>
+  </view>
+
+  <view class="notice">
+    为保障账号安全，建议尽快设置你自己的新密码；也可以先跳过，之后在「我的 → 账号安全 → 登录密码与密保」里随时设置。
+  </view>
+
+  <view class="form">
+    <view class="form-item">
+      <view class="label">新密码 <text class="required">*</text></view>
+      <input class="input" password placeholder="至少 8 位" value="{{newPassword}}" data-field="newPassword" bindinput="onInput" />
+    </view>
+    <view class="form-item">
+      <view class="label">确认新密码 <text class="required">*</text></view>
+      <input class="input" password placeholder="请再次输入新密码" value="{{confirmPassword}}" data-field="confirmPassword" bindinput="onInput" />
+    </view>
+  </view>
+
+  <view wx:if="{{error}}" class="error">{{error}}</view>
+
+  <button class="btn-primary" loading="{{saving}}" disabled="{{saving}}" bindtap="submit">设置并进入系统</button>
+  <button class="btn-plain" bindtap="skip">暂不设置，先进入系统</button>
+  <view class="btn-link" bindtap="logout">退出登录</view>
+</view>

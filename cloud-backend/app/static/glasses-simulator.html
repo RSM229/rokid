@@ -1,0 +1,1350 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rokid 眼镜端模拟器 — 监理智能体</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            background: #1a1a2e;
+            color: #e0e0e0;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        /* 顶部状态栏 */
+        .top-bar {
+            width: 100%;
+            background: #16213e;
+            padding: 12px 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid #0f3460;
+        }
+        .top-bar h1 { font-size: 18px; color: #e94560; }
+        .auth-bar { display: flex; align-items: center; gap: 6px; }
+        .auth-bar input, .auth-bar select {
+            width: 120px;
+            padding: 6px 8px;
+            border: 1px solid #304b74;
+            border-radius: 4px;
+            color: #e0e0e0;
+            background: #101b33;
+        }
+        .auth-bar select { width: 145px; }
+        .connection-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+        }
+        .status-dot {
+            width: 10px; height: 10px;
+            border-radius: 50%;
+            background: #666;
+        }
+        .status-dot.connected { background: #4caf50; box-shadow: 0 0 8px #4caf50; }
+        .status-dot.disconnected { background: #f44336; }
+
+        /* 主容器 */
+        .main-container {
+            display: flex;
+            gap: 20px;
+            padding: 20px;
+            max-width: 1400px;
+            width: 100%;
+            flex: 1;
+        }
+
+        /* 左侧：眼镜模拟显示 */
+        .glasses-display {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        /* 眼镜屏幕模拟 */
+        .glasses-screen {
+            background: #000;
+            border: 3px solid #0f3460;
+            border-radius: 16px;
+            padding: 20px;
+            min-height: 300px;
+            position: relative;
+            overflow: hidden;
+        }
+        .glasses-screen::before {
+            content: 'AR DISPLAY';
+            position: absolute;
+            top: 8px; right: 12px;
+            font-size: 10px;
+            color: #333;
+        }
+        .screen-status {
+            font-size: 14px;
+            color: #4caf50;
+            margin-bottom: 12px;
+        }
+        .screen-content {
+            font-size: 16px;
+            line-height: 1.8;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+        .screen-content .hazard-warn {
+            color: #ff5252;
+            font-weight: bold;
+        }
+        .screen-content .info-label {
+            color: #82b1ff;
+        }
+        .screen-content .success-text {
+            color: #4caf50;
+        }
+
+        /* 摄像头预览 */
+        .camera-preview {
+            background: #111;
+            border: 2px solid #0f3460;
+            border-radius: 12px;
+            padding: 12px;
+            text-align: center;
+            position: relative;
+        }
+        .camera-preview video {
+            max-width: 100%;
+            border-radius: 8px;
+            transform: scaleX(-1); /* 镜像翻转，更自然 */
+        }
+        .camera-placeholder {
+            color: #555;
+            padding: 40px;
+            font-size: 14px;
+        }
+        .camera-toolbar {
+            display: flex;
+            gap: 8px;
+            margin-top: 10px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        .rec-indicator {
+            position: absolute;
+            top: 20px; left: 20px;
+            background: rgba(229, 69, 96, 0.85);
+            color: #fff;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            display: none;
+            align-items: center;
+            gap: 6px;
+        }
+        .rec-indicator.active { display: flex; }
+        .rec-dot {
+            width: 8px; height: 8px;
+            background: #fff;
+            border-radius: 50%;
+            animation: blink 1s infinite;
+        }
+        @keyframes blink { 50% { opacity: 0.3; } }
+        .cam-status {
+            position: absolute;
+            top: 20px; right: 20px;
+            background: rgba(0,0,0,0.6);
+            color: #4caf50;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+        .cam-status.off { color: #f44336; }
+        .photo-thumb {
+            display: flex;
+            gap: 8px;
+            margin-top: 10px;
+            overflow-x: auto;
+            padding: 4px;
+        }
+        .photo-thumb img {
+            height: 60px;
+            border-radius: 4px;
+            border: 1px solid #0f3460;
+        }
+
+        /* 语音面板 */
+        .voice-panel {
+            background: #16213e;
+            border: 1px solid #0f3460;
+            border-radius: 12px;
+            padding: 16px;
+        }
+        .voice-panel h3 {
+            font-size: 14px;
+            color: #e94560;
+            margin-bottom: 12px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .voice-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 10px;
+            font-size: 13px;
+        }
+        .voice-dot {
+            width: 10px; height: 10px;
+            border-radius: 50%;
+            background: #666;
+        }
+        .voice-dot.active {
+            background: #4caf50;
+            box-shadow: 0 0 8px #4caf50;
+            animation: pulse 1.5s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        .voice-cmds {
+            font-size: 12px;
+            color: #888;
+            line-height: 1.8;
+            margin-top: 8px;
+        }
+        .voice-cmds strong { color: #82b1ff; }
+
+        /* 右侧：控制面板 */
+        .control-panel {
+            width: 420px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .panel-card {
+            background: #16213e;
+            border: 1px solid #0f3460;
+            border-radius: 12px;
+            padding: 16px;
+        }
+        .panel-card h3 {
+            font-size: 14px;
+            color: #e94560;
+            margin-bottom: 12px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        /* 指令测试区 */
+        .command-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+        }
+        .cmd-btn {
+            background: #0f3460;
+            color: #e0e0e0;
+            border: 1px solid #1a4a8a;
+            border-radius: 8px;
+            padding: 10px;
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .cmd-btn:hover { background: #1a4a8a; }
+        .cmd-btn.danger { border-color: #e94560; color: #ff8a80; }
+        .cmd-btn.danger:hover { background: #3d1525; }
+        .cmd-btn.success { border-color: #4caf50; color: #a5d6a7; }
+        .cmd-btn.success:hover { background: #1b3a1f; }
+
+        .text-input {
+            width: 100%;
+            background: #0d1b3e;
+            border: 1px solid #0f3460;
+            border-radius: 8px;
+            padding: 10px;
+            color: #e0e0e0;
+            font-size: 14px;
+            margin-bottom: 8px;
+        }
+        .text-input:focus { outline: none; border-color: #e94560; }
+
+        /* 日志区 */
+        .log-area {
+            background: #0d1117;
+            border: 1px solid #0f3460;
+            border-radius: 8px;
+            padding: 12px;
+            height: 200px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            line-height: 1.6;
+        }
+        .log-entry { margin-bottom: 4px; }
+        .log-time { color: #666; }
+        .log-type-cmd { color: #82b1ff; }
+        .log-type-recv { color: #4caf50; }
+        .log-type-error { color: #ff5252; }
+        .log-type-info { color: #ffc107; }
+
+        /* 震动动画 */
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            25% { transform: translateX(-5px); }
+            75% { transform: translateX(5px); }
+        }
+        .shaking { animation: shake 0.3s ease-in-out 3; }
+
+        /* 紧急闪烁 */
+        @keyframes urgent-flash {
+            0%, 100% { background: #000; }
+            50% { background: #3d0000; }
+        }
+        .urgent { animation: urgent-flash 0.5s ease-in-out 3; }
+
+        /* 滚动条 */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: #0d1b3e; }
+        ::-webkit-scrollbar-thumb { background: #0f3460; border-radius: 3px; }
+
+        /* 底部状态 */
+        .bottom-info {
+            display: flex;
+            gap: 16px;
+            font-size: 12px;
+            color: #666;
+            margin-top: 8px;
+        }
+        .bottom-info span { color: #aaa; }
+    </style>
+</head>
+<body>
+
+<!-- 顶部状态栏 -->
+<div class="top-bar">
+    <h1>Rokid 眼镜端模拟器</h1>
+    <div class="auth-bar">
+        <input id="loginUsername" autocomplete="username" placeholder="监理通账号" />
+        <input id="loginPassword" type="password" autocomplete="current-password" placeholder="密码" />
+        <select id="loginRole">
+            <option>专业监理工程师</option>
+            <option>监理员</option>
+            <option>总监代表</option>
+            <option>总监理工程师</option>
+        </select>
+        <button class="cmd-btn" onclick="loginSimulator()">登录并连接</button>
+    </div>
+    <div class="connection-status">
+        <div class="status-dot disconnected" id="statusDot"></div>
+        <span id="statusText">未连接</span>
+    </div>
+</div>
+
+<div class="main-container">
+    <!-- 左侧：眼镜显示 -->
+    <div class="glasses-display">
+        <!-- 眼镜屏幕 -->
+        <div class="glasses-screen" id="glassesScreen">
+            <div class="screen-status" id="screenStatus">就绪</div>
+            <div class="screen-content" id="screenContent">等待连接...</div>
+        </div>
+
+        <!-- 摄像头预览（使用电脑本身摄像头） -->
+        <div class="camera-preview">
+            <div id="cameraContainer">
+                <div class="camera-placeholder" id="cameraPlaceholder">
+                    正在请求摄像头权限...
+                </div>
+                <video id="cameraVideo" autoplay playsinline muted style="display:none;"></video>
+                <canvas id="photoCanvas" style="display:none;"></canvas>
+                <div class="rec-indicator" id="recIndicator">
+                    <div class="rec-dot"></div>
+                    <span id="recTime">00:00</span>
+                </div>
+                <div class="cam-status off" id="camStatus">摄像头未开启</div>
+            </div>
+            <div class="camera-toolbar">
+                <button class="cmd-btn" onclick="startCamera()">开启摄像头</button>
+                <button class="cmd-btn" onclick="stopCamera()">关闭摄像头</button>
+                <button class="cmd-btn success" onclick="takePhoto()">拍照</button>
+                <button class="cmd-btn" id="recordBtn" onclick="toggleRecording()">开始录像</button>
+                <button class="cmd-btn danger" onclick="detectLiveHazard()">现场隐患识别</button>
+                <button class="cmd-btn" id="autoInspectBtn" onclick="toggleAutoInspect()">定时巡检识别</button>
+            </div>
+            <div class="photo-thumb" id="photoThumb"></div>
+        </div>
+
+        <!-- 底部信息 -->
+        <div class="bottom-info">
+            <span>设备ID: <strong id="deviceId">--</strong></span>
+            <span>连接时间: <strong id="connectTime">--</strong></span>
+            <span>消息数: <strong id="msgCount">0</strong></span>
+        </div>
+    </div>
+
+    <!-- 右侧：控制面板 -->
+    <div class="control-panel">
+        <!-- 指令测试 -->
+        <div class="panel-card">
+            <h3>指令测试台</h3>
+            <input type="text" class="text-input" id="speakText" placeholder="输入要播报的文字..." value="监理智能体已启动，请说出指令" />
+            <div class="command-grid">
+                <button class="cmd-btn" onclick="sendSpeak()">语音播报</button>
+                <button class="cmd-btn danger" onclick="sendUrgent()">紧急播报</button>
+                <button class="cmd-btn" onclick="sendVibrate()">震动提示</button>
+                <button class="cmd-btn" onclick="sendStartInspection()">启动巡检</button>
+                <button class="cmd-btn danger" onclick="sendStopInspection()">停止巡检</button>
+                <button class="cmd-btn" onclick="clearDisplay()">清屏</button>
+            </div>
+        </div>
+
+        <!-- 隐患展示测试 -->
+        <div class="panel-card">
+            <h3>隐患识别模拟</h3>
+            <div class="command-grid">
+                <button class="cmd-btn danger" onclick="showHazardDemo()">展示隐患</button>
+                <button class="cmd-btn success" onclick="showRecheckPass()">复查合格</button>
+                <button class="cmd-btn danger" onclick="showRecheckFail()">驳回整改</button>
+                <button class="cmd-btn" onclick="showRectification()">展示整改单</button>
+            </div>
+        </div>
+
+        <!-- 验收指引测试 -->
+        <div class="panel-card">
+            <h3>验收指引模拟</h3>
+            <input type="text" class="text-input" id="guideKeyword" placeholder="验收项目关键词" value="钢筋" />
+            <button class="cmd-btn" style="width:100%;" onclick="showGuideDemo()">展示验收指引</button>
+        </div>
+
+        <!-- 语音控制（电脑麦克风） -->
+        <div class="voice-panel">
+            <h3>语音控制（电脑麦克风）</h3>
+            <div class="voice-status">
+                <div class="voice-dot" id="voiceDot"></div>
+                <span id="voiceStatusText">未开启</span>
+            </div>
+            <button class="cmd-btn" id="listenBtn" style="width:100%; margin-bottom:8px;" onclick="toggleListening()">开启语音监听</button>
+            <!-- 文本输入降级方案 -->
+            <div id="voiceFallback" style="display:none; margin-top:8px;">
+                <input type="text" class="text-input" id="voiceTextInput" placeholder="输入指令文字..." style="margin-bottom:4px;" onkeydown="if(event.key==='Enter')execVoiceText()" />
+                <button class="cmd-btn" style="width:100%;" onclick="execVoiceText()">执行指令</button>
+            </div>
+            <div class="voice-cmds">
+                支持语音指令：<br>
+                <strong>拍照</strong> / <strong>录像</strong> / <strong>停止录像</strong><br>
+                <strong>识别隐患</strong> / <strong>现场识别</strong><br>
+                <strong>开始巡检</strong> / <strong>停止巡检</strong><br>
+                <strong>清屏</strong> / <strong>震动</strong><br>
+                <strong>开启摄像头</strong> / <strong>关闭摄像头</strong>
+            </div>
+        </div>
+
+        <!-- 消息日志 -->
+        <div class="panel-card">
+            <h3>消息日志</h3>
+            <div class="log-area" id="logArea">
+                <div class="log-entry"><span class="log-time">--:--:--</span> <span class="log-type-info">[INFO]</span> 模拟器启动中...</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// ===== 全局状态 =====
+let ws = null;
+let msgCount = 0;
+let mediaStream = null;
+let lastPhotoBlob = null;
+let mediaRecorder = null;
+let recordedChunks = [];
+let isRecording = false;
+let recStartTime = 0;
+let recTimer = null;
+let autoInspectTimer = null;
+let autoInspectRunning = false;
+let authToken = null;
+let backendUrl = 'http://localhost:8000';
+let wsUrl = 'ws://localhost:8000/api/ws/glasses-simulator';
+
+// 语音相关
+let audioStream = null;          // 麦克风音频流
+let audioContext = null;         // AudioContext 用于音量检测
+let audioAnalyser = null;
+let isListening = false;         // 是否正在监听语音
+let recognition = null;          // SpeechRecognition 实例
+let voiceCmdMap = {};            // 语音指令映射
+
+// ===== 日志 =====
+function log(type, message) {
+    const now = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+    const logArea = document.getElementById('logArea');
+    const entry = document.createElement('div');
+    entry.className = 'log-entry';
+    const typeClass = {
+        'cmd': 'log-type-cmd',
+        'recv': 'log-type-recv',
+        'error': 'log-type-error',
+        'info': 'log-type-info',
+    }[type] || 'log-type-info';
+    const timeSpan = document.createElement('span');
+    timeSpan.className = 'log-time';
+    timeSpan.textContent = now;
+    const typeSpan = document.createElement('span');
+    typeSpan.className = typeClass;
+    typeSpan.textContent = `[${type.toUpperCase()}]`;
+    entry.append(
+        timeSpan,
+        document.createTextNode(' '),
+        typeSpan,
+        document.createTextNode(` ${message}`),
+    );
+    logArea.appendChild(entry);
+    logArea.scrollTop = logArea.scrollHeight;
+
+    // 限制日志条数
+    while (logArea.children.length > 100) {
+        logArea.removeChild(logArea.firstChild);
+    }
+}
+
+// ===== WebSocket 连接 =====
+async function connect() {
+    const token = await getAuthToken();
+    if (!token || (ws && ws.readyState <= WebSocket.OPEN)) return;
+    log('info', `正在连接后端: ${wsUrl}`);
+    ws = new WebSocket(wsUrl);
+
+    ws.onopen = () => {
+        ws.send(JSON.stringify({ type: 'auth', token }));
+        document.getElementById('statusDot').className = 'status-dot connected';
+        document.getElementById('statusText').textContent = '已连接';
+        document.getElementById('screenStatus').textContent = '已连接后端';
+        document.getElementById('screenContent').textContent = '监理智能体已就绪\n等待指令...';
+        document.getElementById('connectTime').textContent = new Date().toLocaleTimeString('zh-CN');
+        document.getElementById('deviceId').textContent = 'SIM-' + Date.now().toString(36);
+        log('info', 'WebSocket 连接成功');
+    };
+
+    ws.onmessage = (event) => {
+        msgCount++;
+        document.getElementById('msgCount').textContent = msgCount;
+        const msg = JSON.parse(event.data);
+        handleMessage(msg);
+    };
+
+    ws.onerror = (error) => {
+        log('error', 'WebSocket 连接错误');
+        document.getElementById('statusDot').className = 'status-dot disconnected';
+        document.getElementById('statusText').textContent = '连接错误';
+    };
+
+    ws.onclose = () => {
+        log('error', 'WebSocket 连接断开，3秒后重连...');
+        document.getElementById('statusDot').className = 'status-dot disconnected';
+        document.getElementById('statusText').textContent = '已断开';
+        setTimeout(connect, 3000);
+    };
+}
+
+// ===== 消息处理 =====
+function handleMessage(msg) {
+    log('recv', `收到消息: ${JSON.stringify(msg)}`);
+
+    if (msg.type === 'connected') {
+        log('info', msg.message);
+        return;
+    }
+
+    if (msg.type === 'command') {
+        const cmd = msg.data;
+        const action = cmd.action;
+        log('cmd', `执行指令: ${action}`);
+
+        switch (action) {
+            case 'speak':
+                speak(cmd.text || '');
+                updateScreen('语音播报', cmd.text || '');
+                break;
+
+            case 'speak_urgent':
+                speak(cmd.text || '', true);
+                updateScreen('紧急播报', cmd.text || '', 'hazard-warn');
+                triggerUrgent();
+                break;
+
+            case 'show_hazard':
+                showHazard(cmd.data || {});
+                break;
+
+            case 'show_guide':
+                showGuide(cmd.data || {});
+                break;
+
+            case 'show_rectification':
+                showRectification(cmd.data || {});
+                break;
+
+            case 'show_recheck':
+                showRecheck(cmd.data || {});
+                break;
+
+            case 'show_document':
+                showDocument(cmd.data || {});
+                break;
+
+            case 'vibrate':
+                vibrate();
+                break;
+
+            case 'start_inspection':
+                updateScreen('巡检中', 'AI安全巡检已启动\n正在定时拍照识别...', 'info-label');
+                speak('安全AI巡检已启动');
+                if (!autoInspectRunning) toggleAutoInspect();
+                break;
+
+            case 'stop_inspection':
+                updateScreen('已停止', 'AI安全巡检已停止', 'info-label');
+                speak('安全AI巡检已停止');
+                if (autoInspectRunning) toggleAutoInspect();
+                break;
+
+            case 'take_photo':
+                handleTakePhoto(cmd);
+                break;
+
+            case 'start_audio':
+                startListening();
+                break;
+
+            case 'stop_audio':
+                stopListening();
+                break;
+
+            case 'clear_display':
+                clearDisplay();
+                break;
+
+            default:
+                log('info', `未知指令: ${action}`);
+        }
+    }
+}
+
+// ===== 屏幕更新 =====
+function updateScreen(status, content, contentClass = '') {
+    document.getElementById('screenStatus').textContent = status;
+    const contentEl = document.getElementById('screenContent');
+    contentEl.className = 'screen-content' + (contentClass ? ' ' + contentClass : '');
+    contentEl.textContent = content;
+}
+
+function clearDisplay() {
+    updateScreen('就绪', '');
+}
+
+// ===== 语音播报 (TTS) =====
+function speak(text, urgent = false) {
+    if (!text) return;
+    log('info', `TTS播报: ${text}`);
+
+    if ('speechSynthesis' in window) {
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = 'zh-CN';
+        utterance.rate = urgent ? 1.2 : 1.0;
+        utterance.pitch = urgent ? 1.3 : 1.0;
+        speechSynthesis.cancel();
+        speechSynthesis.speak(utterance);
+    } else {
+        log('error', '浏览器不支持语音合成');
+    }
+}
+
+// ===== 震动 =====
+function vibrate() {
+    log('info', '震动提示');
+    const screen = document.getElementById('glassesScreen');
+    screen.classList.add('shaking');
+    setTimeout(() => screen.classList.remove('shaking'), 1000);
+
+    if ('speechSynthesis' in window) {
+        const u = new SpeechSynthesisUtterance('震动提示');
+        u.lang = 'zh-CN';
+        u.volume = 0.3;
+        speechSynthesis.speak(u);
+    }
+}
+
+// ===== 紧急闪烁 =====
+function triggerUrgent() {
+    const screen = document.getElementById('glassesScreen');
+    screen.classList.add('urgent');
+    setTimeout(() => screen.classList.remove('urgent'), 1500);
+}
+
+// ===== 隐患展示 =====
+function showHazard(data) {
+    const risk = data.top1_risk || data.risk_status || '未知隐患';
+    const category = data.risk_category || '';
+    const evidence = (data.evidence || []).join('\n• ');
+    const suggestions = (data.recheck_suggestion || []).join('\n• ');
+
+    const content = `⚠ 发现安全隐患\n` +
+        `风险类别: ${category}\n` +
+        `主要风险: ${risk}\n` +
+        (evidence ? `\n证据:\n• ${evidence}\n` : '') +
+        (suggestions ? `\n复查建议:\n• ${suggestions}` : '');
+
+    updateScreen('隐患警报', content, 'hazard-warn');
+    speak(`警告，发现安全隐患：${risk}`, true);
+    triggerUrgent();
+}
+
+// ===== 验收指引展示 =====
+function showGuide(data) {
+    const steps = (data.steps || []).map((s, i) => `${i + 1}. ${s}`).join('\n');
+    const points = (data.key_points || []).join('、');
+    const violations = (data.common_violations || []).join('、');
+
+    const content = `【验收指引】${data.keyword || ''}\n\n` +
+        `验收步骤:\n${steps}\n\n` +
+        (points ? `管控要点: ${points}\n\n` : '') +
+        (violations ? `常见违规: ${violations}` : '');
+
+    updateScreen('验收指引', content, 'info-label');
+    speak(`验收指引：${data.keyword || ''}，共${(data.steps || []).length}个步骤`);
+}
+
+// ===== 整改通知单展示 =====
+function showRectification(data) {
+    const content = `【整改通知单】\n` +
+        `编号: ${data.doc_id || ''}\n` +
+        `隐患: ${data.hazard_description || ''}\n` +
+        `部位: ${data.section || ''}\n` +
+        `期限: ${data.deadline || ''}`;
+    updateScreen('整改通知', content, 'info-label');
+    speak('整改通知单已生成');
+}
+
+// ===== 复查结果展示 =====
+function showRecheck(data) {
+    const passed = data.passed;
+    const content = passed ?
+        `✓ 复查合格\n隐患已闭环` :
+        `✗ 驳回整改\n请施工单位重新整改`;
+    updateScreen('复查结果', content, passed ? 'success-text' : 'hazard-warn');
+    speak(passed ? '复查合格，隐患已闭环' : '已驳回整改');
+}
+
+// ===== 文书展示 =====
+function showDocument(data) {
+    const content = `【监理文书】\n` +
+        `类型: ${data.doc_type || ''}\n` +
+        `标题: ${data.title || ''}\n` +
+        `状态: ${data.status || ''}`;
+    updateScreen('文书信息', content, 'info-label');
+}
+
+// ===== 摄像头（使用电脑本身摄像头）=====
+
+function updateCamStatus(text, isOn) {
+    const el = document.getElementById('camStatus');
+    el.textContent = text;
+    el.className = 'cam-status' + (isOn ? '' : ' off');
+}
+
+async function startCamera() {
+    if (mediaStream) {
+        log('info', '摄像头已开启');
+        return;
+    }
+    try {
+        log('info', '正在请求电脑摄像头权限...');
+        mediaStream = await navigator.mediaDevices.getUserMedia({
+            video: { width: { ideal: 1920 }, height: { ideal: 1080 }, facingMode: 'environment' },
+            audio: false,
+        });
+        const video = document.getElementById('cameraVideo');
+        video.srcObject = mediaStream;
+        video.style.display = 'block';
+        document.getElementById('cameraPlaceholder').style.display = 'none';
+        updateCamStatus('摄像头已开启 ●', true);
+        log('info', `摄像头已开启: ${video.videoWidth}x${video.videoHeight}`);
+    } catch (e) {
+        log('error', `摄像头开启失败: ${e.message}`);
+        updateCamStatus('摄像头开启失败', false);
+        document.getElementById('cameraPlaceholder').textContent = '摄像头开启失败：' + e.message + '\n请点击"开启摄像头"重试，并允许浏览器访问摄像头。';
+    }
+}
+
+function stopCamera() {
+    if (isRecording) toggleRecording();
+    if (autoInspectRunning) toggleAutoInspect();
+    if (mediaStream) {
+        mediaStream.getTracks().forEach(t => t.stop());
+        mediaStream = null;
+    }
+    document.getElementById('cameraVideo').style.display = 'none';
+    document.getElementById('cameraPlaceholder').style.display = 'block';
+    document.getElementById('cameraPlaceholder').textContent = '摄像头已关闭 — 点击"开启摄像头"重新开启';
+    updateCamStatus('摄像头未开启', false);
+    log('info', '摄像头已关闭');
+}
+
+// 从摄像头捕获一帧
+function captureFrame() {
+    const video = document.getElementById('cameraVideo');
+    if (!video.videoWidth) return null;
+    const canvas = document.getElementById('photoCanvas');
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext('2d');
+    // 镜像翻转以匹配预览
+    ctx.translate(canvas.width, 0);
+    ctx.scale(-1, 1);
+    ctx.drawImage(video, 0, 0);
+    ctx.setTransform(1, 0, 0, 1, 0, 0); // 重置
+    return canvas;
+}
+
+function takePhoto() {
+    if (!mediaStream) {
+        log('error', '请先开启摄像头');
+        return null;
+    }
+    const canvas = captureFrame();
+    if (!canvas) {
+        log('error', '摄像头未就绪');
+        return null;
+    }
+    const blob = canvas.toBlob(photoBlob => {
+        lastPhotoBlob = photoBlob;
+        // 添加到缩略图
+        addPhotoThumb(photoBlob);
+        log('info', `拍照完成: ${canvas.width}x${canvas.height}, ${(photoBlob.size / 1024).toFixed(1)}KB`);
+
+        // 上报拍照完成
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({
+                type: 'photo_taken',
+                filename: `photo_${Date.now()}.jpg`,
+                size: photoBlob.size,
+            }));
+        }
+    }, 'image/jpeg', 0.9);
+    return blob;
+}
+
+function addPhotoThumb(blob) {
+    const thumb = document.getElementById('photoThumb');
+    const img = document.createElement('img');
+    img.src = URL.createObjectURL(blob);
+    img.onclick = () => {
+        // 点击下载
+        const a = document.createElement('a');
+        a.href = img.src;
+        a.download = `photo_${Date.now()}.jpg`;
+        a.click();
+    };
+    thumb.appendChild(img);
+    // 限制缩略图数量
+    while (thumb.children.length > 10) {
+        thumb.removeChild(thumb.firstChild);
+    }
+}
+
+function handleTakePhoto(cmd) {
+    log('info', `收到拍照指令: ${cmd.width || 0}x${cmd.height || 0}`);
+    if (!mediaStream) {
+        log('info', '摄像头未开启，自动开启...');
+        startCamera().then(() => setTimeout(takePhoto, 1500));
+    } else {
+        takePhoto();
+    }
+}
+
+// ===== 录像功能 =====
+function toggleRecording() {
+    if (isRecording) stopRecording();
+    else startRecording();
+}
+
+function startRecording() {
+    if (!mediaStream) {
+        log('error', '请先开启摄像头');
+        return;
+    }
+    if (!MediaRecorder.isTypeSupported('video/webm')) {
+        log('error', '浏览器不支持录像');
+        return;
+    }
+    try {
+        recordedChunks = [];
+        // 录像需要音频轨，重新获取带音频的流
+        const recStream = mediaStream;
+        mediaRecorder = new MediaRecorder(recStream, { mimeType: 'video/webm;codecs=vp8' });
+        mediaRecorder.ondataavailable = (e) => {
+            if (e.data.size > 0) recordedChunks.push(e.data);
+        };
+        mediaRecorder.onstop = () => {
+            const blob = new Blob(recordedChunks, { type: 'video/webm' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `recording_${Date.now()}.webm`;
+            a.click();
+            URL.revokeObjectURL(url);
+            log('info', `录像已保存: ${(blob.size / 1024 / 1024).toFixed(1)}MB`);
+        };
+        mediaRecorder.start();
+        isRecording = true;
+        recStartTime = Date.now();
+        document.getElementById('recordBtn').textContent = '停止录像';
+        document.getElementById('recordBtn').classList.add('danger');
+        document.getElementById('recIndicator').classList.add('active');
+        recTimer = setInterval(() => {
+            const elapsed = Math.floor((Date.now() - recStartTime) / 1000);
+            const mm = String(Math.floor(elapsed / 60)).padStart(2, '0');
+            const ss = String(elapsed % 60).padStart(2, '0');
+            document.getElementById('recTime').textContent = `${mm}:${ss}`;
+        }, 1000);
+        log('info', '录像开始');
+    } catch (e) {
+        log('error', `录像启动失败: ${e.message}`);
+    }
+}
+
+function stopRecording() {
+    if (!isRecording || !mediaRecorder) return;
+    mediaRecorder.stop();
+    isRecording = false;
+    clearInterval(recTimer);
+    document.getElementById('recordBtn').textContent = '开始录像';
+    document.getElementById('recordBtn').classList.remove('danger');
+    document.getElementById('recIndicator').classList.remove('active');
+    log('info', '录像已停止，正在保存...');
+}
+
+// ===== 现场隐患识别（拍照 + AI 识别）=====
+async function getAuthToken() {
+    if (authToken) return authToken;
+    const username = document.getElementById('loginUsername').value.trim();
+    const password = document.getElementById('loginPassword').value;
+    const role = document.getElementById('loginRole').value;
+    if (!username || !password) {
+        log('error', '请先输入监理通账号和密码');
+        return null;
+    }
+    try {
+        const resp = await fetch(`${backendUrl}/api/auth/login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password, role }),
+        });
+        const data = await resp.json();
+        if (!resp.ok || !data.access_token) {
+            log('error', `登录失败: ${data.detail || resp.status}`);
+            return null;
+        }
+        authToken = data.access_token;
+        document.getElementById('loginPassword').value = '';
+        return authToken;
+    } catch (e) {
+        log('error', `登录失败: ${e.message}`);
+        return null;
+    }
+}
+
+async function loginSimulator() {
+    authToken = null;
+    if (ws) {
+        ws.onclose = null;
+        ws.close();
+        ws = null;
+    }
+    const token = await getAuthToken();
+    if (token) connect();
+}
+
+async function detectLiveHazard() {
+    if (!mediaStream) {
+        log('error', '请先开启摄像头');
+        return;
+    }
+    log('info', '正在获取现场画面并识别隐患...');
+    updateScreen('AI识别中', '正在获取现场画面\n调用 AI 隐患识别模型...', 'info-label');
+    speak('正在识别现场隐患');
+
+    const canvas = captureFrame();
+    if (!canvas) {
+        log('error', '获取现场画面失败');
+        return;
+    }
+
+    const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.9));
+    lastPhotoBlob = blob;
+    addPhotoThumb(blob);
+
+    const token = await getAuthToken();
+    if (!token) {
+        log('error', '无法获取认证 Token');
+        return;
+    }
+
+    const formData = new FormData();
+    formData.append('image', blob, `live_${Date.now()}.jpg`);
+
+    try {
+        updateScreen('AI识别中', '现场画面已上传\n等待 AI 模型返回结果...', 'info-label');
+        const resp = await fetch(`${backendUrl}/api/hazard/detect-and-save`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}` },
+            body: formData,
+        });
+        const result = await resp.json();
+
+        if (result.hazard_id) {
+            log('info', `识别完成，隐患ID: ${result.hazard_id}`);
+            if (result.result) {
+                showHazard(result.result);
+            } else {
+                updateScreen('识别完成', `已保存隐患记录\nID: ${result.hazard_id}`, 'success-text');
+            }
+        } else if (result.detail) {
+            log('error', `识别失败: ${result.detail}`);
+            updateScreen('识别失败', result.detail, 'hazard-warn');
+        } else {
+            log('error', `识别返回异常: ${JSON.stringify(result)}`);
+        }
+    } catch (e) {
+        log('error', `识别请求异常: ${e.message}`);
+        updateScreen('识别失败', e.message, 'hazard-warn');
+    }
+}
+
+// ===== 定时巡检识别 =====
+function toggleAutoInspect() {
+    if (autoInspectRunning) {
+        clearInterval(autoInspectTimer);
+        autoInspectRunning = false;
+        document.getElementById('autoInspectBtn').textContent = '定时巡检识别';
+        document.getElementById('autoInspectBtn').classList.remove('danger');
+        log('info', '定时巡检已停止');
+        updateScreen('已停止', 'AI定时巡检已停止', 'info-label');
+        speak('定时巡检已停止');
+    } else {
+        if (!mediaStream) {
+            log('error', '请先开启摄像头');
+            return;
+        }
+        autoInspectRunning = true;
+        document.getElementById('autoInspectBtn').textContent = '停止定时巡检';
+        document.getElementById('autoInspectBtn').classList.add('danger');
+        log('info', '定时巡检已启动（每30秒自动识别一次）');
+        updateScreen('巡检中', 'AI定时巡检已启动\n每30秒自动拍照识别...', 'info-label');
+        speak('定时巡检已启动，每30秒自动识别一次');
+        // 立即执行一次
+        detectLiveHazard();
+        // 定时执行
+        autoInspectTimer = setInterval(detectLiveHazard, 30000);
+    }
+}
+
+// ===== 语音功能（使用电脑麦克风）=====
+
+// 初始化语音指令映射
+function initVoiceCommands() {
+    voiceCmdMap = {
+        '拍照': () => takePhoto(),
+        '录像': () => { if (!isRecording) startRecording(); },
+        '停止录像': () => { if (isRecording) stopRecording(); },
+        '识别隐患': () => detectLiveHazard(),
+        '现场识别': () => detectLiveHazard(),
+        '开始巡检': () => { if (!autoInspectRunning) toggleAutoInspect(); },
+        '启动巡检': () => { if (!autoInspectRunning) toggleAutoInspect(); },
+        '停止巡检': () => { if (autoInspectRunning) toggleAutoInspect(); },
+        '清屏': () => clearDisplay(),
+        '震动': () => vibrate(),
+        '开启摄像头': () => startCamera(),
+        '关闭摄像头': () => stopCamera(),
+    };
+}
+
+// 开启麦克风监听（使用本地 STT，不依赖 Google）
+async function startListening() {
+    if (isListening) {
+        log('info', '已在监听中');
+        return;
+    }
+    try {
+        log('info', '正在请求电脑麦克风权限...');
+        audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        isListening = true;
+
+        // 音量检测（可视化）
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        const source = audioContext.createMediaStreamSource(audioStream);
+        audioAnalyser = audioContext.createAnalyser();
+        audioAnalyser.fftSize = 256;
+        source.connect(audioAnalyser);
+
+        updateScreen('语音监听中', '电脑麦克风已开启（本地语音识别）\n请说出指令...\n\n支持指令:\n拍照 / 录像 / 识别隐患\n开始巡检 / 停止巡检 / 清屏', 'info-label');
+        log('info', '电脑麦克风已开启，使用本地 Whisper 语音识别');
+
+        // 更新按钮状态
+        const btn = document.getElementById('listenBtn');
+        if (btn) {
+            btn.textContent = '停止语音监听';
+            btn.classList.add('danger');
+        }
+        document.getElementById('voiceDot').classList.add('active');
+        document.getElementById('voiceStatusText').textContent = '正在监听...';
+
+        // 启动本地 STT 循环（录音 → 上传识别 → 处理）
+        startLocalSTTLoop();
+    } catch (e) {
+        log('error', `麦克风开启失败: ${e.message}`);
+        updateScreen('麦克风错误', '无法访问电脑麦克风：' + e.message, 'hazard-warn');
+    }
+}
+
+// ===== 本地 STT 循环（录音5秒 → 上传后端 Whisper 识别）=====
+let sttMediaRecorder = null;
+let sttChunks = [];
+let sttLoopTimer = null;
+const STT_RECORD_MS = 5000;  // 每次录音 5 秒
+
+function startLocalSTTLoop() {
+    // 立即开始第一次录音
+    recordAndTranscribe();
+
+    // 定时循环
+    sttLoopTimer = setInterval(recordAndTranscribe, STT_RECORD_MS + 2000);  // 录音5秒 + 识别2秒
+}
+
+async function recordAndTranscribe() {
+    if (!isListening || !audioStream) return;
+
+    try {
+        // 录音
+        sttChunks = [];
+        sttMediaRecorder = new MediaRecorder(audioStream, { mimeType: 'audio/webm' });
+
+        sttMediaRecorder.ondataavailable = (e) => {
+            if (e.data.size > 0) sttChunks.push(e.data);
+        };
+
+        sttMediaRecorder.onstop = async () => {
+            if (sttChunks.length === 0) return;
+
+            const blob = new Blob(sttChunks, { type: 'audio/webm' });
+            // 过滤太短的录音（静音）
+            if (blob.size < 2000) return;
+
+            log('info', `录音完成 (${(blob.size / 1024).toFixed(1)}KB)，上传识别...`);
+
+            try {
+                const formData = new FormData();
+                formData.append('file', blob, `voice_${Date.now()}.webm`);
+                formData.append('language', 'zh');
+
+                const resp = await fetch(`${backendUrl}/api/local/stt/transcribe`, {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${authToken}` },
+                    body: formData,
+                });
+                const result = await resp.json();
+
+                if (result.text && result.text.trim()) {
+                    log('recv', `语音识别: "${result.text.trim()}"`);
+                    handleVoiceCommand(result.text.trim());
+                }
+            } catch (e) {
+                log('error', `语音识别请求失败: ${e.message}`);
+            }
+        };
+
+        sttMediaRecorder.start();
+        // 5秒后停止
+        setTimeout(() => {
+            if (sttMediaRecorder && sttMediaRecorder.state === 'recording') {
+                sttMediaRecorder.stop();
+            }
+        }, STT_RECORD_MS);
+    } catch (e) {
+        log('error', `录音失败: ${e.message}`);
+    }
+}
+
+// 处理语音指令
+function handleVoiceCommand(text) {
+    // 上报语音识别结果到后端
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+            type: 'voice_result',
+            text: text,
+        }));
+    }
+
+    // 匹配语音指令
+    for (const keyword in voiceCmdMap) {
+        if (text.includes(keyword)) {
+            log('cmd', `匹配语音指令: ${keyword}`);
+            speak(`执行指令：${keyword}`);
+            voiceCmdMap[keyword]();
+            return;
+        }
+    }
+
+    // 未匹配指令，将识别文本作为语音播报内容
+    log('info', `未匹配指令，原文: ${text}`);
+}
+
+// 停止麦克风监听
+function stopListening() {
+    isListening = false;
+    // 停止 STT 循环
+    if (sttLoopTimer) {
+        clearInterval(sttLoopTimer);
+        sttLoopTimer = null;
+    }
+    if (sttMediaRecorder && sttMediaRecorder.state === 'recording') {
+        try { sttMediaRecorder.stop(); } catch (e) {}
+    }
+    if (audioStream) {
+        audioStream.getTracks().forEach(t => t.stop());
+        audioStream = null;
+    }
+    if (audioContext) {
+        try { audioContext.close(); } catch (e) {}
+        audioContext = null;
+    }
+    log('info', '电脑麦克风已关闭');
+    updateScreen('就绪', '语音监听已停止');
+
+    const btn = document.getElementById('listenBtn');
+    if (btn) {
+        btn.textContent = '开启语音监听';
+        btn.classList.remove('danger');
+    }
+    document.getElementById('voiceDot').classList.remove('active');
+    document.getElementById('voiceStatusText').textContent = '未开启';
+}
+
+// 切换语音监听
+function toggleListening() {
+    if (isListening) stopListening();
+    else startListening();
+}
+
+// 文本输入执行指令（降级方案）
+function execVoiceText() {
+    const input = document.getElementById('voiceTextInput');
+    const text = input.value.trim();
+    if (!text) return;
+    log('cmd', `文本指令: "${text}"`);
+    handleVoiceCommand(text);
+    input.value = '';
+}
+
+// ===== 指令发送（通过后端 API）=====
+async function sendCommand(action, text, data) {
+    try {
+        const token = await getAuthToken();
+        if (!token) {
+            log('error', '无法获取认证 Token');
+            return;
+        }
+
+        const body = { action };
+        if (text) body.text = text;
+        if (data) body.data = data;
+
+        const resp = await fetch(`${backendUrl}/api/simulator/send-command`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(body),
+        });
+        const result = await resp.json();
+        if (result.success) {
+            log('cmd', `指令已发送: ${action}`);
+        } else {
+            log('error', `发送失败: ${JSON.stringify(result)}`);
+        }
+    } catch (e) {
+        log('error', `发送异常: ${e.message}`);
+    }
+}
+
+// ===== 测试按钮 =====
+function sendSpeak() {
+    const text = document.getElementById('speakText').value;
+    sendCommand('speak', text);
+}
+function sendUrgent() {
+    const text = document.getElementById('speakText').value;
+    sendCommand('speak_urgent', text);
+}
+function sendVibrate() { sendCommand('vibrate'); }
+function sendStartInspection() { sendCommand('start_inspection'); }
+function sendStopInspection() { sendCommand('stop_inspection'); }
+
+function showHazardDemo() {
+    const data = {
+        risk_status: '存在隐患',
+        risk_category: '安全',
+        top1_risk: '未佩戴安全帽',
+        evidence: ['施工人员未佩戴安全帽进入施工现场', '位于1#楼3层作业区域'],
+        recheck_suggestion: ['要求立即佩戴安全帽', '对相关人员进行安全教育'],
+        uncertainty: '低',
+    };
+    sendCommand('show_hazard', null, data);
+}
+
+function showRecheckPass() {
+    sendCommand('show_recheck', null, { passed: true, hazard_id: 1 });
+}
+
+function showRecheckFail() {
+    sendCommand('show_recheck', null, { passed: false, hazard_id: 1 });
+}
+
+function showRectification() {
+    const data = {
+        doc_id: 'GD-B-000001',
+        hazard_description: '未佩戴安全帽',
+        section: '1#楼3层',
+        deadline: '2026-06-20',
+    };
+    sendCommand('show_rectification', null, data);
+}
+
+function showGuideDemo() {
+    const keyword = document.getElementById('guideKeyword').value || '钢筋';
+    const data = {
+        keyword: keyword,
+        steps: ['材料进场验收', '钢筋加工检查', '钢筋连接检查', '钢筋安装检查', '隐蔽工程验收'],
+        key_points: ['钢筋型号规格', '钢筋间距', '保护层厚度', '搭接长度', '锚固长度'],
+        common_violations: ['钢筋型号不符', '间距偏差超标', '保护层不足', '搭接长度不够'],
+        regulation_basis: ['GB 50204 混凝土结构工程施工质量验收规范'],
+    };
+    sendCommand('show_guide', null, data);
+}
+
+// ===== 启动 =====
+initVoiceCommands();
+log('info', '请输入监理通账号，登录后再按需开启摄像头或麦克风');
+</script>
+
+</body>
+</html>

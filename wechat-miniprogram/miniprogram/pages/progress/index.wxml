@@ -1,0 +1,71 @@
+<view class="page tab-host" style="{{themeStyle}}">
+  <glass-nav-bar title="进度记录" left="back" />
+  <tab-bar active="" />
+
+  <view class="toolbar">
+    <button class="btn-primary" bindtap="openCreate">+ 记录</button>
+  </view>
+
+  <!-- 最新进度卡片 -->
+  <view class="card latest" wx:if="{{latest}}">
+    <view class="latest-label">最新进度</view>
+    <view class="latest-meta" wx:if="{{latest.record_date || latest.part}}">{{latest.record_date}}{{latest.part ? ' · ' + latest.part : ''}}</view>
+    <view class="latest-body">
+      <view class="latest-num">{{latest.actual_percent === null ? '—' : latest.actual_percent}}<text class="latest-unit">%</text></view>
+      <view class="latest-plan">计划 {{latest.plan_percent}}%</view>
+    </view>
+    <view class="bar">
+      <view class="bar-fill" style="width: {{latest.actual_percent || 0}}%"></view>
+    </view>
+  </view>
+
+  <view wx:if="{{loading && !records.length}}" class="empty">加载中…</view>
+  <view wx:elif="{{!records.length}}" class="empty">还没有进度记录，点上方「+ 记录」</view>
+  <view wx:for="{{records}}" wx:key="id" class="card record" data-id="{{item.id}}" bindtap="openEdit">
+    <view class="record-head">
+      <text class="record-date">{{item.record_date}}</text>
+      <text class="record-badge {{item.statusClass}}">{{item.statusText}}</text>
+    </view>
+    <view class="record-part">{{item.part}}</view>
+    <view class="record-meta">计划 {{item.plan_percent}}% / 实际 {{item.actual_percent === null ? '—' : item.actual_percent}}%</view>
+  </view>
+
+  <!-- 记录表单弹层：新建 / 编辑共用 -->
+  <view class="overlay" wx:if="{{showForm}}" catchtouchmove="true">
+    <view class="overlay-mask" bindtap="closeForm"></view>
+    <view class="overlay-panel">
+      <view class="panel-header">
+        <text class="panel-title">{{editingId ? '编辑进度记录' : '新建进度记录'}}</text>
+      </view>
+      <view class="form-group">
+        <text class="form-label">记录日期 *</text>
+        <picker mode="date" value="{{form.record_date}}" bindchange="onDateChange">
+          <view class="form-input picker-value">{{form.record_date || '选择日期'}}</view>
+        </picker>
+      </view>
+      <view class="form-group">
+        <text class="form-label">施工部位 *</text>
+        <input class="form-input" value="{{form.part}}" placeholder="请输入施工部位" bindinput="onPartInput" />
+      </view>
+      <view class="form-group">
+        <text class="form-label">计划进度（%）</text>
+        <slider min="0" max="100" step="1" show-value value="{{form.plan_percent}}" activeColor="{{themeBrand}}" bindchange="onPlanSlide" />
+      </view>
+      <view class="form-group">
+        <text class="form-label">实际进度（%）</text>
+        <slider min="0" max="100" step="1" show-value value="{{form.actual_percent}}" activeColor="{{themeBrand}}" bindchange="onActualSlide" />
+      </view>
+      <view class="form-group">
+        <text class="form-label">情况描述</text>
+        <textarea class="form-textarea" value="{{form.description}}" placeholder="进度情况描述（可选）" bindinput="onDescInput" auto-height maxlength="2000" />
+      </view>
+      <view class="panel-actions">
+        <button class="btn-cancel" bindtap="closeForm">取消</button>
+        <button class="btn-submit" loading="{{saving}}" bindtap="save">保存</button>
+      </view>
+      <view class="del-row" wx:if="{{editingId}}">
+        <button class="btn-del" bindtap="removeRecord">删除该记录</button>
+      </view>
+    </view>
+  </view>
+</view>

@@ -1,0 +1,80 @@
+<!-- 微信绑定（账号安全 · 子目录）· 2026-10-12 晚
+     绑定状态 / 绑定时间 / 最近登录 / 微信资料（昵称头像）/ 解除绑定。
+     「微信昵称 / 头像」走官方「头像昵称填写能力」，供管理端识别绑定者。 -->
+<view class="page" style="{{themeStyle}}">
+  <glass-nav-bar title="微信绑定" left="back" />
+
+  <view class="section">
+    <view class="cell">
+      <view class="cell-main">
+        <text class="cell-label">绑定状态</text>
+        <text class="cell-sub" wx:if="{{wxBound === true}}">已绑定，可直接用微信一键登录</text>
+        <text class="cell-sub" wx:elif="{{wxBound === false}}">退出后重新登录，即会绑定当前微信</text>
+        <text class="cell-sub" wx:else>绑定状态读取失败，稍后自动重试</text>
+      </view>
+      <view class="cell-right">
+        <text class="bind-tag {{wxBound === true ? 'on' : (wxBound === false ? 'off' : 'unknown')}}">{{wxBound === true ? '已绑定' : (wxBound === false ? '未绑定' : '未知')}}</text>
+      </view>
+    </view>
+    <view class="cell" wx:if="{{wxBound === true}}">
+      <text class="cell-label">绑定时间</text>
+      <text class="cell-value muted">{{wxBoundAt || '—'}}</text>
+    </view>
+    <view class="cell" wx:if="{{wxBound === true}}">
+      <text class="cell-label">最近登录</text>
+      <text class="cell-value muted">{{wxLastLoginAt || '—'}}</text>
+    </view>
+    <view class="cell" wx:if="{{wxBound === true}}" bindtap="openWxProfile">
+      <view class="cell-main">
+        <text class="cell-label">微信昵称 / 头像</text>
+        <text class="cell-sub" wx:if="{{wxNickname}}">{{wxNickname}}</text>
+        <text class="cell-sub" wx:else>未完善 —— 管理员凭它识别绑定的是谁的微信</text>
+      </view>
+      <view class="cell-right">
+        <image wx:if="{{wxAvatarUrl}}" class="wx-avatar-sm" src="{{wxAvatarUrl}}" mode="aspectFill" />
+        <text class="cell-arrow">›</text>
+      </view>
+    </view>
+    <view class="cell" wx:if="{{wxBound === true}}" bindtap="unbindWechat">
+      <text class="cell-label danger-text">{{unbinding ? '正在解绑…' : '解除微信绑定'}}</text>
+      <text class="cell-arrow">›</text>
+    </view>
+  </view>
+
+  <!-- 微信资料编辑浮层：昵称用官方 type=nickname 键盘、头像用 open-type=chooseAvatar，
+       二者都是微信官方「头像昵称填写能力」，无需额外授权弹窗 -->
+  <view class="overlay wxp-overlay" wx:if="{{showWxProfile}}" catchtouchmove="true">
+    <view class="overlay-mask" bindtap="closeWxProfile"></view>
+    <view class="wxp-sheet">
+      <view class="wxp-head">
+        <text class="wxp-title">微信资料</text>
+        <text class="wxp-sub">管理员在后台凭昵称和头像确认绑定的微信是你</text>
+      </view>
+      <view class="wxp-row">
+        <text class="wxp-label">头像</text>
+        <view class="wxp-avatar-col">
+          <button class="wxp-avatar-btn" open-type="chooseAvatar" bindchooseavatar="onChooseAvatar">
+            <image class="wxp-avatar" src="{{wxAvatarTemp || wxAvatarUrl}}" mode="aspectFill" />
+            <text class="wxp-avatar-hint">{{avatarCapable ? '点击选择' : '当前微信版本不支持'}}</text>
+          </button>
+          <!-- 兜底通道：chooseAvatar 属「微信昵称、头像」隐私能力，平台侧指引未声明 / 基础库过低时
+               真机点它静默无反应（见 utils/privacy.ts）。相册选图只依赖「选中的照片或视频信息」，
+               一定能用，且选出的本地临时文件同样能走 wx.uploadFile 上传。 -->
+          <text class="wxp-album-link" bindtap="pickAvatarFromAlbum">从相册选择</text>
+        </view>
+      </view>
+      <view class="wxp-row">
+        <text class="wxp-label">昵称</text>
+        <input
+          class="wxp-input"
+          type="nickname"
+          placeholder="你的微信昵称"
+          value="{{wxNickname}}"
+          bindinput="onWxNickInput"
+          bindblur="onWxNickInput"
+        />
+      </view>
+      <button class="primary wxp-save" loading="{{savingWxProfile}}" bindtap="saveWxProfile">保存</button>
+    </view>
+  </view>
+</view>

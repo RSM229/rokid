@@ -1,0 +1,62 @@
+<view class="page" style="{{themeStyle}}">
+  <glass-nav-bar title="{{isNew ? '新建' : '编辑'}}{{title || '监理记录'}}" left="back" />
+
+  <scroll-view scroll-y class="body" enhanced show-scrollbar="{{false}}">
+    <view class="card" wx:if="{{isNew}}">
+      <view class="lbl">文书标题</view>
+      <input
+        class="title-input"
+        value="{{title}}"
+        placeholder="留空则使用表式名称"
+        bindinput="onTitleInput" />
+    </view>
+
+    <view class="prefill-tip" wx:if="{{prefillSource === 'draft' && prefillCount > 0}}">
+      已按聊天内容预填 {{prefillCount}} 项，请核对后保存
+    </view>
+
+    <view class="stepbar" wx:if="{{steps.length > 1}}">
+      <scroll-view scroll-x class="step-scroll" enhanced show-scrollbar="{{false}}">
+        <view
+          wx:for="{{steps}}"
+          wx:key="index"
+          class="step-chip {{index === stepIndex ? 'on' : ''}} {{stepDone[index] ? 'done' : ''}}"
+          data-i="{{index}}"
+          bindtap="onStepTap">
+          <text class="step-no">{{index + 1}}</text>
+          <text class="step-name">{{item.title}}</text>
+        </view>
+      </scroll-view>
+    </view>
+
+    <view class="card" wx:if="{{steps.length}}">
+      <view class="step-head">
+        <text class="step-title">{{steps[stepIndex].title}}</text>
+        <text class="step-count">{{stepIndex + 1}}/{{steps.length}}</text>
+      </view>
+      <prov-form
+        id="pf"
+        schema="{{stepSchema}}"
+        value="{{formValues}}"
+        bind:change="onFormChange" />
+    </view>
+    <view class="card empty" wx:else>{{loading ? '正在加载表式…' : '该表式暂无字段定义'}}</view>
+
+    <view class="miss" wx:if="{{missingCount > 0}}">
+      <view class="miss-head" bindtap="jumpToFirstMissing">
+        <text class="miss-t">还有 {{missingCount}} 项必填未填</text>
+        <text class="miss-go">去填写</text>
+      </view>
+      <view class="miss-list">
+        <text wx:for="{{missingLabels}}" wx:key="*this" class="miss-item">{{item}}</text>
+      </view>
+    </view>
+
+    <view class="actions">
+      <button class="btn-ghost" wx:if="{{stepIndex > 0}}" bindtap="onPrev">上一步</button>
+      <button class="btn-next" wx:if="{{stepIndex < steps.length - 1}}" bindtap="onNext">下一步</button>
+      <button class="btn-save" wx:else bindtap="save" disabled="{{saving}}">{{saving ? '保存中…' : '保存'}}</button>
+    </view>
+    <view class="bottom-gap"></view>
+  </scroll-view>
+</view>

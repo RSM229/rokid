@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <application
+        android:name=".GdjlApplication"
+        android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:label="监理通"
+        android:theme="@style/Theme.Gdjl"
+        android:requestLegacyExternalStorage="true"
+        tools:targetApi="31">
+
+        <!-- FileProvider -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
+        <!-- 全程语音唤起：后台监听唤起词的前台服务 -->
+        <service
+            android:name=".voice.VoiceWakeService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
+
+        <!-- 开机自启语音唤起 -->
+        <receiver
+            android:name=".voice.BootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+
+        <activity
+            android:name=".ui.menu.MenuActivity"
+            android:exported="true"
+            android:theme="@style/Theme.Gdjl.Business">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:name=".ui.workrecord.WorkRecordActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Gdjl.Business" />
+
+        <activity
+            android:name=".ui.workrecord.WorkRecordDetailActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Gdjl.Business" />
+
+        <activity
+            android:name=".ui.workrecord.WorkRecordSessionActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Gdjl.Business" />
+
+        <!-- 安全隐患 -->
+        <activity
+            android:name=".ui.hazard.HazardSubListActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Gdjl.Business" />
+
+        <activity
+            android:name=".ui.hazard.HazardDetectActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Gdjl.Business" />
+
+        <activity
+            android:name=".ui.hazard.DispatchActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Gdjl.Business" />
+
+        <activity
+            android:name=".ui.hazard.HazardDetailActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Gdjl.Business" />
+
+        <activity
+            android:name=".ui.hazard.HazardListActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Gdjl.Business" />
+
+    </application>
+
+</manifest>

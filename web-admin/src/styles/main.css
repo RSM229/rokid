@@ -1,0 +1,29 @@
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  background-color: #f0f2f5;
+}
+
+.app-layout {
+  min-height: 100vh;
+}
+
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #001529;
+  color: #fff;
+  padding: 0 24px;
+  height: 60px;
+}
+
+.app-sider {
+  background: #001529;
+  color: #fff;
+}
+
+.app-content {
+  padding: 24px;
+  min-height: calc(100vh - 60px);
+}

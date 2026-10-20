@@ -1,0 +1,33 @@
+{
+  "name": "gdjl-mobile-h5",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "监理手机浏览器端（便携经办端）- Vue 3 + Vant 4",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "type-check": "vue-tsc --noEmit"
+  },
+  "dependencies": {
+    "vue": "^3.5.0",
+    "vue-router": "^4.4.0",
+    "pinia": "^2.2.0",
+    "vant": "^4.9.0",
+    "axios": "^1.7.0",
+    "@vueuse/core": "^11.0.0",
+    "dayjs": "^1.11.0",
+    "idb": "^8.0.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^6.0.8",
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.6",
+    "vue-tsc": "^3.3.8",
+    "unplugin-auto-import": "^21.0.0",
+    "unplugin-vue-components": "^32.1.0",
+    "@vant/auto-import-resolver": "^1.3.0"
+  }
+}

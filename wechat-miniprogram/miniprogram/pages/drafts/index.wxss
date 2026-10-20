@@ -1,0 +1,17 @@
+@import "../../styles/cell-list.wxss";
+
+/* 单条草稿：复用 .section 外壳（cell-list.wxss），这里只定义行内排版 */
+.draft-item { padding: 28rpx 30rpx; border-bottom: 1rpx solid rgba(var(--deep-rgb, 10,46,92), 0.08); }
+.draft-item:last-child { border-bottom: none; }
+.di-title { font-size: 30rpx; font-weight: 600; color: var(--ink, #12253d); }
+.di-sub { font-size: 24rpx; color: #6b7c90; margin-top: 8rpx; overflow-wrap: anywhere; }
+.di-missing { font-size: 24rpx; color: #c0392b; margin-top: 6rpx; }
+.di-time { font-size: 22rpx; color: #9aa9bb; margin-top: 8rpx; }
+.di-actions { display: flex; flex-wrap: wrap; gap: 16rpx; margin-top: 20rpx; }
+.di-btn { margin: 0; font-size: 26rpx; line-height: 2.2; }
+.di-btn.ghost { background: rgba(255, 255, 255, 0.5); color: #6b7c90; border: 1rpx solid rgba(20, 40, 60, 0.14); }
+.di-btn::after { border: none; }
+
+.empty { display: flex; flex-direction: column; align-items: center; padding: 140rpx 40rpx; gap: 16rpx; }
+.empty-text { font-size: 30rpx; color: var(--ink, #12253d); font-weight: 600; }
+.empty-sub { font-size: 24rpx; color: #9aa9bb; text-align: center; line-height: 1.6; }

@@ -1,0 +1,124 @@
+<view class="page tab-host" style="{{themeStyle}}">
+  <glass-nav-bar title="项目看板" left="back" />
+  <!-- 2026-10-08 起不再占底部 tab（位置让给「资料库」），改从「我的」页进入，故不高亮任何 tab -->
+  <tab-bar active="" />
+
+  <view class="board-head">
+    <view class="board-head-left">
+      <view class="board-bar"></view>
+      <text class="board-title">项目数据总览</text>
+    </view>
+    <text class="board-sub">{{updateText}}</text>
+  </view>
+
+  <!-- ① 核心指标 -->
+  <view class="kpis">
+    <view class="kpi" wx:for="{{kpis}}" wx:key="label">
+      <view class="kpi-top">
+        <view class="kpi-dot" style="background:{{item.color}}"></view>
+        <text class="kpi-label">{{item.label}}</text>
+      </view>
+      <view class="kpi-value">
+        <text class="kpi-num" style="color:{{item.color}}">{{item.value}}</text>
+        <text class="kpi-unit">{{item.unit}}</text>
+      </view>
+      <view class="kpi-track"><view class="kpi-fill" style="width:{{item.pct}}%; background:{{item.color}}"></view></view>
+      <text class="kpi-delta {{item.showDelta ? '' : 'muted'}}">{{item.deltaText}}</text>
+    </view>
+  </view>
+
+  <!-- ② 处置进度 -->
+  <view class="card">
+    <view class="card-title">处置进度</view>
+    <view class="rings" wx:if="{{showRings}}">
+      <view class="ring-item" wx:for="{{rings}}" wx:key="label">
+        <view class="ring" style="background:{{item.style}}">
+          <view class="ring-hole">
+            <text class="ring-pct" style="color:{{item.color}}">{{item.pct}}%</text>
+          </view>
+        </view>
+        <text class="ring-label">{{item.label}}</text>
+        <text class="ring-desc">{{item.desc}}</text>
+      </view>
+    </view>
+    <view class="card-empty" wx:else>任务与隐患数据同步后可查看处置进度</view>
+  </view>
+
+  <!-- ③ 近 7 日趋势（巡检柱 + 隐患折线，双轴） -->
+  <view class="card">
+    <view class="card-head">
+      <text class="card-title">近 7 日巡检趋势</text>
+      <view class="legend">
+        <view class="lg"><view class="dot blue"></view><text>巡检次数</text></view>
+        <view class="lg"><view class="line-mark"></view><text>隐患数</text></view>
+      </view>
+    </view>
+    <view wx:if="{{showTrend}}">
+      <view class="chart-frame">
+        <view class="axis axis-l">
+          <text class="axis-num" wx:for="{{yTicksL}}" wx:key="label">{{item.label}}</text>
+        </view>
+        <view class="plot" id="trendPlot">
+          <view class="gridline" wx:for="{{yTicksL}}" wx:key="label" style="bottom:{{item.pct}}%"></view>
+          <view class="baseline"></view>
+          <view class="bars-row">
+            <view class="trend-col" wx:for="{{trendBars}}" wx:key="label">
+              <text class="bar-val">{{item.inspection}}</text>
+              <view class="bar blue" style="height:{{item.hpx}}px"></view>
+            </view>
+          </view>
+          <view class="poly-layer">
+            <view class="seg" wx:for="{{trendSegs}}" wx:key="k" style="left:{{item.x}}px; top:{{item.y}}px; width:{{item.w}}px; transform: rotate({{item.a}}deg);"></view>
+            <view class="pt" wx:for="{{trendPoints}}" wx:key="k" style="left:{{item.x}}px; top:{{item.y}}px;"></view>
+          </view>
+        </view>
+        <view class="axis axis-r">
+          <text class="axis-num" wx:for="{{yTicksR}}" wx:key="label">{{item.label}}</text>
+        </view>
+      </view>
+      <view class="x-axis">
+        <text class="x-label" wx:for="{{trendBars}}" wx:key="label">{{item.label}}</text>
+      </view>
+    </view>
+    <view class="card-empty" wx:else>近 7 日暂无巡检数据</view>
+  </view>
+
+  <!-- ④ 隐患类别分布 -->
+  <view class="card">
+    <view class="card-title">隐患类别分布</view>
+    <view class="donut-wrap" wx:if="{{showDonut}}">
+      <view class="donut" style="background:{{donutStyle}}">
+        <view class="donut-inner">
+          <text class="donut-num">{{donutTotal}}</text>
+          <text class="donut-label">隐患总数</text>
+        </view>
+      </view>
+      <view class="donut-legend">
+        <view class="lg" wx:for="{{categories}}" wx:key="name">
+          <view class="dot" style="background:{{item.color}}"></view>
+          <text class="donut-name">{{item.name}}</text>
+          <text class="donut-pct">{{item.pct}}%</text>
+          <text class="donut-count">{{item.count}}</text>
+        </view>
+      </view>
+    </view>
+    <view class="card-empty" wx:else>暂无隐患类别数据</view>
+    <view class="card-link" data-url="/pages/hazards/index" bindtap="open">管理隐患 ›</view>
+  </view>
+
+  <!-- ⑤ 工作记录待办构成 -->
+  <view class="card">
+    <view class="card-title">工作记录待办构成</view>
+    <block wx:if="{{workTotal > 0}}">
+      <view class="hbar" wx:for="{{workBars}}" wx:key="label">
+        <text class="hbar-label">{{item.label}}</text>
+        <view class="hbar-track">
+          <view class="hbar-fill" style="width:{{item.pct}}%; background:{{item.color}};"></view>
+        </view>
+        <text class="hbar-count">{{item.count}}</text>
+      </view>
+    </block>
+    <view class="card-empty" wx:else>暂无待办的工作记录</view>
+    <view class="card-link" data-url="/pages/work/index" bindtap="open">查看工作记录 ›</view>
+  </view>
+</view>
