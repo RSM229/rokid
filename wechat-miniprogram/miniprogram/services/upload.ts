@@ -14,6 +14,14 @@ export class UploadError extends Error {
   }
 }
 
+export function friendlyServerError(statusCode: number): string {
+  if (statusCode === 401) return '登录已失效，请重新登录'
+  if (statusCode === 413) return '图片超过大小限制，请选择较小的图片'
+  if (statusCode === 429) return '请求过于频繁，请稍后重试'
+  if (statusCode >= 500) return '服务器暂时不可用，请稍后重试'
+  return `上传失败（HTTP ${statusCode}）`
+}
+
 function upload<T>(
   path: string,
   filePath: string,
