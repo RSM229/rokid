@@ -21,7 +21,9 @@ uv pip install --python .venv\Scripts\python.exe -r requirements-local.txt
 .venv\Scripts\python.exe -m scripts.run_local
 ```
 
-后端地址为 `http://127.0.0.1:8000`，接口文档为 `http://127.0.0.1:8000/docs`。开发者工具打开本小程序后重新编译；本机 `ext.json` 已启用仅开发版生效的本地 API 和模拟微信登录。首次绑定时选择「总监理工程师」，测试账号为 `local_demo`，密码为 `LocalDemo123!`。小程序会按 API 地址分别保存登录态和待上传队列。
+后端地址为 `http://127.0.0.1:8000`，接口文档为 `http://127.0.0.1:8000/docs`。开发者工具打开本小程序后重新编译；本机 `ext.json` 仅对开发版启用本地 API，登录仍走真实 `wx.login` 和微信 `jscode2session`，不使用 mock openid。首次绑定时选择「总监理工程师」，本地业务账号为 `local_demo`，密码为 `LocalDemo123!`。小程序会按 API 地址分别保存登录态和待上传队列。
+
+真实微信登录还需要在不入 Git 的 `cloud-backend/.local/backend.env` 配置 `WECHAT_APP_ID` 和 `WECHAT_APP_SECRET`（必须对应当前小程序 AppID），然后重启本地后端。字段参考 `cloud-backend/local.env.example`。该凭据目前未配置；未补齐前 `/miniprogram/auth/login` 会返回 503，不能完成小程序登录/绑定。短信使用真实腾讯云服务，未配置腾讯云凭据时发送失败，不返回模拟成功。不要把生产数据库连到本地，也不要把 AppSecret 放进小程序源码。
 
 体验版与正式版不会采用本地地址，继续走 `ext.apiBaseUrl`（当前为正式服务器）。本地启动器仅监听电脑回环地址，适用于开发者工具模拟器；真机联调另需配置局域网监听或测试服务器，手机不能访问电脑的 `127.0.0.1`。当前环境没有 AI 密钥，智能体对话会返回 503。可在不入 Git 的 `cloud-backend/.local/backend.env` 配置 `DEFAULT_LLM_API_KEY`、`DEFAULT_LLM_BASE_URL`、`DEFAULT_LLM_MODEL_ID` 及对应 `DEFAULT_VLM_*`，然后重启后端。图片识别使用现有华工接口协议，需匹配该服务的配置；本地账号、项目、记录和上传文件都只存在于 `.local/`。此前新增的「资料核对」页仍为独立交互原型，尚未接真实识图和建单流程。
 
@@ -31,7 +33,7 @@ uv pip install --python .venv\Scripts\python.exe -r requirements-local.txt
 
 1. 复制 `project.private.config.json.example` 为 `project.private.config.json`，填写企业主体小程序 AppID。
 2. `miniprogram/config.ts` 默认连接服务器；本地联调按上节设置 `ext.useLocalBackend=true` 和 `ext.localApiBaseUrl`，仅开发版生效。体验版/正式版继续从 `ext.apiBaseUrl` 读取服务器地址，字段格式见 `ext.json.example`；真机不能使用 `127.0.0.1`。
-3. 后端配置 `WECHAT_APP_ID`、`WECHAT_APP_SECRET`。仅本地联调可同时开启后端 `WECHAT_MOCK_LOGIN_ENABLED=true` 和前端 `mockWechatLogin=true`。
+3. 后端本地配置 `WECHAT_APP_ID`、`WECHAT_APP_SECRET`；本地服务与体验/正式服务都使用真实微信登录，保持 `WECHAT_MOCK_LOGIN_ENABLED=false` 和 `mockWechatLogin=false`。
 4. 在微信公众平台配置 request、uploadFile、downloadFile、socket 合法域名、业务类目和隐私保护指引（`app.json` 已开启 `__usePrivacyCheck__`）。
    **服务器只开放 4432 时无需改端口**——微信 https 合法域名允许带端口，但不能混用。按当前默认地址 `https://www.baize.gdces.cn:4432/api` 需配置为：
 

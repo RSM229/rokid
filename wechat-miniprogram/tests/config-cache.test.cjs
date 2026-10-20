@@ -36,7 +36,7 @@ test('local backend is explicit and limited to develop; production URL stays unc
       }),
       getAccountInfoSync: () => ({ miniProgram: { envVersion } }),
     } })
-    assert.equal(config.mockWechatLogin, envVersion === 'develop')
+    assert.equal(config.mockWechatLogin, false)
     assert.equal(config.useLocalBackend, envVersion === 'develop')
     assert.equal(config.apiBaseUrl, envVersion === 'develop'
       ? 'http://127.0.0.1:8000/api'
