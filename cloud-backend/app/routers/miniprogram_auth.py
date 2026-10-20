@@ -103,16 +103,19 @@ async def _permissions_for(user: User, db: AsyncSession) -> list[str]:
 
 
 async def _release_unusable_binding(db: AsyncSession, openid: str) -> None:
-    """若 openid 当前绑定的账号在小程序端**不可用**（公司级/禁用/已删除/被拒绝），
+    """若 openid 当前绑定的账号在小程序端**不可用**（超管/禁用/已删除/被拒绝），
     删除旧绑定并留审计，由调用方的新绑定接管该 openid。
 
     「换绑」唯一情形的统一实现 —— 登录绑定（/bind）与注册绑定（/register）
     两条路共用，避免出现「登录能换绑、注册却 409」的口径分裂
-    （实测死局：微信被公司级账号占死后，注册页报「该微信身份已绑定其他账号」）。
+    （实测死局：微信被超管账号占死后，注册页报「该微信身份已绑定其他账号」）。
     正常情况（已绑项目级有效账号）仍 409，保持「一个微信一个账号」。
 
     Step 4 补充：``audit_status='rejected'`` 的账号同样视为不可用 —— 否则
     审批被拒的人会被自己的微信**永久占死**，无法用同一微信重新申请。
+
+    2026-10-20 起：公司级「管理员」＝项目负责人，小程序**放行**；
+    仅超管仍视为不可用（管理端只在 Web）。
     """
     existing = await db.execute(
         select(WechatUserBinding).where(WechatUserBinding.openid == openid)
@@ -124,7 +127,7 @@ async def _release_unusable_binding(db: AsyncSession, openid: str) -> None:
     old_unusable = (
         old_user is None
         or not old_user.is_active
-        or (old_user.org_role in ORG_ROLES)
+        or old_user.is_super_admin()
         or (getattr(old_user, "audit_status", None) == AUDIT_REJECTED)
     )
     if not old_unusable:
@@ -139,17 +142,16 @@ async def _release_unusable_binding(db: AsyncSession, openid: str) -> None:
 
 
 async def _token_response(user: User, db: AsyncSession) -> dict:
-    from app.models.user import ORG_ROLES, Project as ProjectModel
+    from app.models.user import Project as ProjectModel
 
-    # Step 2（设计说明 §7.3）：小程序端**不接受公司级角色登录**。
-    # 公司级权限（user_manage / role_grant / project_create…）的落地场景是
-    # Web 管理后台；允许其在手机端登录等于把跨项目授权能力带到无审计的终端。
-    # 拦截点选在这里 —— 它是小程序所有发 token 路径（登录/绑定/注册/扫码）的
-    # 唯一出口，加一次即全覆盖，不会出现"某个入口漏接开关"。
-    if user.org_role in ORG_ROLES:
+    # Step 2（设计说明 §7.3）：小程序端**不接受超级管理员登录** ——
+    # 跨项目授权能力（role_grant / project_create…）只在 Web 管理后台落地。
+    # 2026-10-20 起：公司级「管理员」＝项目负责人，是现场用眼镜/小程序干活
+    # 的人，**放行**；其项目范围仍由可见性规则收敛（成员项目 + 超管授权项目）。
+    if user.is_super_admin():
         raise HTTPException(
             status_code=403,
-            detail="该账号为公司级账号，请使用 Web 管理后台登录",
+            detail="超级管理员账号不支持小程序登录，请使用 Web 管理后台",
         )
 
     # Step 4（§8.8.5）：审批状态拦截。本函数是小程序**唯一**发 token 出口，
@@ -262,18 +264,17 @@ async def wechat_login(
     )
     binding = result.scalar_one_or_none()
     if binding:
-        from app.models.user import ORG_ROLES
-
         user_result = await db.execute(select(User).where(User.id == binding.user_id))
         user = user_result.scalar_one_or_none()
         if user is None or not user.is_active:
             raise HTTPException(status_code=403, detail="绑定账号不存在或已禁用")
-        # Step 2：若该微信绑定的是**公司级账号**，小程序端不放行（见 _token_response）。
+        # Step 2：若该微信绑定的是**超管账号**，小程序端不放行（见 _token_response）。
         # 此处不能直接抛 403 —— 那样微信身份被这个绑定占死，用户既登不进去、
         # 前端又拿不到 bind_token 去切换账号，页面成死局（实测 2026-10-10）。
         # 改为与「未绑定」同构：发一个 bind_token，让前端进入绑定表单，
-        # 用户可用任意项目级账号重新绑定；旧绑定由 /bind 的迁移逻辑让位。
-        if user.org_role in ORG_ROLES:
+        # 用户可用任意可用账号重新绑定；旧绑定由 /bind 的迁移逻辑让位。
+        # 2026-10-20 起：公司级「管理员」＝项目负责人，放行；仅超管走换绑。
+        if user.is_super_admin():
             bind_token = create_access_token(
                 {
                     "sub": "wechat-binding",
@@ -289,7 +290,7 @@ async def wechat_login(
                 "bind_token": bind_token,
                 "expires_in": 600,
                 "rebind_from_org_account": True,
-                "message": "当前微信绑定的账号是公司级账号，小程序端不支持，请改绑项目级账号",
+                "message": "当前微信绑定的账号是超级管理员账号，小程序端不支持，请改绑其他账号",
             }
         binding.last_login_at = datetime.now()
         await db.commit()
@@ -486,14 +487,15 @@ async def wechat_register(
     old_binding = existing.scalar_one_or_none()
     if old_binding is not None:
         old_user = await db.get(User, old_binding.user_id)
+        # 2026-10-20 起：公司级「管理员」＝项目负责人，小程序可用；仅超管不可用。
         if (
             old_user is not None
             and old_user.is_active
-            and old_user.org_role not in ORG_ROLES
+            and not old_user.is_super_admin()
             and getattr(old_user, "audit_status", None) != AUDIT_REJECTED
         ):
             return await _token_response(old_user, db)
-        # 旧绑定不可用（公司级/禁用/已拒绝）⇒ 释放后由本次接管
+        # 旧绑定不可用（超管/禁用/已拒绝）⇒ 释放后由本次接管
         await _release_unusable_binding(db, openid)
 
     # 生成唯一 username：openid 全局唯一；超长则哈希降级到 64 位以内。
