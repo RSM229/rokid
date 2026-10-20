@@ -30,14 +30,14 @@ from typing import Any, Awaitable, Callable
 from sqlalchemy import select, text as sql_text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.agent_draft import AgentDraft
+from app.models.agent_draft import AgentConversationDraft, AgentConversationMemory, AgentDraft
 from app.models.document import Document, DocStatus
 from app.models.hazard import Hazard, HazardStatus
 from app.models.security_audit import SecurityAudit
 from app.models.user import Project, User
 from app.models.work_record import WorkRecord, WorkRecordStatus
 from app.services import model_gateway, provform_schema, record_field_spec
-from app.services.agent_context import extract_user_facts, merge_user_facts
+from app.services.agent_context import append_context_message, extract_user_facts, merge_user_facts
 from app.services import acceptance_checklists
 from app.services.period_report_service import doc_type_for
 from app.services.record_fields import project_fields
@@ -1430,6 +1430,47 @@ async def _navigate(ctx: ToolContext, args: dict) -> dict:
 # 存储：``agent_drafts`` 表（见 models/agent_draft.py）。早期版本放在进程内存，
 # 因 reload/重启即丢、多进程不安全，已改为落库；重载不再影响用户已填内容。
 _PENDING_TTL = timedelta(hours=24)
+_CONVERSATION_MEMORY_TTL = timedelta(days=7)
+
+
+async def record_conversation_message(db: AsyncSession, user_id: Any,
+                                      conversation_id: str | None,
+                                      message: str) -> list[dict[str, str]]:
+    """Persist each user turn and return earlier turns for context assembly."""
+    if not user_id or not conversation_id:
+        return []
+    stale_rows = (await db.execute(select(AgentConversationMemory).where(
+        AgentConversationMemory.user_id == int(user_id),
+        AgentConversationMemory.updated_at < datetime.now() - _CONVERSATION_MEMORY_TTL,
+    ))).scalars().all()
+    for stale in stale_rows:
+        await db.delete(stale)
+    stmt = select(AgentConversationMemory).where(
+        AgentConversationMemory.user_id == int(user_id),
+        AgentConversationMemory.conversation_id == conversation_id,
+    )
+    row = (await db.execute(stmt)).scalars().first()
+    try:
+        history = json.loads(row.messages_json or "[]") if row else []
+    except (TypeError, ValueError):
+        history = []
+    history = history if isinstance(history, list) else []
+    if row and datetime.now() - row.updated_at > _CONVERSATION_MEMORY_TTL:
+        history = []
+    previous = [item for item in history if isinstance(item, dict) and item.get("text")]
+    history = append_context_message({"messages": previous}, message).get("messages", [])
+    if row is None:
+        row = AgentConversationMemory(
+            user_id=int(user_id), conversation_id=conversation_id,
+        )
+        db.add(row)
+    row.messages_json = json.dumps(history, ensure_ascii=False)
+    row.updated_at = datetime.now()
+    await db.commit()
+    current = str(message or "").strip()
+    if current and history and history[-1].get("text") == current:
+        return history[:-1]
+    return history
 
 
 def merge_args(pending_args: dict | None, new_args: dict | None) -> dict:
@@ -1452,23 +1493,31 @@ def _draft_clean_args(args: dict | None) -> dict:
             if str(v if v is not None else "").strip()}
 
 
-async def _draft_row(db: AsyncSession, user_id: Any, tool: str) -> AgentDraft | None:
-    stmt = select(AgentDraft).where(
-        AgentDraft.user_id == int(user_id), AgentDraft.tool == tool
-    )
+async def _draft_row(db: AsyncSession, user_id: Any, tool: str,
+                     conversation_id: str | None = None) -> AgentDraft | AgentConversationDraft | None:
+    model = AgentConversationDraft if conversation_id else AgentDraft
+    stmt = select(model).where(model.user_id == int(user_id), model.tool == tool)
+    if conversation_id:
+        stmt = stmt.where(model.conversation_id == conversation_id)
     return (await db.execute(stmt)).scalars().first()
 
 
 async def stash_pending(db: AsyncSession, user_id: Any, tool: str,
                         args: dict | None, missing: list[str] | None,
                         *, message: str = "",
-                        fact_args: dict | None = None) -> None:
-    """need_more 时暂存「已收集参数 + 仍缺字段」（同用户同工具覆盖旧草稿）。"""
+                        fact_args: dict | None = None,
+                        conversation_id: str | None = None) -> None:
+    """need_more 时暂存「已收集参数 + 仍缺字段」，按会话与工具隔离。"""
     if not user_id or not tool:
         return
-    row = await _draft_row(db, user_id, tool)
+    row = await _draft_row(db, user_id, tool, conversation_id)
     if row is None:
-        row = AgentDraft(user_id=int(user_id), tool=tool)
+        if conversation_id:
+            row = AgentConversationDraft(
+                user_id=int(user_id), conversation_id=conversation_id, tool=tool,
+            )
+        else:
+            row = AgentDraft(user_id=int(user_id), tool=tool)
         db.add(row)
     clean_args = _draft_clean_args(args)
     try:
@@ -1486,11 +1535,13 @@ async def stash_pending(db: AsyncSession, user_id: Any, tool: str,
             message_ref=message,
         ),
     )
-    clean_args["_context"] = {
+    context = {
         "facts": facts,
         "version": int(old_context.get("version") or 0) + 1,
         "last_message": message[:2000] if message else old_context.get("last_message", ""),
     }
+    context = append_context_message(context | {"messages": old_context.get("messages", [])}, message)
+    clean_args["_context"] = context
     row.args_json = json.dumps(clean_args, ensure_ascii=False)
     row.missing_json = json.dumps([str(x) for x in (missing or [])], ensure_ascii=False)
     row.updated_at = datetime.now()
@@ -1498,14 +1549,18 @@ async def stash_pending(db: AsyncSession, user_id: Any, tool: str,
 
 
 async def get_pending(db: AsyncSession, user_id: Any,
-                      tool: str | None = None) -> tuple[str, dict] | None:
+                      tool: str | None = None,
+                      conversation_id: str | None = None) -> tuple[str, dict] | None:
     """取未过期草稿：(工具名, {args, missing})；tool 给定时只匹配该工具。过期即删。"""
     if not user_id:
         return None
-    stmt = select(AgentDraft).where(AgentDraft.user_id == int(user_id))
+    model = AgentConversationDraft if conversation_id else AgentDraft
+    stmt = select(model).where(model.user_id == int(user_id))
     if tool:
-        stmt = stmt.where(AgentDraft.tool == tool)
-    row = (await db.execute(stmt.order_by(AgentDraft.updated_at.desc()))).scalars().first()
+        stmt = stmt.where(model.tool == tool)
+    if conversation_id:
+        stmt = stmt.where(model.conversation_id == conversation_id)
+    row = (await db.execute(stmt.order_by(model.updated_at.desc()))).scalars().first()
     if row is None:
         return None
     if datetime.now() - row.updated_at > _PENDING_TTL:
@@ -1529,20 +1584,27 @@ async def get_pending(db: AsyncSession, user_id: Any,
         "facts": context.get("facts") if isinstance(context.get("facts"), list) else [],
         "version": int(context.get("version") or 1),
         "last_message": str(context.get("last_message") or ""),
+        "messages": context.get("messages") if isinstance(context.get("messages"), list) else [],
     }
 
 
-async def clear_pending(db: AsyncSession, user_id: Any, tool: str | None = None) -> None:
+async def clear_pending(db: AsyncSession, user_id: Any, tool: str | None = None,
+                        conversation_id: str | None = None) -> None:
     """清空草稿：成功落库后、或用户切换了意图时调用。"""
     if not user_id:
         return
-    stmt = select(AgentDraft).where(AgentDraft.user_id == int(user_id))
-    if tool:
-        stmt = stmt.where(AgentDraft.tool == tool)
-    rows = (await db.execute(stmt)).scalars().all()
-    for row in rows:
-        await db.delete(row)
-    if rows:
+    models = [AgentConversationDraft] if conversation_id else [AgentConversationDraft, AgentDraft]
+    deleted = False
+    for model in models:
+        stmt = select(model).where(model.user_id == int(user_id))
+        if tool:
+            stmt = stmt.where(model.tool == tool)
+        if conversation_id:
+            stmt = stmt.where(model.conversation_id == conversation_id)
+        for row in (await db.execute(stmt)).scalars().all():
+            await db.delete(row)
+            deleted = True
+    if deleted:
         await db.commit()
 
 
@@ -1576,20 +1638,26 @@ def _draft_form_code(tool: str, args: dict) -> str | None:
     return None
 
 
-async def list_pending(db: AsyncSession, user_id: Any) -> list[dict]:
+async def list_pending(db: AsyncSession, user_id: Any,
+                       conversation_id: str | None = None) -> list[dict]:
     """返回该用户所有未过期草稿（按 updated_at desc）。过期的就地删除并回收。"""
     if not user_id:
         return []
-    stmt = select(AgentDraft).where(
-        AgentDraft.user_id == int(user_id)
-    ).order_by(AgentDraft.updated_at.desc())
-    rows = (await db.execute(stmt)).scalars().all()
+    models = [AgentConversationDraft] if conversation_id else [AgentConversationDraft, AgentDraft]
+    rows = []
+    for model in models:
+        stmt = select(model).where(model.user_id == int(user_id))
+        if conversation_id:
+            stmt = stmt.where(model.conversation_id == conversation_id)
+        rows.extend((model, row) for row in (await db.execute(
+            stmt.order_by(model.updated_at.desc())
+        )).scalars().all())
     out: list[dict] = []
     now = datetime.now()
-    expired_ids: list[int] = []
-    for row in rows:
+    expired: list[tuple[type, int]] = []
+    for model, row in rows:
         if now - row.updated_at > _PENDING_TTL:
-            expired_ids.append(row.id)
+            expired.append((model, row.id))
             continue
         try:
             args = json.loads(row.args_json or "{}")
@@ -1604,6 +1672,7 @@ async def list_pending(db: AsyncSession, user_id: Any) -> list[dict]:
             context = {}
         out.append({
             "id": row.id,
+            "conversation_id": getattr(row, "conversation_id", None),
             "tool": row.tool,
             "label": tool_label(row.tool),
             "form_code": _draft_form_code(row.tool, args if isinstance(args, dict) else {}),
@@ -1611,11 +1680,12 @@ async def list_pending(db: AsyncSession, user_id: Any) -> list[dict]:
             "missing": missing if isinstance(missing, list) else [],
             "facts": context.get("facts") if isinstance(context.get("facts"), list) else [],
             "version": int(context.get("version") or 1),
+            "messages": context.get("messages") if isinstance(context.get("messages"), list) else [],
             "updated_at": row.updated_at.isoformat(),
         })
-    if expired_ids:
-        for rid in expired_ids:
-            obj = await db.get(AgentDraft, rid)
+    if expired:
+        for model, rid in expired:
+            obj = await db.get(model, rid)
             if obj:
                 await db.delete(obj)
         await db.commit()
