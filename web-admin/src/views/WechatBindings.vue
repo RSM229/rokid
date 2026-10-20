@@ -42,9 +42,22 @@
               公司级 · {{ ORG_ROLE_LABELS[row.org_role] || row.org_role }}
             </el-tag>
             <el-tag v-else size="small">{{ row.role_label || row.role || '-' }}</el-tag>
-            <el-tag v-if="row.mini_unusable" type="danger" size="small" effect="plain" class="ml4">
-              小程序不可用
-            </el-tag>
+            <!--
+              🔴 2026-10-20：公司级「管理员」＝项目负责人，现场要用小程序，已放行。
+              此前把「公司级」一律标成不可用，会误导现场负责人来解绑自己。
+              现在只对后端判定的真正不可用（超管/禁用/待审/被拒）打标签，
+              并用 tooltip 展示后端给的 mini_unusable_reason，前端不再自行推断口径
+              （口径的唯一真源 = 后端 _mini_unusable_reason，与小程序发 token 闸门一致）。
+            -->
+            <el-tooltip
+              v-if="row.mini_unusable"
+              :content="row.mini_unusable_reason || '该账号无法在小程序登录'"
+              placement="top"
+            >
+              <el-tag type="danger" size="small" effect="plain" class="ml4">
+                小程序不可用
+              </el-tag>
+            </el-tooltip>
           </template>
         </el-table-column>
         <el-table-column label="手机号" width="130">
@@ -126,8 +139,11 @@ async function load() {
 
 async function unbind(row: any) {
   const who = row.username || `用户#${row.user_id}`
+  // 🔴 2026-10-20：原因改用后端给的 mini_unusable_reason。
+  // 旧文案按 `row.org_role ? '公司级' : '不可用'` 自行推断，会把已放行的
+  // 公司级管理员说成「无法在小程序登录」，误导管理员来解绑自己能用的账号。
   const reason = row.mini_unusable
-    ? `该账号为${row.org_role ? '公司级' : '不可用'}账号，无法在小程序登录，解绑可释放此微信。`
+    ? `${row.mini_unusable_reason || '该账号无法在小程序登录'}，解绑可释放此微信。`
     : '解绑后，该微信将无法再登录该账号，需重新绑定。'
   try {
     await ElMessageBox.confirm(

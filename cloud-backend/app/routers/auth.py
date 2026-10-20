@@ -734,6 +734,28 @@ async def revoke_invite_code(
 # ---------------------------------------------------------------------------
 
 
+def _mini_unusable_reason(u: "User | None") -> str | None:
+    """返回该账号在小程序端不可登录的**具体原因**；可用则返回 None。
+
+    🔴 单一真源：判定顺序与 ``miniprogram_auth._token_response`` 的闸门一致，
+    ``mini_unusable`` 布尔值直接由「本函数是否返回 None」推导，避免前后端两处
+    各判一次而口径漂移（2026-10-20 那个 bug 的根因）。
+    """
+    if u is None:
+        return "绑定账号已被删除"
+    if not u.is_active:
+        return "账号已禁用"
+    if u.is_super_admin():
+        return "超级管理员账号不支持小程序登录"
+    status = getattr(u, "audit_status", None)
+    if status == AUDIT_PENDING:
+        return "注册申请待审批"
+    if status == AUDIT_REJECTED:
+        reason = getattr(u, "reject_reason", None)
+        return f"注册申请已被拒绝：{reason}" if reason else "注册申请已被拒绝"
+    return None
+
+
 @router.get("/wechat-bindings")
 async def list_wechat_bindings(
     q: str | None = Query(None, max_length=64),
@@ -779,10 +801,16 @@ async def list_wechat_bindings(
                 "role_label": ROLE_LABELS.get(u.role, u.role) if u else None,
                 "org_role": u.org_role if u else None,
                 "is_active": bool(u.is_active) if u else False,
-                # 公司级账号在小程序端不可登录 → 前端高亮提示
-                "mini_unusable": bool(
-                    u is None or not u.is_active or (u.org_role in ORG_ROLES)
-                ),
+                "audit_status": getattr(u, "audit_status", None) if u else None,
+                # 小程序端不可登录 → 前端高亮提示。
+                # 2026-10-20 起口径与 miniprogram_auth._token_response 的真实闸门
+                # 严格对齐：只有「超管 / 未激活 / 审批待审 / 审批被拒」不可用；
+                # 公司级「管理员」＝项目负责人，现场要用小程序，**已放行**。
+                # （此前误用 `org_role in ORG_ROLES`，会把管理员一并标成不可用。）
+                # 🔴 布尔值与原因共用 _mini_unusable_reason 一次计算，单一真源，
+                #    前端只展示不再自行推断，杜绝两处判定再次漂移（本 bug 根因）。
+                "mini_unusable": (_mini_reason := _mini_unusable_reason(u)) is not None,
+                "mini_unusable_reason": _mini_reason,
             }
             for b, u in rows
         ]
