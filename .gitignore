@@ -1,66 +1,74 @@
-# ===== 环境变量与本机配置（含敏感信息）=====
-cloud-backend/.env
-cloud-backend/.env.*
-glasses-app/local.properties
-wechat-miniprogram/project.private.config.json
-
-# ===== Python 后端 =====
-venv/
-**/__pycache__/
-*.pyc
-**/.pytest_cache/
-**/.venv/
-
-# ===== 前端 / 依赖 / 构建产物 =====
-**/node_modules/
-**/dist/
-web-admin/dist/
-web-admin/dist_ws/
-mobile-h5/dist/
-
-# ===== Android (glasses-app) 构建产物 =====
-glasses-app/.gradle/
-glasses-app/**/build/
-glasses-app/**/*.apk
-glasses-app/gradle-*-all.zip
-**/*.apk
-
-# ===== 运行时数据 / 临时 / 大二进制 =====
-uploads/
-exports/
-tmp/
-**/uploads/
-**/exports/
-**/tmp/
-*.deb
-
-# ===== 二进制资源库（图片库，非源码）=====
-图片库/
+﻿# ===== 敏感信息（必须）=====
+*key*.txt
+*Key*.txt
+*API*.md
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+.env
+.env.*
+**/ssl/
+**/*pwd*hash*
+**/*密码*
+**/*passwd*
 
 # ===== 备份文件 =====
 *.bak
 *.bak[0-9]*
 *.bak-*
 *.orig
+*.tmp
 **/*.rootcopy.*
 
-# ===== 文件名乱码副本（GBK 误解码的重复目录，非源码）=====
-SDK瀵规帴鏂囨。/
-妯″瀷璋冪敤鏂囨。/
-妯″瀷璋冪敤瑙勫垝
-闇€姹傛枃鏈琠extracted.txt
-鐩戠悊宸ヤ綔娴佺▼.xlsx
-AI鐪奸暅宸ョ▼绠＄悊搴旂敤锛堥渶姹傛枃鏈級.docx
-docs/1-闇€姹俁PD鏂囨。.md
-docs/2-椤圭洰璇存槑鏂囨。.md
-
-# ===== 系统 / IDE / 代理垃圾 =====
-.DS_Store
-Thumbs.db
+# ===== macOS 垃圾 =====
 __MACOSX/
 ._*
+.DS_Store
+
+# ===== 第三方 SDK 二进制 =====
+**/tmp/sdk/
+*.jar
+*.aar
+*.pom
+**/gradle-wrapper.jar
+
+# ===== 构建/导出/临时目录 =====
+**/exports/
+**/build/
+**/node_modules/
+**/.pytest_cache/
+**/.kotlin/
+**/.workbuddy/
+**/backups/
+**/src.bak/
+
+# ===== 语言/IDE =====
+__pycache__/
+*.py[cod]
+.venv/
+**/cloud-backend/.local/
+venv/
 .vscode/
 .idea/
-.trae/
-.workbuddy/
-**/.workbuddy/
+Thumbs.db
+
+# ===== 大文件 / 安装包 =====
+*.zip
+*.deb
+*.rpm
+*.exe
+*.msi
+*.dmg
+*.iso
+*.tar.gz
+*.tgz
+**/gradle-*-all.zip
+
+# ===== 前端构建备份 =====
+**/dist_bak_*/
+**/dist_old_*/
+
+# ===== 保留示例 zip（如不需要可删掉这行）=====
+!rokid_glass/rokid_glass/glasses-app/cxrlsampe.zip

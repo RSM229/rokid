@@ -1,4 +1,4 @@
-"""Initialize a demo project and user only in the isolated local database."""
+"""Initialize a demo project and user only in a disposable local database."""
 from __future__ import annotations
 
 import asyncio
@@ -8,6 +8,12 @@ from scripts.run_local import configure_local
 
 async def main() -> None:
     configure_local()
+    from app.config import settings
+    from sqlalchemy.engine import make_url
+
+    if make_url(settings.database_url).database != "gdjl_local":
+        raise RuntimeError("Demo seeding is disabled for the shared business database")
+
     from sqlalchemy import select
     from app.db import async_session, close_db, init_db
     from app.models.organization import Organization

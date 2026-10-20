@@ -41,7 +41,9 @@ const isRelease = currentEnv === 'release'
 const productionApiBaseUrl = trimTrailingSlash(
   ext.apiBaseUrl || 'https://www.baize.gdces.cn:4432/api',
 )
-const useLocalBackend = currentEnv === 'develop' && ext.useLocalBackend === true
+// The WeChat IDE's local simulator often has no injected ext config. Default
+// develop builds to loopback so a fresh checkout cannot silently hit production.
+const useLocalBackend = currentEnv === 'develop' && ext.useLocalBackend !== false
 const apiBaseUrl = trimTrailingSlash(
   useLocalBackend
     ? ext.localApiBaseUrl || 'http://127.0.0.1:8000/api'

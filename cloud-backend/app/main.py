@@ -55,7 +55,15 @@ async def lifespan(app: FastAPI):
             "生产配置检查失败：" + "；".join(security_warnings)
         )
 
-    await init_db()
+    if os.getenv("GDJL_SKIP_DB_INIT", "false").lower() == "true":
+        logger.info("本地共享业务库模式：跳过自动建表、字段迁移和种子数据初始化")
+        from app.db import async_session
+        from app.services.permissions import load_matrix
+
+        async with async_session() as db:
+            await load_matrix(db)
+    else:
+        await init_db()
     # RAG 检索预热：把嵌入模型、分词器、索引缓存提前建好，
     # 否则首个检索请求要承担 95MB 模型加载 + 建 BM25 的全部开销。
     # 预热失败不影响服务启动，检索会自动回退关键词模式。
