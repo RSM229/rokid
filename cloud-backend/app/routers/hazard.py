@@ -25,6 +25,7 @@ from app.routers.auth import (
     project_scope_id,
 )
 from app.services.ai_client import ai_client
+from app.services import agent_hazard_candidates
 from app.services.media_validation import assert_valid_image
 from app.services.watermark_service import apply_watermark_to_image
 from app.services.form_registry import FORM_BY_CODE
@@ -67,6 +68,10 @@ class HazardNotifyDocRequest(BaseModel):
 class HazardReplyDocRequest(BaseModel):
     rectify_desc: Optional[str] = None  # 整改完成情况
     rechecker: Optional[str] = None     # 复查人
+
+
+class HazardCandidateCommitRequest(BaseModel):
+    candidates: list[dict]
 
 
 def _chain_stage(hazard: Hazard) -> str:
@@ -364,6 +369,154 @@ async def commit_detection(
         weather=weather,
         source=source,
     )
+
+
+@router.post("/commit-candidates")
+async def commit_hazard_candidates(
+    req: HazardCandidateCommitRequest,
+    user: User = Depends(require_permission("hazard_ai")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Atomically create formally confirmed hazards from selected media candidates.
+
+    Visual recognition remains non-writing. The client sends only candidates the
+    user selected; every media row is locked and validated before any hazard is
+    created. A failure rolls back the whole batch.
+    """
+    try:
+        candidates = agent_hazard_candidates.normalize_candidates(req.candidates)
+    except agent_hazard_candidates.HazardCandidateError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    project_id = require_project_id(user)
+    media_ids = [item["media_id"] for item in candidates]
+    media_rows = (await db.execute(
+        select(MediaRecord)
+        .where(
+            MediaRecord.id.in_(media_ids),
+            MediaRecord.project_id == project_id,
+            MediaRecord.uploader_id == user.id,
+            MediaRecord.media_type == MediaType.IMAGE.value,
+        )
+        .with_for_update()
+    )).scalars().all()
+    media_by_id = {item.id: item for item in media_rows}
+    if set(media_by_id) != set(media_ids):
+        raise HTTPException(status_code=403, detail="部分隐患候选图片不存在或不属于当前用户/项目")
+    for media in media_rows:
+        if media.business_id is not None or media.business_type is not None:
+            raise HTTPException(status_code=409, detail=f"图片 {media.id} 已关联其他业务记录，不能重复建档")
+
+    now = datetime.now()
+    created: list[dict] = []
+    for candidate in candidates:
+        media = media_by_id[candidate["media_id"]]
+        detection = candidate["detection"]
+        metadata = media.metadata_json if isinstance(media.metadata_json, dict) else {}
+        taken_at = now
+        taken_at_text = candidate.get("taken_at") or str(metadata.get("capture_time") or "")
+        if taken_at_text:
+            try:
+                taken_at = datetime.fromisoformat(taken_at_text.replace("Z", "+00:00")).replace(tzinfo=None)
+            except ValueError:
+                taken_at = now
+        image_path = media.processed_path or media.original_path
+        section = candidate.get("section") or media.section
+        location = candidate.get("location") or media.location
+        weather = candidate.get("weather") or media.weather
+        hazard = Hazard(
+            project_id=project_id,
+            reporter_id=user.id,
+            status=HazardStatus.REPORTED.value,
+            risk_status=detection.get("risk_status"),
+            risk_category=detection.get("risk_category"),
+            top1_risk=detection.get("top1_risk"),
+            evidence=detection.get("evidence", []),
+            uncertainty=detection.get("uncertainty"),
+            recheck_suggestion=detection.get("recheck_suggestion", []),
+            scene_related=detection.get("scene_related"),
+            image_path=image_path,
+            section=section,
+            location=location,
+            remark=candidate.get("remark") or None,
+        )
+        db.add(hazard)
+        await db.flush()
+
+        image_record = (await db.execute(
+            select(ImageRecord)
+            .where(
+                ImageRecord.project_id == project_id,
+                ImageRecord.uploader_id == user.id,
+                ImageRecord.original_path == media.original_path,
+            )
+            .order_by(ImageRecord.id.desc())
+        )).scalars().first()
+        if image_record is None:
+            image_record = ImageRecord(
+                project_id=project_id,
+                uploader_id=user.id,
+                source=media.source,
+                original_path=media.original_path,
+                watermarked_path=image_path,
+                taken_at=taken_at,
+                location=location,
+                section=section,
+                weather=weather,
+                hazard_id=hazard.id,
+                file_hash=media.file_hash,
+                remark=f"用户确认的隐患候选：{detection.get('top1_risk', '')}",
+            )
+            db.add(image_record)
+        else:
+            if image_record.hazard_id is not None:
+                raise HTTPException(status_code=409, detail=f"图片 {media.id} 已生成过隐患记录，不能重复建档")
+            image_record.hazard_id = hazard.id
+            image_record.watermarked_path = image_path
+            image_record.taken_at = taken_at
+            image_record.location = location
+            image_record.section = section
+            image_record.weather = weather
+            image_record.remark = f"用户确认的隐患候选：{detection.get('top1_risk', '')}"
+
+        media.business_type = "hazard"
+        media.business_id = hazard.id
+        media.section = section
+        media.location = location
+        media.weather = weather
+        media.metadata_json = {
+            **metadata,
+            "hazard_candidate_confirmed": True,
+            "detection": detection,
+            "hazard_id": hazard.id,
+        }
+        created.append({
+            "media_id": media.id,
+            "hazard_id": hazard.id,
+            "top1_risk": hazard.top1_risk,
+            "section": section,
+            "location": location,
+        })
+
+    await db.commit()
+
+    try:
+        from app.services.notification import push_realtime, broadcast_to_project
+        for item in created:
+            await push_realtime(
+                user_id=user.id,
+                event_type="hazard_detected",
+                data=item,
+            )
+            await broadcast_to_project(
+                project_id=project_id,
+                event_type="hazard_detected",
+                data={**item, "reporter_id": user.id},
+            )
+    except Exception:
+        pass
+
+    return {"created_count": len(created), "hazards": created}
 
 
 @router.get("/list")
