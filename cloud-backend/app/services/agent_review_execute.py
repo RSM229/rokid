@@ -14,21 +14,17 @@ from app.models.miniprogram import MediaRecord, MediaType
 from app.models.user import Project, User
 from app.models.work_record import WorkRecord, WorkRecordStatus
 from app.services import agent_review_plan
+from app.services.form_registry import FORMS
 
 
+RECORD_TYPES = {"inspection": "巡视", "acceptance": "验收", "witness": "见证", "station": "旁站"}
+RECORD_PERMISSIONS = {"巡视": "inspection", "验收": "acceptance", "见证": "witness", "旁站": "station"}
 FORM_RECORD_TYPES = {
-    "gd_b_212_pangzhan": "旁站",
-    "gd_b_213_pingxing": "验收",
-    "gd_b_214_xunshi": "巡视",
-    "acceptance_record": "验收",
-    "gdaq_30306_weida": "巡视",
-}
-FORM_PERMISSIONS = {
-    "gd_b_212_pangzhan": "station",
-    "gd_b_213_pingxing": "acceptance",
-    "gd_b_214_xunshi": "inspection",
-    "acceptance_record": "acceptance",
-    "gdaq_30306_weida": "inspection",
+    spec.form_code: RECORD_TYPES[record_type]
+    for spec in FORMS
+    if spec.source == "record"
+    for record_type in spec.record_types
+    if record_type in RECORD_TYPES
 }
 
 
@@ -68,7 +64,7 @@ async def execute_confirmed_plan(
             "unsupported_forms": unsupported,
         })
     for _event, form in pairs:
-        permission = FORM_PERMISSIONS[form]
+        permission = RECORD_PERMISSIONS[FORM_RECORD_TYPES[form]]
         if not user.has_permission(permission):
             raise HTTPException(403, f"当前角色无权创建{permission}类记录")
 
