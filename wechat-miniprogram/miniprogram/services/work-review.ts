@@ -44,15 +44,36 @@ export interface ReviewPlan {
   serverId?: number
   serverRevision?: number
   conversationId?: string
-  status?: 'draft' | 'confirmed'
+  status?: 'draft' | 'confirmed' | 'executed'
+  executedRevision?: number | null
+  executionResult?: ReviewExecutionResult | null
+}
+
+export interface ReviewExecutionRecord {
+  event_id: string
+  form_code: string
+  form_name: string
+  record_id: number
+  document_id: number
+  document_title: string
+  media_ids: number[]
+}
+
+export interface ReviewExecutionResult {
+  plan_id: number
+  revision: number
+  created_count: number
+  records: ReviewExecutionRecord[]
 }
 
 export interface ReviewPlanResponse {
   id: number
   conversation_id: string
   revision: number
-  status: 'draft' | 'confirmed'
+  status: 'draft' | 'confirmed' | 'executed'
   confirmed_revision: number | null
+  executed_revision?: number | null
+  execution_result?: ReviewExecutionResult | null
   plan: Record<string, unknown>
   issues: string[]
 }
@@ -83,6 +104,8 @@ function fromServerPlan(result: ReviewPlanResponse): ReviewPlan {
     serverRevision: result.revision,
     conversationId: result.conversation_id,
     status: result.status,
+    executedRevision: result.executed_revision == null ? null : Number(result.executed_revision),
+    executionResult: result.execution_result || null,
   }
   validatePlan(plan)
   return plan
@@ -154,6 +177,14 @@ export async function listReviewPlans(conversationId?: string): Promise<ReviewPl
 export async function confirmReviewPlan(plan: ReviewPlan, revision = plan.serverRevision ?? plan.revision): Promise<ReviewPlan> {
   if (!plan.serverId) throw new Error('整理计划尚未保存到服务端')
   const result = await request<ReviewPlanResponse>(`/agent/review-plans/${plan.serverId}/confirm`, {
+    method: 'POST', data: { revision },
+  })
+  return fromServerPlan(result)
+}
+
+export async function executeReviewPlan(plan: ReviewPlan, revision = plan.serverRevision ?? plan.revision): Promise<ReviewPlan> {
+  if (!plan.serverId) throw new Error('整理计划尚未保存到服务端')
+  const result = await request<ReviewPlanResponse>(`/agent/review-plans/${plan.serverId}/execute`, {
     method: 'POST', data: { revision },
   })
   return fromServerPlan(result)

@@ -651,10 +651,16 @@ def _review_plan_payload(row: AgentReviewPlan) -> dict[str, Any]:
         plan = json.loads(row.plan_json or "{}")
     except (TypeError, ValueError):
         plan = {}
+    try:
+        execution_result = json.loads(row.execution_result_json or "null")
+    except (TypeError, ValueError):
+        execution_result = None
     return {
         "id": row.id, "conversation_id": row.conversation_id,
         "revision": row.revision, "status": row.status,
         "confirmed_revision": row.confirmed_revision,
+        "executed_revision": row.executed_revision,
+        "execution_result": execution_result,
         "plan": plan, "issues": agent_review_plan.review_issues(plan),
         "updated_at": row.updated_at.isoformat(),
     }
@@ -789,5 +795,26 @@ async def confirm_review_plan(
     row.confirmed_revision = row.revision
     row.updated_at = datetime.now()
     await db.commit()
+    await db.refresh(row)
+    return _review_plan_payload(row)
+
+
+@router.post("/review-plans/{plan_id}/execute")
+async def execute_review_plan(
+    plan_id: int,
+    req: ReviewPlanConfirm,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Execute one exact confirmed revision and create formal records atomically."""
+    row = (await db.execute(select(AgentReviewPlan).where(
+        AgentReviewPlan.id == plan_id, AgentReviewPlan.user_id == user.id,
+    ).with_for_update())).scalars().first()
+    if not row:
+        raise HTTPException(404, "整理计划不存在")
+    if row.project_id != getattr(user, "project_id", None):
+        raise HTTPException(403, "整理计划不属于当前项目")
+    from app.services.agent_review_execute import execute_confirmed_plan
+    await execute_confirmed_plan(db, row, user, req.revision)
     await db.refresh(row)
     return _review_plan_payload(row)
