@@ -719,10 +719,11 @@ Page(themed({
           : uploaded.watermark || {}
         const takenAt = String(watermark.taken_at || uploaded.capture_time || '')
         const observedDate = this.watermarkDate(takenAt)
+        const observedDateSource = watermark.taken_at ? 'watermark' : uploaded.capture_time ? 'exif' : ''
         const timeSource = watermark.taken_at ? '水印时间' : uploaded.capture_time ? `EXIF时间（${uploaded.capture_time_source || '图片元数据'}）` : ''
         const details = [watermark.location, watermark.section, takenAt, timeSource].filter(Boolean).join(' · ')
         evidence.push({
-          id: String(uploaded.id), mediaId: uploaded.id,
+          id: String(uploaded.id), mediaId: uploaded.id, observedDateSource,
           image: absoluteMediaUrl(uploaded.url), observedDate,
           note: details || '未读取到水印或EXIF时间信息',
         })
@@ -741,11 +742,15 @@ Page(themed({
       const eventGroups = userFacts.date
         ? [[userFacts.date, evidence.map(item => item.id)] as [string, string[]]]
         : [...dateGroups.entries()]
+      const sourceForEvidence = (evidenceIds: string[]) => {
+        const sources = evidence.filter(item => evidenceIds.includes(item.id)).map(item => item.observedDateSource).filter(Boolean)
+        return sources.includes('watermark') ? 'watermark' : sources.includes('exif') ? 'exif' : ''
+      }
       const events: ReviewPlan['events'] = hasActionIntent ? eventGroups.map(([date, evidenceIds], index) => ({
         id: `event-${index + 1}`, title: note.trim().slice(0, 80) || '现场工作事项（待核对）',
-        location: userFacts.location, date, dateConfirmed: true, dateSource: userFacts.date ? 'user_message' : 'watermark', evidenceIds, forms: [],
+        location: userFacts.location, date, dateConfirmed: true, dateSource: userFacts.date ? 'user_message' : sourceForEvidence(evidenceIds), evidenceIds, forms: [],
         recordType: inferred.type, recordTypeConfidence: inferred.confidence, recordTypeReason: inferred.reason,
-        fieldSources: { date: userFacts.date ? 'user_message' : 'watermark', ...(userFacts.location ? { location: 'user_message' } : {}) }, content: note.trim(),
+        fieldSources: { date: userFacts.date ? 'user_message' : sourceForEvidence(evidenceIds), ...(userFacts.location ? { location: 'user_message' } : {}) }, content: note.trim(),
       })) : []
       const datedIds = new Set(events.flatMap(event => event.evidenceIds))
       const undatedIds = hasActionIntent ? evidence.filter(item => !datedIds.has(item.id)).map(item => item.id) : []
