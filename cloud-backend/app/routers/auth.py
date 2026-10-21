@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Reques
 from fastapi.responses import Response
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, func, or_, select, update
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 import jwt
 import openpyxl
@@ -2652,6 +2652,11 @@ async def batch_import_users(
 
 @router.get("/users/export")
 async def export_users(
+    project_id: int | None = Query(
+        None,
+        ge=1,
+        description="仅公司级账号生效：只导出该项目的账号（与页面筛选同口径）",
+    ),
     manager: User = Depends(require_permission("user_manage")),
     db: AsyncSession = Depends(get_db),
 ):
@@ -2659,11 +2664,40 @@ async def export_users(
 
     可见范围与 ``list_users`` 同口径：公司级看全部，其余人只看本项目成员。
     真实密码不可逆，只导出管理员设过的临时口令（用户自行改密后即为空）。
+
+    ``project_id``（2026-10-21 新增）：公司级账号在页面选了具体项目后导出，
+    只导该项目的账号，口径与前端筛选**逐字一致** ——
+    命中 = 该项目成员（含已离场，对应前端 ``members(pid, include_left=true)``）
+    ∪ 所属项目 = 该项目。
+
+    🔴 **该参数只对公司级账号生效**：非公司级账号本来就被限定在「自己项目的
+    成员」，若认这个参数，等于让他导出别的项目的账号表（**含初始口令明文**），
+    属真实越权 —— 故直接忽略而非报错（与 ``X-Project-Id`` 写入头的处理一致）。
     """
+    scope_project_id: int | None = None
+    scope_project: "Project | None" = None
+    if project_id is not None and _can_manage_all_projects(manager):
+        target = await db.get(Project, project_id)
+        if target is None:
+            raise HTTPException(status_code=404, detail="项目不存在")
+        # 企业隔离：不得借该参数跨企业导出（org_id 为空视为本企业历史数据）
+        if manager.org_id is not None and target.org_id not in (None, manager.org_id):
+            raise HTTPException(status_code=403, detail="无权导出该项目账号")
+        scope_project_id = project_id
+        scope_project = target
+
     query = select(User).order_by(User.created_at.asc(), User.id.asc())
     if manager.org_id is not None:
         query = query.where(User.org_id == manager.org_id)
-    if not _can_manage_all_projects(manager):
+    if scope_project_id is not None:
+        # 含已离场成员：与页面列表看到的一致，导出的就是屏幕上那批人
+        member_ids = select(ProjectMember.user_id).where(
+            ProjectMember.project_id == scope_project_id,
+        )
+        query = query.where(
+            or_(User.project_id == scope_project_id, User.id.in_(member_ids))
+        )
+    elif not _can_manage_all_projects(manager):
         member_ids = select(ProjectMember.user_id).where(
             ProjectMember.project_id == manager.project_id,
             ProjectMember.left_at.is_(None),
@@ -2704,7 +2738,9 @@ async def export_users(
 
     buffer = io.BytesIO()
     workbook.save(buffer)
-    filename = f"白泽_账号表_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
+    # 指定了项目就把项目名放进文件名，避免同时导出多个项目时分不清谁是谁
+    suffix = f"_{scope_project.name}" if scope_project else ""
+    filename = f"白泽_账号表{suffix}_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
     return Response(
         content=buffer.getvalue(),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
