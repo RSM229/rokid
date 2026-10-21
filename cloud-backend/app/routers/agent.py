@@ -79,6 +79,7 @@ class RequestPlanEvidence(BaseModel):
     observation: str = ""
     note: str = ""
     watermark_fields: dict[str, Any] = Field(default_factory=dict)
+    field_sources: dict[str, str] = Field(default_factory=dict)
 
 
 class RequestPlanRequest(BaseModel):
@@ -312,8 +313,9 @@ _AGENT_SYSTEM = """你是「白泽」，广东建筑工程监理智能助手，�
  "args": {{"参数名": "值"}}, "answer": "给用户看的纯文本回答"}}
 
 facts 只记录用户原话明确提供的信息；图片、水印和视觉观察由服务端作为独立证据合并。
-args 可以放你已确认的工具参数，但服务端仍会重新抽取、校验和合并。用户明确说出的值
-不得因为图片缺失而被改写或丢失。可以返回多个动作；存在多个动作时服务端不会自动执行。
+args 可以放你已确认的工具参数，但服务端仍会重新抽取、校验和合并。水印/EXIF 中成功识别的
+日期、项目、地点、部位和天气优先于用户转述；冲突时用户值仍保留用于提示。图片缺失不能
+反向覆盖用户事实。可以返回多个动作；存在多个动作时服务端不会自动执行。
 
 🔴 最高优先级：办事必须输出受控动作，缺字段交给服务端追问
 ----------------------------------------------------
@@ -403,40 +405,65 @@ def _iso_date(value: Any) -> str:
     return f"{year:04d}-{month:02d}-{day:02d}"
 
 
-def apply_prefill(args: dict, prefill: dict, record_type: str) -> tuple[dict, list[str]]:
+def apply_prefill(
+    args: dict,
+    prefill: dict,
+    record_type: str,
+    *,
+    protected_keys: set[str] | None = None,
+) -> tuple[dict, list[str]]:
     """把水印等客观字段并入建记录参数，返回（新 args，已自动填入的说明）。
 
-    原则：只填水印能确定的客观值（拍摄日期/时间、地点、部位、天气），
-    用户原话已经给了值的栏不覆盖；其余一律不猜，留给服务端逐栏追问。
+    水印/EXIF 对日期、地点、部位、天气等客观栏拥有更高优先级；用户转述
+    有冲突时采用照片证据。拍摄时间对“开始时间”只是推断，存在用户明确
+    时段时仍保留用户值。用户在表单中主动修改的键通过 protected_keys 保护。
     """
     out = dict(args or {})
     filled: list[str] = []
+    protected = protected_keys or set()
 
-    def put(key: str, value: Any, label: str) -> None:
+    def put(key: str, value: Any, label: str, *, objective: bool = False) -> None:
         if not key:
             return
         text = str(value if value is not None else "").strip()
-        if not text or str(out.get(key) or "").strip():
+        if not text or key in protected:
+            return
+        existing = str(out.get(key) or "").strip()
+        if existing:
+            if not objective or existing == text:
+                return
+            out[key] = text
+            filled.append(f"{label}（改用照片水印）：{text}")
             return
         out[key] = text
         filled.append(f"{label}：{text}")
 
-    put("record_date", prefill.get("record_date") or _iso_date(prefill.get("taken_at")), "日期")
-    put("location", prefill.get("location"), "地点")
+    put(
+        "record_date",
+        prefill.get("record_date") or _iso_date(prefill.get("taken_at")),
+        "日期",
+        objective=True,
+    )
+    put("location", prefill.get("location"), "地点", objective=True)
 
     section = str(prefill.get("section") or "").strip()
     if section:
         if record_type == "旁站":
-            put("station_part", section, "关键部位")
-            out.setdefault("section", section)
+            put("station_part", section, "关键部位", objective=True)
+            if "section" not in protected:
+                out["section"] = section
         else:
-            put("section", section, "工程部位")
+            put("section", section, "工程部位", objective=True)
 
-    put("weather", prefill.get("weather"), "天气")
+    put("weather", prefill.get("weather"), "天气", objective=True)
 
     hhmm = _hms(prefill.get("taken_at"))
     if hhmm:
-        put(_PREFILL_START_ARG.get(record_type, ""), hhmm, "开始时间（水印拍摄时间）")
+        put(
+            _PREFILL_START_ARG.get(record_type, ""),
+            hhmm,
+            "开始时间（水印拍摄时间）",
+        )
 
     return out, filled
 
@@ -743,8 +770,16 @@ async def _agent_chat_impl(
         incoming_plan["field_status"] = agent_fact_model.fact_context_fields(merged_facts)
         prefill_evidence = [{
             "record_date": prefill.get("record_date") or _iso_date(prefill.get("taken_at")),
+            "observed_date_source": "watermark",
             "location": prefill.get("location"),
             "section": prefill.get("section"),
+            "weather": prefill.get("weather"),
+            "field_sources": {
+                field: "watermark"
+                for field in ("record_date", "location", "section", "weather")
+                if str(prefill.get(field) or "").strip()
+                or (field == "record_date" and _iso_date(prefill.get("taken_at")))
+            },
         }] if prefill else []
         prefill_conflicts = agent_fact_model.detect_source_conflicts(
             merged_facts, prefill_evidence,
@@ -842,7 +877,7 @@ async def _agent_chat_impl(
             turn_fact_args = dict(args)
 
     # 素材里已确定的结构化字段（照片水印的拍摄时间/地点/天气）并入建记录参数。
-    # 模型从用户原话听到的值优先，prefill 只补它没填的——水印是相机记的，比转述可靠。
+    # 日期、地点、部位和天气以水印/EXIF 客观证据为准；用户冲突描述保留在计划中。
     # 带素材不等于明确了记录类型。素材只提供证据；类型不明时保留澄清，
     # 避免用户上传旁站/验收/材料照片却被静默归成巡视。
     auto_filled: list[str] = []
@@ -876,7 +911,10 @@ async def _agent_chat_impl(
             if not rtype:
                 auto_filled = []
             else:
-                args, auto_filled = apply_prefill(args, prefill, rtype)
+                args, auto_filled = apply_prefill(
+                    args, prefill, rtype,
+                    protected_keys=set(form_values) if structured_submit else None,
+                )
 
     if tool:
         spec = agent_tools.TOOL_BY_NAME[tool]
@@ -988,7 +1026,7 @@ async def agent_chat(
     if isinstance(conflicts, list) and conflicts and isinstance(result, dict):
         labels = {
             "record_date": "日期", "project": "项目",
-            "location": "地点", "section": "工程部位",
+            "location": "地点", "section": "工程部位", "weather": "天气",
         }
         lines = ["发现你描述的信息与图片证据不一致："]
         for item in conflicts[:4]:
@@ -999,7 +1037,7 @@ async def agent_chat(
             lines.append(
                 f"- {label}：你说的是「{item.get('user_value')}」，图片证据是「{evidence}」"
             )
-        lines.append("当前候选优先采用你的明确描述，正式写入前仍需确认。")
+        lines.append("当前候选优先采用照片水印/EXIF 中的客观字段；你的描述保留为冲突提示，可在表单中核对修改。")
         result["field_conflicts"] = conflicts
         result["reply"] = "\n".join(lines) + "\n" + str(result.get("reply") or "").strip()
     if conversation_id and isinstance(result, dict):

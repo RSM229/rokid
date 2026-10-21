@@ -20,6 +20,7 @@ USER_FACT_SOURCES = {
     "user_confirmation",
 }
 USER_FACT_STATUSES = {"user_stated_candidate", "user_confirmed"}
+OBJECTIVE_EVIDENCE_SOURCES = {"watermark", "exif", "watermark_or_exif"}
 _FIELD_RE = re.compile(r"^(?:extra_fields\.)?[A-Za-z][A-Za-z0-9_.-]{0,95}$")
 _EMPTY_VALUES = {"", "null", "none", "unknown", "未知", "未识别", "待定", "n/a"}
 _FACT_ALIASES = {
@@ -167,13 +168,42 @@ def _comparable(value: Any) -> str:
     return re.sub(r"\s+", "", text).lower()
 
 
+def _evidence_field_source(item: dict[str, Any], field: str) -> str:
+    """Return the source of one evidence field without trusting generic vision as OCR."""
+    field_sources = item.get("field_sources")
+    if isinstance(field_sources, dict):
+        source = _text(field_sources.get(field))
+        if source:
+            return source
+    if field == "record_date":
+        source = _text(item.get("observed_date_source"))
+        if source:
+            return source
+    watermark_fields = item.get("watermark_fields")
+    watermark_keys = {
+        "record_date": ("taken_at", "record_date", "date"),
+        "project": ("project", "project_name"),
+        "location": ("location", "address"),
+        "section": ("section", "work_area"),
+        "weather": ("weather",),
+    }.get(field, ())
+    if isinstance(watermark_fields, dict) and any(_text(watermark_fields.get(key)) for key in watermark_keys):
+        return "watermark"
+    return _text(item.get("source")) or "evidence"
+
+
+def _objective_source(source: str) -> bool:
+    return source in OBJECTIVE_EVIDENCE_SOURCES
+
+
 def detect_source_conflicts(
     facts: Iterable[dict[str, Any]] | None,
     evidence: Iterable[dict[str, Any]] | None,
 ) -> list[dict[str, Any]]:
-    """Report explicit user values that disagree with extracted evidence."""
+    """Report disagreements and apply priority only to watermark/EXIF fields."""
     user_facts = user_fact_map(facts)
     evidence_values: dict[str, list[str]] = {}
+    evidence_sources: dict[str, list[str]] = {}
     for item in evidence or []:
         if not isinstance(item, dict):
             continue
@@ -182,11 +212,24 @@ def detect_source_conflicts(
             "project": ("project",),
             "location": ("location",),
             "section": ("section",),
+            "weather": ("weather",),
         }.items():
             value = next((_text(item.get(key)) for key in keys if _text(item.get(key))), "")
-            known = {_comparable(v) for v in evidence_values.get(field, [])}
+            observed = evidence_values.get(field, [])
+            known = {_comparable(v) for v in observed}
+            source = _evidence_field_source(item, field)
             if value and _comparable(value) not in known:
                 evidence_values.setdefault(field, []).append(value)
+                evidence_sources.setdefault(field, []).append(source)
+            elif value and _objective_source(source):
+                # The same value may first arrive as generic vision and later be
+                # confirmed by OCR/EXIF. Keep values and sources index-aligned.
+                index = next(
+                    i for i, existing in enumerate(observed)
+                    if _comparable(existing) == _comparable(value)
+                )
+                sources = evidence_sources.setdefault(field, [""] * len(observed))
+                sources[index] = source
 
     conflicts: list[dict[str, Any]] = []
     for field, observed in evidence_values.items():
@@ -197,12 +240,28 @@ def detect_source_conflicts(
         normalized_user = _comparable(user_value)
         normalized_observed = {_comparable(value) for value in observed}
         if normalized_user and normalized_observed and normalized_user not in normalized_observed:
+            sources = evidence_sources.get(field) or []
+            objective_index = next(
+                (index for index, source in enumerate(sources) if _objective_source(source)),
+                None,
+            )
+            if objective_index is None:
+                preferred_value = user_value
+                preferred_source = _text(fact.get("source")) or "user_message"
+                resolution = "user_value_preferred_pending_evidence_confirmation"
+            else:
+                preferred_value = observed[objective_index]
+                preferred_source = "watermark_or_exif"
+                resolution = "evidence_value_preferred_pending_confirmation"
             conflicts.append({
                 "field": field,
                 "user_value": user_value,
                 "evidence_values": observed,
+                "evidence_sources": sources,
+                "preferred_value": preferred_value,
+                "preferred_source": preferred_source,
                 "status": "conflict",
-                "resolution": "user_value_preferred_pending_confirmation",
+                "resolution": resolution,
                 "source_ref": fact.get("source_ref") or "",
             })
     return conflicts

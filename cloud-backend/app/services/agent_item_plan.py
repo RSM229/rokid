@@ -12,6 +12,7 @@ from typing import Any, Iterable
 IDENTITY_FIELDS = ("record_date", "project", "location", "section")
 RECORD_ACTIONS = {"record_work", "create_hazard"}
 _EMPTY_VALUES = {"", "null", "none", "unknown", "未知", "未识别", "待定", "n/a"}
+_OBJECTIVE_SOURCES = {"watermark", "exif", "watermark_or_exif"}
 
 
 def _text(value: Any) -> str:
@@ -34,13 +35,33 @@ def _fact_map(facts: Iterable[dict[str, Any]] | None) -> dict[str, Any]:
     return out
 
 
-def _evidence_identity(item: dict[str, Any]) -> dict[str, str]:
-    return {
+def _evidence_identity(item: dict[str, Any]) -> tuple[dict[str, str], dict[str, str]]:
+    identity = {
         "record_date": _text(item.get("record_date") or item.get("observed_date")),
         "project": _text(item.get("project")),
         "location": _text(item.get("location")),
         "section": _text(item.get("section")),
     }
+    field_sources = item.get("field_sources")
+    watermark_fields = item.get("watermark_fields")
+    watermark_keys = {
+        "record_date": ("taken_at", "record_date", "date"),
+        "project": ("project", "project_name"),
+        "location": ("location", "address"),
+        "section": ("section", "work_area"),
+    }
+    sources: dict[str, str] = {}
+    for field, value in identity.items():
+        if not _usable(value):
+            continue
+        source = _text(field_sources.get(field)) if isinstance(field_sources, dict) else ""
+        if not source and field == "record_date" and _text(item.get("observed_date_source")):
+            source = _text(item.get("observed_date_source"))
+        if not source and isinstance(watermark_fields, dict):
+            if any(_text(watermark_fields.get(key)) for key in watermark_keys.get(field, ())):
+                source = "watermark"
+        sources[field] = source or _text(item.get("source")) or "evidence"
+    return identity, sources
 
 
 def _compatible(group: dict[str, str], incoming: dict[str, str]) -> bool:
@@ -55,16 +76,23 @@ def _compatible(group: dict[str, str], incoming: dict[str, str]) -> bool:
     return shared > 0
 
 
-def _field_views(identity: dict[str, str], user_fields: dict[str, Any]) -> dict[str, dict[str, Any]]:
+def _field_views(
+    identity: dict[str, str],
+    user_fields: dict[str, Any],
+    evidence_sources: dict[str, str] | None = None,
+) -> dict[str, dict[str, Any]]:
     out: dict[str, dict[str, Any]] = {}
+    sources = evidence_sources or {}
     for field in IDENTITY_FIELDS:
         evidence_value = _text(identity.get(field))
         user_value = user_fields.get(field)
-        if evidence_value:
+        evidence_source = _text(sources.get(field)) or "evidence"
+        objective_evidence = evidence_source in _OBJECTIVE_SOURCES
+        if evidence_value and (objective_evidence or not _usable(user_value)):
             out[field] = {
                 "value": evidence_value,
-                "source": "evidence",
-                "status": "evidence_extracted",
+                "source": evidence_source,
+                "status": "evidence_extracted" if objective_evidence else "vision_observed",
             }
         elif _usable(user_value):
             out[field] = {
@@ -117,18 +145,20 @@ def build_item_plan(
     groups: list[dict[str, Any]] = []
     unassigned: list[int] = []
     for index, item in enumerate(evidence_items):
-        identity = _evidence_identity(item)
+        identity, sources = _evidence_identity(item)
         known = {key: value for key, value in identity.items() if _usable(value)}
         if not known:
             unassigned.append(index)
             continue
         target = next((group for group in groups if _compatible(group["identity"], identity)), None)
         if target is None:
-            target = {"identity": {}, "evidence_indexes": [], "notes": []}
+            target = {"identity": {}, "sources": {}, "evidence_indexes": [], "notes": []}
             groups.append(target)
         target["evidence_indexes"].append(index)
         for field, value in known.items():
             target["identity"].setdefault(field, value)
+            if field not in target["sources"] and sources.get(field):
+                target["sources"][field] = sources[field]
         note = _text(item.get("activity") or item.get("observation") or item.get("note"))
         if note:
             target["notes"].append(note[:500])
@@ -136,14 +166,16 @@ def build_item_plan(
     items: list[dict[str, Any]] = []
     for index, group in enumerate(groups, 1):
         identity = group["identity"]
-        fields = _field_views(identity, fact_map)
+        fields = _field_views(identity, fact_map, group.get("sources"))
         missing = [field for field in ("record_date", "location", "section") if field not in fields]
         issues: list[str] = []
         for field in IDENTITY_FIELDS:
             user_value = _text(fact_map.get(field))
             evidence_value = _text(identity.get(field))
             if user_value and evidence_value and user_value.lower() != evidence_value.lower():
-                issues.append(f"{field} 存在用户描述与图片证据冲突")
+                source = _text((group.get("sources") or {}).get(field))
+                preferred = "图片水印/EXIF" if source in _OBJECTIVE_SOURCES else "用户描述"
+                issues.append(f"{field} 存在用户描述与图片证据冲突，候选按{preferred}采用")
         items.append({
             "id": f"item_{index}",
             "record_type": record_type,

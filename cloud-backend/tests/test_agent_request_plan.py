@@ -45,19 +45,25 @@ def test_model_facts_are_source_controlled_and_exposed_with_status():
     assert plan["field_status"]["section"]["value"] == "3号楼二层"
 
 
-def test_user_fact_wins_and_is_reported_when_evidence_disagrees():
+def test_watermark_field_wins_and_user_value_is_reported_when_evidence_disagrees():
     plan = planner.normalize_candidate({
         "intent": "create_record",
         "actions": ["record_work"],
         "record_type": "巡视",
         "facts": [{"field": "record_date", "value": "2026-10-18"}],
     }, message="10月18日巡视", evidence=[{
-        "kind": "image", "observed_date": "2026-10-19",
+        "kind": "image", "observed_date": "2026-10-19", "observed_date_source": "watermark",
         "location": "A区", "section": "3号楼二层",
+        "watermark_fields": {
+            "taken_at": "2026-10-19 09:30", "location": "A区", "section": "3号楼二层",
+        },
     }])
     assert plan["field_conflicts"][0]["field"] == "record_date"
     assert plan["field_conflicts"][0]["user_value"] == "2026-10-18"
     assert plan["field_conflicts"][0]["evidence_values"] == ["2026-10-19"]
+    assert plan["field_conflicts"][0]["preferred_value"] == "2026-10-19"
+    assert plan["field_conflicts"][0]["preferred_source"] == "watermark_or_exif"
+    assert plan["field_conflicts"][0]["resolution"] == "evidence_value_preferred_pending_confirmation"
     assert plan["item_plan"]["candidate_count"] == 1
 
 
