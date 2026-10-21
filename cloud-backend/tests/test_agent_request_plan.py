@@ -1,4 +1,5 @@
 from app.services import agent_request_plan as planner
+from app.services import agent_tools
 
 
 def test_record_aliases_are_canonicalized_in_one_catalog():
@@ -22,6 +23,70 @@ def test_record_plan_is_a_candidate_and_never_directly_writable():
     assert plan["requires_confirmation"] is True
     assert plan["write_allowed"] is False
     assert plan["clarifications"] == []
+
+
+def test_model_facts_are_source_controlled_and_exposed_with_status():
+    plan = planner.normalize_candidate({
+        "intent": "create_record",
+        "actions": [{"id": "record_work", "confidence": 0.9}],
+        "record_type": "巡视",
+        "facts": [{
+            "field": "section",
+            "value": "3号楼二层",
+            "source": "user_confirmed",
+            "status": "user_confirmed",
+            "source_span": "3号楼二层",
+        }],
+    }, message="3号楼二层做巡视")
+    fact = plan["facts"][0]
+    assert fact["field"] == "section"
+    assert fact["source"] == "user_message_model"
+    assert fact["status"] == "user_stated_candidate"
+    assert plan["field_status"]["section"]["value"] == "3号楼二层"
+
+
+def test_user_fact_wins_and_is_reported_when_evidence_disagrees():
+    plan = planner.normalize_candidate({
+        "intent": "create_record",
+        "actions": ["record_work"],
+        "record_type": "巡视",
+        "facts": [{"field": "record_date", "value": "2026-10-18"}],
+    }, message="10月18日巡视", evidence=[{
+        "kind": "image", "observed_date": "2026-10-19",
+        "location": "A区", "section": "3号楼二层",
+    }])
+    assert plan["field_conflicts"][0]["field"] == "record_date"
+    assert plan["field_conflicts"][0]["user_value"] == "2026-10-18"
+    assert plan["field_conflicts"][0]["evidence_values"] == ["2026-10-19"]
+    assert plan["item_plan"]["candidate_count"] == 1
+
+
+def test_legacy_tool_output_is_mapped_through_the_action_catalog():
+    plan = planner.normalize_candidate({
+        "tool": "query_work_records",
+        "args": {"keyword": "钢筋"},
+    })
+    assert plan["actions"][0]["id"] == "query_work_records"
+    assert plan["selected_tool"] == "query_work_records"
+
+
+def test_every_executable_tool_has_a_controlled_action():
+    assert set(agent_tools.TOOL_BY_NAME) <= set(planner.ACTION_BY_TOOL)
+
+
+def test_evidence_dates_become_multiple_item_candidates_without_writing():
+    plan = planner.normalize_candidate({
+        "intent": "create_record",
+        "actions": ["record_work"],
+        "record_type": "巡视",
+    }, message="记录这些巡视照片", evidence=[
+        {"observed_date": "2026-10-18", "section": "3号楼二层"},
+        {"observed_date": "2026-10-18", "section": "3号楼二层"},
+        {"observed_date": "2026-10-19", "section": "3号楼二层"},
+    ])
+    assert plan["item_plan"]["candidate_count"] == 2
+    assert plan["item_plan"]["write_allowed"] is False
+    assert plan["write_allowed"] is False
 
 
 def test_ambiguous_record_request_requires_a_type_and_cannot_execute():

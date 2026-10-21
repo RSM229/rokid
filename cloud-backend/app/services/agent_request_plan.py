@@ -8,7 +8,16 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import datetime
 from typing import Any
+
+from app.services.agent_fact_model import (
+    detect_source_conflicts,
+    fact_context_fields,
+    merge_fact_candidates,
+    normalize_model_facts,
+)
+from app.services.agent_item_plan import build_item_plan
 
 
 RECORD_TYPES: dict[str, dict[str, Any]] = {
@@ -56,6 +65,10 @@ ACTIONS: dict[str, dict[str, Any]] = {
         "label": "生成监理文书", "tool": "generate_document", "kind": "write",
         "requires_confirmation": True, "attachment_purpose": None,
     },
+    "create_provform_doc": {
+        "label": "新建指定省统表", "tool": "create_provform_doc", "kind": "write",
+        "requires_confirmation": True, "attachment_purpose": None,
+    },
     "query_work_records": {
         "label": "查询工作记录", "tool": "query_work_records", "kind": "read",
         "requires_confirmation": False, "attachment_purpose": None,
@@ -99,6 +112,12 @@ INTENT_ACTIONS = {
     "navigate": "navigate",
     "undo": "undo",
     "chat": "chat",
+}
+
+ACTION_BY_TOOL = {
+    str(spec["tool"]): action_id
+    for action_id, spec in ACTIONS.items()
+    if spec.get("tool")
 }
 
 
@@ -163,9 +182,9 @@ def build_prompt(
         "\"actions\":[{\"id\":\"动作 id\",\"confidence\":0到1,\"reason\":\"简短依据\"}],"
         "\"record_type\":\"巡视|旁站|验收|见证|null\","
         "\"record_type_confidence\":0到1,"
+        "\"facts\":[{\"field\":\"工具参数名\",\"value\":\"用户明确提供的值\","
+        "\"source_span\":\"用户原话片段\",\"confidence\":0到1}],"
         "\"needs_hazard_analysis\":true|false,"
-        "\"clarifications\":[{\"field\":\"record_type|attachments|purpose\","
-        "\"question\":\"只问一个决定性问题\"}],"
         "\"reason\":\"本轮判断摘要\"}。\n"
         "动作 id 只能来自动作目录。可以返回多个动作，例如先分析隐患再创建隐患记录。\n"
         "用户明确说出的信息优先于水印和图片观察；证据缺失不能改写成用户没有提供。\n"
@@ -175,6 +194,8 @@ def build_prompt(
         "澄清；不要静默猜成巡视。\n"
         "如果证据中存在多个日期、项目、地点或部位，不要在本阶段决定记录条数，"
         "只保留证据并说明需要事项规划。\n"
+        "facts 只填写用户原话明确提供的事实；图片水印和视觉观察由服务端另行作为证据。"
+        "不得把模型推断写成用户事实，也不得用图片缺失值覆盖用户已说出的字段。\n"
         "不要声称已经保存、创建、发送或签发任何内容。\n\n"
         f"可用动作目录：{json.dumps(action_catalog(), ensure_ascii=False)}\n"
         f"记录类型目录：{json.dumps(RECORD_TYPES, ensure_ascii=False)}\n"
@@ -241,6 +262,7 @@ def normalize_candidate(
     message: str = "",
     attachment_count: int = 0,
     evidence_count: int = 0,
+    evidence: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     source = candidate if isinstance(candidate, dict) else {}
     intent = _text(source.get("intent"))
@@ -255,10 +277,23 @@ def normalize_candidate(
                 "id": mapped, "confidence": 0.5,
                 "reason": "由意图归一化",
             }]
+    # Transitional compatibility for models that still emit a legacy tool
+    # field. The tool is mapped back through the controlled action catalog;
+    # an unknown tool is ignored just like an unknown action id.
+    if not actions:
+        legacy_action = ACTION_BY_TOOL.get(_text(source.get("tool")))
+        if legacy_action:
+            actions = [{
+                "id": legacy_action,
+                "confidence": 0.5,
+                "reason": "旧版工具候选归一化",
+            }]
 
     action_ids = {item["id"] for item in actions}
     record_type = canonical_record_type(source.get("record_type"))
     record_confidence = _confidence(source.get("record_type_confidence"), 0.0)
+    facts = normalize_model_facts(source.get("facts"), message_ref=message)
+    evidence_items = [item for item in (evidence or []) if isinstance(item, dict)]
 
     clarifications: list[dict[str, Any]] = []
     if "record_work" in action_ids and not record_type:
@@ -327,13 +362,24 @@ def normalize_candidate(
     execution_mode = "clarify" if clarifications else (
         "single_tool" if selected_tool else "plan_only"
     )
+    field_conflicts = detect_source_conflicts(facts, evidence_items)
+    item_plan = build_item_plan(
+        facts=facts,
+        evidence=evidence_items,
+        record_type=record_type,
+        action_ids=action_ids,
+    )
 
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "intent": intent,
         "actions": actions,
         "record_type": record_type,
         "record_type_confidence": record_confidence,
+        "facts": facts,
+        "field_status": fact_context_fields(facts),
+        "field_conflicts": field_conflicts,
+        "item_plan": item_plan,
         "needs_hazard_analysis": (
             "analyze_hazard" in action_ids
             and max(attachment_count, evidence_count) > 0
@@ -347,6 +393,18 @@ def normalize_candidate(
         "requires_confirmation": requires_confirmation,
         "reason": _text(source.get("reason"))[:500],
         "degraded": False,
+        "trace": {
+            "planner_version": "2026-10-21.2",
+            "created_at": datetime.now().isoformat(timespec="seconds"),
+            "action_ids": [item["id"] for item in actions],
+            "clarification_fields": [
+                item["field"] for item in _unique_clarifications(clarifications)
+            ],
+            "fact_count": len(facts),
+            "conflict_count": len(field_conflicts),
+            "candidate_count": item_plan["candidate_count"],
+            "write_allowed": False,
+        },
     }
 
 
@@ -365,11 +423,17 @@ def degraded_plan(
             "select",
         ))
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "intent": "clarify",
         "actions": [],
         "record_type": None,
         "record_type_confidence": 0.0,
+        "facts": [],
+        "field_status": {},
+        "field_conflicts": [],
+        "item_plan": build_item_plan(
+            facts=[], evidence=[], record_type=None, action_ids=[],
+        ),
         "needs_hazard_analysis": False,
         "attachment_purposes": [],
         "clarifications": clarifications,
@@ -380,7 +444,54 @@ def degraded_plan(
         "requires_confirmation": False,
         "reason": reason,
         "degraded": True,
+        "trace": {
+            "planner_version": "2026-10-21.2",
+            "created_at": datetime.now().isoformat(timespec="seconds"),
+            "action_ids": [],
+            "clarification_fields": [item["field"] for item in clarifications],
+            "fact_count": 0,
+            "conflict_count": 0,
+            "candidate_count": 0,
+            "write_allowed": False,
+            "degraded_reason": reason,
+        },
     }
+
+
+def enrich_plan_facts(
+    plan: dict[str, Any],
+    additional_facts: list[dict[str, Any]] | None,
+    *,
+    evidence: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Merge trusted facts into an existing candidate without changing actions."""
+    out = dict(plan)
+    facts = merge_fact_candidates(plan.get("facts"), additional_facts)
+    evidence_items = [item for item in (evidence or []) if isinstance(item, dict)]
+    conflicts = detect_source_conflicts(facts, evidence_items)
+    action_ids = {
+        str(item.get("id") or "")
+        for item in out.get("actions", [])
+        if isinstance(item, dict)
+    }
+    item_plan = build_item_plan(
+        facts=facts,
+        evidence=evidence_items,
+        record_type=out.get("record_type"),
+        action_ids=action_ids,
+    )
+    out["facts"] = facts
+    out["field_status"] = fact_context_fields(facts)
+    out["field_conflicts"] = conflicts
+    out["item_plan"] = item_plan
+    trace = dict(out.get("trace") or {})
+    trace.update({
+        "fact_count": len(facts),
+        "conflict_count": len(conflicts),
+        "candidate_count": item_plan["candidate_count"],
+    })
+    out["trace"] = trace
+    return out
 
 
 def plan_to_legacy_purpose(plan: dict[str, Any]) -> dict[str, Any]:

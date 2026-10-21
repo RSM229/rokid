@@ -26,8 +26,12 @@ from app.models.agent_draft import AgentReviewPlan
 from app.models.miniprogram import MediaRecord, MediaType
 from app.routers.auth import get_current_user
 from app.routers.local_ai import _PLAINTEXT_SUFFIX
-from app.services import agent_request_plan, agent_tools, model_gateway
-from app.services.agent_context import render_context_summary, render_conversation_history
+from app.services import agent_fact_model, agent_request_plan, agent_tools, model_gateway
+from app.services.agent_context import (
+    extract_explicit_message_facts,
+    render_context_summary,
+    render_conversation_history,
+)
 from app.services import agent_review_plan
 from app.services.text_clean import strip_markdown
 
@@ -288,30 +292,43 @@ async def _validate_review_plan_media(
 # 回归测试：python tests/agent_eval/runner.py --repeat 3
 _AGENT_SYSTEM = """你是「白泽」，广东建筑工程监理智能助手，同时是「监理通」小程序的统一操作入口。
 
-判断用户意图分两类：
-1) 用户在**办事**（记记录、建隐患、建文书、生成日志/周报/月报、查记录/隐患/文书、查规范、查天气、打开页面、撤销）→ 必须从工具目录里选一个工具并抽取参数。
-2) 用户只是**问知识或闲聊**（规范怎么规定、某句话什么意思、打招呼）→ tool 传 null，在 answer 里正常回答。
+你只提出结构化语义候选，不直接决定执行哪个工具。服务端会根据动作白名单、
+记录目录、权限、当前草稿和业务规则决定能否执行。
 
-可用工具目录：
+可用动作目录：
+{actions}
+
+记录类型目录：
+{record_types}
+
+参数说明（只用于 facts/args 的字段命名）：
 {catalog}
 
 只输出一个 JSON 对象，不要输出任何其它文字、不要加代码块标记：
-{{"tool": "工具名或 null", "args": {{"参数名": "值"}}, "answer": "给用户看的纯文本回答"}}
+{{"intent": "create_record|archive|analyze_hazard|query|generate_document|navigate|undo|chat|clarify",
+ "actions": [{{"id": "动作 id", "confidence": 0.0, "reason": "简短依据"}}],
+ "record_type": "巡视|旁站|验收|见证|null", "record_type_confidence": 0.0,
+ "facts": [{{"field": "参数名", "value": "用户明确提供的值", "source_span": "用户原话片段", "confidence": 0.0}}],
+ "args": {{"参数名": "值"}}, "answer": "给用户看的纯文本回答"}}
 
-🔴 最高优先级：办事就必须调工具，缺字段交给服务端追问
+facts 只记录用户原话明确提供的信息；图片、水印和视觉观察由服务端作为独立证据合并。
+args 可以放你已确认的工具参数，但服务端仍会重新抽取、校验和合并。用户明确说出的值
+不得因为图片缺失而被改写或丢失。可以返回多个动作；存在多个动作时服务端不会自动执行。
+
+🔴 最高优先级：办事必须输出受控动作，缺字段交给服务端追问
 ----------------------------------------------------
-**唯一需要你追问的情况**：用户要新建工作记录，但没说清是 巡视 / 旁站 / 验收 / 见证 哪一类。
-此时 tool 传 null，在 answer 里只问这一个问题。
+**唯一需要你直接追问的情况**：用户要新建工作记录，但没说清是 巡视 / 旁站 / 验收 / 见证 哪一类。
+此时仍返回 record_work 动作，record_type 传 null，在 answer 里只问这一个问题；服务端会保留证据。
 
-**除此之外，任何字段缺失都不要追问、不要返回 null**——直接调工具，把你已经听到的填进 args，
+**除此之外，任何字段缺失都不要追问、不要退回普通聊天**——返回对应动作，把你已经听到的填进 facts/args，
 没听到的一律省略。服务端会自动列出缺失栏目并逐项向用户追问，这是既定机制，你不需要代劳。
 
 错误示范（严禁）：用户说「记一条旁站：屋面防水卷材铺贴，9:00 到 12:00，10人」，
-你因为「没有旁站结论」而返回 tool=null 去追问结论 —— 这是错的。
-正确做法：调用 create_work_record，args 填 record_type=旁站、station_part=屋面防水卷材铺贴、
+你因为「没有旁站结论」而返回 chat 动作去追问结论 —— 这是错的。
+正确做法：返回 record_work 动作，args 填 record_type=旁站、station_part=屋面防水卷材铺贴、
 station_start_time=9:00、station_end_time=12:00、worker_count=10，结论留给服务端追问。
 
-判断口诀：**能确定是哪一类记录 → 必须调工具；连类型都定不了 → 才追问。**
+判断口诀：**能确定是哪一类记录 → 返回 record_work；连类型都定不了 → record_work + 只问类型。**
 
 其他硬约束
 ----------
@@ -322,15 +339,15 @@ station_start_time=9:00、station_end_time=12:00、worker_count=10，结论留�
 - content（工作内容）只写用户说过的内容；不要把隐患识别结果、检查项清单、规范条目搬进来。
 - 记录类栏目口径以**字段表**为准：标「由系统生成=是」的栏（工程项目名称/编号/日期/星期/施工单位/项目章等）由系统带出，**不要追问、也不用传**；标「否」的栏用户没说才要问。表上有、参数清单里没单列的栏目，放进 **extra_fields**（键用服务端给出的字段 key，如 1_13/10_14），值填用户原话。
 - 用户补充回答追问时，除了已有参数，也要把该栏目写进 extra_fields 一并传入。
-- 用户回复「跳过 / 直接创建 / 不用补」等表示不再补充时，**必须仍调用 create_work_record**，把历史里已收集到的信息一并填入（不要只回文字）。
+- 用户回复「跳过 / 直接创建 / 不用补」等表示不再补充时，**必须仍返回 record_work**，把历史里已收集到的信息一并填入 facts/args（不要只回文字）。
 - 🔴 用户补充回答追问时（如答了类型、补了时间、补了结论），必须把**历史对话里已收集到的全部信息与本次补充合并成完整 args** 一次性传入，然后**立即调用工具**。合并后信息已足够建单，严禁继续追问下一个字段（只传本次提到的字段、或答完又追问，都会导致用户被反复盘问）。
 - 你**没有**写库能力，严禁在 answer 里声称「已保存」「已记录」「已生成」「已删除」——落库由服务端执行后回执。
-- 用户要换记录类型（如「改成旁站」「这条算验收」）→ 仍用 create_work_record，record_type 换成新类型，
+- 用户要换记录类型（如「改成旁站」「这条算验收」）→ 仍返回 record_work，record_type 换成新类型，
   其余已经确认过的部位/时间/内容照抄，不要反问用户重新说一遍。
-- 用户说「撤销 / 删掉刚才那条 / 说错了」→ 用 undo_last_action。
-- 用户问「今天天气」→ query_weather；问「规范/标准怎么要求」→ query_regulation。
+- 用户说「撤销 / 删掉刚才那条 / 说错了」→ 返回 undo 动作。
+- 用户问「今天天气」→ query_weather 动作；问「规范/标准怎么要求」→ query_regulation 动作。
 - 🔴 用户只说一个页面名或功能名（如「监理文书」「台账」「查看台账」「待办任务」「巡视记录」）→ 用 navigate 打开该页面，不要追问用户想干什么，也不要当成知识问答。
-- 用户说「有没有XX」「查一下XX」「今天记了几条」→ 是**查询**，用 query_* 工具；不是「生成/新建」。
+- 用户说「有没有XX」「查一下XX」「今天记了几条」→ 是**查询**，返回对应 query_* 动作；不是「生成/新建」。
 - 输出纯文本，禁止 Markdown 标记（#、*、表格、代码块）。
 
 🔴 图片与素材（最容易编造的地方）
@@ -348,10 +365,10 @@ station_start_time=9:00、station_end_time=12:00、worker_count=10，结论留�
 「记录今天工作情况」这类模糊请求
 --------------------------------
 - 「记录今天工作情况 / 今天干了什么 / 记一下今天」= 要留痕。
-- **图片/水印素材不等于巡视，也不等于任何固定表式**。如果用户没有明确说巡视、旁站、验收、见证、材料、日志等目标，tool 传 null，只问一个决定性问题：「你想把这些内容整理成巡视、旁站、验收、见证，还是只整理图片？」
-- 用户明确说了记录类型时才调用 create_work_record。用户已经在前文说过日期、地点、时间、工作内容的，必须沿用，不得因图片没有识别到而说成缺失。
+- **图片/水印素材不等于巡视，也不等于任何固定表式**。如果用户没有明确说巡视、旁站、验收、见证、材料、日志等目标，返回 record_work + record_type=null，只问一个决定性问题：「你想把这些内容整理成巡视、旁站、验收、见证，还是只整理图片？」
+- 用户明确说了记录类型时才填写 record_type 并进入记录候选。用户已经在前文说过日期、地点、时间、工作内容的，必须沿用，不得因图片没有识别到而说成缺失。
 - 错误示范（严禁）：直接回一段「今日工作情况结论与建议」，甚至还写「经图片识别」。这是答非所问。
-- 用户明确说「生成今天的监理日志 / 月报」时，才用 generate_document（period=day / month）。"""
+- 用户明确说「生成今天的监理日志 / 月报」时，才返回 generate_document 动作（args.period=day / month）。"""
 
 
 # ---------------------------------------------------------------------------
@@ -360,9 +377,6 @@ station_start_time=9:00、station_end_time=12:00、worker_count=10，结论留�
 # ---------------------------------------------------------------------------
 # 水印拍摄时间 → 该类型的「开始时间」参数（表字段 arg 名）
 _PREFILL_START_ARG = {"巡视": "inspection_start_time", "旁站": "station_start_time"}
-# 「记录今天工作」这类不指明表式的说法
-_DAILY_RECORD_HINTS = ("记录今天", "记录今日", "记一下今天", "记下今天", "今天的工作",
-                       "今天工作", "今天干了", "今天做什么", "今日工作", "今天情况")
 _TIME_RE = re.compile(r"(\d{1,2})\s*[:：时]\s*(\d{2})")
 _DATE_RE = re.compile(r"(\d{4})\s*[-/年.]\s*(\d{1,2})\s*[-/月.]\s*(\d{1,2})")
 
@@ -425,23 +439,6 @@ def apply_prefill(args: dict, prefill: dict, record_type: str) -> tuple[dict, li
         put(_PREFILL_START_ARG.get(record_type, ""), hhmm, "开始时间（水印拍摄时间）")
 
     return out, filled
-
-
-def _is_daily_record(message: str) -> bool:
-    text = message or ""
-    return any(h in text for h in _DAILY_RECORD_HINTS)
-
-
-def _explicit_record_type(message: str) -> str | None:
-    """Return a record type only when the user's own words name one uniquely."""
-    text = str(message or "")
-    matched = {
-        record_type
-        for record_type, spec in agent_request_plan.RECORD_TYPES.items()
-        if record_type in text
-        or any(alias in text for alias in spec.get("aliases", ()))
-    }
-    return next(iter(matched)) if len(matched) == 1 else None
 
 
 def _history_messages(history: list[dict], limit: int = 6) -> list[dict]:
@@ -563,6 +560,12 @@ async def _generate_request_plan(
             message=message,
             attachment_count=max(0, attachment_count),
             evidence_count=evidence_count,
+            evidence=evidence_items,
+        )
+        plan = agent_request_plan.enrich_plan_facts(
+            plan,
+            extract_explicit_message_facts(message, message_ref=message),
+            evidence=evidence_items,
         )
         return plan, config.model_id
     except (model_gateway.ModelGatewayError, TypeError, ValueError) as exc:
@@ -646,7 +649,11 @@ async def _agent_chat_impl(
     pend_for_context = await agent_tools.get_pending(db, user.id, conversation_id=conversation_id)
     draft_for_context = pend_for_context[1] if pend_for_context else {}
 
-    system = _AGENT_SYSTEM.format(catalog=agent_tools.catalog_for_prompt())
+    system = _AGENT_SYSTEM.format(
+        catalog=agent_tools.catalog_for_prompt(),
+        actions=json.dumps(agent_request_plan.action_catalog(), ensure_ascii=False),
+        record_types=json.dumps(agent_request_plan.RECORD_TYPES, ensure_ascii=False),
+    )
     messages: list[dict] = [{"role": "system", "content": system}]
     if pend_for_context:
         messages.append({"role": "system", "content": render_context_summary(
@@ -666,12 +673,14 @@ async def _agent_chat_impl(
     else:
         messages.append({"role": "user", "content": message})
 
-    incoming_plan = agent_request_plan.normalize_candidate(
+    external_plan = agent_request_plan.normalize_candidate(
         req.request_plan,
         message=message,
         attachment_count=1 if material else 0,
         evidence_count=1 if material else 0,
     )
+    has_external_plan = bool(external_plan.get("actions"))
+    incoming_plan = external_plan
 
     form_values = req.form_values if isinstance(req.form_values, dict) else {}
     structured_submit = bool(form_values) and bool(pend_for_context)
@@ -701,24 +710,72 @@ async def _agent_chat_impl(
                     "form": None, "model": None, "degraded": True,
                     "request_plan": incoming_plan}
 
-    tool = str((parsed or {}).get("tool") or "").strip()
-    if tool in ("null", "None") or tool not in agent_tools.TOOL_BY_NAME:
+    semantic_candidate = dict(parsed or {})
+    semantic_args = (
+        semantic_candidate.get("args")
+        if isinstance(semantic_candidate.get("args"), dict)
+        else {}
+    )
+    # Some models still put the record type only inside args. Preserve that
+    # value as a candidate while the action itself remains catalog-controlled.
+    if not semantic_candidate.get("record_type") and semantic_args.get("record_type"):
+        semantic_candidate["record_type"] = semantic_args.get("record_type")
+    semantic_plan = agent_request_plan.normalize_candidate(
+        semantic_candidate,
+        message=message,
+        attachment_count=1 if material else 0,
+        evidence_count=1 if material else 0,
+        evidence=[],
+    )
+    semantic_plan = agent_request_plan.enrich_plan_facts(
+        semantic_plan,
+        extract_explicit_message_facts(message, message_ref=message),
+        evidence=[],
+    )
+    if has_external_plan:
+        # The precomputed attachment plan is authoritative for actions and
+        # clarifications; the chat turn contributes the extracted user facts.
+        merged_facts = agent_fact_model.merge_fact_candidates(
+            external_plan.get("facts"), semantic_plan.get("facts"),
+        )
+        incoming_plan = dict(external_plan)
+        incoming_plan["facts"] = merged_facts
+        incoming_plan["field_status"] = agent_fact_model.fact_context_fields(merged_facts)
+        prefill_evidence = [{
+            "record_date": prefill.get("record_date") or _iso_date(prefill.get("taken_at")),
+            "location": prefill.get("location"),
+            "section": prefill.get("section"),
+        }] if prefill else []
+        prefill_conflicts = agent_fact_model.detect_source_conflicts(
+            merged_facts, prefill_evidence,
+        )
+        existing_conflicts = [
+            item for item in (external_plan.get("field_conflicts") or [])
+            if isinstance(item, dict)
+        ]
+        conflict_fields = {str(item.get("field") or "") for item in existing_conflicts}
+        incoming_plan["field_conflicts"] = existing_conflicts + [
+            item for item in prefill_conflicts
+            if str(item.get("field") or "") not in conflict_fields
+        ]
+        trace = dict(incoming_plan.get("trace") or {})
+        trace.update({
+            "fact_count": len(merged_facts),
+            "conflict_count": len(incoming_plan["field_conflicts"]),
+            "semantic_action_ids": [
+                str(item.get("id") or "") for item in semantic_plan.get("actions", [])
+                if isinstance(item, dict)
+            ],
+        })
+        incoming_plan["trace"] = trace
+    else:
+        incoming_plan = semantic_plan
+
+    tool = str(incoming_plan.get("selected_tool") or "").strip()
+    if tool not in agent_tools.TOOL_BY_NAME:
         tool = ""
-    args = (parsed or {}).get("args") if isinstance((parsed or {}).get("args"), dict) else {}
-    incoming_action_ids = {
-        str(item.get("id") or "")
-        for item in incoming_plan.get("actions", [])
-        if isinstance(item, dict)
-    }
-    incoming_plan_is_read_only = not incoming_action_ids.intersection({
-        "record_work", "create_hazard", "generate_document", "undo",
-    })
-    if (
-        incoming_plan_is_read_only
-        and not tool
-        and incoming_plan.get("selected_tool") in agent_tools.TOOL_BY_NAME
-    ):
-        tool = str(incoming_plan["selected_tool"])
+    fact_args = agent_fact_model.facts_to_args(incoming_plan.get("facts"))
+    args = {**fact_args, **semantic_args}
     if incoming_plan.get("record_type") and not str(args.get("record_type") or "").strip():
         args["record_type"] = incoming_plan["record_type"]
     turn_fact_args = dict(args)
@@ -778,23 +835,22 @@ async def _agent_chat_impl(
     # the evidence-only draft.  The generic supplement extractor cannot infer
     # a form before record_type exists.
     if not tool and pending_tool == "create_work_record":
-        for candidate in ("巡视", "旁站", "验收", "见证"):
-            if candidate in message:
-                tool = pending_tool
-                args = {"record_type": candidate}
-                turn_fact_args = dict(args)
-                break
+        candidate = agent_request_plan.canonical_record_type(message)
+        if candidate:
+            tool = pending_tool
+            args = {**args, "record_type": candidate}
+            turn_fact_args = dict(args)
 
     # 素材里已确定的结构化字段（照片水印的拍摄时间/地点/天气）并入建记录参数。
     # 模型从用户原话听到的值优先，prefill 只补它没填的——水印是相机记的，比转述可靠。
     # 带素材不等于明确了记录类型。素材只提供证据；类型不明时保留澄清，
     # 避免用户上传旁站/验收/材料照片却被静默归成巡视。
     auto_filled: list[str] = []
-    needs_record_type = (
-        _is_daily_record(message)
-        and _explicit_record_type(message) is None
-        and not pending_tool
-    )
+    needs_record_type = any(
+        str(item.get("field") or "") == "record_type"
+        for item in incoming_plan.get("clarifications", [])
+        if isinstance(item, dict)
+    ) and not pending_tool
     if needs_record_type:
         # Never accept a model-inferred form for this ambiguous request.
         tool = ""
@@ -927,6 +983,25 @@ async def agent_chat(
     """Run one agent turn, then persist the exact assistant result for restore."""
     conversation_id = (req.conversation_id or "").strip()[:64] or None
     result = await _agent_chat_impl(req, user=user, db=db)
+    plan = result.get("request_plan") if isinstance(result, dict) else None
+    conflicts = plan.get("field_conflicts") if isinstance(plan, dict) else None
+    if isinstance(conflicts, list) and conflicts and isinstance(result, dict):
+        labels = {
+            "record_date": "日期", "project": "项目",
+            "location": "地点", "section": "工程部位",
+        }
+        lines = ["发现你描述的信息与图片证据不一致："]
+        for item in conflicts[:4]:
+            if not isinstance(item, dict):
+                continue
+            label = labels.get(str(item.get("field") or ""), str(item.get("field") or "字段"))
+            evidence = "、".join(str(value) for value in (item.get("evidence_values") or []))
+            lines.append(
+                f"- {label}：你说的是「{item.get('user_value')}」，图片证据是「{evidence}」"
+            )
+        lines.append("当前候选优先采用你的明确描述，正式写入前仍需确认。")
+        result["field_conflicts"] = conflicts
+        result["reply"] = "\n".join(lines) + "\n" + str(result.get("reply") or "").strip()
     if conversation_id and isinstance(result, dict):
         result["conversation_id"] = conversation_id
         try:
