@@ -712,6 +712,25 @@ function isApproved(row: any) {
   return (row.audit_status || 'approved') === 'approved'
 }
 
+/**
+ * 「默认操作哪个项目」的唯一取值口径（2026-10-21 修）。
+ *
+ * 🔴 原先三处（成员弹窗 openMembers / 审批 openApprove / 建号 resetForm）都写
+ * `projects.value[0]?.id`，而后端 `list_projects` 是 `ORDER BY created_at DESC`，
+ * 于是 **projects[0] = 最新建的项目**，跟用户顶栏选中的项目毫无关系。线上实测：
+ * 超管切到项目 1，点「项目成员管理」弹窗却默认选中最新建的「111」，显示的是
+ * 111 的成员；审批入册 / 新增用户同样会**静默把数据写进最新建的项目**（写入型更危险）。
+ *
+ * 优先级：筛选器选中值 → 顶栏当前项目 → 才回落 projects[0]。
+ * 「全部项目」视角下 auth.currentProjectId 仍有值（视角只改读取范围，不动
+ * users.project_id），所以照用；真取不到时回落，避免下拉空白无法提交。
+ */
+function defaultProjectId(): number | undefined {
+  if (projectFilter.value > 0) return projectFilter.value
+  if (auth.currentProjectId) return auth.currentProjectId
+  return projects.value[0]?.id
+}
+
 // ---- 项目筛选（2026-10-21，纯前端）----
 // 后端 `GET /auth/users` 对公司级账号短路了项目过滤（`_can_manage_all_projects`），
 // 所以超管切项目后账号列表仍是全量。这里在前端补一层筛选，且**默认跟随顶栏当前项目**，
@@ -841,7 +860,9 @@ async function loadPending() {
 
 function openApprove(row: any) {
   approveTarget.value = row
-  approveForm.project_id = projects.value[0]?.id
+  // 🔴 写入型默认值：原先 projects[0] = 最新建的项目，会把审批通过的人
+  // 静默落进不相干的项目（2026-10-21 修，与 openMembers 同一口径）。
+  approveForm.project_id = defaultProjectId()
   // 码上的岗位 = 申请意向 → 预填（审批人可改，改后以审批为准）
   approveForm.role = row.apply_role || DEFAULT_ROLE
   approveForm.extra_roles = []
@@ -1025,7 +1046,8 @@ function resetForm() {
   form.real_name = ''
   form.role = DEFAULT_ROLE
   form.org_role = ''
-  form.project_id = projects.value[0]?.id
+  // 🔴 写入型默认值：原先 projects[0] = 最新建的项目（2026-10-21 修）
+  form.project_id = defaultProjectId()
   form.phone = ''
   form.password = ''
   form.is_active = true
@@ -1129,7 +1151,10 @@ async function unbindWechat(row: any) {
 
 // ---- 项目成员管理（Step 2）----
 function openMembers() {
-  memberProjectId.value = memberProjectId.value || projects.value[0]?.id
+  // 🔴 默认项目不能再取 projects[0]（= 最新建的项目），要跟随当前视角，
+  // 否则超管切到 A 项目却看到最新那个项目的成员（2026-10-21 线上实测复现）。
+  // 且**每次打开都重置**：保留旧值会让「切了项目再开弹窗」仍停在上次的项目上。
+  memberProjectId.value = defaultProjectId()
   memberDialogVisible.value = true
   if (memberProjectId.value) loadMembers()
 }
