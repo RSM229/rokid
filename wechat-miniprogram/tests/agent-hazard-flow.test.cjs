@@ -25,4 +25,5 @@ test('a combined record and hazard plan renders both controlled sub-flows', () =
     page,
     /if \(wantsRecordPlan\) \{[\s\S]{0,900}createReviewPlanFromAttachments[\s\S]{0,500}appendHazardCandidateMessage/,
   )
+  assert.match(page, /createReviewPlanFromAttachments\([^\n]*false\)/)
 })

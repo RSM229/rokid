@@ -979,7 +979,7 @@ Page(themed({
       )
       if (wantsRecordPlan) {
         if (detections.length) {
-          await this.createReviewPlanFromAttachments(note, images, watermarks, observations, requestPlan)
+          await this.createReviewPlanFromAttachments(note, images, watermarks, observations, requestPlan, false)
           await this.appendHazardCandidateMessage(
             detections,
             images,
@@ -1037,6 +1037,7 @@ Page(themed({
     watermarks: Array<Record<string, any>>,
     observations: string[] = [],
     requestPlan?: AgentRequestPlan,
+    manageLoading = true,
   ) {
     try {
       if (!this.currentSessionId) this.currentSessionId = Date.now()
@@ -1138,7 +1139,7 @@ Page(themed({
     } catch (error) {
       this.addMessage({ role: 'assistant', text: `整理计划创建失败：${(error as Error).message}。已上传的资料不会自动创建业务记录。` })
     } finally {
-      this.setData({ loading: false })
+      if (manageLoading) this.setData({ loading: false })
     }
   },
 
