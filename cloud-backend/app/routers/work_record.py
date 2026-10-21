@@ -44,6 +44,7 @@ async def auto_create_record_document(
     user: User,
     record: WorkRecord,
     project: Project | None = None,
+    auto_generate: bool = True,
 ) -> Document | None:
     """工作记录创建/提交后自动生成对应的省统表文书。
 
@@ -55,6 +56,10 @@ async def auto_create_record_document(
       渲染失败自动**降级**为普通文书（无模板也仍能在文书列表/台账中看到并导出 PDF）；
     - 任何异常都只记日志，**绝不让工作记录的创建/提交失败**。
     """
+    # 工作记录与正式表单解耦：业务入口默认只创建记录。保留该函数供
+    # 历史管理脚本/测试和明确的兼容调用使用，产品入口必须显式选择表式。
+    if not auto_generate:
+        return None
     if record.record_type not in RECORD_DOC_TYPES:
         return None
     if record.generated_doc_id:
@@ -485,7 +490,7 @@ async def create_work_record_with_photos(
 
     # 自动生成对应的省统表文书（待定记录跳过；失败不影响记录本身）
     try:
-        await auto_create_record_document(db, user, record, project)
+        await auto_create_record_document(db, user, record, project, auto_generate=False)
         await db.commit()
     except Exception as exc:  # noqa: BLE001
         logger.warning("自动生成文书失败（记录已保存）：%s", exc)
@@ -605,7 +610,7 @@ async def create_inspection_with_photo(
         )
     )
     try:
-        await auto_create_record_document(db, user, record, project)
+        await auto_create_record_document(db, user, record, project, auto_generate=False)
     except Exception as exc:  # noqa: BLE001
         logger.warning("自动生成文书失败（记录已保存）：%s", exc)
     await db.commit()
@@ -648,7 +653,7 @@ async def create_inspection(
     await db.flush()
     # 自动生成对应的省统表文书
     try:
-        await auto_create_record_document(db, user, record)
+        await auto_create_record_document(db, user, record, auto_generate=False)
     except Exception as exc:  # noqa: BLE001
         logger.warning("自动生成文书失败（记录已保存）：%s", exc)
     await db.commit()
@@ -773,7 +778,7 @@ async def submit_work_record(
     # 提交审批 -> 补齐省统表文书（创建时已生成则跳过，老记录在此补上）
     doc = None
     try:
-        doc = await auto_create_record_document(db, user, record)
+        doc = await auto_create_record_document(db, user, record, auto_generate=False)
     except Exception as exc:  # noqa: BLE001
         logger.warning("自动生成文书失败（记录已提交）：%s", exc)
     await db.commit()
@@ -966,7 +971,7 @@ async def create_acceptance(
     project = await db.get(Project, record.project_id)
     if not record.acceptance_participants:
         record.acceptance_participants = getattr(project, "acceptance_participants", None)
-    doc = await auto_create_record_document(db, user, record, project)
+    doc = await auto_create_record_document(db, user, record, project, auto_generate=False)
 
     await db.commit()
     await db.refresh(record)
@@ -1010,7 +1015,7 @@ async def create_witness(
     await db.flush()
     # 自动生成对应的省统表文书（见证取样记录 / GD-B-219）
     try:
-        await auto_create_record_document(db, user, record)
+        await auto_create_record_document(db, user, record, auto_generate=False)
     except Exception as exc:  # noqa: BLE001
         logger.warning("自动生成文书失败（记录已保存）：%s", exc)
     await db.commit()
@@ -1181,7 +1186,7 @@ async def create_station(
     await db.flush()
     # 自动生成对应的省统表文书（旁站未结束时跳过，结束时由 /station/{id} 补）
     try:
-        await auto_create_record_document(db, user, record)
+        await auto_create_record_document(db, user, record, auto_generate=False)
     except Exception as exc:  # noqa: BLE001
         logger.warning("自动生成文书失败（记录已保存）：%s", exc)
     await db.commit()
@@ -1218,7 +1223,7 @@ async def update_station_end_time(
     await db.flush()
     # 旁站结束 -> 补生成省统表文书
     try:
-        await auto_create_record_document(db, user, record)
+        await auto_create_record_document(db, user, record, auto_generate=False)
     except Exception as exc:  # noqa: BLE001
         logger.warning("自动生成文书失败（记录已保存）：%s", exc)
     await db.commit()
@@ -1501,7 +1506,21 @@ async def get_work_record(
             MediaRecord.media_type == MediaType.IMAGE.value,
         )
     )
-    media_urls = [r.processed_path or r.original_path for r in media_result.scalars().all()]
+    media_rows = list(media_result.scalars().all())
+    media_urls = [r.processed_path or r.original_path for r in media_rows]
+    media_evidence = [
+        {
+            "id": r.id,
+            "url": r.processed_path or r.original_path,
+            "section": r.section,
+            "location": r.location,
+            "weather": r.weather,
+            "capture_time": (r.metadata_json or {}).get("capture_time"),
+            "capture_time_source": (r.metadata_json or {}).get("capture_time_source"),
+            "watermark": (r.metadata_json or {}).get("watermark") or {},
+        }
+        for r in media_rows
+    ]
     if record.record_type == "见证":
         witness_photos = list(dict.fromkeys((record.witness_photos or []) + media_urls))
         inspection_photos = record.inspection_photos
@@ -1553,6 +1572,7 @@ async def get_work_record(
         "station_supervision_status": record.station_supervision_status,
         "station_conclusion": record.station_conclusion,
         "content_json": record.content_json,
+        "media_evidence": media_evidence,
         "remark": record.remark,
         "reject_reason": record.reject_reason,
         "approved_by": record.approved_by,
@@ -1800,7 +1820,7 @@ async def update_record_type(
     # 待定记录被确定为具体类型后 -> 生成对应的省统表文书
     doc = None
     try:
-        doc = await auto_create_record_document(db, user, record)
+        doc = await auto_create_record_document(db, user, record, auto_generate=False)
     except Exception as exc:  # noqa: BLE001
         logger.warning("自动生成文书失败（类型已修改）：%s", exc)
     await db.commit()

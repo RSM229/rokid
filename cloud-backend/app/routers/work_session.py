@@ -374,7 +374,7 @@ async def _voice_create_impl(
         # 自动生成省统表文书
         try:
             from app.routers.work_record import auto_create_record_document
-            await auto_create_record_document(db, user, record)
+            await auto_create_record_document(db, user, record, auto_generate=False)
         except Exception as exc:
             logger.warning("自动生成文书失败（记录已保存）：%s", exc)
 
