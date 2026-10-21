@@ -14,7 +14,7 @@ npm run typecheck
 本地开发运行同一套 FastAPI 后端，使用服务器真实微信、AI 配置，并经 R640 SSH 隧道直接连接服务器业务库 `gdjl`。本地与服务器数据实时共享；本地创建、修改或删除的业务数据会直接影响服务器上的真实数据，请使用已有账号和测试项目，不要写入演示数据。上传与导出文件仍保存在本机 `cloud-backend/.local/`，不与服务器文件目录同步。先在仓库根目录执行：
 
 ```powershell
-cd rokid_glass/rokid_glass/cloud-backend
+cd cloud-backend
 uv venv --python 3.12 .venv
 uv pip install --python .venv\Scripts\python.exe -r requirements-local.txt
 cd ..
