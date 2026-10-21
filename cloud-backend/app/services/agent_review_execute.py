@@ -116,6 +116,9 @@ async def execute_confirmed_plan(
             "title": event["title"],
             "request_text": plan["request_text"],
             "event_content": event["content"],
+            "acceptance_type": event["title"] if record_type == "验收" else None,
+            "acceptance_content": event["content"] if record_type == "验收" else None,
+            "record": event["content"],
             "media_ids": event_media_ids,
             "evidence_ids": list(event["evidence_ids"]),
             "field_sources": {
