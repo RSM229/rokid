@@ -52,6 +52,7 @@ __pycache__/
 venv/
 .vscode/
 .idea/
+wechat-miniprogram/project.private.config.json
 Thumbs.db
 
 # ===== 大文件 / 安装包 =====
