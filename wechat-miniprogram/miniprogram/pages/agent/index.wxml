@@ -81,7 +81,7 @@
                 <text class="inline-review-label">业务日期</text>
                 <text class="inline-review-date-status {{event.date ? 'confirmed' : 'pending'}}">{{event.date ? event.date : '未提供，执行时使用当前日期'}}</text>
               </view>
-              <text wx:if="{{event.dateSource}}" class="inline-review-source">日期依据：{{event.dateSource === 'watermark' ? '照片水印' : event.dateSource}}</text>
+              <text wx:if="{{event.dateSource}}" class="inline-review-source">日期依据：{{event.dateSource === 'watermark' ? '照片水印' : (event.dateSource === 'user_message' ? '你的文字描述' : event.dateSource)}}</text>
               <view wx:if="{{event.dateOptions && event.dateOptions.length}}" class="inline-review-clues">
                 <text class="inline-review-clue-label">照片水印识别到：</text>
                 <view class="inline-review-chip-row">
