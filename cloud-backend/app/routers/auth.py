@@ -34,6 +34,7 @@ from app.models.user import (
     UserRole,
 )
 from app.models.invite_code import InviteCode
+from app.models.verification_code import VerificationCode
 from app.models.miniprogram import WechatBindingAudit, WechatUserBinding
 from app.models.organization import Organization
 from app.models.project_member import ProjectMember
@@ -43,6 +44,7 @@ from app.models.security_question import (
     UserSecurityQuestion,
 )
 from app.services.passwords import pwd_context
+from app.services.sms import get_sms_sender
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -69,19 +71,33 @@ class TokenResponse(BaseModel):
 
 
 class LoginRequest(BaseModel):
-    """登录请求（用户名 + 密码）。
+    """登录请求。
 
     ``role`` 为**可选**：省略时服务端按账号真实角色自动判定（见 login）。
     旧调用方仍可传 role，行为完全不变（向后兼容）。
-
-    🔴 2026-10-21：原「手机号 + 短信验证码（OTP）」登录已下线 ——
-    腾讯云短信资质审批要 2~3 周且按条计费，而注册准入改为邀请码后，
-    OTP 只剩「忘记密码」一个用途，而该场景已由密保问题自助重置
-    （``/forgot/questions`` → ``/forgot/verify`` → ``/forgot/reset``）覆盖。
+    登录支持两种模式（二选一）：
+      - 用户名 + 密码（``username`` + ``password``）；
+      - 手机号 + 短信验证码（``phone`` + ``sms_code``，OTP）。
     """
     username: str | None = None
     password: str | None = None
     role: str | None = None
+    # 手机号 + 验证码登录（OTP）：与 password 二选一
+    phone: str | None = None
+    sms_code: str | None = None
+
+
+class RegisterRequest(BaseModel):
+    """公开注册请求（手机号 + 短信验证码；无需邀请码）。"""
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    username: str = Field(min_length=3, max_length=64, pattern=r"^[A-Za-z0-9_.-]+$")
+    password: str = Field(min_length=8, max_length=72)
+    real_name: str = Field(min_length=1, max_length=64)
+    phone: str = Field(min_length=11, max_length=20)  # 必填：手机号注册
+    sms_code: str = Field(min_length=4, max_length=8)  # 必填：短信验证码
+    role: str = Field(default="inspector")  # 主岗占位（项目岗位由加入项目决定）
+    company_name: str | None = Field(default=None, max_length=100)
 
 
 class ChangePasswordRequest(BaseModel):
@@ -116,9 +132,8 @@ class UpdateUserRequest(BaseModel):
 
 class RoleInfoResponse(BaseModel):
     roles: list[dict]
-    # 🔴 2026-10-21：registration_roles / public_registration_enabled 已下线 ——
-    # 注册改为「邀请码准入」，可注册岗位由码上的 role 决定，不再是全局白名单。
-    # 两端前端从未读过这两个字段（grep 零命中），删除无兼容影响。
+    registration_roles: list[dict] = Field(default_factory=list)
+    public_registration_enabled: bool = False
 
 
 # ---------- 「忘记密码」自助重置 与 密保问题（2026-10-12） ----------
@@ -178,6 +193,34 @@ def decode_access_token(token: str) -> dict:
 
 
 # ============ 短信验证码辅助（手机号注册 / 登录 OTP） ============
+_PHONE_RE = re.compile(r"^1\d{10}$")
+
+
+async def _verify_sms_code(db: AsyncSession, phone: str, purpose: str, code: str) -> bool:
+    """校验短信验证码：取该手机号最新一条未消费的码，比对并作废。
+
+    失败（过期/错误）返回 False；错误时递增 attempts 便于后续风控。
+    """
+    row = (await db.execute(
+        select(VerificationCode).where(
+            VerificationCode.phone == phone,
+            VerificationCode.purpose == purpose,
+            VerificationCode.consumed_at.is_(None),
+        ).order_by(VerificationCode.id.desc())
+    )).scalar_one_or_none()
+    if row is None:
+        return False
+    if row.expires_at < datetime.now():
+        return False
+    if row.code != (code or "").strip():
+        row.attempts += 1
+        await db.commit()
+        return False
+    row.consumed_at = datetime.now()
+    await db.commit()
+    return True
+
+
 async def _issue_token(user: User, db: AsyncSession, role: str | None = None) -> TokenResponse:
     """为已通过身份校验的用户签发 Web 登录态 TokenResponse。
 
@@ -216,6 +259,19 @@ async def _issue_token(user: User, db: AsyncSession, role: str | None = None) ->
         org_role=user.org_role,
         must_change_password=bool(user.must_change_password),
     )
+
+
+async def _otp_login(phone: str, code: str, db: AsyncSession) -> TokenResponse:
+    """手机号 + 验证码登录（OTP）。与密码登录二选一。"""
+    result = await db.execute(select(User).where(User.phone == phone))
+    user = result.scalar_one_or_none()
+    if user is None:
+        raise HTTPException(status_code=404, detail="该手机号未注册")
+    if user.audit_status != AUDIT_APPROVED:
+        raise HTTPException(status_code=403, detail="账号待审批或未通过，无法登录")
+    if not await _verify_sms_code(db, phone, "login", code):
+        raise HTTPException(status_code=400, detail="验证码错误或已过期")
+    return await _issue_token(user, db, None)
 
 
 async def get_user_from_token(token: str, db: AsyncSession) -> User:
@@ -345,6 +401,17 @@ def require_role(*roles: str):
             raise HTTPException(status_code=403, detail=f"需要角色: {', '.join(roles)}")
         return user
     return role_checker
+
+
+def get_public_registration_roles() -> list[str]:
+    valid_roles = {member.value for member in UserRole}
+    configured = [
+        item.strip()
+        for item in settings.public_registration_roles.split(",")
+        if item.strip()
+    ]
+    roles = list(dict.fromkeys(item for item in configured if item in valid_roles))
+    return roles or [UserRole.INSPECTOR.value]
 
 
 # ============ 密保问题 / 忘记密码自助重置 / 强制改密（2026-10-12） ============
@@ -509,15 +576,13 @@ async def validate_invite_code(code: str, db: AsyncSession) -> dict:
 
 @router.get("/invite-codes/validate")
 async def check_invite_code(code: str, db: AsyncSession = Depends(get_db)):
-    """只读校验邀请码，供小程序注册页实时回显企业归属。
+    """只读校验邀请码，供注册页实时回显级别与岗位。
 
-    🔴 2026-10-21 起这句话**终于是事实**：注册（``/miniprogram/auth/wechat-register``）
-    改成了「邀请码准入」，与本接口共用同一个 ``validate_invite_code``，
-    校验口径不存在第二套规则。此前注册走手机号+短信、根本不查邀请码，
-    这段注释是 Step 1 遗留的过期描述。
+    Step 1：取代前端 ``Login.vue`` 里那张**硬编码假邀请码表**。
+    返回 ``level`` / ``role``（role 为英文 key）；校验口径与注册接口
+    完全一致（同一个 ``validate_invite_code``），不存在第二套规则。
 
-    注意：本接口**不消耗使用次数**，仅在注册/join 成功时才递增 ``used_count``。
-    公开只读（无登录态依赖）——注册时用户还没有 token。
+    注意：本接口**不消耗使用次数**，仅在注册成功时才递增 ``used_count``。
     """
     result = await validate_invite_code(code, db)
     if not result["valid"]:
@@ -1014,7 +1079,14 @@ async def get_available_roles(client: str = Query("web")):
         }
         for value, _ in source
     ]
-    return RoleInfoResponse(roles=roles)
+    public_roles = set(get_public_registration_roles())
+    return RoleInfoResponse(
+        roles=roles,
+        registration_roles=[
+            item for item in roles if item["value"] in public_roles
+        ],
+        public_registration_enabled=settings.allow_public_registration,
+    )
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -1026,8 +1098,13 @@ async def login(req: LoginRequest, db: AsyncSession = Depends(get_db)):
     if req.role is not None and req.role not in valid_roles:
         raise HTTPException(status_code=400, detail=f"无效角色，可选: {', '.join(valid_roles)}")
 
+    # OTP 登录（手机 + 验证码）：与密码登录二选一
+    if req.sms_code:
+        if not req.phone:
+            raise HTTPException(status_code=400, detail="OTP 登录需提供手机号")
+        return await _otp_login(req.phone, req.sms_code, db)
     if not req.username or not req.password:
-        raise HTTPException(status_code=400, detail="请提供用户名和密码")
+        raise HTTPException(status_code=400, detail="请提供用户名+密码，或手机号+验证码")
 
     result = await db.execute(select(User).where(User.username == req.username))
     user = result.scalar_one_or_none()
@@ -1099,6 +1176,77 @@ async def login(req: LoginRequest, db: AsyncSession = Depends(get_db)):
 @router.post("/logout")
 async def logout(user: User = Depends(get_current_user)):
     return {"detail": "已退出登录", "user_id": user.id}
+
+
+# ============ 短信验证码下发（手机号注册 / 登录 OTP） ============
+class SendSmsCodeRequest(BaseModel):
+    phone: str
+    purpose: str = "register"  # register | login
+
+
+@router.post("/send-sms-code")
+async def send_sms_code(req: SendSmsCodeRequest, db: AsyncSession = Depends(get_db)):
+    """发送短信验证码（注册 / 登录 OTP）。
+
+    - 校验手机号格式；
+    - 注册用途：手机号已注册则驳回；登录用途：手机号未注册则驳回；
+    - 限频：同号 60s 重发、每日上限（防刷）；
+    - 验证码存 verification_codes，经 SMS Provider 下发（mock 只打日志）。
+    """
+    phone = (req.phone or "").strip()
+    if not _PHONE_RE.match(phone):
+        raise HTTPException(status_code=400, detail="手机号格式不正确")
+    purpose = req.purpose if req.purpose in ("register", "login") else "register"
+
+    existing = await db.execute(select(User).where(User.phone == phone))
+    user_exists = existing.scalar_one_or_none() is not None
+    if purpose == "register" and user_exists:
+        raise HTTPException(status_code=409, detail="该手机号已注册，请直接登录")
+    if purpose == "login" and not user_exists:
+        raise HTTPException(status_code=404, detail="该手机号未注册")
+
+    now = datetime.now()
+    # 限频：同号最近一条仍在有效期且距发送 < 重发间隔 → 拦截
+    recent = (await db.execute(
+        select(VerificationCode).where(
+            VerificationCode.phone == phone,
+            VerificationCode.purpose == purpose,
+            VerificationCode.consumed_at.is_(None),
+        ).order_by(VerificationCode.id.desc())
+    )).scalar_one_or_none()
+    if recent is not None and recent.expires_at > now:
+        if (now - recent.created_at).total_seconds() < settings.sms_code_resend_seconds:
+            raise HTTPException(
+                status_code=429,
+                detail=f"验证码已发送，请 {settings.sms_code_resend_seconds} 秒后重试",
+            )
+
+    # 每日上限
+    day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    sent_today = (await db.execute(
+        select(func.count()).select_from(VerificationCode).where(
+            VerificationCode.phone == phone,
+            VerificationCode.created_at >= day_start,
+        )
+    )).scalar() or 0
+    if sent_today >= settings.sms_code_max_daily:
+        raise HTTPException(status_code=429, detail="今日验证码发送次数已达上限")
+
+    code = f"{secrets.randbelow(1000000):06d}"
+    record = VerificationCode(
+        phone=phone,
+        code=code,
+        purpose=purpose,
+        expires_at=now + timedelta(seconds=settings.sms_code_ttl),
+    )
+    db.add(record)
+    await db.commit()
+    sender = get_sms_sender()
+    try:
+        await sender.send(phone, code)
+    except Exception as exc:  # 发送失败不阻断验证码落库（便于排查）；登录仍需正确码
+        logger.warning("短信下发失败 phone=%s: %s", phone, exc)
+    return {"success": True, "message": "验证码已发送（有效期 5 分钟）"}
 
 
 # ============ 邀请码语义升级：项目负责人加项目成员 ============
@@ -1210,11 +1358,7 @@ async def join_project_by_invite(
 ):
     """已登录用户用项目邀请码加入项目，并获对应岗位。
 
-    🔴 2026-10-21 起有两条入项目路径，共用同一个 ``validate_invite_code`` 与
-    同一套 used_count 递增规则：
-      ① 注册时填码（``/miniprogram/auth/wechat-register``）→ 建号即入项目；
-      ② 已登录用户走本接口 → 适用于「注册时填的是企业码（无 project_id）」
-         或「事后被拉进第二个项目」的场景。
+    与注册解耦：手机号注册只产出裸用户；加入项目是独立动作，由项目负责人发码驱动。
     """
     result = await validate_invite_code(code, db)
     if not result["valid"]:
@@ -1267,6 +1411,70 @@ async def join_project_by_invite(
         "role": role,
         "role_label": ROLE_LABELS.get(role, role),
     }
+
+
+# ============ 注册接口（手机号 + 短信验证码） ============
+@router.post("/register")
+async def register(req: RegisterRequest, db: AsyncSession = Depends(get_db)):
+    """公开注册（手机号 + 短信验证码；注册即激活、自动登录）。
+
+    **权限隔离铁律（设计说明 §8.8.3 新版）**：公共注册产出**零权限裸用户**——
+      - 请求体无 ``org_role`` 字段，``org_role`` 写死 ``None``，注册通道不可能拿到公司级角色；
+      - ``project_id`` = None，项目岗位（总监/监理/…）由「加入项目」动作授予；
+      - ``audit_status`` = ``AUDIT_APPROVED``，注册即激活，无需管理员审批即可登录；
+      - 公司级角色（``super_admin`` / ``admin``）仅由种子/后台接口授予。
+    真正的授权全部来自「项目负责人发项目邀请码 → 成员加入项目」这条独立路径，
+    与「手机号注册」解耦。
+    """
+    if not settings.allow_public_registration:
+        raise HTTPException(
+            status_code=403,
+            detail="公开注册已关闭，请联系系统管理员创建账号",
+        )
+
+    phone = (req.phone or "").strip()
+    if not _PHONE_RE.match(phone):
+        raise HTTPException(status_code=400, detail="手机号格式不正确")
+
+    # 拒绝公司级角色伪装：注册只产出项目级裸用户
+    if req.role in ORG_ROLES:
+        raise HTTPException(status_code=400, detail="注册不支持公司级角色")
+
+    # 先做「不消耗验证码」的校验：用户名/手机号查重失败时验证码仍可用
+    username = req.username.strip()
+    if username.lower() == "admin":
+        raise HTTPException(status_code=400, detail="该用户名不可注册")
+    existing = await db.execute(select(User).where(User.username == username))
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail="用户名已存在")
+    # 手机号唯一（防止同一手机号绑定多个账号）
+    phone_taken = await db.execute(select(User).where(User.phone == phone))
+    if phone_taken.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail="该手机号已被其他账号绑定")
+
+    # 校验短信验证码（注册用途）；失败不留具体原因，防枚举
+    if not await _verify_sms_code(db, phone, "register", req.sms_code):
+        raise HTTPException(status_code=400, detail="验证码错误或已过期")
+
+    # 注册即激活，产出裸用户（零特权）。授权后续经「加入项目」授予。
+    user = User(
+        username=username,
+        password_hash=hash_password(req.password),
+        real_name=req.real_name.strip(),
+        role=req.role or "inspector",   # 主岗占位（项目岗位由加入项目决定）
+        phone=phone,
+        company_name=req.company_name,
+        project_id=None,
+        org_id=settings.registration_default_org_id,
+        org_role=None,                  # 注册绝不给公司级角色
+        audit_status=AUDIT_APPROVED,    # 注册即激活
+    )
+    db.add(user)
+    await db.commit()
+    await db.refresh(user)
+
+    # 注册即登录：签发 Web 登录态（与密码登录/OTP 登录复用同一签发器）
+    return await _issue_token(user, db, None)
 
 
 @router.get("/me")

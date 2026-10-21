@@ -60,13 +60,19 @@ class Settings(BaseSettings):
     secret_key: str = os.getenv("SECRET_KEY", "gdjl-supervision-secret-change-in-production")
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 1440
-    # 微信自助注册：小程序 wx.login → 填**项目邀请码** → 建号即入组织。
-    # 🔴 2026-10-21：这是唯一的自助注册通道。原「手机号 + 短信验证码」注册
-    #   （allow_public_registration / public_registration_roles）已整体下线 ——
-    #   腾讯云短信资质审批要 2~3 周且按条计费，而邀请码准入比短信验证更契合
-    #   监理通「组织系统」定位：进来的人必须由已知、受公司背书的人发码引入。
+    allow_public_registration: bool = (
+        os.getenv("ALLOW_PUBLIC_REGISTRATION", "false").lower() == "true"
+    )
+    # 微信自助注册（路径 A）：小程序 wx.login → 一键注册，零短信成本。
+    # 与 allow_public_registration（手机号+短信）并列；A+B 方案默认开启前者、
+    # 关闭后者。生产 .env 不填腾讯云密钥 → 短信走 mock = 零费用。
     allow_wechat_registration: bool = (
         os.getenv("ALLOW_WECHAT_REGISTRATION", "true").lower() == "true"
+    )
+    # 公开注册只能授予白名单内角色；项目绑定和角色提升由管理员完成。
+    # Step 1：角色值已 key 化为英文，默认白名单随之改英文（原值「监理员」）。
+    public_registration_roles: str = os.getenv(
+        "PUBLIC_REGISTRATION_ROLES", "supervisor"
     )
 
     # CORS 白名单：生产环境应配置为具体域名，逗号分隔
@@ -204,15 +210,21 @@ class Settings(BaseSettings):
     weather_api_key: str = os.getenv("WEATHER_API_KEY", "")
     weather_api_url: str = os.getenv("WEATHER_API_URL", "https://devapi.qweather.com/v7/weather/now")
 
-    # ============ 注册归属 ============
-    # 🔴 2026-10-21：整段「短信验证码」配置已下线（sms_provider / sms_code_* /
-    #   sms_tencent_* 共 10 项），连同 app/services/sms.py、
-    #   app/models/verification_code.py 一起删除。
-    #   原因：注册准入改为邀请码后短信无用途 —— 注册不再要验证码，OTP 登录已下线，
-    #   忘记密码走密保问题自助重置。腾讯云短信资质审批（2~3 周）与按条计费都不再需要，
-    #   生产 compose 里 SMS_PROVIDER 之类的开关也可以删掉了。
-    # 注册默认组织：邀请码上没有 org_id（老码）时的兜底归属，避免 users.org_id 为空。
+    # ============ 短信验证码（手机号注册 / 登录 OTP） ============
+    # provider: mock(默认, 不发真实短信, 开发自测) | tencent | aliyun(待补)
+    sms_provider: str = os.getenv("SMS_PROVIDER", "mock")
+    sms_code_ttl: int = int(os.getenv("SMS_CODE_TTL", "300"))              # 验证码有效期(秒)
+    sms_code_resend_seconds: int = int(os.getenv("SMS_CODE_RESEND_SECONDS", "60"))  # 同号重发间隔
+    sms_code_max_daily: int = int(os.getenv("SMS_CODE_MAX_DAILY", "10"))   # 同号每日上限
+    # 注册默认组织（裸用户归属，避免 org_id 空）
     registration_default_org_id: int = int(os.getenv("REGISTRATION_DEFAULT_ORG_ID", "1"))
+    # 腾讯云短信（SMS_PROVIDER=tencent 时生效）
+    sms_tencent_secret_id: str = os.getenv("SMS_TENCENT_SECRET_ID", "")
+    sms_tencent_secret_key: str = os.getenv("SMS_TENCENT_SECRET_KEY", "")
+    sms_tencent_sdk_app_id: str = os.getenv("SMS_TENCENT_SDK_APP_ID", "")
+    sms_tencent_sign: str = os.getenv("SMS_TENCENT_SIGN", "")
+    sms_tencent_template_id: str = os.getenv("SMS_TENCENT_TEMPLATE_ID", "")
+    # ============ 短信验证码结束 ============
 
 settings = Settings()
 settings.upload_dir.mkdir(parents=True, exist_ok=True)

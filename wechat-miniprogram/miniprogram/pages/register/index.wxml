@@ -1,38 +1,16 @@
 <view class="page" style="{{themeStyle}}">
   <glass-nav-bar title="注册 / 绑定" left="none" />
 
-  <!-- 选择模式：微信授权 + 邀请码注册 -->
+  <!-- 选择模式：路径 A 微信自助注册（主） -->
   <block wx:if="{{mode === 'choose'}}">
     <view class="header">
       <view class="title">欢迎使用监理通</view>
-      <view class="subtitle">微信授权 + 项目负责人发放的邀请码，即可入组</view>
+      <view class="subtitle">用微信一键创建账号，零短信、免填写</view>
     </view>
 
     <view class="card">
-      <view class="form">
-        <view class="form-item">
-          <view class="label">邀请码 <text class="required">*</text></view>
-          <input
-            class="input"
-            placeholder="请输入项目负责人发放的邀请码"
-            value="{{inviteCode}}"
-            bindinput="onInviteInput"
-            bindblur="onInviteBlur"
-            maxlength="20"
-          />
-        </view>
-        <view class="form-item">
-          <view class="label">真实姓名</view>
-          <input class="input" type="nickname" placeholder="便于同事识别，选填" value="{{realName}}" bindinput="onInput" data-field="realName" />
-        </view>
-      </view>
-
-      <!-- 邀请码实时回显：让用户在点「注册」前就看到会进哪家公司 -->
-      <view wx:if="{{inviteHint}}" class="hint invite-hint">{{inviteHint}}</view>
-      <view wx:if="{{inviteError}}" class="error">{{inviteError}}</view>
-
-      <button class="btn-primary" loading="{{loading}}" disabled="{{loading}}" bindtap="wechatRegister">微信授权注册</button>
-      <view class="hint">邀请码决定你的企业归属、项目与岗位：项目负责人发的项目码，注册后直接进项目干活；企业码则先进公司，再由负责人发项目码加入具体项目。无需手机号与短信验证码。</view>
+      <button class="btn-primary" loading="{{loading}}" disabled="{{loading}}" bindtap="wechatRegister">微信授权注册（推荐）</button>
+      <view class="hint">基于你的微信身份创建账号，无需手机号与短信验证码。注册后由项目负责人发放项目邀请码，你在「加入项目」中填写即可使用对应功能。</view>
     </view>
 
     <view class="footer">

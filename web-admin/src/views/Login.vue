@@ -59,7 +59,7 @@
         </el-form>
 
         <div class="switch-mode">
-          <span>账号由管理员统一创建，或成员在小程序凭「项目邀请码」自助注册</span>
+          <span>账号由管理员统一创建；成员经「项目邀请码」加入项目</span>
         </div>
       </el-card>
     </div>
