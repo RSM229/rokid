@@ -28,8 +28,14 @@ export interface WorkEvent {
   location: string
   date: string
   dateConfirmed: boolean
+  dateSource?: string
   evidenceIds: string[]
+  /** Legacy form selections are retained for old saved plans, but are not required. */
   forms: string[]
+  recordType?: '巡视' | '验收' | '见证' | '旁站' | '待定' | string
+  recordTypeConfidence?: number
+  recordTypeReason?: string
+  fieldSources?: Record<string, string>
   content: string
   fields?: Record<string, Record<string, unknown>>
 }
@@ -52,13 +58,16 @@ export interface ReviewPlan {
 
 export interface ReviewExecutionRecord {
   event_id: string
-  form_code: string
-  form_name: string
   record_id: number
-  document_id: number
-  document_title: string
+  record_type?: string
+  record_date?: string
   media_ids: number[]
-  pending_fields: string[]
+  /** Legacy response fields kept for the standalone review page. */
+  form_code?: string
+  form_name?: string
+  document_id?: number
+  document_title?: string
+  pending_fields?: string[]
 }
 
 export interface ReviewExecutionResult {
@@ -97,8 +106,13 @@ function fromServerPlan(result: ReviewPlanResponse): ReviewPlan {
       id: String(item.id || ''), title: String(item.title || ''),
       location: String(item.location || ''), content: String(item.content || ''),
       date: String(item.date || ''), dateConfirmed: item.date_confirmed === true,
+      dateSource: String(item.date_source || ''),
       evidenceIds: Array.isArray(item.evidence_ids) ? item.evidence_ids.map(String) : [],
       forms: Array.isArray(item.forms) ? item.forms.map(value => FORM_LABEL_BY_CODE[String(value)] || String(value)) : [],
+      recordType: String(item.record_type || '待定'),
+      recordTypeConfidence: typeof item.record_type_confidence === 'number' ? item.record_type_confidence : 0,
+      recordTypeReason: String(item.record_type_reason || ''),
+      fieldSources: item.field_sources && typeof item.field_sources === 'object' ? item.field_sources as Record<string, string> : {},
       fields: item.fields && typeof item.fields === 'object' ? item.fields as Record<string, Record<string, unknown>> : {},
     })),
     unassignedIds: Array.isArray(raw.unassigned_ids) ? raw.unassigned_ids.map(String) : [],
@@ -123,7 +137,12 @@ function toServerPlan(plan: ReviewPlan): Record<string, unknown> {
     events: plan.events.map(item => ({
       id: item.id, title: item.title, location: item.location, content: item.content,
       date: item.date, date_confirmed: item.dateConfirmed,
+      date_source: item.dateSource || '',
       evidence_ids: item.evidenceIds, forms: item.forms.map(value => FORM_CODE_BY_LABEL[value] || value),
+      record_type: item.recordType || '待定',
+      record_type_confidence: item.recordTypeConfidence || 0,
+      record_type_reason: item.recordTypeReason || '',
+      field_sources: item.fieldSources || {},
       fields: item.fields || {},
     })),
     unassigned_ids: plan.unassignedIds,
@@ -208,7 +227,7 @@ export async function executeReviewPlan(plan: ReviewPlan, revision = plan.server
 }
 
 export function newEvent(id: string, evidenceIds: string[] = [], date = ''): WorkEvent {
-  return { id, title: '现场事项（待核对）', location: '', date, dateConfirmed: false, evidenceIds, forms: [], content: '' }
+  return { id, title: '现场事项（待核对）', location: '', date, dateConfirmed: Boolean(date), dateSource: date ? 'watermark' : '', evidenceIds, forms: [], recordType: '待定', recordTypeConfidence: 0, recordTypeReason: '', fieldSources: {}, content: '' }
 }
 
 export function createExample(scenario = 0): ReviewPlan {
@@ -256,6 +275,8 @@ export function validatePlan(plan: ReviewPlan): void {
   for (const event of plan.events) {
     if (typeof event.id !== 'string' || typeof event.title !== 'string' || typeof event.location !== 'string' || typeof event.content !== 'string' || typeof event.dateConfirmed !== 'boolean') throw new Error('事项数据无效')
     if (!validDateOrEmpty(event.date) || (event.dateConfirmed && !event.date)) throw new Error('日期无效')
+    if (event.recordType && !['巡视', '验收', '见证', '旁站', '待定'].includes(event.recordType)) throw new Error('记录类型无效')
+    if (event.recordTypeConfidence != null && (typeof event.recordTypeConfidence !== 'number' || event.recordTypeConfidence < 0 || event.recordTypeConfidence > 1)) throw new Error('记录类型置信度无效')
     if (new Set(event.forms).size !== event.forms.length || event.forms.some(form => !FORM_TYPES.includes(form))) throw new Error('表式无效')
   }
   if (plan.confirmedRevision !== null && plan.confirmedRevision !== plan.revision) throw new Error('确认版本已过期')
@@ -277,7 +298,7 @@ function revised(plan: ReviewPlan, patch: Partial<ReviewPlan>): ReviewPlan {
 export function editRequest(plan: ReviewPlan, requestText: string): ReviewPlan {
   return revised(plan, { requestText })
 }
-export function editEvent(plan: ReviewPlan, id: string, patch: Partial<Pick<WorkEvent, 'title' | 'location' | 'date' | 'dateConfirmed' | 'forms' | 'content'>>): ReviewPlan {
+export function editEvent(plan: ReviewPlan, id: string, patch: Partial<Pick<WorkEvent, 'title' | 'location' | 'date' | 'dateConfirmed' | 'dateSource' | 'forms' | 'content' | 'recordType' | 'recordTypeConfidence' | 'recordTypeReason'>>): ReviewPlan {
   if (!plan.events.some(event => event.id === id)) throw new Error('事项不存在')
   return revised(plan, { events: plan.events.map(event => event.id === id ? { ...event, ...patch } : event) })
 }
@@ -332,6 +353,9 @@ export function mergeEvents(plan: ReviewPlan, selectedIds: string[], newId: stri
   const merged: WorkEvent = {
     ...newEvent(newId, selected.flatMap(event => event.evidenceIds), dates.length === 1 ? dates[0] : ''),
     title: '合并事项（待核对）', forms: [...new Set(selected.flatMap(event => event.forms))],
+    recordType: selected.every(event => event.recordType === selected[0].recordType) ? (selected[0].recordType || '待定') : '待定',
+    recordTypeConfidence: selected.every(event => event.recordType === selected[0].recordType) ? Math.min(...selected.map(event => event.recordTypeConfidence || 0)) : 0,
+    recordTypeReason: '合并事项后需要重新核对记录类型',
     content: selected.map(event => event.content).filter(Boolean).join('\n'),
     location: [...new Set(selected.map(event => event.location).filter(Boolean))].join('；'),
     fields,
@@ -349,8 +373,6 @@ export function reviewIssues(plan: ReviewPlan): string[] {
   if (plan.unassignedIds.length) issues.push(`${plan.unassignedIds.length} 张资料尚未分配`)
   plan.events.forEach((event, i) => {
     if (!event.title.trim()) issues.push(`事项 ${i + 1} 缺少名称`)
-    if (!event.dateConfirmed) issues.push(`事项 ${i + 1} 的业务日期待确认`)
-    if (!event.forms.length) issues.push(`事项 ${i + 1} 的表式待确定`)
     if (!event.evidenceIds.length && !event.content.trim()) issues.push(`事项 ${i + 1} 缺少工作描述或资料`)
   })
   return issues

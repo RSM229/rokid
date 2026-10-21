@@ -10,8 +10,7 @@ import { themed } from '../../utils/theme'
 import { cleanMarkdown } from '../../utils/markdown'
 import { createReviewPlan, saveReviewPlan, confirmReviewPlan, executeReviewPlan, editEvent, confirmPlan, reviewIssues, type ReviewPlan } from '../../services/work-review'
 
-/** 整理计划当前可直接执行的记录表式；其余表式属于独立文书/台账流程。 */
-const INLINE_REVIEW_FORMS = ['巡视记录', '危大工程巡视记录', '旁站记录', '平行检验记录', '验收记录']
+const INLINE_RECORD_TYPES = ['巡视', '验收', '见证', '旁站', '待定']
 
 const recorder = wx.getRecorderManager()
 const player = wx.createInnerAudioContext()
@@ -47,9 +46,12 @@ interface Message {
     date: string
     dateConfirmed: boolean
     dateOptions: string[]
-    forms: string[]
-    formsText: string
-    formOptions: Array<{ label: string; checked: boolean }>
+    dateSource: string
+    recordType: string
+    recordTypeConfidence: number
+    recordTypeConfidenceText: string
+    recordTypeReason: string
+    recordTypeOptions: Array<{ label: string; checked: boolean }>
     evidenceCount: number
   }>
   reviewBusy?: boolean
@@ -709,19 +711,20 @@ Page(themed({
       const conversationId = conversationIdFor(this.currentSessionId)
       const evidence: ReviewPlan['evidence'] = []
       for (const [index, image] of images.entries()) {
-        const uploaded = await uploadImage<{ id: number; url: string; watermark?: Record<string, string> }>(image.path, {
+        const uploaded = await uploadImage<{ id: number; url: string; watermark?: Record<string, string>; capture_time?: string; capture_time_source?: string }>(image.path, {
           source: 'agent_review_plan', trigger_detection: false,
         })
         const watermark = watermarks[index] && Object.keys(watermarks[index]).length
           ? watermarks[index]
           : uploaded.watermark || {}
-        const takenAt = String(watermark.taken_at || '')
+        const takenAt = String(watermark.taken_at || uploaded.capture_time || '')
         const observedDate = this.watermarkDate(takenAt)
-        const details = [watermark.location, watermark.section, takenAt].filter(Boolean).join(' · ')
+        const timeSource = watermark.taken_at ? '水印时间' : uploaded.capture_time ? `EXIF时间（${uploaded.capture_time_source || '图片元数据'}）` : ''
+        const details = [watermark.location, watermark.section, takenAt, timeSource].filter(Boolean).join(' · ')
         evidence.push({
           id: String(uploaded.id), mediaId: uploaded.id,
           image: absoluteMediaUrl(uploaded.url), observedDate,
-          note: details || '未读取到水印信息',
+          note: details || '未读取到水印或EXIF时间信息',
         })
       }
       const dateGroups = new Map<string, string[]>()
@@ -730,25 +733,26 @@ Page(themed({
         dateGroups.set(item.observedDate, [...(dateGroups.get(item.observedDate) || []), item.id])
       }
       const hasActionIntent = this.wantsActionIntent(note)
-      const formByIntent: Array<[RegExp, string]> = [
-        [/危大/, '危大工程巡视记录'], [/旁站/, '旁站记录'], [/平行检验/, '平行检验记录'],
-        [/验收/, '验收记录'], [/巡视|巡查/, '巡视记录'],
-      ]
-      const suggestedForms = formByIntent.filter(([pattern]) => pattern.test(note)).map(([, form]) => form)
-      const selectedForms = suggestedForms.length === 1 ? suggestedForms : []
+      const inferred = this.inferRecordType(note)
       const events: ReviewPlan['events'] = hasActionIntent ? [...dateGroups.entries()].map(([date, evidenceIds], index) => ({
         id: `event-${index + 1}`, title: note.trim().slice(0, 80) || '现场工作事项（待核对）',
-        location: '', date, dateConfirmed: false, evidenceIds, forms: selectedForms, content: note.trim(),
+        location: '', date, dateConfirmed: true, dateSource: 'watermark', evidenceIds, forms: [],
+        recordType: inferred.type, recordTypeConfidence: inferred.confidence, recordTypeReason: inferred.reason,
+        fieldSources: { date: 'watermark' }, content: note.trim(),
       })) : []
       const datedIds = new Set(events.flatMap(event => event.evidenceIds))
       const undatedIds = hasActionIntent ? evidence.filter(item => !datedIds.has(item.id)).map(item => item.id) : []
       if (note.trim() && undatedIds.length) events.push({
         id: `event-${events.length + 1}`, title: note.trim().slice(0, 80) || '现场工作事项（待核对）',
-        location: '', date: '', dateConfirmed: false, evidenceIds: undatedIds, forms: selectedForms, content: note.trim(),
+        location: '', date: '', dateConfirmed: false, dateSource: '', evidenceIds: undatedIds, forms: [],
+        recordType: inferred.type, recordTypeConfidence: inferred.confidence, recordTypeReason: inferred.reason,
+        fieldSources: {}, content: note.trim(),
       })
       if (hasActionIntent && events.length === 0) events.push({
         id: 'event-1', title: note.trim().slice(0, 80) || '现场工作事项（待核对）',
-        location: '', date: '', dateConfirmed: false, evidenceIds: evidence.map(item => item.id), forms: selectedForms, content: note.trim(),
+        location: '', date: '', dateConfirmed: false, dateSource: '', evidenceIds: evidence.map(item => item.id), forms: [],
+        recordType: inferred.type, recordTypeConfidence: inferred.confidence, recordTypeReason: inferred.reason,
+        fieldSources: {}, content: note.trim(),
       })
       const assigned = new Set(events.flatMap(event => event.evidenceIds))
       const plan: ReviewPlan = {
@@ -759,7 +763,7 @@ Page(themed({
       const saved = await createReviewPlan(conversationId, plan)
       this.addMessage({
         role: 'assistant',
-        text: `已整理 ${evidence.length} 张图片${dateGroups.size ? `，识别到 ${dateGroups.size} 个照片日期` : ''}。请在对话中核对日期并选择要生成的记录类型。确认前不会创建正式记录。`,
+        text: `已整理 ${evidence.length} 张图片${dateGroups.size ? `，按照片日期整理出 ${dateGroups.size} 个事项` : ''}。我会先生成工作记录草稿，记录类型是建议值，可在这里修改；确认前不会写入正式记录。`,
         reviewPlan: saved,
         reviewEvents: this.inlineReviewEvents(saved),
         reviewIssues: reviewIssues(saved),
@@ -780,12 +784,26 @@ Page(themed({
     return `${matched[1]}-${matched[2].padStart(2, '0')}-${matched[3].padStart(2, '0')}`
   },
 
+  inferRecordType(note: string): { type: string; confidence: number; reason: string } {
+    const rules: Array<[RegExp, string, number, string]> = [
+      [/旁站/, '旁站', 0.94, '用户文字明确提到“旁站”'],
+      [/验收|检查验收|联合验收/, '验收', 0.92, '用户文字明确提到“验收”'],
+      [/见证|取样|送检/, '见证', 0.86, '用户文字包含见证、取样或送检场景'],
+      [/巡视|巡查/, '巡视', 0.9, '用户文字明确提到巡视或巡查'],
+    ]
+    const hit = rules.find(([pattern]) => pattern.test(note))
+    return hit ? { type: hit[1], confidence: hit[2], reason: hit[3] } : { type: '待定', confidence: 0, reason: '用户尚未明确记录类型，先保存为待定工作记录' }
+  },
+
   inlineReviewEvents(plan: ReviewPlan) {
     return plan.events.map(event => ({
       id: event.id, title: event.title, date: event.date, dateConfirmed: event.dateConfirmed,
       dateOptions: [...new Set(plan.evidence.filter(item => event.evidenceIds.includes(item.id)).map(item => item.observedDate).filter(Boolean))],
-      forms: event.forms, formsText: event.forms.join('、'),
-      formOptions: INLINE_REVIEW_FORMS.map(label => ({ label, checked: event.forms.includes(label) })),
+      dateSource: event.dateSource || (event.date ? 'evidence' : ''),
+      recordType: event.recordType || '待定', recordTypeConfidence: event.recordTypeConfidence || 0,
+      recordTypeConfidenceText: `${Math.round((event.recordTypeConfidence || 0) * 100)}%`,
+      recordTypeReason: event.recordTypeReason || '',
+      recordTypeOptions: INLINE_RECORD_TYPES.map(label => ({ label, checked: (event.recordType || '待定') === label })),
       evidenceCount: event.evidenceIds.length,
     }))
   },
@@ -821,7 +839,7 @@ Page(themed({
     const id = String(event.currentTarget.dataset.id)
     const plan = this.data.messages[index]?.reviewPlan
     if (!plan) return
-    const candidate = editEvent(plan, id, { date: String(event.detail.value), dateConfirmed: true })
+    const candidate = editEvent(plan, id, { date: String(event.detail.value), dateConfirmed: true, dateSource: 'user' })
     void this.updateInlineReview(index, candidate).catch(error => wx.showToast({ title: `日期保存失败：${(error as Error).message}`, icon: 'none' }))
   },
 
@@ -831,20 +849,19 @@ Page(themed({
     const date = String(event.currentTarget.dataset.date)
     const plan = this.data.messages[index]?.reviewPlan
     if (!plan) return
-    const candidate = editEvent(plan, id, { date, dateConfirmed: true })
+    const candidate = editEvent(plan, id, { date, dateConfirmed: true, dateSource: 'watermark' })
     void this.updateInlineReview(index, candidate).catch(error => wx.showToast({ title: `日期保存失败：${(error as Error).message}`, icon: 'none' }))
   },
 
-  toggleInlineReviewForm(event: WechatMiniprogram.TouchEvent) {
+  changeInlineReviewType(event: WechatMiniprogram.TouchEvent) {
     const index = Number(event.currentTarget.dataset.index)
     const id = String(event.currentTarget.dataset.id)
-    const form = String(event.currentTarget.dataset.form)
+    const recordType = String(event.currentTarget.dataset.type)
     const plan = this.data.messages[index]?.reviewPlan
     const target = plan?.events.find(item => item.id === id)
     if (!plan || !target) return
-    const forms = target.forms.includes(form) ? target.forms.filter(value => value !== form) : [...target.forms, form]
-    const candidate = editEvent(plan, id, { forms })
-    void this.updateInlineReview(index, candidate).catch(error => wx.showToast({ title: `表式保存失败：${(error as Error).message}`, icon: 'none' }))
+    const candidate = editEvent(plan, id, { recordType, recordTypeConfidence: 1, recordTypeReason: '用户在对话中确认记录类型' })
+    void this.updateInlineReview(index, candidate).catch(error => wx.showToast({ title: `记录类型保存失败：${(error as Error).message}`, icon: 'none' }))
   },
 
   async confirmInlineReview(event: WechatMiniprogram.TouchEvent) {
@@ -871,7 +888,9 @@ Page(themed({
       this.setData({ messages: savedMessages })
       const executed = await executeReviewPlan(confirmed, confirmed.serverRevision || confirmed.revision)
       const finalMessages = [...this.data.messages]
-      finalMessages[index] = { ...finalMessages[index], reviewPlan: executed, reviewEvents: this.inlineReviewEvents(executed), reviewResult: `已生成 ${executed.executionResult?.created_count || 0} 条记录。` }
+      const records = executed.executionResult?.records || []
+      const summary = records.map(record => `${record.record_type || '待定'} ${record.record_date || ''}（#${record.record_id}）`).join('、')
+      finalMessages[index] = { ...finalMessages[index], reviewPlan: executed, reviewEvents: this.inlineReviewEvents(executed), reviewResult: `已生成 ${executed.executionResult?.created_count || 0} 条工作记录${summary ? `：${summary}` : ''}。表单可在工作记录详情中按需生成。` }
       this.setData({ messages: finalMessages })
     } catch (error) {
       const latest = [...this.data.messages]

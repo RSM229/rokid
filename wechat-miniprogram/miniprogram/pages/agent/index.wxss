@@ -104,6 +104,7 @@
 .inline-review-date-status { font-size: 24rpx; font-weight: 600; }
 .inline-review-date-status.confirmed { color: #245f56; }
 .inline-review-date-status.pending { color: #b06b20; }
+.inline-review-source { display: block; margin-top: 8rpx; font-size: 21rpx; color: #71827e; line-height: 1.5; }
 .inline-review-clues { margin-top: 12rpx; padding: 12rpx; border-radius: 12rpx; background: rgba(36,95,86,.06); }
 .inline-review-clue-label { display: block; font-size: 22rpx; color: #5d766f; margin-bottom: 8rpx; }
 .inline-review-chip-row { display: flex; flex-wrap: wrap; gap: 10rpx; margin-top: 10rpx; }
