@@ -541,8 +541,7 @@ async def recommend_purpose(req: PurposeRecommendRequest):
         return {"intent": "clarify", "recommendation": None, "alternatives": [], "choices": choices, "degraded": True}
 
 
-@router.post("/chat")
-async def agent_chat(
+async def _agent_chat_impl(
     req: AgentChatRequest,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -813,6 +812,69 @@ async def agent_chat(
     return {"kind": "chat", "tool": None, "reply": strip_markdown(answer), "card": None,
             "cards": [], "actions": [], "need_more": [], "undo": None,
             "form": None, "model": model_id}
+
+
+@router.post("/chat")
+async def agent_chat(
+    req: AgentChatRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Run one agent turn, then persist the exact assistant result for restore."""
+    conversation_id = (req.conversation_id or "").strip()[:64] or None
+    result = await _agent_chat_impl(req, user=user, db=db)
+    if conversation_id and isinstance(result, dict):
+        result["conversation_id"] = conversation_id
+        try:
+            await agent_tools.append_conversation_response(
+                db, user.id, conversation_id, result,
+            )
+        except Exception:  # noqa: BLE001
+            # The business action may already be committed. Never turn a
+            # history-write failure into a misleading failed chat response.
+            logger.exception("保存智能体会话回复失败，conversation_id=%s", conversation_id)
+            await db.rollback()
+            result["history_saved"] = False
+    return result
+
+
+@router.get("/conversations")
+async def agent_conversations(
+    limit: int = 30,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """List conversations owned by the current account only."""
+    conversations = await agent_tools.list_conversation_summaries(db, user.id, limit)
+    return {"conversations": conversations}
+
+
+@router.get("/conversations/{conversation_id}")
+async def agent_conversation_detail(
+    conversation_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    detail = await agent_tools.get_conversation_detail(
+        db, user.id, conversation_id.strip()[:64],
+    )
+    if not detail:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    return detail
+
+
+@router.delete("/conversations/{conversation_id}")
+async def agent_conversation_delete(
+    conversation_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    deleted = await agent_tools.delete_conversation(
+        db, user.id, conversation_id.strip()[:64],
+    )
+    if not deleted:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    return {"ok": True}
 
 
 @router.post("/undo")

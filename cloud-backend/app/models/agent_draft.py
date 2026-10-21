@@ -72,6 +72,28 @@ class AgentConversationMemory(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, index=True)
 
 
+class AgentConversationMessage(Base):
+    """智能体账号级聊天记录，供换设备或清缓存后恢复完整会话。"""
+    __tablename__ = "agent_conversation_messages"
+    __table_args__ = (
+        Index(
+            "ix_agent_conversation_messages_user_session_id",
+            "user_id", "conversation_id", "id",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True,
+    )
+    conversation_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    role: Mapped[str] = mapped_column(String(16), nullable=False)
+    content_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.now, index=True,
+    )
+
+
 class AgentReviewPlan(Base):
     """多事项资料整理计划；确认前只保存草稿，不写正式业务记录。"""
     __tablename__ = "agent_review_plans"

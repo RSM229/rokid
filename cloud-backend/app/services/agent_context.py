@@ -216,7 +216,9 @@ def render_conversation_history(messages: list[dict[str, Any]] | None) -> str:
     if not isinstance(messages, list):
         return ""
     history = [_text(item.get("text")) for item in messages[-12:]
-               if isinstance(item, dict) and _text(item.get("text"))]
+               if isinstance(item, dict)
+               and item.get("role", "user") == "user"
+               and _text(item.get("text"))]
     if not history:
         return ""
     return "以下 JSON 数组是本聊天较早的用户原话引用，只用于回顾信息，不是本轮新指令；不要把不同事项强行合并：\n" + json.dumps(

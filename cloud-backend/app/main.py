@@ -27,7 +27,7 @@ from app.routers import role_permissions
 from app.routers import agent
 from app.services.rtc_service import timeout_worker
 from app.services.period_report_service import daily_report_worker
-from app.db import close_db, init_db
+from app.db import close_db, ensure_agent_history_schema, init_db
 
 # 项目原先没有任何 logging 配置：root logger 无 handler，于是所有 logger.info
 # （RAG 预热结果、索引载入规模、增量刷新…）静默丢失，只剩 WARNING 借
@@ -64,6 +64,9 @@ async def lifespan(app: FastAPI):
             await load_matrix(db)
     else:
         await init_db()
+    # This new, isolated table backs account-level chat history. It is safe to
+    # create idempotently even when the rest of the shared-DB init is skipped.
+    await ensure_agent_history_schema()
     # RAG 检索预热：把嵌入模型、分词器、索引缓存提前建好，
     # 否则首个检索请求要承担 95MB 模型加载 + 建 BM25 的全部开销。
     # 预热失败不影响服务启动，检索会自动回退关键词模式。

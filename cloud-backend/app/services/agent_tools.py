@@ -27,10 +27,15 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from typing import Any, Awaitable, Callable
 
-from sqlalchemy import select, text as sql_text
+from sqlalchemy import delete, func, select, text as sql_text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.agent_draft import AgentConversationDraft, AgentConversationMemory, AgentDraft
+from app.models.agent_draft import (
+    AgentConversationDraft,
+    AgentConversationMemory,
+    AgentConversationMessage,
+    AgentDraft,
+)
 from app.models.document import Document, DocStatus
 from app.models.hazard import Hazard, HazardStatus
 from app.models.security_audit import SecurityAudit
@@ -1529,21 +1534,12 @@ async def _navigate(ctx: ToolContext, args: dict) -> dict:
 # 存储：``agent_drafts`` 表（见 models/agent_draft.py）。早期版本放在进程内存，
 # 因 reload/重启即丢、多进程不安全，已改为落库；重载不再影响用户已填内容。
 _PENDING_TTL = timedelta(hours=24)
-_CONVERSATION_MEMORY_TTL = timedelta(days=7)
-
-
 async def record_conversation_message(db: AsyncSession, user_id: Any,
                                       conversation_id: str | None,
                                       message: str) -> list[dict[str, str]]:
-    """Persist each user turn and return earlier turns for context assembly."""
+    """Persist a display turn and keep a bounded raw trail for model context."""
     if not user_id or not conversation_id:
         return []
-    stale_rows = (await db.execute(select(AgentConversationMemory).where(
-        AgentConversationMemory.user_id == int(user_id),
-        AgentConversationMemory.updated_at < datetime.now() - _CONVERSATION_MEMORY_TTL,
-    ))).scalars().all()
-    for stale in stale_rows:
-        await db.delete(stale)
     stmt = select(AgentConversationMemory).where(
         AgentConversationMemory.user_id == int(user_id),
         AgentConversationMemory.conversation_id == conversation_id,
@@ -1554,8 +1550,6 @@ async def record_conversation_message(db: AsyncSession, user_id: Any,
     except (TypeError, ValueError):
         history = []
     history = history if isinstance(history, list) else []
-    if row and datetime.now() - row.updated_at > _CONVERSATION_MEMORY_TTL:
-        history = []
     previous = [item for item in history if isinstance(item, dict) and item.get("text")]
     history = append_context_message({"messages": previous}, message).get("messages", [])
     if row is None:
@@ -1565,11 +1559,180 @@ async def record_conversation_message(db: AsyncSession, user_id: Any,
         db.add(row)
     row.messages_json = json.dumps(history, ensure_ascii=False)
     row.updated_at = datetime.now()
+    db.add(AgentConversationMessage(
+        user_id=int(user_id), conversation_id=conversation_id,
+        role="user", created_at=datetime.now(),
+        content_json=json.dumps({
+            "role": "user", "text": str(message or "").strip(),
+            "at": datetime.now().isoformat(timespec="seconds"),
+        }, ensure_ascii=False),
+    ))
     await db.commit()
     current = str(message or "").strip()
     if current and history and history[-1].get("text") == current:
         return history[:-1]
     return history
+
+
+async def append_conversation_response(db: AsyncSession, user_id: Any,
+                                       conversation_id: str | None,
+                                       response: dict[str, Any]) -> None:
+    """Persist the exact structured assistant result shown to the user."""
+    if not user_id or not conversation_id:
+        return
+    now = datetime.now()
+    content = {
+        "role": "assistant",
+        "text": str(response.get("reply") or ""),
+        "response": response,
+        "at": now.isoformat(timespec="seconds"),
+    }
+    db.add(AgentConversationMessage(
+        user_id=int(user_id), conversation_id=conversation_id,
+        role="assistant", content_json=json.dumps(content, ensure_ascii=False),
+        created_at=now,
+    ))
+    await db.commit()
+
+
+def _conversation_content(row: AgentConversationMessage) -> dict[str, Any]:
+    try:
+        content = json.loads(row.content_json or "{}")
+    except (TypeError, ValueError):
+        content = {}
+    if not isinstance(content, dict):
+        content = {}
+    content.setdefault("role", row.role)
+    content.setdefault("text", "")
+    content["at"] = row.created_at.isoformat(timespec="seconds") if row.created_at else ""
+    return content
+
+
+async def list_conversation_summaries(db: AsyncSession, user_id: Any,
+                                      limit: int = 30) -> list[dict[str, Any]]:
+    """List only the current user's conversations, newest first."""
+    if not user_id:
+        return []
+    capped_limit = max(1, min(int(limit or 30), 100))
+    latest_ids = select(
+        func.max(AgentConversationMessage.id).label("max_id")
+    ).where(
+        AgentConversationMessage.user_id == int(user_id)
+    ).group_by(
+        AgentConversationMessage.conversation_id
+    ).subquery()
+    latest_rows = (await db.execute(select(AgentConversationMessage).join(
+        latest_ids, AgentConversationMessage.id == latest_ids.c.max_id,
+    ).order_by(AgentConversationMessage.created_at.desc()).limit(capped_limit))).scalars().all()
+    if not latest_rows:
+        return []
+    conversation_ids = [row.conversation_id for row in latest_rows]
+    rows = (await db.execute(select(AgentConversationMessage).where(
+        AgentConversationMessage.user_id == int(user_id),
+        AgentConversationMessage.conversation_id.in_(conversation_ids),
+    ).order_by(AgentConversationMessage.id.asc()))).scalars().all()
+    buckets: dict[str, list[AgentConversationMessage]] = {}
+    for row in rows:
+        buckets.setdefault(row.conversation_id, []).append(row)
+    summaries: list[dict[str, Any]] = []
+    for latest in latest_rows:
+        messages = buckets.get(latest.conversation_id, [])
+        first_text = next((
+            _conversation_content(item).get("text", "") for item in messages
+            if item.role == "user" and _conversation_content(item).get("text")
+        ), "")
+        title = str(first_text or "新对话").strip().replace("\n", " ")[:40]
+        summaries.append({
+            "conversation_id": latest.conversation_id,
+            "title": title,
+            "message_count": len(messages),
+            "updated_at": latest.created_at.isoformat(timespec="seconds"),
+            "updatedAt": latest.created_at.strftime("%m/%d %H:%M"),
+        })
+    # Older deployments only kept the bounded model-context trail. Surface
+    # those conversations too, still scoped to the exact same account.
+    known_ids = {item["conversation_id"] for item in summaries}
+    memory_rows = (await db.execute(select(AgentConversationMemory).where(
+        AgentConversationMemory.user_id == int(user_id),
+    ).order_by(AgentConversationMemory.updated_at.desc()).limit(capped_limit))).scalars().all()
+    for memory in memory_rows:
+        if memory.conversation_id in known_ids:
+            continue
+        try:
+            legacy = json.loads(memory.messages_json or "[]")
+        except (TypeError, ValueError):
+            legacy = []
+        legacy_messages = [
+            item for item in legacy
+            if isinstance(item, dict) and str(item.get("text") or "").strip()
+        ]
+        if not legacy_messages:
+            continue
+        summaries.append({
+            "conversation_id": memory.conversation_id,
+            "title": str(legacy_messages[0].get("text") or "新对话").replace("\n", " ")[:40],
+            "message_count": len(legacy_messages),
+            "updated_at": memory.updated_at.isoformat(timespec="seconds"),
+            "updatedAt": memory.updated_at.strftime("%m/%d %H:%M"),
+        })
+    summaries.sort(key=lambda item: item["updated_at"], reverse=True)
+    return summaries[:capped_limit]
+
+
+async def get_conversation_detail(db: AsyncSession, user_id: Any,
+                                  conversation_id: str) -> dict[str, Any] | None:
+    """Return a conversation only when it belongs to ``user_id``."""
+    if not user_id or not conversation_id:
+        return None
+    rows = (await db.execute(select(AgentConversationMessage).where(
+        AgentConversationMessage.user_id == int(user_id),
+        AgentConversationMessage.conversation_id == conversation_id,
+    ).order_by(AgentConversationMessage.id.asc()))).scalars().all()
+    messages = [_conversation_content(row) for row in rows]
+    if not messages:
+        # Compatibility for conversations recorded before display history existed.
+        memory = (await db.execute(select(AgentConversationMemory).where(
+            AgentConversationMemory.user_id == int(user_id),
+            AgentConversationMemory.conversation_id == conversation_id,
+        ))).scalars().first()
+        if memory:
+            try:
+                legacy = json.loads(memory.messages_json or "[]")
+            except (TypeError, ValueError):
+                legacy = []
+            messages = [
+                {"role": "user", "text": str(item.get("text") or ""), "at": str(item.get("at") or "")}
+                for item in legacy if isinstance(item, dict) and item.get("text")
+            ]
+    if not messages:
+        return None
+    last = messages[-1]
+    first_user = next((item for item in messages if item.get("role") == "user" and item.get("text")), {})
+    updated_at = str(last.get("at") or "")
+    return {
+        "conversation_id": conversation_id,
+        "title": str(first_user.get("text") or "新对话").replace("\n", " ")[:40],
+        "message_count": len(messages),
+        "updated_at": updated_at,
+        "messages": messages,
+    }
+
+
+async def delete_conversation(db: AsyncSession, user_id: Any,
+                              conversation_id: str) -> bool:
+    """Delete display history and model context for one owned conversation."""
+    if not user_id or not conversation_id:
+        return False
+    result = await db.execute(delete(AgentConversationMessage).where(
+        AgentConversationMessage.user_id == int(user_id),
+        AgentConversationMessage.conversation_id == conversation_id,
+    ))
+    await db.execute(delete(AgentConversationMemory).where(
+        AgentConversationMemory.user_id == int(user_id),
+        AgentConversationMemory.conversation_id == conversation_id,
+    ))
+    await db.commit()
+    return bool(result.rowcount)
 
 
 def merge_args(pending_args: dict | None, new_args: dict | None) -> dict:

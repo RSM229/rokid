@@ -8,6 +8,7 @@
 import logging
 
 from sqlalchemy import inspect, text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy.orm import DeclarativeBase
@@ -122,6 +123,25 @@ async def init_db():
     from app.services.permissions import load_matrix
     async with async_session() as session:
         await load_matrix(session)
+
+
+async def ensure_agent_history_schema() -> None:
+    """Create the isolated chat-history table even when shared DB init is skipped."""
+    from app.models.agent_draft import AgentConversationMessage
+
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(
+                Base.metadata.create_all,
+                tables=[AgentConversationMessage.__table__],
+            )
+    except SQLAlchemyError:
+        # Shared-DB app accounts may be intentionally read/write-only. A
+        # missing table must not take the whole API down; deploy the checked-in
+        # migration once with a schema-owner account instead.
+        logger.exception(
+            "聊天历史表不可用；请使用 migrations/2026-10-21_agent_conversation_history.sql 初始化"
+        )
 
 
 async def get_db() -> AsyncSession:
