@@ -53,12 +53,6 @@
   },
   "__usePrivacyCheck__": true,
   "permission": {
-    "scope.camera": {
-      "desc": "用于现场拍照、录像取证"
-    },
-    "scope.record": {
-      "desc": "用于录音调用监理智能体"
-    },
     "scope.userLocation": {
       "desc": "用于为现场影像添加位置水印"
     }
