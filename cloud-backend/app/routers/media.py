@@ -4,6 +4,7 @@ from datetime import datetime
 import hashlib
 import io
 import json
+import mimetypes
 from pathlib import Path
 import shutil
 import uuid
@@ -223,6 +224,7 @@ async def upload_image(
     weather: Optional[str] = Form(None),
     unit_project: Optional[str] = Form(None),
     work_content: Optional[str] = Form(None),
+    add_system_watermark: bool = Form(False),
     trigger_detection: bool = Form(False),
     idempotency_key_form: Optional[str] = Form(None, alias="idempotency_key"),
     idempotency_key_header: Optional[str] = Header(None, alias="Idempotency-Key"),
@@ -271,25 +273,46 @@ async def upload_image(
         except ValueError:
             pass
     observed_taken_at = watermark_taken_at or exif_taken_at
-    taken_at_source = "watermark" if watermark_taken_at else "exif" if exif_taken_at else "server_upload_time"
+    taken_at_source = "watermark" if watermark_taken_at else "exif" if exif_taken_at else "unknown"
 
     directory = _media_dir(MediaType.IMAGE.value)
     file_id = uuid.uuid4().hex
     original = directory / f"{file_id}_original{ext}"
-    processed = directory / f"{file_id}_watermarked.jpg"
+    processed = directory / f"{file_id}_processed{'.jpg' if add_system_watermark else ext}"
     original.write_bytes(data)
-    watermarked = await apply_watermark_to_image(
-        data,
-        project_name=project.name if project else "",
-        supervisor=user.real_name,
-        unit_project=unit_project or "",
-        section=section or "",
-        location=location or "",
-        work_content=work_content or "",
-        weather=weather or "",
-    )
-    processed.write_bytes(watermarked)
-    digest = hashlib.sha256(watermarked).hexdigest()
+    processed_bytes = data
+    if add_system_watermark:
+        processed_bytes = await apply_watermark_to_image(
+            data,
+            project_name=project.name if project else "",
+            supervisor=user.real_name,
+            unit_project=unit_project or "",
+            section=section or "",
+            location=location or "",
+            work_content=work_content or "",
+            weather=weather or "",
+        )
+        # OCR the final camera image too, so the system-generated watermark can
+        # provide evidence to the review draft just like an uploaded watermark.
+        try:
+            watermark_result = await recognize_watermark(processed_bytes)
+            watermark_fields = watermark_result.get("fields") or {}
+            if watermark_result.get("available"):
+                location = location or watermark_fields.get("location") or None
+                weather = weather or watermark_fields.get("weather") or None
+                section = section or watermark_fields.get("section") or watermark_fields.get("work_area") or None
+            if watermark_fields.get("taken_at"):
+                try:
+                    watermark_taken_at = datetime.fromisoformat(str(watermark_fields["taken_at"]).replace("Z", "+00:00")).replace(tzinfo=None)
+                except ValueError:
+                    pass
+            observed_taken_at = watermark_taken_at or exif_taken_at
+            taken_at_source = "watermark" if watermark_taken_at else "exif" if exif_taken_at else "unknown"
+        except Exception as exc:
+            import logging as _logging
+            _logging.getLogger(__name__).warning("系统水印 OCR 失败：%s", type(exc).__name__)
+    processed.write_bytes(processed_bytes)
+    digest = hashlib.sha256(processed_bytes).hexdigest()
 
     record = MediaRecord(
         project_id=project_id,
@@ -298,8 +321,8 @@ async def upload_image(
         source=source,
         original_path=_public_path(original),
         processed_path=_public_path(processed),
-        mime_type="image/jpeg",
-        size_bytes=len(watermarked),
+        mime_type="image/jpeg" if add_system_watermark else (file.content_type or mimetypes.guess_type(file.filename or "")[0] or "image/jpeg"),
+        size_bytes=len(processed_bytes),
         file_hash=digest,
         idempotency_key=key,
         business_type=business_type,
@@ -309,6 +332,8 @@ async def upload_image(
         weather=weather,
         metadata_json={
             **({"watermark": watermark_fields} if watermark_fields else {}),
+            "watermark_ocr": watermark_result,
+            "system_watermark_added": add_system_watermark,
             "capture_time": observed_taken_at.isoformat() if observed_taken_at else None,
             "capture_time_source": taken_at_source,
         },
@@ -419,7 +444,7 @@ async def upload_image(
         "idempotent_replay": False,
         "hazard_id": hazard_id,
         "detection": hazard_payload,
-        "watermark": watermark_fields or None,
+        "watermark": watermark_result,
         "capture_time": observed_taken_at.isoformat() if observed_taken_at else None,
         "capture_time_source": taken_at_source,
     }
@@ -698,6 +723,28 @@ async def recognize_image_watermark(
         raise HTTPException(status_code=413, detail="图片为空或超过大小限制")
     _assert_image(data)
     return await recognize_watermark(data)
+
+
+@router.post("/images/observe")
+async def observe_uploaded_image(
+    file: UploadFile = File(...),
+    user: User = Depends(get_current_user),
+):
+    """Neutral visual observation for work-record evidence, separate from hazard detection."""
+    del user
+    _safe_ext(file.filename, IMAGE_EXTS)
+    data = await file.read(settings.max_image_bytes + 1)
+    if not data or len(data) > settings.max_image_bytes:
+        raise HTTPException(status_code=413, detail="图片为空或超过大小限制")
+    _assert_image(data)
+    try:
+        observation = await model_gateway.observe_image(
+            data,
+            content_type=file.content_type or mimetypes.guess_type(file.filename or "")[0] or "image/jpeg",
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="通用图片理解暂不可用，请稍后重试") from exc
+    return {"available": True, "observation": observation}
 
 
 @router.get("")

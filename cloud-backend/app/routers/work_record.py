@@ -20,6 +20,7 @@ from app.routers.auth import (
     require_project_id,
 )
 from app.services.watermark_service import apply_watermark_to_image
+from app.services.watermark_ocr import recognize_watermark
 from app.services.media_validation import assert_valid_image
 from app.config import settings
 import os
@@ -314,6 +315,7 @@ async def create_work_record_with_photos(
         raise HTTPException(400, "payload_json 不是有效 JSON") from exc
     if not isinstance(payload, dict):
         raise HTTPException(400, "payload_json 必须是对象")
+    add_system_watermark = payload.get("camera_capture") is True
 
     project_id = require_project_id(user)
     if record_type == "inspection":
@@ -378,6 +380,7 @@ async def create_work_record_with_photos(
             content_json={
                 "voice_text": payload.get("voice_text"),
                 "source": payload.get("source"),
+                "evidence_watermarks": [],
             },
         )
     else:
@@ -437,45 +440,79 @@ async def create_work_record_with_photos(
     try:
         for index, photo in enumerate(photos):
             raw = await _read_valid_photo(photo)
-            watermarked = await apply_watermark_to_image(
-                raw,
-                project_name=project.name if project else "",
-                supervisor=user.real_name,
-                section=record.section or "",
-                location=record.location or "",
-                work_content=(
-                    record.work_content
-                    or record.witness_material_name
-                    or record.station_content
-                    or record.record_type
-                ),
-                weather=record.weather or "",
-            )
+            watermarked = raw
+            watermark_result = {"available": False, "recognized": False, "fields": {}, "lines": []}
+            if add_system_watermark:
+                watermarked = await apply_watermark_to_image(
+                    raw,
+                    project_name=project.name if project else "",
+                    supervisor=user.real_name,
+                    section=record.section or "",
+                    location=record.location or "",
+                    work_content=(
+                        record.work_content
+                        or record.witness_material_name
+                        or record.station_content
+                        or record.record_type
+                    ),
+                    weather=record.weather or "",
+                )
+            try:
+                watermark_result = await recognize_watermark(watermarked)
+            except Exception as exc:
+                logger.warning("工作记录图片水印 OCR 失败：%s", type(exc).__name__)
+            watermark_fields = watermark_result.get("fields") or {}
+            if not isinstance(record.content_json, dict):
+                record.content_json = {}
+            content_json = dict(record.content_json or {})
+            content_json.setdefault("evidence_watermarks", []).append({
+                "labels": watermark_fields.get("labeled_items", []),
+                "fields": {key: value for key, value in watermark_fields.items() if key != "labeled_items"},
+                "lines": watermark_result.get("lines", []),
+                "status": "recognized" if watermark_result.get("recognized") else "empty" if watermark_result.get("available") else "unavailable",
+            })
+            record.content_json = content_json
+            if watermark_result.get("available"):
+                record.section = record.section or watermark_fields.get("section") or watermark_fields.get("work_area") or None
+                record.location = record.location or watermark_fields.get("location") or None
+                record.weather = record.weather or watermark_fields.get("weather") or None
+                if not record.record_date and watermark_fields.get("taken_at"):
+                    try:
+                        record.record_date = datetime.fromisoformat(str(watermark_fields["taken_at"])).date()
+                    except ValueError:
+                        pass
             directory = settings.upload_dir / "work-record" / str(record.id)
             directory.mkdir(parents=True, exist_ok=True)
-            filename = (
-                f"{record_type}_{index}_"
-                f"{datetime.now().strftime('%Y%m%d%H%M%S%f')}.jpg"
-            )
+            stamp = datetime.now().strftime('%Y%m%d%H%M%S%f')
+            suffix = ".jpg" if add_system_watermark else (os.path.splitext(photo.filename or "")[1].lower() or ".jpg")
+            original_filename = f"{record_type}_{index}_{stamp}_original{os.path.splitext(photo.filename or '')[1].lower() or '.jpg'}"
+            original_path = directory / original_filename
+            original_path.write_bytes(raw)
+            saved_files.append(original_path)
+            filename = f"{record_type}_{index}_{stamp}_processed{suffix}"
             path = directory / filename
             path.write_bytes(watermarked)
             saved_files.append(path)
+            original_url = f"/uploads/work-record/{record.id}/{original_filename}"
             url = f"/uploads/work-record/{record.id}/{filename}"
             photo_urls.append(url)
-            db.add(
-                ImageRecord(
+            try:
+                image_taken_at = datetime.fromisoformat(str(watermark_fields["taken_at"])) if watermark_fields.get("taken_at") else datetime.now()
+            except ValueError:
+                image_taken_at = datetime.now()
+            image_record = ImageRecord(
                     project_id=project_id,
                     uploader_id=user.id,
                     source="mobile_h5",
-                    original_path=url,
+                    original_path=original_url,
                     watermarked_path=url,
-                    taken_at=datetime.now(),
+                    taken_at=image_taken_at,
                     location=record.location,
                     section=record.section,
                     weather=record.weather,
                     remark=f"{record.record_type}现场取证",
                 )
-            )
+            db.add(image_record)
         if record_type == "witness":
             record.witness_photos = photo_urls
         else:

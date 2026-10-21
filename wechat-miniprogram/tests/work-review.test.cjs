@@ -27,12 +27,49 @@ test('nine photo dates remain nine distinct candidate events and use watermark d
   assert.equal(model.reviewIssues(plan).length, 0)
 })
 
+test('watermark labels and values can be edited per evidence and invalidate confirmation', () => {
+  let plan = model.createExample(2)
+  const evidenceId = plan.events[0].evidenceIds[0]
+  plan = { ...plan, evidence: plan.evidence.map(item => item.id === evidenceId ? { ...item, watermarkItems: [{ label: '备注', value: '' }] } : item) }
+  plan = model.confirmPlan(plan)
+  plan = model.editEvidenceWatermark(plan, evidenceId, 0, 'value', '补充：夜间施工')
+  plan = model.editEvidenceWatermark(plan, evidenceId, 0, 'label', '检查备注')
+  assert.deepEqual(plan.evidence.find(item => item.id === evidenceId).watermarkItems, [{ label: '检查备注', value: '补充：夜间施工' }])
+  assert.equal(plan.confirmedRevision, null)
+  plan = model.addEvidenceWatermark(plan, evidenceId)
+  assert.equal(plan.evidence.find(item => item.id === evidenceId).watermarkItems.length, 2)
+})
+
 test('photos on the same observed date do not force one event per photo', () => {
   const plan = model.createExample(2)
   assert.equal(plan.evidence.length, 9)
   assert.equal(plan.events.length, 3)
   assert.equal(new Set(plan.events.map(event => event.date)).size, 1)
   assert.equal(plan.events.every(event => event.dateConfirmed), true)
+})
+
+test('evidence grouping uses date, project, location and section without treating missing values as conflicts', () => {
+  const evidence = [
+    { id: 'a', image: 'a.jpg', observedDate: '2026-10-18', project: '白泽项目', location: 'A区', section: '3号楼二层' },
+    { id: 'b', image: 'b.jpg', observedDate: '2026-10-18', project: '白泽项目二期', location: 'A区东侧', section: '3号楼二层梁板', note: '' },
+    { id: 'c', image: 'c.jpg', observedDate: '2026-10-19', project: '白泽项目', location: 'A区', section: '3号楼二层', note: '' },
+    { id: 'd', image: 'd.jpg', observedDate: '2026-10-18', project: '另一项目', location: 'A区', section: '3号楼二层', note: '' },
+    { id: 'e', image: 'e.jpg', observedDate: '2026-10-18', project: '白泽项目', location: 'B区', section: '3号楼二层', note: '' },
+    { id: 'f', image: 'f.jpg', observedDate: '', project: '', location: '', section: '', note: '' },
+  ]
+  const groups = model.groupReviewEvidence(evidence)
+  assert.deepEqual(groups.map(group => group.evidenceIds), [['a', 'b', 'f'], ['c'], ['d'], ['e']])
+  assert.equal(model.groupReviewEvidence(evidence, { ignoreDate: true }).length, 3)
+})
+
+test('record attachment validation reports only known identity conflicts', () => {
+  const evidence = [
+    { id: 'a', image: 'a.jpg', observedDate: '2026-10-18', project: '白泽项目', location: 'A区', section: '3号楼二层', note: '' },
+    { id: 'b', image: 'b.jpg', observedDate: '', project: '', location: 'B区', section: '', note: '' },
+  ]
+  assert.deepEqual(model.evidenceTargetConflicts(evidence, {
+    date: '2026-10-18', project: '白泽项目一期', location: 'A区', section: '3号楼二层',
+  }), ['地点'])
 })
 
 test('unknown intent does not infer events; evidence can remain explicitly unassigned', () => {
