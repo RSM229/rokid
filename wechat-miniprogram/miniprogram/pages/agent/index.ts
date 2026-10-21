@@ -53,10 +53,17 @@ interface Message {
     recordTypeReason: string
     recordTypeOptions: Array<{ label: string; checked: boolean }>
     evidenceCount: number
+    location: string
+    locationSource: string
+    content: string
+    sourceLabels: string[]
+    sourceText: string
   }>
   reviewBusy?: boolean
   reviewResult?: string
   reviewIssues?: string[]
+  reviewProgress?: Array<{ label: string; state: 'done' | 'current' | 'pending' }>
+  reviewSummary?: string
 }
 
 /** /agent/chat 响应：kind=action 表示服务端已执行动作，chat 表示纯问答 */
@@ -736,21 +743,28 @@ Page(themed({
       const hasActionIntent = this.wantsActionIntent(note)
       const inferred = this.inferRecordType(note)
       const userFacts = this.extractReviewFacts(note)
-      // Explicit user facts have priority over image metadata. If the user
-      // names one date, keep the batch together under that date and retain
-      // the photo dates as evidence notes rather than silently overriding it.
-      const eventGroups = userFacts.date
+      // 绝对日期是用户对业务日期的明确指定，可以覆盖照片日期；“今天/今日”
+      // 只是相对线索。当照片存在多个日期时保留照片分组，避免跨日期照片被
+      // 静默合成一条记录，同时把差异展示给用户确认。
+      const preserveEvidenceDateGroups = Boolean(userFacts.dateKind === 'relative' && dateGroups.size > 1)
+      const eventGroups = userFacts.date && !preserveEvidenceDateGroups
         ? [[userFacts.date, evidence.map(item => item.id)] as [string, string[]]]
         : [...dateGroups.entries()]
+      const notices: string[] = []
+      if (preserveEvidenceDateGroups) {
+        notices.push(`你说的是“今天”，但照片识别到 ${dateGroups.size} 个不同日期，已按照片日期分别保留为候选事项。`)
+      } else if (userFacts.dateKind === 'absolute' && userFacts.date && dateGroups.size && !dateGroups.has(userFacts.date)) {
+        notices.push(`你描述的业务日期是 ${userFacts.date}，照片识别到的日期为 ${[...dateGroups.keys()].join('、')}；已优先采用你的明确描述，照片日期保留为证据提示。`)
+      }
       const sourceForEvidence = (evidenceIds: string[]) => {
         const sources = evidence.filter(item => evidenceIds.includes(item.id)).map(item => item.observedDateSource).filter(Boolean)
         return sources.includes('watermark') ? 'watermark' : sources.includes('exif') ? 'exif' : ''
       }
       const events: ReviewPlan['events'] = hasActionIntent ? eventGroups.map(([date, evidenceIds], index) => ({
         id: `event-${index + 1}`, title: note.trim().slice(0, 80) || '现场工作事项（待核对）',
-        location: userFacts.location, date, dateConfirmed: true, dateSource: userFacts.date ? 'user_message' : sourceForEvidence(evidenceIds), evidenceIds, forms: [],
+        location: userFacts.location, date, dateConfirmed: true, dateSource: userFacts.date && !preserveEvidenceDateGroups ? 'user_message' : sourceForEvidence(evidenceIds), evidenceIds, forms: [],
         recordType: inferred.type, recordTypeConfidence: inferred.confidence, recordTypeReason: inferred.reason,
-        fieldSources: { date: userFacts.date ? 'user_message' : sourceForEvidence(evidenceIds), ...(userFacts.location ? { location: 'user_message' } : {}) }, content: note.trim(),
+        fieldSources: { date: userFacts.date && !preserveEvidenceDateGroups ? 'user_message' : sourceForEvidence(evidenceIds), ...(userFacts.location ? { location: 'user_message' } : {}) }, content: note.trim(),
       })) : []
       const datedIds = new Set(events.flatMap(event => event.evidenceIds))
       const undatedIds = hasActionIntent ? evidence.filter(item => !datedIds.has(item.id)).map(item => item.id) : []
@@ -758,27 +772,29 @@ Page(themed({
         id: `event-${events.length + 1}`, title: note.trim().slice(0, 80) || '现场工作事项（待核对）',
         location: userFacts.location, date: userFacts.date, dateConfirmed: Boolean(userFacts.date), dateSource: userFacts.date ? 'user_message' : '', evidenceIds: undatedIds, forms: [],
         recordType: inferred.type, recordTypeConfidence: inferred.confidence, recordTypeReason: inferred.reason,
-        fieldSources: userFacts.location || userFacts.date ? { ...(userFacts.location ? { location: 'user_message' } : {}), ...(userFacts.date ? { date: 'user_message' } : {}) } : {}, content: note.trim(),
+        fieldSources: userFacts.location || userFacts.date ? { ...(userFacts.location ? { location: 'user_message' } : {}), ...(userFacts.date && !preserveEvidenceDateGroups ? { date: 'user_message' } : {}) } : {}, content: note.trim(),
       })
       if (hasActionIntent && events.length === 0) events.push({
         id: 'event-1', title: note.trim().slice(0, 80) || '现场工作事项（待核对）',
         location: userFacts.location, date: userFacts.date, dateConfirmed: Boolean(userFacts.date), dateSource: userFacts.date ? 'user_message' : '', evidenceIds: evidence.map(item => item.id), forms: [],
         recordType: inferred.type, recordTypeConfidence: inferred.confidence, recordTypeReason: inferred.reason,
-        fieldSources: { ...(userFacts.location ? { location: 'user_message' } : {}), ...(userFacts.date ? { date: 'user_message' } : {}) }, content: note.trim(),
+        fieldSources: { ...(userFacts.location ? { location: 'user_message' } : {}), ...(userFacts.date && !preserveEvidenceDateGroups ? { date: 'user_message' } : {}) }, content: note.trim(),
       })
       const assigned = new Set(events.flatMap(event => event.evidenceIds))
       const plan: ReviewPlan = {
         schemaVersion: 1, scenario: 0, revision: 1, requestText: note.trim() || '用户仅上传图片，尚未说明整理用途',
         evidence, events, unassignedIds: evidence.filter(item => !assigned.has(item.id)).map(item => item.id),
-        confirmedRevision: null,
+        confirmedRevision: null, notices,
       }
       const saved = await createReviewPlan(conversationId, plan)
       this.addMessage({
         role: 'assistant',
-        text: `已整理 ${evidence.length} 张图片${eventGroups.length ? `，整理出 ${eventGroups.length} 个事项` : ''}${userFacts.location ? `，已采用你说的地点“${userFacts.location}”` : ''}${userFacts.date ? `，已采用你说的日期 ${userFacts.date}` : ''}。我会先生成工作记录草稿，记录类型是建议值，可在这里修改；确认前不会写入正式记录。`,
+        text: `已整理 ${evidence.length} 张图片${eventGroups.length ? `，整理出 ${eventGroups.length} 个事项` : ''}${userFacts.location ? `，已采用你说的地点“${userFacts.location}”` : ''}${userFacts.date && !preserveEvidenceDateGroups ? `，已采用你说的日期 ${userFacts.date}` : ''}。先生成工作记录草稿，不自动生成表单；确认前不会写入正式记录。`,
         reviewPlan: saved,
         reviewEvents: this.inlineReviewEvents(saved),
         reviewIssues: reviewIssues(saved),
+        reviewProgress: this.reviewProgress(saved),
+        reviewSummary: notices.length ? notices.join(' ') : '已读取用户描述、照片水印和 EXIF；记录类型和日期均可在对话中核对。',
       })
     } catch (error) {
       this.addMessage({ role: 'assistant', text: `整理计划创建失败：${(error as Error).message}。已上传的资料不会自动创建业务记录。` })
@@ -796,19 +812,20 @@ Page(themed({
     return `${matched[1]}-${matched[2].padStart(2, '0')}-${matched[3].padStart(2, '0')}`
   },
 
-  extractReviewFacts(note: string): { date: string; location: string } {
+  extractReviewFacts(note: string): { date: string; location: string; dateKind: 'absolute' | 'relative' | '' } {
     const text = String(note || '').trim()
     const now = new Date()
     let date = ''
+    let dateKind: 'absolute' | 'relative' | '' = ''
     const full = text.match(/(20\d{2})\s*[年./-]\s*(\d{1,2})\s*[月./-]\s*(\d{1,2})\s*(?:日)?/)
     const short = text.match(/(?<!\d)(\d{1,2})\s*月\s*(\d{1,2})\s*日?/)
-    if (full) date = this.normalizeReviewDate(Number(full[1]), Number(full[2]), Number(full[3]))
-    else if (short) date = this.normalizeReviewDate(now.getFullYear(), Number(short[1]), Number(short[2]))
-    else if (/(今天|今日|当天)/.test(text)) date = this.localDateString(now)
+    if (full) { date = this.normalizeReviewDate(Number(full[1]), Number(full[2]), Number(full[3])); dateKind = 'absolute' }
+    else if (short) { date = this.normalizeReviewDate(now.getFullYear(), Number(short[1]), Number(short[2])); dateKind = 'absolute' }
+    else if (/(今天|今日|当天)/.test(text)) { date = this.localDateString(now); dateKind = 'relative' }
     let location = ''
     const locationMatch = text.match(/(?:在|位于|地点为|位置为)\s*([^，。；,;\n]{2,80}?)(?=(?:进行|开展|完成|做了|做|干了|检查|施工|浇筑|验收|旁站|巡视|巡查|记录)|[，。；,;\n]|$)/u)
     if (locationMatch) location = locationMatch[1].trim()
-    return { date, location }
+    return { date, location, dateKind }
   },
 
   normalizeReviewDate(year: number, month: number, day: number): string {
@@ -842,12 +859,29 @@ Page(themed({
       recordTypeReason: event.recordTypeReason || '',
       recordTypeOptions: INLINE_RECORD_TYPES.map(label => ({ label, checked: (event.recordType || '待定') === label })),
       evidenceCount: event.evidenceIds.length,
+      location: event.location || '',
+      locationSource: event.fieldSources?.location || '',
+      content: event.content || '',
+      sourceLabels: [...new Set(event.evidenceIds.map(id => plan.evidence.find(item => item.id === id)?.observedDateSource || '').filter(Boolean).map(source => source === 'watermark' ? '照片水印' : source === 'exif' ? 'EXIF' : source))],
+      sourceText: [...new Set(event.evidenceIds.map(id => plan.evidence.find(item => item.id === id)?.observedDateSource || '').filter(Boolean).map(source => source === 'watermark' ? '照片水印' : source === 'exif' ? 'EXIF' : source))].join('、'),
     }))
+  },
+
+  reviewProgress(plan: ReviewPlan) {
+    const hasEvidence = plan.evidence.length > 0
+    const hasEvents = plan.events.length > 0
+    const done = plan.status === 'executed'
+    return [
+      { label: '收到资料', state: hasEvidence ? 'done' : 'current' },
+      { label: '提取证据', state: hasEvidence ? 'done' : 'pending' },
+      { label: '归纳事项', state: hasEvents ? 'done' : hasEvidence ? 'current' : 'pending' },
+      { label: done ? '已建档' : '待确认', state: done ? 'done' : hasEvents ? 'current' : 'pending' },
+    ] as Array<{ label: string; state: 'done' | 'current' | 'pending' }>
   },
 
   updateInlineReview(index: number, candidate: ReviewPlan) {
     const messages = [...this.data.messages]
-    const message = { ...messages[index], reviewPlan: candidate, reviewEvents: this.inlineReviewEvents(candidate), reviewIssues: reviewIssues(candidate), reviewResult: '' }
+    const message = { ...messages[index], reviewPlan: candidate, reviewEvents: this.inlineReviewEvents(candidate), reviewIssues: reviewIssues(candidate), reviewProgress: this.reviewProgress(candidate), reviewResult: '' }
     messages[index] = message
     this.setData({ messages })
     if (!candidate.serverId) return Promise.reject(new Error('整理计划尚未保存到服务端'))
@@ -864,7 +898,7 @@ Page(themed({
       const plan = latestPlan.revision === current.revision
         ? saved
         : { ...latestPlan, serverRevision: saved.serverRevision }
-      latestMessages[index] = { ...latest, reviewPlan: plan, reviewEvents: this.inlineReviewEvents(plan), reviewIssues: reviewIssues(plan) }
+      latestMessages[index] = { ...latest, reviewPlan: plan, reviewEvents: this.inlineReviewEvents(plan), reviewIssues: reviewIssues(plan), reviewProgress: this.reviewProgress(plan) }
       this.setData({ messages: latestMessages })
     })
     this.inlinePlanSaveQueues[key] = task
@@ -921,13 +955,13 @@ Page(themed({
       plan = confirmPlan(plan)
       const confirmed = await confirmReviewPlan(plan, plan.serverRevision || plan.revision)
       const savedMessages = [...this.data.messages]
-      savedMessages[index] = { ...savedMessages[index], reviewPlan: confirmed, reviewEvents: this.inlineReviewEvents(confirmed) }
+      savedMessages[index] = { ...savedMessages[index], reviewPlan: confirmed, reviewEvents: this.inlineReviewEvents(confirmed), reviewProgress: this.reviewProgress(confirmed) }
       this.setData({ messages: savedMessages })
       const executed = await executeReviewPlan(confirmed, confirmed.serverRevision || confirmed.revision)
       const finalMessages = [...this.data.messages]
       const records = executed.executionResult?.records || []
       const summary = records.map(record => `${record.record_type || '待定'} ${record.record_date || ''}（#${record.record_id}）`).join('、')
-      finalMessages[index] = { ...finalMessages[index], reviewPlan: executed, reviewEvents: this.inlineReviewEvents(executed), reviewResult: `已生成 ${executed.executionResult?.created_count || 0} 条工作记录${summary ? `：${summary}` : ''}。表单可在工作记录详情中按需生成。` }
+      finalMessages[index] = { ...finalMessages[index], reviewPlan: executed, reviewEvents: this.inlineReviewEvents(executed), reviewProgress: this.reviewProgress(executed), reviewResult: `已生成 ${executed.executionResult?.created_count || 0} 条工作记录${summary ? `：${summary}` : ''}。表单可在工作记录详情中按需生成。` }
       this.setData({ messages: finalMessages })
     } catch (error) {
       const latest = [...this.data.messages]

@@ -68,9 +68,16 @@
           <!-- 整理计划直接在对话中完成：识别日期是候选，点击后才确认，不再跳转独立页面。 -->
           <view wx:if="{{item.reviewPlan}}" class="inline-review">
             <view class="inline-review-head">
-              <text class="inline-review-title">整理计划</text>
+              <text class="inline-review-title">工作记录草稿</text>
               <text class="inline-review-meta">{{item.reviewPlan.evidence.length}} 张图片 · {{item.reviewPlan.events.length}} 个事项</text>
             </view>
+            <view wx:if="{{item.reviewProgress && item.reviewProgress.length}}" class="review-progress">
+              <view wx:for="{{item.reviewProgress}}" wx:for-item="step" wx:key="label" class="review-progress-step {{step.state}}">
+                <view class="review-progress-dot">{{step.state === 'done' ? '✓' : (step.state === 'current' ? '·' : '')}}</view>
+                <text>{{step.label}}</text>
+              </view>
+            </view>
+            <text wx:if="{{item.reviewSummary}}" class="inline-review-summary">{{item.reviewSummary}}</text>
             <view wx:if="{{!item.reviewEvents || !item.reviewEvents.length}}" class="inline-review-empty">尚未判断整理用途，请在消息中补充要做什么。</view>
             <view wx:for="{{item.reviewEvents}}" wx:for-item="event" wx:for-index="ei" wx:key="id" class="inline-review-event">
               <view class="inline-review-event-head">
@@ -79,9 +86,12 @@
               </view>
               <view class="inline-review-date-row">
                 <text class="inline-review-label">业务日期</text>
-                <text class="inline-review-date-status {{event.date ? 'confirmed' : 'pending'}}">{{event.date ? event.date : '未提供，执行时使用当前日期'}}</text>
+                <text class="inline-review-date-status {{event.date ? 'confirmed' : 'pending'}}">{{event.date ? event.date : '待补充'}}</text>
               </view>
-              <text wx:if="{{event.dateSource}}" class="inline-review-source">日期依据：{{event.dateSource === 'watermark' ? '照片水印' : (event.dateSource === 'user_message' ? '你的文字描述' : event.dateSource)}}</text>
+              <text wx:if="{{event.dateSource}}" class="inline-review-source">日期依据：{{event.dateSource === 'watermark' ? '照片水印' : (event.dateSource === 'exif' ? '照片 EXIF' : (event.dateSource === 'user_message' ? '你的文字描述' : event.dateSource))}}</text>
+              <text wx:if="{{event.location}}" class="inline-review-detail">地点/部位：{{event.location}}{{event.locationSource === 'user_message' ? '（来自你的描述）' : ''}}</text>
+              <text wx:if="{{event.content}}" class="inline-review-detail">工作描述：{{event.content}}</text>
+              <text wx:if="{{event.sourceText}}" class="inline-review-source">证据来源：{{event.sourceText}}</text>
               <view wx:if="{{event.dateOptions && event.dateOptions.length}}" class="inline-review-clues">
                 <text class="inline-review-clue-label">照片水印识别到：</text>
                 <view class="inline-review-chip-row">
@@ -89,7 +99,7 @@
                 </view>
               </view>
               <picker mode="date" value="{{event.date || '2000-01-01'}}" data-index="{{mi}}" data-id="{{event.id}}" bindchange="changeInlineReviewDate">
-                <view class="inline-review-date-picker">{{event.dateConfirmed ? '修改业务日期' : (event.dateOptions && event.dateOptions.length ? '日期不一致？手动选择' : '选择业务日期')}} <text>▾</text></view>
+                <view class="inline-review-date-picker">{{event.dateConfirmed ? '修改日期' : (event.dateOptions && event.dateOptions.length ? '从照片日期中选择' : '补充业务日期')}} <text>▾</text></view>
               </picker>
               <view class="inline-review-form-row">
                 <text class="inline-review-label">工作记录类型</text>
