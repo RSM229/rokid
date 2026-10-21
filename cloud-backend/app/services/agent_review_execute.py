@@ -13,10 +13,21 @@ from app.models.agent_draft import AgentReviewPlan
 from app.models.miniprogram import MediaRecord, MediaType
 from app.models.user import Project, User
 from app.models.work_record import WorkRecord, WorkRecordStatus
-from app.services import agent_review_plan
-from app.services.record_fields import now_local
+from app.services import agent_review_plan, record_field_spec
+from app.services.watermark_ocr import match_form_field
 
 RECORD_PERMISSIONS = {"巡视": "inspection", "验收": "acceptance", "见证": "witness", "旁站": "station"}
+WATERMARK_FIELD_ALIASES = {
+    "项目": "project", "项目名称": "project", "工程名称": "project", "建设项目": "project",
+    "建设单位名称": "construction_unit", "施工单位名称": "contractor", "监理单位名称": "supervision_unit",
+    "施工区域": "work_area", "区域": "work_area", "施工部位": "section", "部位": "section",
+    "地点": "location", "位置": "location", "地址": "location",
+    "拍摄时间": "taken_at", "时间": "taken_at", "日期": "taken_at", "天气": "weather",
+    "检查人员": "person", "拍摄人": "person", "记录人": "person", "人员": "person",
+    "备注": "remark", "备注一": "remark", "备注二": "remark", "备注1": "remark", "备注2": "remark",
+    "危大名称": "hazard_name", "危大工程名称": "hazard_name",
+    "建设单位": "owner_unit", "施工单位": "contractor", "监理单位": "supervision_unit",
+}
 
 
 def _media_ids_by_evidence(plan: dict[str, Any]) -> dict[str, int]:
@@ -92,8 +103,38 @@ async def execute_confirmed_plan(
         record_type = event.get("record_type") or "待定"
         event_media_ids = [media_by_evidence[item] for item in event["evidence_ids"] if item in media_by_evidence]
         urls = [media_by_id[mid].processed_path or media_by_id[mid].original_path for mid in event_media_ids]
-        record_date = date.fromisoformat(event["date"]) if event.get("date") else now_local().date()
+        record_date = date.fromisoformat(event["date"]) if event.get("date") else None
+        record_date_text = record_date.isoformat() if record_date else ""
         fields = event.get("fields") or {}
+        event_evidence = [
+            item for item in plan.get("evidence", [])
+            if item.get("id") in event["evidence_ids"]
+        ]
+        watermark_fields: dict[str, Any] = {}
+        form_code = record_field_spec.form_for_record_type(record_type)
+        for item in event_evidence:
+            for field_item in item.get("watermark_items") or []:
+                if not isinstance(field_item, dict):
+                    continue
+                label = str(field_item.get("label") or "").strip()
+                value = str(field_item.get("value") or "").strip()
+                if not label:
+                    continue
+                watermark_fields.setdefault("labeled_items", []).append({"label": label, "value": value})
+                if value:
+                    # 先按当前记录类型的字段表匹配（数据驱动），旧别名仅兜底
+                    canonical = match_form_field(label, form_code) or WATERMARK_FIELD_ALIASES.get(label)
+                    if canonical:
+                        watermark_fields[canonical] = value
+                    watermark_fields[f"label:{label}"] = value
+            for key, value in (item.get("watermark_fields") or {}).items():
+                if value not in (None, ""):
+                    watermark_fields.setdefault(key, value)
+        form_fields = {**watermark_fields, **(fields if isinstance(fields, dict) else {})}
+        field_sources = event.get("field_sources") or {}
+        user_location = event.get("location") if field_sources.get("location") == "user_message" else None
+        resolved_section = form_fields.get("section") or form_fields.get("work_area") or event.get("location") or None
+        resolved_location = user_location or form_fields.get("location") or event.get("location") or None
         content_json = {
             "source": "agent_review_plan",
             "review_plan_id": row.id,
@@ -104,14 +145,25 @@ async def execute_confirmed_plan(
             "event_content": event["content"],
             "media_ids": event_media_ids,
             "evidence_ids": list(event["evidence_ids"]),
-            "field_sources": event.get("field_sources") or {},
+            "field_sources": field_sources,
             "record_type_reason": event.get("record_type_reason") or "",
             "record_type_confidence": event.get("record_type_confidence", 0),
-            "date_source": event.get("date_source") or ("event_date" if event.get("date") else "server_current_date"),
+            "date_source": event.get("date_source") or ("event_date" if event.get("date") else "unknown"),
             "evidence_notes": [
                 item.get("note", "") for item in plan.get("evidence", [])
                 if item.get("id") in event["evidence_ids"] and item.get("note")
             ],
+            "evidence_watermark_fields": [
+                {
+                    "evidence_id": item.get("id"),
+                    "fields": item.get("watermark_fields") or {},
+                    "observed_date": item.get("observed_date") or "",
+                    "observed_date_source": item.get("observed_date_source") or "",
+                }
+                for item in event_evidence
+            ],
+            "extracted_watermark_fields": watermark_fields,
+            "form_field_candidates": form_fields,
             "extracted_fields": fields if isinstance(fields, dict) else {},
         }
         record = WorkRecord(
@@ -119,26 +171,27 @@ async def execute_confirmed_plan(
             status=WorkRecordStatus.DRAFT.value,
             project_id=project_id,
             creator_id=user.id,
-            section=event.get("location") or None,
-            location=event.get("location") or None,
+            section=resolved_section,
+            location=resolved_location,
             work_content=event.get("content") or event.get("title") or None,
             record_date=record_date,
-            weather=str(fields.get("weather") or "")[:16] or None,
-            worker_count=int(fields["worker_count"]) if str(fields.get("worker_count") or "").isdigit() else None,
-            inspection_start_time=_event_datetime(fields.get("start_time"), record_date.isoformat()),
-            inspection_end_time=_event_datetime(fields.get("end_time"), record_date.isoformat()),
+            weather=str(form_fields.get("weather") or "")[:16] or None,
+            worker_count=int(form_fields["worker_count"]) if str(form_fields.get("worker_count") or "").isdigit() else None,
+            inspection_start_time=_event_datetime(form_fields.get("start_time") or form_fields.get("taken_at"), record_date_text),
+            inspection_end_time=_event_datetime(form_fields.get("end_time"), record_date_text),
             inspection_remark=event.get("content") or None if record_type == "巡视" else None,
             station_content=event.get("content") or None if record_type == "旁站" else None,
-            station_location=str(fields.get("station_part") or fields.get("section") or event.get("location") or "")[:256] or None,
-            station_process=str(fields.get("station_process") or "")[:256] or None,
-            station_start_time=_event_datetime(fields.get("start_time"), record_date.isoformat()),
-            station_end_time=_event_datetime(fields.get("end_time"), record_date.isoformat()),
+            station_location=str(form_fields.get("station_part") or resolved_section or resolved_location or "")[:256] or None,
+            station_process=str(form_fields.get("station_process") or form_fields.get("work_content") or "")[:256] or None,
+            station_start_time=_event_datetime(form_fields.get("start_time") or form_fields.get("taken_at"), record_date_text),
+            station_end_time=_event_datetime(form_fields.get("end_time"), record_date_text),
             station_conclusion=str(fields.get("conclusion") or fields.get("problems") or "")[:2000] or None,
-            acceptance_result=str(fields.get("acceptance_result") or fields.get("supervision_conclusion") or fields.get("conclusion") or "")[:32] or None,
-            acceptance_participants=str(fields.get("acceptance_participants") or "") or None,
-            acceptance_basis=str(fields.get("basis") or ""),
-            problems=str(fields.get("problems") or ""),
-            treatment=str(fields.get("treatment") or fields.get("handling") or ""),
+            acceptance_result=str(form_fields.get("acceptance_result") or form_fields.get("supervision_conclusion") or form_fields.get("conclusion") or "")[:32] or None,
+            acceptance_participants=str(form_fields.get("acceptance_participants") or form_fields.get("person") or "") or None,
+            acceptance_basis=str(form_fields.get("basis") or ""),
+            problems=str(form_fields.get("problems") or form_fields.get("remark") or ""),
+            treatment=str(form_fields.get("treatment") or form_fields.get("handling") or ""),
+            remark=str(form_fields.get("remark") or "") or None,
             inspection_photos=urls if record_type != "见证" else None,
             witness_photos=urls if record_type == "见证" else None,
             content_json=content_json,
@@ -153,7 +206,7 @@ async def execute_confirmed_plan(
             "event_id": event["id"],
             "record_id": record.id,
             "record_type": record.record_type,
-            "record_date": record.record_date.isoformat(),
+            "record_date": record.record_date.isoformat() if record.record_date else None,
             "media_ids": event_media_ids,
         })
 
