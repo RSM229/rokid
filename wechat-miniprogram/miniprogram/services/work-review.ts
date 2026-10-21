@@ -20,6 +20,7 @@ export interface Evidence {
   mediaId?: number
   image: string
   observedDate: string
+  observedDateSource?: 'watermark' | 'exif' | 'user_message' | string
   note: string
 }
 export interface WorkEvent {
@@ -100,7 +101,7 @@ function fromServerPlan(result: ReviewPlanResponse): ReviewPlan {
     requestText: String(raw.request_text || ''),
     evidence: evidence.map(item => ({
       id: String(item.id || ''), mediaId: item.media_id == null ? undefined : Number(item.media_id), image: absoluteMediaUrl(String(item.image || '')),
-      observedDate: String(item.observed_date || ''), note: String(item.note || ''),
+      observedDate: String(item.observed_date || ''), observedDateSource: String(item.observed_date_source || ''), note: String(item.note || ''),
     })),
     events: events.map(item => ({
       id: String(item.id || ''), title: String(item.title || ''),
@@ -132,7 +133,7 @@ function toServerPlan(plan: ReviewPlan): Record<string, unknown> {
   return {
     schema_version: 1, request_text: plan.requestText,
     evidence: plan.evidence.map(item => ({
-      id: item.id, media_id: item.mediaId, image: item.image, observed_date: item.observedDate, note: item.note,
+      id: item.id, media_id: item.mediaId, image: item.image, observed_date: item.observedDate, observed_date_source: item.observedDateSource || '', note: item.note,
     })),
     events: plan.events.map(item => ({
       id: item.id, title: item.title, location: item.location, content: item.content,

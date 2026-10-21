@@ -267,7 +267,7 @@ async def upload_image(
     watermark_taken_at = None
     if watermark_fields.get("taken_at"):
         try:
-            watermark_taken_at = datetime.fromisoformat(str(watermark_fields["taken_at"]).replace("Z", "+00:00"))
+            watermark_taken_at = datetime.fromisoformat(str(watermark_fields["taken_at"]).replace("Z", "+00:00")).replace(tzinfo=None)
         except ValueError:
             pass
     observed_taken_at = watermark_taken_at or exif_taken_at
