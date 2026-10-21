@@ -37,7 +37,12 @@ from app.models.security_audit import SecurityAudit
 from app.models.user import Project, User
 from app.models.work_record import WorkRecord, WorkRecordStatus
 from app.services import model_gateway, provform_schema, record_field_spec
-from app.services.agent_context import append_context_message, extract_user_facts, merge_user_facts
+from app.services.agent_context import (
+    append_context_message,
+    extract_explicit_message_facts,
+    extract_user_facts,
+    merge_user_facts,
+)
 from app.services import acceptance_checklists
 from app.services.period_report_service import doc_type_for
 from app.services.record_fields import project_fields
@@ -1528,13 +1533,15 @@ async def stash_pending(db: AsyncSession, user_id: Any, tool: str,
     if not isinstance(old_context, dict):
         old_context = {}
     old_facts = old_context.get("facts") if isinstance(old_context.get("facts"), list) else []
-    facts = merge_user_facts(
-        old_facts,
-        extract_user_facts(
-            _draft_clean_args(fact_args) if fact_args is not None else clean_args,
-            message_ref=message,
-        ),
+    # Merge model extraction first, then the deterministic user-language pass.
+    # The latter is intentionally last so a model omission cannot overwrite a
+    # date or location that the user stated explicitly.
+    model_facts = extract_user_facts(
+        _draft_clean_args(fact_args) if fact_args is not None else clean_args,
+        message_ref=message,
     )
+    explicit_facts = extract_explicit_message_facts(message, message_ref=message)
+    facts = merge_user_facts(old_facts, model_facts + explicit_facts)
     context = {
         "facts": facts,
         "version": int(old_context.get("version") or 0) + 1,

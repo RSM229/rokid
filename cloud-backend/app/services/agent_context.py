@@ -9,11 +9,13 @@ processor.
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
+import re
 from typing import Any
 
 
 FACTS_KEY = "_user_facts"
+CN_TZ = timezone(timedelta(hours=8))
 
 
 def _text(value: Any) -> str:
@@ -61,6 +63,56 @@ def extract_user_facts(args: dict[str, Any] | None, *, message_ref: str = "") ->
                 "updated_at": datetime.now().isoformat(timespec="seconds"),
             })
     return out
+
+
+def extract_explicit_message_facts(message: str, *, message_ref: str = "") -> list[dict[str, Any]]:
+    """Extract only high-signal date/location statements from the user's words.
+
+    This is a loss-prevention pass, not an intent classifier.  It supplements
+    model arguments so an omitted model field cannot erase a fact the user
+    already stated.  Ambiguous phrases are deliberately left untouched.
+    """
+    text = _text(message)
+    if not text:
+        return []
+    values: list[tuple[str, Any]] = []
+    full = re.search(r"(20\d{2})\s*[年./-]\s*(\d{1,2})\s*[月./-]\s*(\d{1,2})\s*日?", text)
+    short = re.search(r"(?<!\d)(\d{1,2})\s*月\s*(\d{1,2})\s*日?", text)
+    if full:
+        try:
+            candidate = datetime(int(full.group(1)), int(full.group(2)), int(full.group(3))).date()
+            values.append(("record_date", candidate.isoformat()))
+        except ValueError:
+            pass
+    elif short:
+        try:
+            candidate = datetime(datetime.now(CN_TZ).year, int(short.group(1)), int(short.group(2))).date()
+            values.append(("record_date", candidate.isoformat()))
+        except ValueError:
+            pass
+    elif re.search(r"今天|今日|当天", text):
+        values.append(("record_date", datetime.now(CN_TZ).date().isoformat()))
+    location = re.search(
+        r"(?:在|位于|地点为|位置为)\s*([^，。；,;\n]{2,80}?)(?=(?:进行|开展|完成|做了|做|干了|检查|施工|浇筑|验收|旁站|巡视|巡查|记录)|[，。；,;\n]|$)",
+        text,
+    )
+    if location:
+        value = location.group(1).strip()
+        if value:
+            values.append(("location", value))
+    return [
+        {
+            "field": field,
+            "value": value,
+            "source": "user_message_deterministic",
+            "source_ref": message_ref,
+            "confidence": 1.0,
+            "status": "user_stated_candidate",
+            "sources": [{"source": "user_message_deterministic", "source_ref": message_ref}],
+            "updated_at": datetime.now(CN_TZ).replace(tzinfo=None).isoformat(timespec="seconds"),
+        }
+        for field, value in values
+    ]
 
 
 def merge_user_facts(existing: list[dict[str, Any]] | None,
