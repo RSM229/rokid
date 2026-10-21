@@ -122,6 +122,49 @@ interface AgentChatResponse {
   undo?: { entity: string; id: number } | null
   model?: string
   degraded?: boolean
+  request_plan?: AgentRequestPlan
+}
+
+interface AgentRequestPlanClarification {
+  field: string
+  question: string
+  control: string
+  options: string[]
+  required: boolean
+}
+
+interface AgentRequestPlanAction {
+  id: string
+  confidence: number
+  reason: string
+}
+
+interface AgentRequestPlan {
+  schema_version: number
+  intent: 'create_record' | 'archive' | 'analyze_hazard' | 'query' | 'generate_document' | 'navigate' | 'undo' | 'chat' | 'clarify'
+  actions: AgentRequestPlanAction[]
+  record_type: string | null
+  record_type_confidence: number
+  needs_hazard_analysis: boolean
+  attachment_purposes: string[]
+  clarifications: AgentRequestPlanClarification[]
+  choice: Array<{ value: string; label: string; kind: string; record_type?: string }>
+  selected_tool: string | null
+  execution_mode: 'clarify' | 'single_tool' | 'plan_only'
+  write_allowed: boolean
+  requires_confirmation: boolean
+  reason: string
+  degraded: boolean
+  model?: string
+}
+
+interface PurposeRecommendation {
+  intent: 'create_record' | 'archive' | 'analyze_hazard' | 'clarify'
+  recommendation: { record_type: string; confidence: number; reason: string } | null
+  alternatives: string[]
+  choices: Array<{ value: string; label: string; kind: string }>
+  plan?: AgentRequestPlan
+  degraded?: boolean
 }
 
 interface ChatHistory {
@@ -213,7 +256,8 @@ const COMMAND_ROUTES: Record<string, CommandRoute> = {
   '待办任务': { level1: '任务管理', navigate: '/pages/todo/index', reply: '正在打开待办任务...' },
   '任务': { level1: '任务管理', navigate: '/pages/todo/index', reply: '正在打开任务列表...' },
   'AI巡检': { level1: '安全隐患', level2: 'AI巡检', navigate: '/pages/inspection/index', reply: '正在打开AI巡检...' },
-  '巡检': { level1: '安全隐患', level2: 'AI巡检', navigate: '/pages/inspection/index', reply: '正在打开AI巡检...' },
+  // “巡检”在监理业务里也可能是巡视记录的同义表达，不能由前端直接劫持到
+  // AI巡检页；交给服务端结合上下文判断。
   '规范查询': { level1: '信息库', navigate: '/pages/knowledge/index', reply: '正在打开规范查询...' },
   '返回': { reply: '已返回主页' },
   '返回主页': { reply: '已返回主页' },
@@ -814,36 +858,26 @@ Page(themed({
     const detections: { path: string; raw: any }[] = []
     const watermarks: Array<Record<string, any>> = []
     const observations: string[] = []
+    const filePlanEvidence: Array<Record<string, any>> = []
     /** 水印读到的拍摄时间/地点/天气——相机记的比转述可靠，用来预填记录字段 */
     const wmFields: Record<string, string> = {}
-    // 仅「只识别/看隐患/纯分析」才调 VLM 隐患识别；记录工作等意图下图片只是工作记录的附件，
-    // 不调 VLM（避免"一上传图片就跑隐患识别"），只做轻量水印 OCR 预填字段。
-    const pureDetect = this.isPureDetection(note)
     try {
-      // 图片：水印 OCR（轻量、无 VLM）；仅纯识别意图追加 VLM 隐患识别
+      // 图片先做统一证据准备：水印、EXIF 和通用场景观察。是否调用隐患模型
+      // 由后端请求计划决定，前端不再用关键词把图片直接送进某个业务分支。
       if (images.length) {
         const results = await Promise.all(images.map(async (img) => {
           const wm = await this.readWatermark(img.path)
-          if (pureDetect) {
-            // 纯识别意图：VLM 是必需步骤，失败要如实报错
-            const det = await this.detectImageOnce(img.path)
-            const observation = await this.observeImageOnce(img.path)
-            return { path: img.path, det, wm, observation }
-          }
-          // 记录工作等意图：图片仅作证据，不调隐患专用视觉模型。
           const observation = await this.observeImageOnce(img.path)
-          return { path: img.path, det: null, wm, observation }
+          return { path: img.path, wm, observation }
         }))
         watermarks.push(...results.map(result => result.wm))
         observations.push(...results.map(result => result.observation))
         results.forEach((res, i) => {
-          if (res.det) detections.push({ path: res.path, raw: res.det.raw })
           const wmLine = this.formatWatermark(res.wm)
           const observationLine = res.observation ? `【图片内容观察】${res.observation}` : ''
-          const detectionLine = res.det ? `\n${res.det.text}` : ''
           blocks.push(wmLine
-            ? `【图片 ${i + 1}】\n${wmLine}${observationLine ? `\n${observationLine}` : ''}${detectionLine}`
-            : `【图片 ${i + 1}】${observationLine ? `\n${observationLine}` : ''}${detectionLine || '\n已收到图片'}`)
+            ? `【图片 ${i + 1}】\n${wmLine}${observationLine ? `\n${observationLine}` : ''}`
+            : `【图片 ${i + 1}】${observationLine ? `\n${observationLine}` : '\n已收到图片'}`)
           for (const key of Object.keys(res.wm)) {
             if (res.wm[key] && !wmFields[key]) wmFields[key] = res.wm[key]
           }
@@ -857,49 +891,103 @@ Page(themed({
           blocks.push(content
             ? `【文件《${parsed.filename || file.name}》】\n${content.slice(0, 3000)}`
             : `【文件《${file.name}》】未能提取到文本内容`)
+          filePlanEvidence.push({
+            kind: 'file',
+            note: `文件《${parsed.filename || file.name}》`,
+            observation: content.slice(0, 4000),
+          })
         } catch (error) {
-          blocks.push(`【文件《${file.name}》】解析失败：${(error as Error).message}`)
+          const message = `文件《${file.name}》解析失败：${(error as Error).message}`
+          blocks.push(`【${message}】`)
+          filePlanEvidence.push({ kind: 'file', note: message, observation: '' })
         }
+      }
+
+      const planEvidence = images.map((_image, index) => {
+        const watermark = watermarks[index] || {}
+        const watermarkFields = Object.fromEntries(
+          Object.entries(watermark).filter(([key, value]) => !key.startsWith('_') && typeof value === 'string') as [string, string][],
+        )
+        const takenAt = String(watermark.taken_at || '')
+        return {
+          kind: 'image',
+          observed_date: this.watermarkDate(takenAt),
+          observed_date_source: takenAt ? 'watermark' : '',
+          project: String(watermark.project || watermark.project_name || ''),
+          location: String(watermark.location || ''),
+          section: String(watermark.section || watermark.work_area || ''),
+          activity: [watermark.work_area, watermark.hazard_name].filter(Boolean).join('；'),
+          observation: observations[index] || '',
+          note: [this.formatWatermark(watermark), observations[index] ? `图片观察：${observations[index]}` : ''].filter(Boolean).join('；'),
+          watermark_fields: watermarkFields,
+        }
+      })
+      const requestPlan = await this.requestAgentPlan(
+        note, [...planEvidence, ...filePlanEvidence], files.length,
+      )
+
+      if (requestPlan.needs_hazard_analysis && images.length) {
+        const hazardResults = await Promise.all(images.map(async image => ({
+          path: image.path,
+          result: await this.detectImageOnce(image.path),
+        })))
+        hazardResults.forEach((item, index) => {
+          detections.push({ path: item.path, raw: item.result.raw })
+          const detectionLine = `【安全隐患分析】${item.result.text}`
+          observations[index] = [observations[index], detectionLine].filter(Boolean).join('\n')
+          blocks.push(`【图片 ${index + 1} 安全隐患分析】\n${item.result.text}`)
+          if (requestPlan) requestPlan.attachment_purposes = [...new Set([...requestPlan.attachment_purposes, 'hazard_evidence'])]
+        })
       }
 
       const material = blocks.join('\n\n')
-      if (!pureDetect) {
-        if (images.length) {
-          await this.createReviewPlanFromAttachments(note, images, watermarks, observations)
-          return
+      const actionIds = new Set(requestPlan.actions.map(action => action.id))
+      const wantsRecordPlan = images.length > 0 && (
+        actionIds.has('record_work') || actionIds.has('archive_evidence') ||
+        requestPlan.execution_mode === 'clarify'
+      )
+      if (wantsRecordPlan) {
+        if (detections.length) {
+          this.addMessage({
+            role: 'assistant',
+            text: `已完成 ${detections.length} 张图片的安全隐患分析，结果作为候选证据保留；不会自动创建隐患记录。`,
+          })
         }
-        // 无图片的纯文字/文件请求仍交给 Agent 决定记录、查询或问答。
-        await this.runAgentWithMaterial(
-          note || '记录今天的工作', material, this.watermarkPrefill(wmFields), messages, wmFields,
-          images.length > 0, images.map(i => i.path),
-        )
+        await this.createReviewPlanFromAttachments(note, images, watermarks, observations, requestPlan)
         return
       }
-      // 明确的隐患分析通道：识别命中后再征求是否建档
-      this.setData({ hazardMode: true, mode: 'hazard' })
 
-      const question = note
-        ? `${note}\n\n以下是随消息发送的素材内容（系统已识别，你无需再识别）：\n${material}\n\n请结合以上素材回答我的问题。`
-        : `以下是现场发送的素材（图片识别结果、水印与文件内容）：\n${material}\n\n请综合判断是否存在安全隐患或需要监理处理的事项，并给出处理建议。`
+      if (requestPlan.needs_hazard_analysis) {
+        this.setData({ hazardMode: true, mode: 'hazard' })
 
-      const selModel = this.data.models.find(m => m.id === this.data.currentModel)
-      const result = await request<{ answer?: string; reply?: string }>('/local/llm/chat', {
-        method: 'POST',
-        data: {
-          message: question,
-          temperature: selModel?.temperature ?? 0.7,
-          provider: selModel?.provider || undefined,
-          model: selModel?.model || undefined,
-          system_prompt: '你是建筑工程监理智能助手白泽，请基于用户提供的图片识别结果与文件内容，给出准确、可执行、简洁的结论与建议。注意：你只负责识别与建议，记录的入库由系统完成——禁止声称「已生成记录」「已保存」「已录入」，落库结果由系统另行提示。',
-        },
-        timeout: 120000,
-      })
-      // 识别命中隐患 → 按用户意图落库（用户没说要建档时先问一句，避免库里凭空多出记录）
-      const recordLine = await this.maybeSaveHazardRecords(detections, note)
-      this.addMessage({
-        role: 'assistant',
-        text: (result.answer || result.reply || '识别未返回内容') + recordLine,
-      })
+        const question = note
+          ? `${note}\n\n以下是随消息发送的素材内容（系统已识别，你无需再识别）：\n${material}\n\n请结合以上素材回答我的问题。`
+          : `以下是现场发送的素材（图片识别结果、水印与文件内容）：\n${material}\n\n请综合判断是否存在安全隐患或需要监理处理的事项，并给出处理建议。`
+
+        const selModel = this.data.models.find(m => m.id === this.data.currentModel)
+        const result = await request<{ answer?: string; reply?: string }>('/local/llm/chat', {
+          method: 'POST',
+          data: {
+            message: question,
+            temperature: selModel?.temperature ?? 0.7,
+            provider: selModel?.provider || undefined,
+            model: selModel?.model || undefined,
+            system_prompt: '你是建筑工程监理智能助手白泽，请基于用户提供的图片识别结果与文件内容，给出准确、可执行、简洁的结论与建议。注意：你只负责识别与建议，记录的入库由系统完成，禁止声称「已生成记录」「已保存」「已录入」。',
+          },
+          timeout: 120000,
+        })
+        const recordLine = await this.maybeSaveHazardRecords(detections, note)
+        this.addMessage({
+          role: 'assistant',
+          text: (result.answer || result.reply || '识别未返回内容') + recordLine,
+        })
+        return
+      }
+
+      await this.runAgentWithMaterial(
+        note || '记录今天的工作', material, this.watermarkPrefill(wmFields), messages, wmFields,
+        images.length > 0, images.map(i => i.path), requestPlan,
+      )
     } catch (error) {
       this.addMessage({ role: 'assistant', text: `识别失败：${(error as Error).message}` })
     } finally {
@@ -907,7 +995,13 @@ Page(themed({
     }
   },
 
-  async createReviewPlanFromAttachments(note: string, images: Attachment[], watermarks: Array<Record<string, any>>, observations: string[] = []) {
+  async createReviewPlanFromAttachments(
+    note: string,
+    images: Attachment[],
+    watermarks: Array<Record<string, any>>,
+    observations: string[] = [],
+    requestPlan?: AgentRequestPlan,
+  ) {
     try {
       if (!this.currentSessionId) this.currentSessionId = Date.now()
       const conversationId = conversationIdFor(this.currentSessionId)
@@ -970,7 +1064,9 @@ Page(themed({
       const dates = [...new Set(evidence.map(item => item.observedDate).filter(Boolean))]
       const projects = [...new Set(evidence.map(item => item.project).filter(Boolean))]
       const places = [...new Set(evidence.map(item => [item.project, item.location, item.section].filter(Boolean).join(' / ')).filter(Boolean))]
-      const purpose = await this.requestPurposeRecommendation(note, evidence)
+      const purpose = requestPlan
+        ? this.purposeFromPlan(requestPlan)
+        : await this.requestPurposeRecommendation(note, evidence)
       const inferred = purpose.recommendation
         ? { type: purpose.recommendation.record_type, confidence: purpose.recommendation.confidence, reason: purpose.recommendation.reason }
         : { type: '待定', confidence: 0, reason: '' }
@@ -1093,11 +1189,91 @@ Page(themed({
     return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`
   },
 
-  async requestPurposeRecommendation(note: string, evidence: ReviewPlan['evidence']) {
+  async requestAgentPlan(
+    note: string,
+    evidence: Array<Record<string, any>> = [],
+    fileCount = 0,
+  ): Promise<AgentRequestPlan> {
+    const selected = this.data.models.find(model => model.id === this.data.currentModel)
+    const history = this.data.messages
+      .filter(message => message.role === 'user' || message.role === 'assistant')
+      .slice(-8)
+      .map(message => ({ role: message.role, text: message.text }))
+    try {
+      return await request<AgentRequestPlan>('/agent/request-plan', {
+        method: 'POST',
+        data: {
+          message: note,
+          evidence: evidence.slice(0, 20),
+          attachment_count: evidence.filter(item => item.kind !== 'file').length,
+          file_count: fileCount,
+          history,
+          provider: selected?.provider,
+          model: selected?.model,
+        },
+        timeout: 60000,
+      })
+    } catch {
+      return {
+        schema_version: 1,
+        intent: 'clarify',
+        actions: [],
+        record_type: null,
+        record_type_confidence: 0,
+        needs_hazard_analysis: false,
+        attachment_purposes: [],
+        clarifications: [{
+          field: 'purpose',
+          question: '这些资料要怎么处理？',
+          control: 'select',
+          options: ['整理工作记录', '检查安全隐患', '仅归档'],
+          required: true,
+        }],
+        choice: [
+          { value: 'record_type:巡视', label: '巡视记录', kind: 'record', record_type: '巡视' },
+          { value: 'record_type:旁站', label: '旁站记录', kind: 'record', record_type: '旁站' },
+          { value: 'record_type:验收', label: '验收记录', kind: 'record', record_type: '验收' },
+          { value: 'record_type:见证', label: '见证记录', kind: 'record', record_type: '见证' },
+          { value: 'archive_only', label: '仅整理归档', kind: 'archive' },
+        ],
+        selected_tool: null,
+        execution_mode: 'clarify',
+        write_allowed: false,
+        requires_confirmation: false,
+        reason: 'planner_unavailable',
+        degraded: true,
+      }
+    }
+  },
+
+  purposeFromPlan(plan: AgentRequestPlan): PurposeRecommendation {
+    const actionIds = new Set(plan.actions.map(action => action.id))
+    const intent: PurposeRecommendation['intent'] = actionIds.has('record_work')
+      ? 'create_record'
+      : actionIds.has('analyze_hazard')
+        ? 'analyze_hazard'
+        : actionIds.has('archive_evidence')
+          ? 'archive'
+          : 'clarify'
+    return {
+      intent,
+      recommendation: plan.record_type ? {
+        record_type: plan.record_type,
+        confidence: plan.record_type_confidence,
+        reason: plan.reason,
+      } : null,
+      alternatives: [],
+      choices: plan.choice.length ? plan.choice : [],
+      plan,
+      degraded: plan.degraded,
+    }
+  },
+
+  async requestPurposeRecommendation(note: string, evidence: ReviewPlan['evidence']): Promise<PurposeRecommendation> {
     const selected = this.data.models.find(model => model.id === this.data.currentModel)
     const evidenceSummary = evidence.map((item, index) => `资料${index + 1}：${item.note || item.observation || ''}`).join('\n')
-    return request<{ intent: 'create_record' | 'archive' | 'analyze_hazard' | 'clarify'; recommendation: { record_type: string; confidence: number; reason: string } | null; alternatives: string[]; choices: Array<{ value: string; label: string; kind: string }> }>('/agent/recommend-purpose', {
-      method: 'POST', data: { message: note, evidence_summary: evidenceSummary, provider: selected?.provider, model: selected?.model }, timeout: 60000,
+    return request<PurposeRecommendation>('/agent/recommend-purpose', {
+      method: 'POST', data: { message: note, evidence_summary: evidenceSummary, attachment_count: evidence.length, provider: selected?.provider, model: selected?.model }, timeout: 60000,
     })
   },
 
@@ -1581,16 +1757,6 @@ Page(themed({
     return out
   },
 
-  /** 是否「办事」（记录/建档/生成）——决定带图消息走 Agent 还是纯问答。 */
-  wantsActionIntent(note: string): boolean {
-    return /(记录|记一下|记一条|填写|填表|建档|建单|新建|创建|生成|存档|落库|入库|录入|归档|整理)/.test(note)
-  },
-
-  /** 是否只做识别/分析，而不是记录、建档或整理现场资料。 */
-  isPureDetection(note: string): boolean {
-    return /(识别|检测|查(一下)?隐患|看看(有没有)?隐患|有无隐患|有没有问题|风险|不用(建档|记录)|只(识别|看)|纯识别|先识别|分析(一下)?|什么(问题|情况))/i.test(note)
-  },
-
   /** 带素材走 Agent 工具路由：办事类消息只有走这里才会真的落库 */
   async runAgentWithMaterial(
     text: string,
@@ -1600,6 +1766,7 @@ Page(themed({
     wmFields: Record<string, string>,
     hasImage = false,
     imagePaths: string[] = [],
+    requestPlan?: AgentRequestPlan,
   ) {
     const selModel = this.data.models.find(m => m.id === this.data.currentModel)
     const history = messages
@@ -1618,6 +1785,7 @@ Page(themed({
           prefill,
           history,
           mode: this.data.mode,
+          request_plan: requestPlan,
           provider: selModel?.provider || undefined,
           model: selModel?.model || undefined,
         },
