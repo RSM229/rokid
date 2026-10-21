@@ -13,6 +13,7 @@ loaded.filename = file
 loaded.paths = Module._nodeModulePaths(path.dirname(file))
 loaded.require = (id) => {
   if (id === './request') return { request: async () => { throw new Error('network call is unavailable in this unit test') } }
+  if (id === './agent-execution') return { isExecutionRecoverable: () => false, waitForAgentExecution: async () => null }
   if (id === '../config') return { absoluteMediaUrl: (value) => value }
   return require(id)
 }

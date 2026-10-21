@@ -1,4 +1,5 @@
 import { request } from '../../services/request'
+import { isExecutionRecoverable, newOperationId, waitForAgentExecution } from '../../services/agent-execution'
 import { session } from '../../services/session'
 import { uploadAudio, uploadDocument, uploadImage, friendlyServerError } from '../../services/upload'
 import { persistTempFile, uploadQueue } from '../../services/uploadQueue'
@@ -99,6 +100,8 @@ interface Message {
   hazardCandidates?: HazardCandidateView[]
   hazardCandidateBusy?: boolean
   hazardCandidateResult?: string
+  hazardRequestId?: string
+  hazardExecutionId?: string
   hazardPendingCount?: number
   reviewPlan?: ReviewPlan
   reviewEvents?: Array<{
@@ -177,6 +180,7 @@ interface AgentRequestPlanAction {
 }
 
 interface AgentRequestPlan {
+  request_id?: string
   schema_version: number
   intent: 'create_record' | 'archive' | 'analyze_hazard' | 'query' | 'generate_document' | 'navigate' | 'undo' | 'chat' | 'clarify'
   actions: AgentRequestPlanAction[]
@@ -1192,15 +1196,17 @@ Page(themed({
     fileCount = 0,
   ): Promise<AgentRequestPlan> {
     const selected = this.data.models.find(model => model.id === this.data.currentModel)
+    const requestId = newOperationId('request-plan')
     const history = this.data.messages
       .filter(message => message.role === 'user' || message.role === 'assistant')
       .slice(-8)
       .map(message => ({ role: message.role, text: message.text }))
     try {
-      return await request<AgentRequestPlan>('/agent/request-plan', {
+      const plan = await request<AgentRequestPlan>('/agent/request-plan', {
         method: 'POST',
         data: {
           message: note,
+          request_id: requestId,
           evidence: evidence.slice(0, 20),
           attachment_count: evidence.filter(item => item.kind !== 'file').length,
           file_count: fileCount,
@@ -1210,8 +1216,11 @@ Page(themed({
         },
         timeout: 60000,
       })
+      plan.request_id = plan.request_id || requestId
+      return plan
     } catch {
       return {
+        request_id: requestId,
         schema_version: 2,
         intent: 'clarify',
         actions: [],
@@ -1735,6 +1744,8 @@ Page(themed({
       text: [leadText, candidateText].filter(Boolean).join('\n\n'),
       hazardCandidates,
       hazardPendingCount: hazardCandidates.length,
+      hazardRequestId: newOperationId('hazard-request'),
+      hazardExecutionId: newOperationId('hazard-execution'),
     })
   },
 
@@ -1810,34 +1821,55 @@ Page(themed({
         update(true)
       }
 
-      const response = await request<{ created_count: number; hazards: Array<{ media_id: number; hazard_id: number }> }>('/hazard/commit-candidates', {
-        method: 'POST',
-        data: {
-          candidates: selected.map(item => {
-            const current = working.find(candidate => candidate.id === item.id)!
-            return {
-              media_id: current.mediaId,
-              detection: current.detection,
-              section: current.section,
-              location: current.location,
-              weather: current.weather,
-              taken_at: current.takenAt,
-              remark: current.detection?.top1_risk || current.title,
-            }
-          }),
-        },
-        timeout: 120000,
-      })
-      const idsByMedia = new Map((response.hazards || []).map(item => [Number(item.media_id), Number(item.hazard_id)]))
-      working = working.map(item => {
-        if (item.status !== 'committing') return item
-        const hazardId = idsByMedia.get(Number(item.mediaId))
-        return hazardId
-          ? { ...item, hazardId, status: 'committed' as const, statusText: `已建档 #${hazardId}` }
-          : item
-      })
-      invalidateCache(CACHE_KEYS.HAZARD_LIST)
-      update(false, `已生成 ${response.created_count} 条隐患记录。可在隐患台账继续派单、生成整改文书或复查。`)
+      type HazardCommitResponse = { created_count: number; hazards: Array<{ media_id: number; hazard_id: number }> }
+      const applyCommitted = (response: HazardCommitResponse, recovered = false) => {
+        const idsByMedia = new Map((response.hazards || []).map(item => [Number(item.media_id), Number(item.hazard_id)]))
+        working = working.map(item => {
+          if (item.status !== 'committing') return item
+          const hazardId = idsByMedia.get(Number(item.mediaId))
+          return hazardId
+            ? { ...item, hazardId, status: 'committed' as const, statusText: `已建档 #${hazardId}` }
+            : item
+        })
+        invalidateCache(CACHE_KEYS.HAZARD_LIST)
+        update(false, `${recovered ? '已恢复中断的提交结果：' : ''}已生成 ${response.created_count} 条隐患记录。可在隐患台账继续派单、生成整改文书或复查。`)
+      }
+      const executionId = message.hazardExecutionId || newOperationId('hazard-execution')
+      try {
+        const response = await request<HazardCommitResponse>('/hazard/commit-candidates', {
+          method: 'POST',
+          data: {
+            request_id: message.hazardRequestId || newOperationId('hazard-request'),
+            execution_id: executionId,
+            candidates: selected.map(item => {
+              const current = working.find(candidate => candidate.id === item.id)!
+              return {
+                media_id: current.mediaId,
+                detection: current.detection,
+                section: current.section,
+                location: current.location,
+                weather: current.weather,
+                taken_at: current.takenAt,
+                remark: current.detection?.top1_risk || current.title,
+              }
+            }),
+          },
+          timeout: 120000,
+        })
+        applyCommitted(response)
+      } catch (error) {
+        if (!isExecutionRecoverable(error)) throw error
+        const execution = await waitForAgentExecution(executionId)
+        if (execution?.status === 'COMMITTED') {
+          applyCommitted(execution.result as HazardCommitResponse, true)
+        } else if (execution?.status === 'FAILED') {
+          throw new Error(execution.error || '服务端已回滚本次建档')
+        } else if (execution?.status === 'RUNNING') {
+          throw new Error('服务端仍在确认建档结果，请稍后重新进入查看，不会重复建档')
+        } else {
+          throw error
+        }
+      }
     } catch (error) {
       const detail = (error as Error).message
       working = working.map(item => item.status === 'committing'
@@ -1997,6 +2029,7 @@ Page(themed({
         method: 'POST',
         data: {
           message: text,
+          request_id: requestPlan?.request_id || newOperationId('agent-chat'),
           conversation_id: conversationIdFor(this.currentSessionId),
           material: material || undefined,
           prefill,
@@ -2320,6 +2353,7 @@ Page(themed({
         method: 'POST',
         data: {
           message: summary || '按表单补充信息',
+          request_id: newOperationId('agent-form-submit'),
           form_values: values,
           conversation_id: conversationIdFor(this.currentSessionId),
           history,
@@ -2468,6 +2502,7 @@ Page(themed({
         method: 'POST',
         data: {
           message: text,
+          request_id: newOperationId('agent-chat'),
           conversation_id: conversationIdFor(this.currentSessionId),
           history,
           mode: this.data.mode,
@@ -2647,6 +2682,7 @@ Page(themed({
         method: 'POST',
         data: {
           message: `请根据下面这份导入文件的内容，创建一条规范的工作记录（自动判断巡视/旁站/验收/见证）并回执给我。\n\n文件《${filename}》内容：\n${brief}`,
+          request_id: newOperationId('agent-chat'),
           conversation_id: conversationIdFor(this.currentSessionId),
           history: [],
           mode: this.data.mode,

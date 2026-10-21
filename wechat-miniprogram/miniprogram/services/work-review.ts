@@ -1,6 +1,7 @@
 // Review-plan transport and editing rules shared by the work-review page.
 import { request } from './request'
 import { absoluteMediaUrl } from '../config'
+import { isExecutionRecoverable, waitForAgentExecution } from './agent-execution'
 export const FORM_TYPES = [
   '巡视记录', '危大工程巡视记录', '旁站记录', '平行检验记录', '验收记录',
   '材料台账', '监理通知单', '安全隐患整改通知单', '监理日志', '监理月报', '安全监理日志',
@@ -74,6 +75,8 @@ export interface ReviewPlan {
   notices?: string[]
   /** Immutable request-plan snapshot used to create this draft. */
   requestPlan?: Record<string, unknown>
+  /** Trace/operation id propagated through planning, confirmation and execution. */
+  requestId?: string
 }
 
 export interface RequestPlanFact {
@@ -166,6 +169,8 @@ export interface ReviewExecutionResult {
 export interface ReviewPlanResponse {
   id: number
   conversation_id: string
+  request_id?: string
+  execution_id?: string
   revision: number
   status: 'draft' | 'confirmed' | 'executed'
   confirmed_revision: number | null
@@ -220,6 +225,7 @@ function fromServerPlan(result: ReviewPlanResponse): ReviewPlan {
     executionResult: result.execution_result || null,
     notices: Array.isArray(raw.notices) ? raw.notices.map(String) : [],
     requestPlan: raw.request_plan && typeof raw.request_plan === 'object' ? raw.request_plan as Record<string, unknown> : undefined,
+    requestId: String(result.request_id || raw.request_id || ''),
   }
   validatePlan(plan)
   return plan
@@ -227,7 +233,7 @@ function fromServerPlan(result: ReviewPlanResponse): ReviewPlan {
 
 function toServerPlan(plan: ReviewPlan): Record<string, unknown> {
   return {
-    schema_version: 1, request_text: plan.requestText,
+    schema_version: 1, request_text: plan.requestText, request_id: plan.requestId || '',
     evidence: plan.evidence.map(item => ({
       id: item.id, media_id: item.mediaId, image: item.image, observed_date: item.observedDate, observed_date_source: item.observedDateSource || '', note: item.note,
       project: item.project || '', section: item.section || '',
@@ -273,10 +279,10 @@ export async function fetchReviewFormSchema(formCode: string): Promise<ReviewFor
   return request<ReviewFormSchema>(`/provform/schemas/${formCode}`)
 }
 
-export async function createReviewPlan(conversationId: string, plan: ReviewPlan): Promise<ReviewPlan> {
+export async function createReviewPlan(conversationId: string, plan: ReviewPlan, requestId?: string): Promise<ReviewPlan> {
   try {
     const result = await request<ReviewPlanResponse>('/agent/review-plans', {
-      method: 'POST', data: { conversation_id: conversationId, plan: toServerPlan(plan) },
+      method: 'POST', data: { conversation_id: conversationId, plan: toServerPlan(plan), request_id: requestId || plan.requestId },
     })
     return fromServerPlan(result)
   } catch (error) {
@@ -320,17 +326,38 @@ export async function listReviewPlans(conversationId?: string): Promise<ReviewPl
 export async function confirmReviewPlan(plan: ReviewPlan, revision = plan.serverRevision ?? plan.revision): Promise<ReviewPlan> {
   if (!plan.serverId) throw new Error('整理计划尚未保存到服务端')
   const result = await request<ReviewPlanResponse>(`/agent/review-plans/${plan.serverId}/confirm`, {
-    method: 'POST', data: { revision },
+    method: 'POST', data: { revision, request_id: plan.requestId },
   })
   return fromServerPlan(result)
 }
 
 export async function executeReviewPlan(plan: ReviewPlan, revision = plan.serverRevision ?? plan.revision): Promise<ReviewPlan> {
   if (!plan.serverId) throw new Error('整理计划尚未保存到服务端')
-  const result = await request<ReviewPlanResponse>(`/agent/review-plans/${plan.serverId}/execute`, {
-    method: 'POST', data: { revision },
-  })
-  return fromServerPlan(result)
+  const executionId = `review-plan:${plan.serverId}:revision:${revision}`
+  try {
+    const result = await request<ReviewPlanResponse>(`/agent/review-plans/${plan.serverId}/execute`, {
+      method: 'POST',
+      data: { revision, request_id: plan.requestId, execution_id: executionId },
+      timeout: 120000,
+    })
+    return fromServerPlan(result)
+  } catch (error) {
+    if (!isExecutionRecoverable(error)) throw error
+    const execution = await waitForAgentExecution(executionId)
+    if (execution?.status === 'COMMITTED') {
+      const latest = await fetchReviewPlan(plan.serverId)
+      return { ...latest, status: 'executed', executionResult: execution.result as unknown as ReviewPlan['executionResult'] }
+    }
+    const latest = await fetchReviewPlan(plan.serverId).catch(() => null)
+    if (latest?.status === 'executed' && latest.executionResult) return latest
+    if (execution?.status === 'FAILED') {
+      throw new Error(`执行未完成：${execution.error || '服务端已回滚本次写入'}`)
+    }
+    if (execution?.status === 'RUNNING') {
+      throw new Error('服务端仍在确认本次执行结果，请稍后重新进入查看，不会重复建档')
+    }
+    throw error
+  }
 }
 
 export function newEvent(id: string, evidenceIds: string[] = [], date = ''): WorkEvent {
@@ -533,6 +560,7 @@ export function reviewPlanFromItemPlan(
       ...events.flatMap(event => event.issues || []),
     ].filter(Boolean))],
     requestPlan,
+    requestId: String(requestPlan?.request_id || ''),
   }
   validatePlan(plan)
   return plan

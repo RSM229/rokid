@@ -8,6 +8,20 @@ interface RequestOptions {
   timeout?: number
 }
 
+export class ApiRequestError extends Error {
+  statusCode?: number
+  networkError: boolean
+  timedOut: boolean
+
+  constructor(message: string, options: { statusCode?: number; networkError?: boolean; timedOut?: boolean } = {}) {
+    super(message)
+    this.name = 'ApiRequestError'
+    this.statusCode = options.statusCode
+    this.networkError = options.networkError === true
+    this.timedOut = options.timedOut === true
+  }
+}
+
 function errorMessage(response: WechatMiniprogram.RequestSuccessCallbackResult): string {
   const data = response.data as { detail?: string; message?: string } | string
   if (typeof data === 'string') return data
@@ -50,19 +64,21 @@ export function request<T>(
           session.clear()
           wx.reLaunch({ url: '/pages/login/index' })
         }
-        reject(new Error(errorMessage(response)))
+        reject(new ApiRequestError(errorMessage(response), { statusCode: response.statusCode }))
       },
       fail(error) {
         const raw = error.errMsg || ''
+        const timedOut = /timeout/i.test(raw)
         if (config.useLocalBackend && /request:fail/i.test(raw)) {
           reject(
-            new Error(
+            new ApiRequestError(
               `连不上本地后端（${config.apiBaseUrl}）。请确认后端服务已启动，并在微信开发者工具中重新编译。`,
+              { networkError: true, timedOut },
             ),
           )
           return
         }
-        reject(new Error(raw || '网络请求失败'))
+        reject(new ApiRequestError(raw || '网络请求失败', { networkError: true, timedOut }))
       },
     })
   })
