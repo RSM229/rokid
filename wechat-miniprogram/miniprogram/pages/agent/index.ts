@@ -176,12 +176,18 @@ Page(themed({
     messages: [] as Message[],
     userName: '',
     // ima 风格空状态：竖排建议按钮（icon + 文案），点击走 handleActionTap
+    // 🔴 needProject：该动作会产生项目级业务数据（现场记录/隐患/监理日志），
+    //    无项目用户点了只会被拦，不如一开始就不展示 —— 换成 visibleHeroActions
+    //    按有无项目动态过滤，无项目时只留「查规范」这类真能用的入口。
     heroActions: [
-      { icon: 'ic-mic', text: '开启语音，记录现场工作', command: '工作记录' },
-      { icon: 'ic-camera', text: '拍照识别安全隐患', command: '拍照' },
-      { icon: 'ic-book', text: '查询规范资料库', command: '知识库' },
-      { icon: 'ic-doc', text: '生成今日监理日志', command: '生成监理日志' },
-    ] as { icon: string; text: string; command: string }[],
+      { icon: 'ic-mic', text: '开启语音，记录现场工作', command: '工作记录', needProject: true },
+      { icon: 'ic-camera', text: '拍照识别安全隐患', command: '拍照', needProject: true },
+      { icon: 'ic-book', text: '查询规范资料库', command: '知识库', needProject: false },
+      { icon: 'ic-doc', text: '生成今日监理日志', command: '生成监理日志', needProject: true },
+      { icon: 'ic-doc', text: '加入项目（填邀请码）', command: 'join-project', needProject: false, onlyNoProject: true },
+    ] as { icon: string; text: string; command: string; needProject: boolean; onlyNoProject?: boolean }[],
+    /** 实际渲染的快捷动作：无项目时滤掉写业务的、并补一个「加入项目」入口 */
+    visibleHeroActions: [] as { icon: string; text: string; command: string }[],
     // 侧边栏「工作文书」子项：对应工作记录生成的各类文书（PDF/Word）
     docEntries: [
       { key: 'xunshi', label: '巡视记录', url: '/pages/documents/index?type=xunshi' },
@@ -207,6 +213,18 @@ Page(themed({
     projectFormMode: 'create' as 'create' | 'edit',
     projectForm: { projectName: '', location: '', description: '', constructionUnit: '', supervisionUnit: '' },
     projectCreated: false,
+    /**
+     * 🔴 尚未加入任何项目（自助注册出来的裸用户）。
+     *
+     * 与 `projectCreated` 是同一事实的两种表述，单独留一个标志是为了让 wxml
+     * 能直接用它渲染「引导加入项目」横幅，而不必到处写 `!projectCreated`。
+     *
+     * 2026-10-21：此前无项目时是**自动弹「创建新项目」表单**，但后端
+     * `/project/create` 自 2026-10-10 起要求 `project_create` 权限（仅超管持有），
+     * 而超管又不允许登录小程序 ⇒ 那个表单对小程序里**任何人都必然 403**，
+     * 点「取消」只是关掉弹窗、不给出路，用户卡死在首页。
+     */
+    noProject: false,
     projectName: '',
     projectLocation: '',
     showProjectPicker: false,
@@ -302,10 +320,14 @@ Page(themed({
       modelName: saved.name,
     })
     if (user?.project_id) {
-      this.setData({ projectCreated: true, projectName: user.project_name || '', currentProjectId: user.project_id })
+      this.setData({ projectCreated: true, noProject: false, projectName: user.project_name || '', currentProjectId: user.project_id })
     } else {
-      this.setData({ showProjectForm: true })
+      // 🔴 不再自动弹「创建新项目」表单（该接口仅超管可调用，小程序里必然失败）。
+      // 改为：放开对话框让人先用不需要项目的功能（AI 问答、查规范、查天气），
+      // 并在顶部挂常驻引导条指向「加入项目」。
+      this.setData({ projectCreated: false, noProject: true })
     }
+    this.refreshHeroActions()
 
     const now = new Date()
     this.setData({
@@ -323,6 +345,23 @@ Page(themed({
     if (!session.getToken()) {
       wx.redirectTo({ url: '/pages/login/index' })
       return
+    }
+    // 🔴 重新同步项目状态：用户可能刚去「加入项目」页填了邀请码回来，
+    // 此时 session 里的 project_id 已由 joinProjectByInvite 写回，
+    // 不在这里刷新的话界面还停在「无项目」态、Hero 动作也不会变。
+    const user = session.getUser()
+    if (user?.project_id) {
+      this.setData({
+        projectCreated: true,
+        noProject: false,
+        projectName: user.project_name || this.data.projectName,
+        currentProjectId: user.project_id,
+      })
+      this.refreshHeroActions()
+    } else if (this.data.projectCreated) {
+      // 反向：原本有项目但 session 里没了（被移出项目等）→ 退回无项目态
+      this.setData({ projectCreated: false, noProject: true, currentProjectId: 0, projectName: '' })
+      this.refreshHeroActions()
     }
     this.refreshPendingVoice()
     this.loadPendingDrafts()
@@ -515,8 +554,18 @@ Page(themed({
     const text = this.data.input.trim()
     const attachments = this.data.attachments
     if ((!text && attachments.length === 0) || this.data.loading) return
-    if (!this.data.projectCreated) {
-      wx.showToast({ title: '请先创建项目', icon: 'none' })
+    // 🔴 2026-10-21：无项目时不再一刀切拦住发送。
+    // 原来这里是 `if (!projectCreated) return showToast('请先创建项目')`，
+    // 但后端 /agent/chat 对无项目用户其实已经做了正确处理：
+    //   · read 类工具（查规范 query_regulation / 查天气 / 查记录，permission=None）
+    //     → 无项目照常执行；
+    //   · write 类工具（建工作记录/隐患/文书）→ agent.py 直接返回
+    //     「你还没有所属项目，先加入项目后再记录」+ 一张「去加入项目」导航卡。
+    // 前端把对话框整个禁掉，等于把后端这套降级与引导全埋没了，
+    // 导致裸用户连「问一句规范」都做不到。
+    // 附件（拍照/文件）必然落到写业务数据的路径，仍需项目 → 单独拦（见下）。
+    if (!this.data.projectCreated && attachments.length) {
+      this.guideJoinProject('拍照与文件识别会产生工作记录，需要先加入项目')
       return
     }
 
@@ -1230,7 +1279,7 @@ Page(themed({
   /** 导入微信聊天/本地文档（pdf/docx/txt），提取内容后由 AI 生成对应工作记录 */
   importFile() {
     if (!this.data.projectCreated) {
-      wx.showToast({ title: '请先创建项目', icon: 'none' })
+      this.guideJoinProject('导入文档会生成工作记录')
       return
     }
     this.setData({ showPlusPanel: false })
@@ -1316,6 +1365,11 @@ Page(themed({
     const command = event.currentTarget.dataset.command as string
     if (command === 'show-form') {
       this.setData({ input: '' })
+      return
+    }
+    // 🔴 无项目用户的「加入项目」快捷入口：直接去 join-project 页填邀请码
+    if (command === 'join-project') {
+      wx.navigateTo({ url: '/pages/join-project/index' })
       return
     }
     // 智能体回执：导航到系统页面 / 撤销刚创建的对象
@@ -1407,7 +1461,7 @@ Page(themed({
    *  2026-10-09：不再弹「先拍照/先说话」选择，直接进入说话流程（结束后会询问是否补照片） */
   startVoiceWorkFromChat() {
     if (!this.data.projectCreated) {
-      wx.showToast({ title: '请先创建项目', icon: 'none' })
+      this.guideJoinProject('语音记录会生成现场工作记录')
       return
     }
     this.setData({
@@ -1472,7 +1526,7 @@ Page(themed({
   /** 空状态② 拍照识别：选完图仍在聊天框内识别 */
   captureForRecognize() {
     if (!this.data.projectCreated) {
-      wx.showToast({ title: '请先创建项目', icon: 'none' })
+      this.guideJoinProject('拍照识别会登记安全隐患')
       return
     }
     this.setData({ hazardMode: true, mode: 'hazard' })
@@ -1492,7 +1546,7 @@ Page(themed({
   /** 空状态④ 生成今日监理日志：结果直接回到聊天框 */
   async generateTodayLogInChat() {
     if (!this.data.projectCreated) {
-      wx.showToast({ title: '请先创建项目', icon: 'none' })
+      this.guideJoinProject('生成监理日志要写入所属项目')
       return
     }
     const now = new Date()
@@ -1542,7 +1596,7 @@ Page(themed({
 
   pickImages(source: 'album' | 'camera') {
     if (!this.data.projectCreated) {
-      wx.showToast({ title: '请先创建项目', icon: 'none' })
+      this.guideJoinProject('拍照会生成现场工作记录')
       return
     }
     const isCamera = source === 'camera'
@@ -1569,7 +1623,7 @@ Page(themed({
   /** 「文件」：从微信聊天记录中选文档（pdf/doc/docx/xls/xlsx/txt/md） */
   pickLocalFile() {
     if (!this.data.projectCreated) {
-      wx.showToast({ title: '请先创建项目', icon: 'none' })
+      this.guideJoinProject('导入文件会生成工作记录')
       return
     }
     this.setData({ showPlusPanel: false })
@@ -1587,7 +1641,7 @@ Page(themed({
   /** 「微信文件」：从微信聊天记录中选任意类型（文档 / 图片 / 视频） */
   pickWechatFile() {
     if (!this.data.projectCreated) {
-      wx.showToast({ title: '请先创建项目', icon: 'none' })
+      this.guideJoinProject('导入文件会生成工作记录')
       return
     }
     this.setData({ showPlusPanel: false })
@@ -2163,10 +2217,51 @@ Page(themed({
     this.setData({ showProjectForm: false, projectFormMode: 'create' })
   },
 
+  /**
+   * 🔴 无项目用户的统一引导出口（2026-10-21）。
+   *
+   * 取代原先到处散落的 `wx.showToast('请先创建项目')` —— 那句话既指错了动作
+   * （建项目对小程序用户必然 403），又不给出路。这里改成弹窗说明 + 一键直达
+   * 「加入项目」页填邀请码。
+   *
+   * @param reason 为什么这个操作需要项目（会显示给用户，说人话）
+   */
+  guideJoinProject(reason?: string) {
+    wx.showModal({
+      title: '需要先加入项目',
+      content: (reason ? reason + '。' : '') + '向项目负责人索取项目邀请码，填写后即可使用现场记录等功能。',
+      confirmText: '去加入项目',
+      cancelText: '稍后再说',
+      success: (res) => {
+        if (res.confirm) wx.navigateTo({ url: '/pages/join-project/index' })
+      },
+    })
+  },
+
+  /** 引导条/快捷按钮「去加入项目」：直接跳，不再弹窗（用户已经明确要去了） */
+  goJoinProject() {
+    wx.navigateTo({ url: '/pages/join-project/index' })
+  },
+
+  /**
+   * 按「有没有项目」重算 Hero 区展示的快捷动作。
+   *
+   * 无项目时：滤掉会产生业务数据的（语音记录/拍照识别/生成日志），
+   * 只留「查规范资料库」这类真能用的，并补一个「加入项目」入口 ——
+   * 让用户第一眼就知道现在能干什么、下一步该干什么，而不是点一个被拦一个。
+   */
+  refreshHeroActions() {
+    const hasProject = this.data.projectCreated
+    const visible = this.data.heroActions
+      .filter((a) => hasProject ? !a.onlyNoProject : (!a.needProject || a.onlyNoProject))
+      .map(({ icon, text, command }) => ({ icon, text, command }))
+    this.setData({ visibleHeroActions: visible })
+  },
+
   /** 侧边栏「项目概况」→ 点进修改当前项目（名称/地点/参建单位/描述） */
   async openProjectEdit() {
     if (!this.data.currentProjectId) {
-      wx.showToast({ title: '请先创建项目', icon: 'none' })
+      this.guideJoinProject('你还没有所属项目')
       return
     }
     let current = this.data.projectList.find((p) => p.id === this.data.currentProjectId)
@@ -2274,7 +2369,25 @@ Page(themed({
         ],
       })
     } catch (error) {
-      wx.showToast({ title: (error as Error).message, icon: 'none' })
+      const message = (error as Error).message
+      // 🔴 建项目要 project_create 权限（后端仅超管持有），而超管不允许登录小程序
+      // ⇒ 小程序里任何人都建不了项目。原来直接把后端 403 原文 toast 出来
+      //   （"您的角色（监理员）无权访问此功能，需要权限: project_create"）对用户毫无意义。
+      // 改成说人话并给出路：要么加入已有项目，要么让管理员在 Web 后台立项。
+      if (!isEdit && /无权|权限|403/.test(message)) {
+        this.setData({ loading: false, showProjectForm: false })
+        wx.showModal({
+          title: '无法新建项目',
+          content: '新建项目由管理员在 Web 后台完成。如果你是要加入已有项目，请向项目负责人索取邀请码。',
+          confirmText: '去加入项目',
+          cancelText: '知道了',
+          success: (res) => {
+            if (res.confirm) wx.navigateTo({ url: '/pages/join-project/index' })
+          },
+        })
+        return
+      }
+      wx.showToast({ title: message, icon: 'none' })
       this.setData({ loading: false })
     }
   },
@@ -2341,6 +2454,13 @@ Page(themed({
   },
 
   async switchProject() {
+    // 🔴 无项目用户点导航栏标题：别弹「切换项目」——那里列表必然是空的「暂无项目」，
+    //    唯一可点的「新建项目」又必然 403（见 openProjectCreate 注释），是个死路。
+    //    直接引导去填邀请码加入项目。
+    if (!this.data.projectCreated) {
+      this.guideJoinProject('你还没有所属项目，无法切换')
+      return
+    }
     try {
       const projects = await request<Array<{ id: number; name: string; code: string; location?: string; description?: string; construction_unit?: string; supervision_unit?: string }>>('/project/list')
       const target = projects.find((p) => p.id === this.data.currentProjectId)
