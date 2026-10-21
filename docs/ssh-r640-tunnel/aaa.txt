@@ -1,0 +1,12 @@
+baize@baize-R640:~/rokid_glass$ sudo bash setup-r640.sh baize
+Paste the Windows R640-only public key printed by setup-local-ssh.ps1:
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAzRTYJhelkMwM9pz54IWniU80giK297YQ7L2kHF05qM windows-to-r640
+Created symlink '/etc/systemd/system/multi-user.target.wants/r640-reverse-ssh-tunnel.service' → '/etc/systemd/system/r640-reverse-ssh-tunnel.service'.
+
+R640 reverse tunnel service installed and enabled.
+The service retries until the cloud script authorizes this R640 key.
+R640 public key for setup-cloud.sh:
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAVDtC87sqdbmF6EJ71jXDBgTguTCT0wuWsPEu2KLTkE r640-to-8.134.23.170
+R640 SSH host-key fingerprint (compare on first Windows connection):
+256 SHA256:X80qNiWvYWkXZOALu0CWdQEMRWPUwRzvcwvPzsj5fYA root@baize-R640 (ED25519)
+baize@baize-R640:~/rokid_glass$
