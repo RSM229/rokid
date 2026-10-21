@@ -11,10 +11,12 @@ def test_images_are_not_counted_as_records_and_same_identity_is_grouped():
             {"observed_date": "2026-10-18", "project": "白泽项目"},
         ],
         record_type="巡视",
+        record_type_confidence=0.88,
         action_ids=["record_work"],
     )
     assert plan["candidate_count"] == 1
     assert plan["items"][0]["evidence_indexes"] == [0, 1, 2]
+    assert plan["items"][0]["record_type_confidence"] == 0.88
 
 
 def test_different_dates_or_sections_create_separate_candidates():

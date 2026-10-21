@@ -369,6 +369,7 @@ def normalize_candidate(
         facts=facts,
         evidence=evidence_items,
         record_type=record_type,
+        record_type_confidence=record_confidence,
         action_ids=action_ids,
     )
 
@@ -480,6 +481,7 @@ def enrich_plan_facts(
         facts=facts,
         evidence=evidence_items,
         record_type=out.get("record_type"),
+        record_type_confidence=float(out.get("record_type_confidence") or 0),
         action_ids=action_ids,
     )
     out["facts"] = facts

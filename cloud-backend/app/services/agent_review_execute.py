@@ -75,8 +75,11 @@ async def execute_confirmed_plan(
     if not project_id or row.project_id != project_id:
         raise HTTPException(403, "整理计划不属于当前项目")
     for event in plan["events"]:
-        permission = RECORD_PERMISSIONS.get(event.get("record_type") or "待定")
-        if permission and not user.has_permission(permission):
+        record_type = event.get("record_type") or "待定"
+        permission = RECORD_PERMISSIONS.get(record_type)
+        if not permission:
+            raise HTTPException(422, f"工作记录类型“{record_type}”尚未确认，不能正式建档")
+        if not user.has_permission(permission):
             raise HTTPException(403, f"当前角色无权创建{permission}类记录")
 
     media_by_evidence = _media_ids_by_evidence(plan)
@@ -133,7 +136,10 @@ async def execute_confirmed_plan(
         form_fields = {**watermark_fields, **(fields if isinstance(fields, dict) else {})}
         field_sources = event.get("field_sources") or {}
         user_location = event.get("location") if field_sources.get("location") == "user_message" else None
-        resolved_section = form_fields.get("section") or form_fields.get("work_area") or event.get("location") or None
+        resolved_section = (
+            form_fields.get("section") or form_fields.get("work_area")
+            or event.get("section") or event.get("location") or None
+        )
         resolved_location = user_location or form_fields.get("location") or event.get("location") or None
         content_json = {
             "source": "agent_review_plan",

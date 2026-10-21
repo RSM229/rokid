@@ -96,6 +96,8 @@ def review_issues(plan: dict[str, Any]) -> list[str]:
             issues.append(f"事项 {i} 缺少名称")
         if not event.get("evidence_ids") and not str(event.get("content") or "").strip():
             issues.append(f"事项 {i} 缺少工作描述或资料")
+        if str(event.get("record_type") or "待定") == "待定":
+            issues.append(f"事项 {i} 请选择工作记录类型")
     return issues
 
 

@@ -17,7 +17,7 @@ def base_plan():
         "events": [{
             "id": "e1", "title": "A区钢筋验收", "location": "A区",
             "content": "钢筋验收", "date": "2026-10-18", "date_confirmed": True,
-            "evidence_ids": ["p1"], "forms": ["acceptance_record"],
+            "evidence_ids": ["p1"], "forms": ["acceptance_record"], "record_type": "验收",
         }],
         "unassigned_ids": ["p2"],
     }
@@ -69,3 +69,12 @@ def test_form_specific_fields_must_be_objects():
         assert "专用字段" in str(exc)
     else:
         raise AssertionError("non-object form fields should fail")
+
+
+def test_pending_record_type_must_be_resolved_before_confirmation():
+    plan = base_plan()
+    plan["events"][0]["evidence_ids"].append("p2")
+    plan["unassigned_ids"] = []
+    plan["events"][0]["record_type"] = "待定"
+    review_plan.validate_plan(plan)
+    assert any("请选择工作记录类型" in issue for issue in review_plan.review_issues(plan))

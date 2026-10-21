@@ -108,6 +108,7 @@ def build_item_plan(
     facts: Iterable[dict[str, Any]] | None,
     evidence: Iterable[dict[str, Any]] | None,
     record_type: str | None = None,
+    record_type_confidence: float = 0.0,
     action_ids: Iterable[str] | None = None,
 ) -> dict[str, Any]:
     """Build zero, one or many item candidates without writing anything."""
@@ -128,6 +129,7 @@ def build_item_plan(
             "items": [{
                 "id": "item_1",
                 "record_type": record_type,
+                "record_type_confidence": record_type_confidence,
                 "fields": _field_views({}, fact_map),
                 "evidence_indexes": [],
                 "missing_fields": missing,
@@ -179,6 +181,7 @@ def build_item_plan(
         items.append({
             "id": f"item_{index}",
             "record_type": record_type,
+            "record_type_confidence": record_type_confidence,
             "fields": fields,
             "evidence_indexes": group["evidence_indexes"],
             "notes": group["notes"],
@@ -193,6 +196,7 @@ def build_item_plan(
         items.append({
             "id": "item_1",
             "record_type": record_type,
+            "record_type_confidence": record_type_confidence,
             "fields": _field_views({}, fact_map),
             "evidence_indexes": unassigned,
             "notes": [],

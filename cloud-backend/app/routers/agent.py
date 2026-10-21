@@ -1194,8 +1194,19 @@ async def create_review_plan(
         AgentReviewPlan.user_id == user.id,
         AgentReviewPlan.project_id == getattr(user, "project_id", None),
         AgentReviewPlan.conversation_id == conversation_id,
-    ))).scalars().first()
+    ).with_for_update())).scalars().first()
     if existing:
+        if existing.status == "executed":
+            existing.revision += 1
+            existing.status = "draft"
+            existing.plan_json = json.dumps(req.plan, ensure_ascii=False)
+            existing.confirmed_revision = None
+            existing.executed_revision = None
+            existing.execution_result_json = None
+            existing.updated_at = datetime.now()
+            await db.commit()
+            await db.refresh(existing)
+            return _review_plan_payload(existing)
         raise HTTPException(409, "该会话已有整理计划，请读取并修订现有计划")
     row = AgentReviewPlan(
         user_id=user.id, conversation_id=conversation_id,
