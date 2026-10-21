@@ -132,20 +132,8 @@ Page(themed({
     }, 400)
   },
   activateCamera() {
-    wx.authorize({
-      scope: 'scope.camera',
-      success: () => this.setData({ cameraActive: true }),
-      fail: () => {
-        wx.showModal({
-          title: '需要摄像头权限',
-          content: '摄像头仅在您主动拍照、录像时使用。您仍可从相册选择媒体。',
-          confirmText: '去设置',
-          success: (result) => {
-            if (result.confirm) wx.openSetting({})
-          },
-        })
-      },
-    })
+    // The camera component owns camera authorization; wx.authorize does not support scope.camera.
+    this.setData({ cameraActive: true })
   },
   onCameraReady() {
     this.setData({ cameraReady: true })

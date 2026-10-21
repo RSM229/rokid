@@ -39,13 +39,7 @@ Page({
     this._joining = true
     const generation = ++this._generation
     try {
-      // authorize 只是尽力预授权：对隐私类 scope 从不弹窗、未授权时必 fail，
-      // 不能因为它中断入会。真正授权由媒体 enter 时微信官方弹窗完成，
-      // 失败走下方 catch 的统一提示。
-      await new Promise<void>((resolve) => wx.authorize({ scope: 'scope.record', complete: () => resolve() }))
-      if (this.data.call.media_type === 'video') {
-        await new Promise<void>((resolve) => wx.authorize({ scope: 'scope.camera', complete: () => resolve() }))
-      }
+      // wx.authorize does not support camera or microphone scopes; media entry triggers system consent.
       const ticket = await rtc.credentials(this._id)
       if (!this._alive || generation !== this._generation || this.data.call?.status !== 'accepted') return
       this._media = createRtcMedia(this, () => {
