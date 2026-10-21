@@ -42,6 +42,25 @@
       <el-tab-pane name="list" label="账号列表">
         <el-card shadow="never">
           <div class="list-toolbar">
+            <!-- 项目筛选（2026-10-21）：后端 GET /auth/users 对公司级账号（超管/管理员）
+                 **不按项目过滤**（`_can_manage_all_projects` 直接短路），所以切换项目后
+                 这里一直是全量账号。筛选放在前端做，口径与后端「非公司级」分支对齐：
+                 该项目**成员**（project_members，归属真源）∪ 所属项目 = 该项目的账号。 -->
+            <el-select
+              v-model="projectFilter"
+              size="small"
+              style="width: 220px"
+              :loading="memberScopeLoading"
+            >
+              <el-option label="全部项目" :value="0" />
+              <el-option label="未分配项目" :value="NO_PROJECT" />
+              <el-option
+                v-for="p in projects"
+                :key="p.id"
+                :label="p.name"
+                :value="p.id"
+              />
+            </el-select>
             <el-select v-model="auditFilter" size="small" style="width: 170px">
               <el-option label="全部审批状态" value="" />
               <el-option label="已通过（可登录）" value="approved" />
@@ -49,6 +68,7 @@
               <el-option label="已驳回（不可登录）" value="rejected" />
             </el-select>
             <span class="muted">共 {{ filteredUsers.length }} / {{ users.length }} 个账号</span>
+            <span v-if="scopeHint" class="muted scope-hint">{{ scopeHint }}</span>
           </div>
           <el-table :data="filteredUsers" v-loading="loading" stripe>
             <el-table-column prop="username" label="用户名" min-width="120" />
@@ -616,8 +636,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { authApi, projectApi } from '@/api'
 import { PROJECT_ROLE_OPTIONS, ORG_ROLE_OPTIONS, CHIEF_ROLE_KEYS, DEFAULT_ROLE, roleLabel } from '@/constants/role'
@@ -636,6 +656,7 @@ const stackableRoleOptions = computed(() =>
 // 仅超管可授予公司级角色（与后端 _validate_org_role 同口径）
 const auth = useAuthStore()
 const router = useRouter()
+const route = useRoute()
 // 「角色权限」配置页已下线（2026-10-20），入口与跳转一并移除。
 const canGrantOrgRole = computed(() => auth.userInfo?.org_role === 'super_admin')
 // 新增/编辑/改密 均需 user_manage（目前仅超管持有）；总监只有 settings 与
@@ -690,11 +711,56 @@ function auditTagType(status?: string) {
 function isApproved(row: any) {
   return (row.audit_status || 'approved') === 'approved'
 }
-const filteredUsers = computed(() =>
-  auditFilter.value
-    ? users.value.filter((item) => (item.audit_status || 'approved') === auditFilter.value)
-    : users.value,
-)
+
+// ---- 项目筛选（2026-10-21，纯前端）----
+// 后端 `GET /auth/users` 对公司级账号短路了项目过滤（`_can_manage_all_projects`），
+// 所以超管切项目后账号列表仍是全量。这里在前端补一层筛选，且**默认跟随顶栏当前项目**，
+// 让「切到哪个项目就只看哪个项目的人」符合直觉。口径对齐后端非公司级分支：
+// 命中 = 该项目**成员**（project_members，归属真源）∪ 所属项目 = 该项目的账号。
+const NO_PROJECT = -1 // 「未分配项目」哨兵值（project_id 为空的账号）
+const projectFilter = ref<number>(0) // 0 = 全部项目
+const memberScopeLoading = ref(false)
+// 选中项目的成员 user_id 集合（懒加载 + 缓存，避免每次筛选都打接口）
+const memberScope = ref<Record<number, Set<number>>>({})
+
+const scopeHint = computed(() => {
+  if (projectFilter.value === 0) return ''
+  if (projectFilter.value === NO_PROJECT) return '（未分配项目的账号）'
+  const name = projects.value.find((p) => p.id === projectFilter.value)?.name
+  return name ? `（${name}：成员 ∪ 所属项目）` : ''
+})
+
+async function ensureMemberScope(projectId: number) {
+  if (projectId <= 0 || memberScope.value[projectId]) return
+  memberScopeLoading.value = true
+  try {
+    // include_left=true：连已离场成员一并纳入，和后端「同项目成员」子查询语义一致
+    const res: any = await projectApi.members(projectId, true)
+    const ids = new Set<number>((res?.items || []).map((m: any) => m.user_id))
+    memberScope.value = { ...memberScope.value, [projectId]: ids }
+  } catch {
+    // 拉不到成员（如无 member_manage、接口异常）就退化成「仅按所属项目过滤」，
+    // 但**不写缓存** —— 否则一次失败会永久锁死，切回来也不再重试。
+    // filteredUsers 在 members 为 undefined 时只按 project_id 匹配，不阻塞列表。
+  } finally {
+    memberScopeLoading.value = false
+  }
+}
+
+const filteredUsers = computed(() => {
+  let list = users.value
+  if (auditFilter.value) {
+    list = list.filter((item) => (item.audit_status || 'approved') === auditFilter.value)
+  }
+  const pf = projectFilter.value
+  if (pf === NO_PROJECT) {
+    list = list.filter((item) => !item.project_id)
+  } else if (pf > 0) {
+    const members = memberScope.value[pf]
+    list = list.filter((item) => item.project_id === pf || (members ? members.has(item.id) : false))
+  }
+  return list
+})
 
 // ---- 「密码」列：逐行显隐临时口令（仅临时口令可见，真实密码永不可见）----
 const showPwdMap = reactive<Record<number, boolean>>({})
@@ -750,6 +816,14 @@ async function loadData() {
   }
   if (canApprove.value) await loadPending()
 }
+
+// 选中具体项目 → 预取该项目成员集合（供 filteredUsers 同步过滤）
+watch(projectFilter, (pid) => { if (pid > 0) ensureMemberScope(pid) }, { immediate: true })
+// 顶栏切换项目后，本页的筛选默认跟随当前项目（切回「全部项目」视角则不锁）
+watch(
+  () => auth.currentProjectId,
+  (pid) => { if (!auth.allProjects && pid) projectFilter.value = pid },
+)
 
 // ---- Step 4：待审批 ----
 async function loadPending() {
@@ -1285,7 +1359,13 @@ function exportFileName() {
   return `白泽_账号表_${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}.xlsx`
 }
 
-onMounted(loadData)
+onMounted(async () => {
+  // 支持项目管理页「分配人员」带 project_id 跳转过来：直接锁定该项目筛选
+  const q = Number(route.query.project_id || 0)
+  if (q > 0) projectFilter.value = q
+  else if (!auth.allProjects && auth.currentProjectId) projectFilter.value = auth.currentProjectId
+  await loadData()
+})
 </script>
 
 <style scoped>
@@ -1307,6 +1387,7 @@ onMounted(loadData)
   gap: 12px;
   margin-bottom: 12px;
 }
+.scope-hint { font-size: 12px; }
 .form-hint { margin-left: 8px; color: #9aa4a0; font-size: 12px; }
 .pending-hint {
   margin-bottom: 12px;
