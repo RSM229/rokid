@@ -46,6 +46,21 @@ parser_cases = [
     (["113.2956,23.0974"], {"lat": 23.0974, "lon": 113.2956}),
     (["天气:雷阵雨"], {"weather": "雷阵雨"}),
     (["记录人:王五"], {"person": "王五"}),
+    (["施工区域：西楼外脚手架搭设"], {"work_area": "西楼外脚手架搭设"}),
+    (["危大名称脚手架工程"], {"hazard_name": "脚手架工程"}),
+    (["检查人员：刘幸、陈宇文"], {"person": "刘幸、陈宇文"}),
+    (["拍摄时间：2026.10.0915:48"], {"taken_at": "2026-10-09T15:48:00"}),
+    (["检查人员", "陈宇文"], {"person": "陈宇文"}),
+    (["地点:", "广州市南沙区·广东省中医院南沙", "医院(装修中)"], {"location": "广州市南沙区·广东省中医院南沙"}),
+    (["施工区域:西楼十一层A区混凝土浇筑旁站"], {"work_area": "西楼十一层A区混凝土浇筑旁站"}),
+    (["施工区域:西楼十一层A区混凝土浇筑旁站"], {"location": None}),
+    (["项目名称：海珠湾工程", "施工区域：西楼A区", "危大工程名称：脚手架", "检查人员：张三", "拍摄时间：2026-10-18 09:30", "地点：西楼", "建设单位：甲公司", "监理单位：乙公司", "施工单位：丙公司", "备注：复查东侧", "备注二：补充材料"], {
+        "project": "海珠湾工程", "work_area": "西楼A区", "hazard_name": "脚手架", "person": "张三",
+        "taken_at": "2026-10-18T09:30:00", "location": "西楼",
+        "owner_unit": "甲公司", "supervision_unit": "乙公司", "contractor": "丙公司",
+    }),
+    (["现场人员佩戴安全帽", "施工单位名称", "丙公司", "自定义标签：自定义值", "备注：", "备注：第二条备注"], {"contractor": "丙公司"}),
+    (["没有水印的现场杂字", "墙面编号 A:B"], {}),
 ]
 
 ok = True
@@ -56,6 +71,11 @@ for name, expect in [(f"case{i}", c) for i, c in enumerate(parser_cases)]:
         if fields.get(k) != v:
             ok = False
             print(f"[FAIL] parser {name}: {k} 期望 {v!r} 实得 {fields.get(k)!r}")
+    if name == "case15":
+        items = fields.get("labeled_items", [])
+        if len(items) != 4 or items[-2:] != [{"label": "备注", "value": ""}, {"label": "备注", "value": "第二条备注"}]:
+            ok = False
+            print(f"[FAIL] duplicate/empty labels should be preserved: {items!r}")
 print("parser cases:", "PASS" if ok else "FAIL")
 
 for name, lines, expect_subset in CASES:

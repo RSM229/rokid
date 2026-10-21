@@ -163,6 +163,62 @@ async def chat_completion(
             await http_client.aclose()
 
 
+async def observe_image(
+    image_bytes: bytes,
+    *,
+    content_type: str = "image/jpeg",
+    prompt: str | None = None,
+    client: httpx.AsyncClient | None = None,
+) -> str:
+    """Use the configured general-purpose multimodal LLM for neutral observation."""
+    config = await get_runtime_model_config("llm")
+    _require_available(config)
+    mime = content_type if content_type.startswith("image/") else "image/jpeg"
+    encoded = base64.b64encode(image_bytes).decode("ascii")
+    instruction = prompt or (
+        "Describe only visible, relevant construction-site facts in this image. "
+        "Identify the scene/activity and visible location clues. Do not infer a "
+        "hazard or make a safety judgment unless explicitly asked. Distinguish "
+        "what is clearly visible from uncertainty, and do not repeat watermark "
+        "text as if it were a visual observation. Reply in concise Chinese."
+    )
+    payload = {
+        "model": config.model_id,
+        "messages": [{"role": "user", "content": [
+            {"type": "text", "text": instruction},
+            {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{encoded}"}},
+        ]}],
+        "temperature": 0.2,
+        "max_tokens": 512,
+        "stream": False,
+    }
+    owns_client = client is None
+    http_client = client or httpx.AsyncClient(timeout=httpx.Timeout(90.0))
+    try:
+        response = await http_client.post(
+            _join_api_path(config.base_url, "chat/completions"),
+            headers={**_headers(config), "Content-Type": "application/json"},
+            json=payload,
+        )
+        response.raise_for_status()
+        body = response.json()
+        choices = body.get("choices") if isinstance(body, dict) else None
+        content = choices[0].get("message", {}).get("content") if choices else None
+        if isinstance(content, list):
+            content = "".join(part.get("text", "") for part in content if isinstance(part, dict))
+        if not isinstance(content, str) or not content.strip():
+            raise ModelGatewayError("多模态模型返回格式错误")
+        return content.strip()
+    except ModelGatewayError:
+        raise
+    except (httpx.HTTPError, ValueError, TypeError, KeyError) as exc:
+        logger.warning("通用图片理解调用失败: %s", type(exc).__name__)
+        raise ModelGatewayError("通用图片理解暂不可用") from exc
+    finally:
+        if owns_client:
+            await http_client.aclose()
+
+
 async def detect_hazard(
     image_bytes: bytes,
     *,
