@@ -37,6 +37,7 @@ def test_plan_requires_every_evidence_exactly_once():
 
 def test_plan_allows_unconfirmed_date_and_rejects_unknown_form():
     plan = base_plan()
+    plan["events"][0]["evidence_ids"].append("p2")
     plan["unassigned_ids"] = []
     plan["events"][0]["date_confirmed"] = False
     review_plan.validate_plan(plan)

@@ -425,6 +425,100 @@ def extra_values(args: dict) -> dict:
     return out
 
 
+def _control_for_field(field: dict) -> str:
+    """字段表 → 前端控件类型（不硬编码具体字段，按表类型和枚举推）。"""
+    table_type = str(field.get("table_type") or "")
+    canonical = str(field.get("canonical") or "")
+    if record_field_spec.options_for(field):
+        return "select"
+    if "日期时间" in table_type or ("时间" in table_type and "日期" not in table_type):
+        return "datetime"
+    if "日期" in table_type:
+        return "date"
+    if "数字" in table_type or "数量" in table_type:
+        return "number"
+    if canonical in ("problems", "treatment", "content", "station_content", "station_process",
+                     "acceptance_basis", "acceptance_content", "remark", "work_content"):
+        return "textarea"
+    if "长" in table_type:
+        return "textarea"
+    return "text"
+
+
+def field_view(field: dict, value: str = "") -> dict:
+    canonical = str(field.get("canonical") or field.get("key") or "")
+    label = str(field.get("label") or canonical)
+    control = _control_for_field(field)
+    return {
+        "name": canonical,
+        "label": label,
+        "control": control,
+        "required": bool(field.get("required")),
+        "value": value,
+        "options": record_field_spec.options_for(field),
+        "placeholder": f"请输入{label}" if control in ("text", "number", "datetime") else "",
+        "hint": record_field_spec.QUESTION_OVERRIDES.get(canonical, ""),
+        "section": str(field.get("section") or ""),
+    }
+
+
+def missing_field_views(args: dict, form: str | None) -> list[dict]:
+    """字段表里还没填的栏目（必填在前，组内保持表栏目顺序）。"""
+    if not form:
+        return []
+    views: list[dict] = []
+    for field in record_field_spec.ask_fields(form):
+        if field.get("canonical") in ("start_time", "end_time"):
+            filled = _time_filled(args, field)
+        else:
+            filled = bool(_field_value(args, field))
+        if not filled:
+            views.append(field_view(field))
+    views.sort(key=lambda item: 0 if item["required"] else 1)
+    return views
+
+
+def filled_field_views(args: dict, form: str | None) -> list[dict]:
+    """已经填好的栏目，用于表单上方回显（让用户知道系统读到了什么）。"""
+    if not form:
+        return []
+    out: list[dict] = []
+    for field in record_field_spec.ask_fields(form):
+        value = _field_value(args, field)
+        if not value and field.get("canonical") in ("start_time", "end_time"):
+            value = str(args.get("inspection_time") or "")
+        if value:
+            out.append({"label": str(field.get("label") or field.get("canonical") or ""), "value": value})
+    return out
+
+
+def apply_form_values(args: dict, form: str | None, values: dict | None) -> dict:
+    """把前端表单值按字段表写回参数（键可为 canonical/key/arg/label）。"""
+    out = dict(args or {})
+    if not isinstance(values, dict):
+        return out
+    lookup: dict[str, dict] = {}
+    for field in record_field_spec.fields_of(form) if form else []:
+        for key in (field.get("canonical"), field.get("key"), field.get("arg"),
+                    field.get("label"), field.get("raw_label")):
+            if key:
+                lookup.setdefault(str(key), field)
+    for name, raw in values.items():
+        value = str(raw if raw is not None else "").strip()
+        if not value:
+            continue
+        key = str(name)
+        if key == "record_type":
+            out["record_type"] = value
+            continue
+        field = lookup.get(key)
+        if field:
+            out = _set_field_value(out, field, value)
+        else:
+            out[key] = value
+    return out
+
+
 # ---------------------------------------------------------------------------
 # 验收要点：按「房建举牌验收内容」表自动带出 / 候选追问（2026-10-16）
 #   A) 用户给部位/工序（如「钢筋笼」）→ strong_match 唯一命中 → 直接填入验收要点全文
@@ -935,7 +1029,7 @@ async def _create_work_record(ctx: ToolContext, args: dict) -> dict:
     if is_weida:
         reply += ("\n这是危大工程巡视：生成文书时选《危险性较大的分部分项工程监理巡视检查记录表》"
                   f"（GDAQ30306），检查项会按「{hazard_type or '危大类型'}」自动带出。")
-    reply += "\n要补充现场照片吗？点下方「补充照片」即可（相册/拍摄，最多 9 张，自动加水印挂到这条记录）。"
+    reply += "\n现场照片可以直接在下方表单里添加（可选，自动加水印挂到这条记录）。"
     return _ok(
         reply,
         card={
@@ -951,7 +1045,7 @@ async def _create_work_record(ctx: ToolContext, args: dict) -> dict:
             "kind": "work_record", "id": record.id, "title": f"{record_type}记录",
             "sub": where, "status": record.status, "time": str(record_date),
         }],
-        actions=[{"type": "navigate", "label": "查看工作记录", "url": "/pages/work/index"}],
+        actions=[],
         undo={"tool": "create_work_record", "entity": "work_record", "id": record.id},
         data={"record_id": record.id},
     )
