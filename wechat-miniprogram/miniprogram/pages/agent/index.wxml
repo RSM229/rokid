@@ -180,6 +180,33 @@
             <button wx:if="{{item.reviewPlan.status !== 'executed'}}" class="inline-review-confirm" disabled="{{!item.reviewCanConfirm || item.reviewBusy}}" loading="{{item.reviewBusy}}" bindtap="confirmInlineReview" data-index="{{mi}}">{{item.reviewBusy ? '正在生成' : '确认并生成工作记录'}}</button>
             <text wx:if="{{item.reviewPlan.status === 'executed'}}" class="inline-review-done">已完成建档，正式记录已创建。</text>
           </view>
+          <view wx:if="{{item.hazardCandidates && item.hazardCandidates.length}}" class="inline-hazard-candidates">
+            <view class="inline-hazard-head">
+              <view>
+                <text class="inline-hazard-title">隐患候选</text>
+                <text class="inline-hazard-subtitle">识别结果尚未正式建档，请核对后勾选确认</text>
+              </view>
+              <text class="inline-hazard-count">{{item.hazardCandidates.length}} 项</text>
+            </view>
+            <view wx:for="{{item.hazardCandidates}}" wx:for-item="candidate" wx:key="id" class="inline-hazard-item {{candidate.status}}">
+              <view class="inline-hazard-row">
+                <view class="inline-hazard-select {{candidate.selected ? 'selected' : ''}}" data-index="{{mi}}" data-id="{{candidate.id}}" bindtap="toggleHazardCandidate">{{candidate.selected ? '✓' : ''}}</view>
+                <image class="inline-hazard-photo" src="{{candidate.image}}" mode="aspectFill" />
+                <view class="inline-hazard-main">
+                  <text class="inline-hazard-risk">{{candidate.title}}</text>
+                  <text class="inline-hazard-meta">{{candidate.riskCategory}}{{candidate.section ? ' · ' + candidate.section : ''}}{{candidate.location ? ' · ' + candidate.location : ''}}</text>
+                  <text class="inline-hazard-status">{{candidate.statusText}}</text>
+                </view>
+              </view>
+              <view wx:if="{{candidate.evidence.length}}" class="inline-hazard-evidence">
+                <text wx:for="{{candidate.evidence}}" wx:for-item="reason" wx:key="*this">依据：{{reason}}</text>
+              </view>
+              <text wx:if="{{candidate.error}}" class="inline-hazard-error">{{candidate.error}}</text>
+              <text wx:if="{{candidate.status === 'pending'}}" class="inline-hazard-discard" data-index="{{mi}}" data-id="{{candidate.id}}" bindtap="discardHazardCandidate">排除此项</text>
+            </view>
+            <button wx:if="{{item.hazardPendingCount}}" class="inline-review-confirm" disabled="{{item.hazardCandidateBusy}}" loading="{{item.hazardCandidateBusy}}" data-index="{{mi}}" bindtap="confirmHazardCandidates">{{item.hazardCandidateBusy ? '正在建档' : '确认所选隐患并建档'}}</button>
+            <text wx:if="{{item.hazardCandidateResult}}" class="inline-review-result">{{item.hazardCandidateResult}}</text>
+          </view>
           <!-- 会话内的操作按钮（如语音提取后的「查看表单」）仍跟随气泡 -->
           <view wx:if="{{item.hint || (item.actions && item.actions.length) || (item.chips && item.chips.length)}}" class="message-prompts">
             <view wx:if="{{item.hint}}" class="message-hint">

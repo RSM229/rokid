@@ -54,6 +54,27 @@ interface AgentForm {
   actions?: Array<{ type: string; label: string; url?: string; record_id?: number; command?: string }>
 }
 
+interface HazardCandidateView {
+  id: string
+  image: string
+  localImage: string
+  title: string
+  riskCategory: string
+  evidence: string[]
+  section: string
+  location: string
+  weather: string
+  takenAt: string
+  cameraCapture: boolean
+  detection: Record<string, any>
+  selected: boolean
+  status: 'pending' | 'committing' | 'committed' | 'discarded'
+  statusText: string
+  mediaId?: number
+  hazardId?: number
+  error?: string
+}
+
 interface Message {
   role: 'user' | 'assistant'
   text: string
@@ -69,6 +90,10 @@ interface Message {
   /** 追问的快速候选值（点击即作为回答发送，如 巡视/旁站/验收/见证） */
   chips?: string[]
   agentForm?: AgentForm
+  hazardCandidates?: HazardCandidateView[]
+  hazardCandidateBusy?: boolean
+  hazardCandidateResult?: string
+  hazardPendingCount?: number
   inputComponents?: Array<{ field: string; label: string; control: string; required?: boolean; options?: string[]; value?: string; recommendation?: string; reason?: string }>
   reviewPlan?: ReviewPlan
   reviewEvents?: Array<{
@@ -922,31 +947,7 @@ Page(themed({
         }
       }
 
-      const planEvidence = images.map((_image, index) => {
-        const watermark = watermarks[index] || {}
-        const watermarkFields = Object.fromEntries(
-          Object.entries(watermark).filter(([key, value]) => !key.startsWith('_') && typeof value === 'string') as [string, string][],
-        )
-        const takenAt = String(watermark.taken_at || '')
-        const fieldSources: Record<string, string> = {}
-        if (this.watermarkDate(takenAt)) fieldSources.record_date = 'watermark'
-        if (watermark.project || watermark.project_name) fieldSources.project = 'watermark'
-        if (watermark.location) fieldSources.location = 'watermark'
-        if (watermark.section || watermark.work_area) fieldSources.section = 'watermark'
-        return {
-          kind: 'image',
-          observed_date: this.watermarkDate(takenAt),
-          observed_date_source: takenAt ? 'watermark' : '',
-          project: String(watermark.project || watermark.project_name || ''),
-          location: String(watermark.location || ''),
-          section: String(watermark.section || watermark.work_area || ''),
-          activity: [watermark.work_area, watermark.hazard_name].filter(Boolean).join('；'),
-          observation: observations[index] || '',
-          note: [this.formatWatermark(watermark), observations[index] ? `图片观察：${observations[index]}` : ''].filter(Boolean).join('；'),
-          watermark_fields: watermarkFields,
-          field_sources: fieldSources,
-        }
-      })
+      const planEvidence = this.buildPlanEvidence(images, watermarks, observations)
       const requestPlan = await this.requestAgentPlan(
         note, [...planEvidence, ...filePlanEvidence], files.length,
       )
@@ -1001,10 +1002,19 @@ Page(themed({
           },
           timeout: 120000,
         })
-        const recordLine = await this.maybeSaveHazardRecords(detections, note)
+        let hazardCandidates = this.buildHazardCandidates(detections, images, watermarks)
+        if (hazardCandidates.length) {
+          hazardCandidates = await this.registerHazardCandidateMedia(hazardCandidates)
+        }
         this.addMessage({
           role: 'assistant',
-          text: (result.answer || result.reply || '识别未返回内容') + recordLine,
+          text: (result.answer || result.reply || '识别未返回内容') + (
+            hazardCandidates.length
+              ? `\n\n已整理 ${hazardCandidates.length} 个隐患候选。这里只做识别，尚未创建正式隐患记录；请在下方核对勾选后确认建档。`
+              : '\n\n本次未形成需要建档的隐患候选。'
+          ),
+          hazardCandidates,
+          hazardPendingCount: hazardCandidates.length,
         })
         return
       }
@@ -1140,29 +1150,38 @@ Page(themed({
     return `${matched[1]}-${matched[2].padStart(2, '0')}-${matched[3].padStart(2, '0')}`
   },
 
-  extractReviewFacts(note: string): { date: string; location: string } {
-    const text = String(note || '').trim()
-    const now = new Date()
-    let date = ''
-    const full = text.match(/(20\d{2})\s*[年./-]\s*(\d{1,2})\s*[月./-]\s*(\d{1,2})\s*(?:日)?/)
-    const short = text.match(/(?<!\d)(\d{1,2})\s*月\s*(\d{1,2})\s*日?/)
-    if (full) date = this.normalizeReviewDate(Number(full[1]), Number(full[2]), Number(full[3]))
-    else if (short) date = this.normalizeReviewDate(now.getFullYear(), Number(short[1]), Number(short[2]))
-    else if (/(今天|今日|当天)/.test(text)) date = this.localDateString(now)
-    let location = ''
-    const locationMatch = text.match(/(?:在|位于|地点为|位置为)\s*([^，。；,;\n]{2,80}?)(?=(?:进行|开展|完成|做了|做|干了|检查|施工|浇筑|验收|旁站|巡视|巡查|记录)|[，。；,;\n]|$)/u)
-    if (locationMatch) location = locationMatch[1].trim()
-    return { date, location }
-  },
-
-  normalizeReviewDate(year: number, month: number, day: number): string {
-    const candidate = new Date(year, month - 1, day)
-    if (candidate.getFullYear() !== year || candidate.getMonth() !== month - 1 || candidate.getDate() !== day) return ''
-    return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
-  },
-
-  localDateString(value: Date): string {
-    return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`
+  /** Serialize image facts for the server-side request planner. */
+  buildPlanEvidence(
+    images: Attachment[],
+    watermarks: Array<Record<string, any>>,
+    observations: string[] = [],
+  ): Array<Record<string, any>> {
+    return images.map((_image, index) => {
+      const watermark = watermarks[index] || {}
+      const watermarkFields = Object.fromEntries(
+        Object.entries(watermark).filter(([key, value]) => !key.startsWith('_') && typeof value === 'string') as [string, string][],
+      )
+      const takenAt = String(watermark.taken_at || '')
+      const fieldSources: Record<string, string> = {}
+      if (this.watermarkDate(takenAt)) fieldSources.record_date = 'watermark'
+      if (watermark.project || watermark.project_name) fieldSources.project = 'watermark'
+      if (watermark.location) fieldSources.location = 'watermark'
+      if (watermark.section || watermark.work_area) fieldSources.section = 'watermark'
+      if (watermark.weather) fieldSources.weather = 'watermark'
+      return {
+        kind: 'image',
+        observed_date: this.watermarkDate(takenAt),
+        observed_date_source: takenAt ? 'watermark' : '',
+        project: String(watermark.project || watermark.project_name || ''),
+        location: String(watermark.location || ''),
+        section: String(watermark.section || watermark.work_area || ''),
+        activity: [watermark.work_area, watermark.hazard_name].filter(Boolean).join('；'),
+        observation: observations[index] || '',
+        note: [this.formatWatermark(watermark), observations[index] ? `图片观察：${observations[index]}` : ''].filter(Boolean).join('；'),
+        watermark_fields: watermarkFields,
+        field_sources: fieldSources,
+      }
+    })
   },
 
   async requestAgentPlan(
@@ -1335,10 +1354,8 @@ Page(themed({
         ...(item.section ? { section: 'watermark' } : {}),
       },
     }))
-    const planner = (!archiveOnly && (!selectedType || current.events.length === 0))
-      ? await this.requestAgentPlan(plannerMessage, plannerEvidence)
-      : null
-    if (!selectedType && !archiveOnly) {
+    const planner = !archiveOnly ? await this.requestAgentPlan(plannerMessage, plannerEvidence) : null
+    if (!selectedType && !archiveOnly && current.events.length === 0) {
       const purpose = planner ? this.purposeFromPlan(planner) : await this.requestPurposeRecommendation(`${current.requestText}\n${reply}`, current.evidence)
       if (purpose.intent === 'archive') archiveOnly = true
       if (purpose.intent === 'create_record' && purpose.recommendation) {
@@ -1361,37 +1378,28 @@ Page(themed({
     if (userMessage) messages.push(userMessage)
     const revisedPlan: ReviewPlan = { ...current, revision: current.revision + 1, confirmedRevision: null,
       requestText: [priorRequest, reply].filter(Boolean).join('\n') }
-    if (type.type !== '待定' && current.events.length === 0) {
-      const generated = reviewPlanFromItemPlan(planner?.item_plan || {
-        items: [], unassigned_evidence_indexes: current.evidence.map((_item, evidenceIndex) => evidenceIndex),
-        issues: ['事项规划暂不可用，照片保留在待分配区，请稍后重试。'], write_allowed: false,
-      }, current.evidence, revisedPlan.requestText, current.notices || [], planner as unknown as Record<string, unknown> | undefined)
-      revisedPlan.events = generated.events
-      revisedPlan.unassignedIds = generated.unassignedIds
-      revisedPlan.notices = generated.notices
-      revisedPlan.requestPlan = generated.requestPlan
-    } else if (type.type === '待定' && archiveOnly) {
+    if (type.type === '待定' && archiveOnly) {
       revisedPlan.notices = [...(current.notices || []), '用户选择仅保存/整理图片，不创建工作记录。']
-    } else if (type.type !== '待定') {
-      const facts = this.extractReviewFacts(reply)
-      revisedPlan.events = current.events.map(event => ({ ...event,
-        recordType: type.type, recordTypeConfidence: type.confidence, recordTypeReason: '根据用户对当前草稿的补充判断',
-        content: [event.content, reply].filter(Boolean).join('\n'),
-        ...(facts.location ? { location: facts.location, fieldSources: { ...event.fieldSources, location: 'user_message' } } : {}),
-        ...(facts.date ? { date: facts.date, dateConfirmed: true, dateSource: 'user_message', fieldSources: { ...event.fieldSources, date: 'user_message' } } : {}),
-      }))
-    } else if (current.events.length) {
-      const facts = this.extractReviewFacts(reply)
-      revisedPlan.events = current.events.map(event => ({ ...event, content: [event.content, reply].filter(Boolean).join('\n'),
-        ...(facts.location ? { location: facts.location, fieldSources: { ...event.fieldSources, location: 'user_message' } } : {}),
-        ...(facts.date ? { date: facts.date, dateConfirmed: true, dateSource: 'user_message', fieldSources: { ...event.fieldSources, date: 'user_message' } } : {}),
-      }))
     } else if (planner?.item_plan?.items?.length) {
       const generated = reviewPlanFromItemPlan(planner.item_plan, current.evidence, revisedPlan.requestText, current.notices || [], planner as unknown as Record<string, unknown>)
-      revisedPlan.events = generated.events
+      revisedPlan.events = generated.events.map(event => {
+        const previous = current.events.find(item => item.evidenceIds.length === event.evidenceIds.length
+          && item.evidenceIds.every((id, evidenceIndex) => id === event.evidenceIds[evidenceIndex]))
+        const preserveType = type.type === '待定' && previous?.recordType && previous.recordType !== '待定'
+        return {
+          ...event,
+          recordType: type.type !== '待定' ? type.type : (preserveType ? previous!.recordType! : event.recordType),
+          recordTypeConfidence: type.type !== '待定' ? type.confidence : (preserveType ? previous!.recordTypeConfidence || 0 : event.recordTypeConfidence),
+          recordTypeReason: type.type !== '待定' ? '用户已选择记录类型' : (preserveType ? previous!.recordTypeReason || '' : event.recordTypeReason),
+          forms: previous?.forms?.length ? previous.forms : event.forms,
+          fields: previous?.fields && Object.keys(previous.fields).length ? previous.fields : event.fields,
+        }
+      })
       revisedPlan.unassignedIds = generated.unassignedIds
       revisedPlan.notices = generated.notices
       revisedPlan.requestPlan = generated.requestPlan
+    } else if (current.events.length) {
+      revisedPlan.notices = [...(current.notices || []), '服务端未能可靠重构这句话对应的事项；当前草稿未被覆盖，请补充日期、地点或工作内容后重试。']
     }
     try {
       const saved = await saveReviewPlan(revisedPlan, current.serverRevision || current.revision)
@@ -1646,88 +1654,173 @@ Page(themed({
     }
   },
 
-  /** 用户这句话是否要求建档：识别「只识别」与「识别并落库」两种意图 */
-  wantsRecordIntent(note: string): boolean {
-    return /(创建|建立|生成|保存|存档|建档|落库|入库|归档|录入|记录一下|存一下|记一下)/.test(note)
-  },
-
   /** 识别结果是否命中隐患（与后端 detect 的判定口径保持一致） */
   isHazardHit(raw: any): boolean {
     return !!raw && (!!raw.has_hazard || raw.risk_status === '存在隐患')
   },
 
-  /** 把已识别到隐患的图片落库成隐患记录，返回给用户看的结果文案 */
-  async maybeSaveHazardRecords(
+  /** 视觉识别只生成待确认候选；这里不写任何正式业务数据。 */
+  buildHazardCandidates(
     detections: { path: string; raw: any }[],
-    note: string,
-  ): Promise<string> {
-    const hits = detections.filter(d => this.isHazardHit(d.raw))
-    if (!hits.length) return ''
-
-    let shouldSave = this.wantsRecordIntent(note)
-    if (!shouldSave) {
-      const confirm = await wx.showModal({
-        title: `识别到 ${hits.length} 处隐患`,
-        content: '是否立即生成隐患记录？生成后可在「工作记录 → 隐患」查看、派单并生成整改文书。',
-        confirmText: '生成记录',
-        confirmColor: '#13795b',
-      })
-      shouldSave = !!confirm.confirm
-    }
-    if (!shouldSave) {
-      return `\n\n（本次仅识别，未生成记录。需要建档时重新发送图片并注明「创建隐患记录」即可。）`
-    }
-
-    const saved = await this.commitDetections(hits)
-    if (!saved.ids.length) {
-      return `\n\n⚠️ 隐患记录落库失败${saved.lastError ? `：${saved.lastError}` : ''}，请到「隐患识别」页重拍一次。`
-    }
-    return (
-      `\n\n✅ 已生成 ${saved.ids.length} 条隐患记录（${saved.ids.map(id => '#' + id).join('、')}）` +
-      (saved.failed ? `，另有 ${saved.failed} 条落库失败` : '') +
-      '。可在「工作记录 → 隐患」查看、派单或生成整改文书。'
-    )
+    images: Attachment[],
+    watermarks: Array<Record<string, any>>,
+  ): HazardCandidateView[] {
+    return detections.flatMap((item, detectionIndex) => {
+      if (!this.isHazardHit(item.raw)) return []
+      const imageIndex = images.findIndex(image => image.path === item.path)
+      const image = imageIndex >= 0 ? images[imageIndex] : undefined
+      const watermark = watermarks[imageIndex >= 0 ? imageIndex : detectionIndex] || {}
+      const evidence = Array.isArray(item.raw?.evidence)
+        ? item.raw.evidence.map((value: unknown) => String(value || '')).filter(Boolean)
+        : []
+      return [{
+        id: `hazard-${Date.now()}-${detectionIndex}`,
+        image: item.path,
+        localImage: item.path,
+        title: String(item.raw?.top1_risk || item.raw?.description || item.raw?.risk_category || '待核实的现场安全隐患'),
+        riskCategory: String(item.raw?.risk_category || item.raw?.hazard_type || '未分类'),
+        evidence,
+        section: String(watermark.section || watermark.work_area || ''),
+        location: String(watermark.location || ''),
+        weather: String(watermark.weather || ''),
+        takenAt: String(watermark.taken_at || ''),
+        cameraCapture: image?.cameraCapture === true,
+        detection: item.raw,
+        selected: true,
+        status: 'pending' as const,
+        statusText: '待确认',
+      }]
+    })
   },
 
-  /** 落库已识别结果（/hazard/commit-detection，不重复调用视觉模型） */
-  async commitDetections(
-    hits: { path: string; raw: any }[],
-  ): Promise<{ ids: number[]; failed: number; lastError: string }> {
-    const token = session.getToken()
-    const ids: number[] = []
-    let failed = 0
-    let lastError = ''
-    for (const hit of hits) {
+  /** Register selected visual results as evidence media without creating a formal hazard. */
+  async registerHazardCandidateMedia(candidates: HazardCandidateView[]): Promise<HazardCandidateView[]> {
+    const registered: HazardCandidateView[] = []
+    for (const candidate of candidates) {
       try {
-        const res = await new Promise<any>((resolve, reject) => {
-          wx.uploadFile({
-            url: `${config.apiBaseUrl}/hazard/commit-detection`,
-            filePath: hit.path,
-            name: 'image',
-            formData: { detection: JSON.stringify(hit.raw) },
-            header: { Authorization: `Bearer ${token}` },
-            success: (r) => {
-              if (r.statusCode >= 200 && r.statusCode < 300) {
-                try {
-                  resolve(JSON.parse(r.data))
-                } catch {
-                  reject(new Error('落库返回格式异常'))
-                }
-              } else {
-                reject(new Error(`落库失败（HTTP ${r.statusCode}）`))
-              }
-            },
-            fail: (err) => reject(new Error(err.errMsg || '上传失败')),
-          })
+        const uploaded = await uploadImage<{ id: number; url: string }>(candidate.localImage, {
+          source: 'agent_hazard_candidate',
+          trigger_detection: false,
+          add_system_watermark: candidate.cameraCapture,
+          section: candidate.section,
+          location: candidate.location,
+          weather: candidate.weather,
         })
-        if (res?.hazard_id) ids.push(res.hazard_id)
+        registered.push({ ...candidate, mediaId: uploaded.id, image: absoluteMediaUrl(uploaded.url) })
       } catch (error) {
-        failed += 1
-        lastError = (error as Error).message
+        registered.push({ ...candidate, error: `证据登记暂未完成：${(error as Error).message}` })
       }
     }
-    if (ids.length) invalidateCache(CACHE_KEYS.HAZARD_LIST)
-    return { ids, failed, lastError }
+    return registered
+  },
+
+  toggleHazardCandidate(event: WechatMiniprogram.TouchEvent) {
+    const index = Number(event.currentTarget.dataset.index)
+    const id = String(event.currentTarget.dataset.id || '')
+    const messages = [...this.data.messages]
+    const candidates = messages[index]?.hazardCandidates || []
+    const candidate = candidates.find(item => item.id === id)
+    if (!candidate || candidate.status !== 'pending' || messages[index].hazardCandidateBusy) return
+    messages[index] = {
+      ...messages[index],
+      hazardCandidates: candidates.map(item => item.id === id ? { ...item, selected: !item.selected } : item),
+    }
+    this.setData({ messages })
+  },
+
+  discardHazardCandidate(event: WechatMiniprogram.TouchEvent) {
+    const index = Number(event.currentTarget.dataset.index)
+    const id = String(event.currentTarget.dataset.id || '')
+    const messages = [...this.data.messages]
+    const candidates = messages[index]?.hazardCandidates || []
+    if (messages[index]?.hazardCandidateBusy) return
+    messages[index] = {
+      ...messages[index],
+      hazardCandidates: candidates.map(item => item.id === id && item.status === 'pending'
+        ? { ...item, selected: false, status: 'discarded', statusText: '已排除' }
+        : item),
+    }
+    messages[index].hazardPendingCount = (messages[index].hazardCandidates || []).filter(item => item.status === 'pending').length
+    this.setData({ messages })
+  },
+
+  async confirmHazardCandidates(event: WechatMiniprogram.TouchEvent) {
+    const index = Number(event.currentTarget.dataset.index)
+    const message = this.data.messages[index]
+    if (!message?.hazardCandidates?.length || message.hazardCandidateBusy) return
+    const selected = message.hazardCandidates.filter(item => item.status === 'pending' && item.selected)
+    if (!selected.length) {
+      wx.showToast({ title: '请至少勾选一个隐患候选', icon: 'none' })
+      return
+    }
+
+    let working = message.hazardCandidates.map(item => selected.some(chosen => chosen.id === item.id)
+      ? { ...item, status: 'committing' as const, statusText: '正在建档', error: '' }
+      : item)
+    const update = (busy: boolean, result?: string) => {
+      const messages = [...this.data.messages]
+      messages[index] = {
+        ...messages[index], hazardCandidates: working, hazardCandidateBusy: busy,
+        hazardPendingCount: working.filter(item => item.status === 'pending').length,
+        ...(result === undefined ? {} : { hazardCandidateResult: result }),
+      }
+      this.setData({ messages })
+    }
+    update(true)
+    try {
+      for (const chosen of selected) {
+        const current = working.find(item => item.id === chosen.id)!
+        let mediaId = current.mediaId
+        if (!mediaId) {
+          const uploaded = await uploadImage<{ id: number; url: string }>(current.localImage, {
+            source: 'agent_hazard_candidate',
+            trigger_detection: false,
+            add_system_watermark: current.cameraCapture,
+            section: current.section,
+            location: current.location,
+            weather: current.weather,
+          })
+          mediaId = uploaded.id
+        }
+        working = working.map(item => item.id === current.id ? { ...item, mediaId } : item)
+        update(true)
+      }
+
+      const response = await request<{ created_count: number; hazards: Array<{ media_id: number; hazard_id: number }> }>('/hazard/commit-candidates', {
+        method: 'POST',
+        data: {
+          candidates: selected.map(item => {
+            const current = working.find(candidate => candidate.id === item.id)!
+            return {
+              media_id: current.mediaId,
+              detection: current.detection,
+              section: current.section,
+              location: current.location,
+              weather: current.weather,
+              taken_at: current.takenAt,
+              remark: current.detection?.top1_risk || current.title,
+            }
+          }),
+        },
+        timeout: 120000,
+      })
+      const idsByMedia = new Map((response.hazards || []).map(item => [Number(item.media_id), Number(item.hazard_id)]))
+      working = working.map(item => {
+        if (item.status !== 'committing') return item
+        const hazardId = idsByMedia.get(Number(item.mediaId))
+        return hazardId
+          ? { ...item, hazardId, status: 'committed' as const, statusText: `已建档 #${hazardId}` }
+          : item
+      })
+      invalidateCache(CACHE_KEYS.HAZARD_LIST)
+      update(false, `已生成 ${response.created_count} 条隐患记录。可在隐患台账继续派单、生成整改文书或复查。`)
+    } catch (error) {
+      const detail = (error as Error).message
+      working = working.map(item => item.status === 'committing'
+        ? { ...item, status: 'pending' as const, statusText: '待确认', error: detail }
+        : item)
+      update(false, `暂未建档：${detail}`)
+    }
   },
 
   /** 单张图片视觉识别，返回可读文本 + 原始识别结果（原始结果供落库复用） */
@@ -2125,16 +2218,22 @@ Page(themed({
         const conflicts = evidenceTargetConflicts(previewEvidence, form.target || {})
         if (conflicts.length) {
           const observations = await Promise.all(picked.map(item => this.observeImageOnce(item.path)))
+          const note = `为记录 #${form.record_id} 补充照片时发现证据不一致；请按照片水印重新整理候选事项，不修改原记录。`
+          const requestPlan = await this.requestAgentPlan(
+            note,
+            this.buildPlanEvidence(picked, watermarks, observations),
+          )
           this.updateAgentForm(messageIndex, current => ({ ...current, busy: false }))
           this.addMessage({
             role: 'assistant',
             text: `这些照片水印中的${conflicts.join('、')}与记录 #${form.record_id} 不一致，系统没有直接挂到原记录。已保留照片并按证据重新整理候选事项，请核对后再决定是否新建或改挂。`,
           })
           await this.createReviewPlanFromAttachments(
-            `为记录 #${form.record_id} 补充照片时发现证据不一致；请按照片水印重新整理候选事项，不修改原记录。`,
+            note,
             picked,
             watermarks,
             observations,
+            requestPlan,
           )
           return
         }
@@ -2198,7 +2297,11 @@ Page(themed({
     }
     this.updateAgentForm(messageIndex, current => ({ ...current, busy: false }))
     const note = [form.title, summary].filter(Boolean).join('\n')
-    await this.createReviewPlanFromAttachments(note, images, watermarks, observations)
+    const requestPlan = await this.requestAgentPlan(
+      note,
+      this.buildPlanEvidence(images, watermarks, observations),
+    )
+    await this.createReviewPlanFromAttachments(note, images, watermarks, observations, requestPlan)
   },
 
   skipAgentForm(event: WechatMiniprogram.TouchEvent) {
