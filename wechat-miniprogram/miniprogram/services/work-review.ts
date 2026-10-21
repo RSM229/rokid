@@ -83,6 +83,20 @@ export interface ReviewEvidenceTarget {
   section?: string
 }
 
+export interface ReviewUserIdentityFacts {
+  date?: string
+  location?: string
+}
+
+export interface ReviewIdentitySelection {
+  date: string
+  location: string
+  dateSource: string
+  locationSource: string
+  userDateConflict: boolean
+  userLocationConflict: boolean
+}
+
 export interface ReviewExecutionRecord {
   event_id: string
   record_id: number
@@ -309,6 +323,32 @@ function compatibleEvidenceText(left: unknown, right: unknown): boolean {
   const b = normalizedEvidenceText(right)
   if (!a || !b || a === b) return true
   return a.includes(b) || b.includes(a)
+}
+
+/**
+ * Watermark/EXIF identity fields win over a conflicting user retelling.
+ * Missing evidence falls back to the user value without fabricating a source.
+ */
+export function chooseReviewIdentity(
+  user: ReviewUserIdentityFacts,
+  evidence: Pick<ReviewEvidenceGroup, 'date' | 'location' | 'section'>,
+): ReviewIdentitySelection {
+  const evidenceDate = String(evidence.date || '')
+  const evidenceLocation = String(evidence.location || evidence.section || '')
+  const userDate = String(user.date || '')
+  const userLocation = String(user.location || '')
+  return {
+    date: evidenceDate || userDate,
+    location: evidenceLocation || userLocation,
+    dateSource: evidenceDate ? 'watermark_or_exif' : userDate ? 'user_message' : '',
+    locationSource: evidenceLocation
+      ? evidence.location ? 'watermark' : 'watermark_section'
+      : userLocation ? 'user_message' : '',
+    userDateConflict: Boolean(userDate && evidenceDate && !compatibleEvidenceText(userDate, evidenceDate)),
+    userLocationConflict: Boolean(
+      userLocation && evidenceLocation && !compatibleEvidenceText(userLocation, evidenceLocation),
+    ),
+  }
 }
 
 /**

@@ -62,6 +62,40 @@ test('evidence grouping uses date, project, location and section without treatin
   assert.equal(model.groupReviewEvidence(evidence, { ignoreDate: true }).length, 3)
 })
 
+test('watermark date and location win over conflicting user retelling', () => {
+  const selected = model.chooseReviewIdentity(
+    { date: '2026-10-18', location: 'A区' },
+    { date: '2026-10-19', location: 'B区', section: '3号楼二层' },
+  )
+  assert.equal(selected.date, '2026-10-19')
+  assert.equal(selected.location, 'B区')
+  assert.equal(selected.dateSource, 'watermark_or_exif')
+  assert.equal(selected.locationSource, 'watermark')
+  assert.equal(selected.userDateConflict, true)
+  assert.equal(selected.userLocationConflict, true)
+})
+
+test('review identity falls back per field when watermark evidence is missing', () => {
+  const selected = model.chooseReviewIdentity(
+    { date: '2026-10-18', location: 'A区' },
+    { date: '', location: '', section: '3号楼二层' },
+  )
+  assert.equal(selected.date, '2026-10-18')
+  assert.equal(selected.location, '3号楼二层')
+  assert.equal(selected.dateSource, 'user_message')
+  assert.equal(selected.locationSource, 'watermark_section')
+  assert.equal(selected.userDateConflict, false)
+  assert.equal(selected.userLocationConflict, true)
+
+  const userOnly = model.chooseReviewIdentity(
+    { date: '2026-10-18', location: 'A区' },
+    { date: '', location: '', section: '' },
+  )
+  assert.equal(userOnly.date, '2026-10-18')
+  assert.equal(userOnly.location, 'A区')
+  assert.equal(userOnly.locationSource, 'user_message')
+})
+
 test('record attachment validation reports only known identity conflicts', () => {
   const evidence = [
     { id: 'a', image: 'a.jpg', observedDate: '2026-10-18', project: '白泽项目', location: 'A区', section: '3号楼二层', note: '' },

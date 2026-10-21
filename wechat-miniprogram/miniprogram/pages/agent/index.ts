@@ -7,7 +7,7 @@ import { getCached, invalidateCache, invalidateByPrefix, CACHE_KEYS } from '../.
 import { ensurePrivacy } from '../../utils/privacy'
 import { themed } from '../../utils/theme'
 import { cleanMarkdown } from '../../utils/markdown'
-import { createReviewPlan, saveReviewPlan, confirmReviewPlan, executeReviewPlan, editEvent, editEvidenceWatermark, addEvidenceWatermark, confirmPlan, reviewIssues, groupReviewEvidence, evidenceTargetConflicts, type ReviewPlan } from '../../services/work-review'
+import { createReviewPlan, saveReviewPlan, confirmReviewPlan, executeReviewPlan, editEvent, editEvidenceWatermark, addEvidenceWatermark, confirmPlan, reviewIssues, groupReviewEvidence, chooseReviewIdentity, evidenceTargetConflicts, type ReviewPlan } from '../../services/work-review'
 
 const INLINE_RECORD_TYPES = ['巡视', '验收', '见证', '旁站', '待定']
 
@@ -909,6 +909,11 @@ Page(themed({
           Object.entries(watermark).filter(([key, value]) => !key.startsWith('_') && typeof value === 'string') as [string, string][],
         )
         const takenAt = String(watermark.taken_at || '')
+        const fieldSources: Record<string, string> = {}
+        if (this.watermarkDate(takenAt)) fieldSources.record_date = 'watermark'
+        if (watermark.project || watermark.project_name) fieldSources.project = 'watermark'
+        if (watermark.location) fieldSources.location = 'watermark'
+        if (watermark.section || watermark.work_area) fieldSources.section = 'watermark'
         return {
           kind: 'image',
           observed_date: this.watermarkDate(takenAt),
@@ -920,6 +925,7 @@ Page(themed({
           observation: observations[index] || '',
           note: [this.formatWatermark(watermark), observations[index] ? `图片观察：${observations[index]}` : ''].filter(Boolean).join('；'),
           watermark_fields: watermarkFields,
+          field_sources: fieldSources,
         }
       })
       const requestPlan = await this.requestAgentPlan(
@@ -1059,11 +1065,13 @@ Page(themed({
         })
       }
       const userFacts = this.extractReviewFacts(note)
-      const absoluteUserDate = Boolean(userFacts.date && userFacts.dateKind === 'absolute')
-      const evidenceGroups = groupReviewEvidence(evidence, { ignoreDate: absoluteUserDate })
+      const evidenceGroups = groupReviewEvidence(evidence)
       const dates = [...new Set(evidence.map(item => item.observedDate).filter(Boolean))]
       const projects = [...new Set(evidence.map(item => item.project).filter(Boolean))]
       const places = [...new Set(evidence.map(item => [item.project, item.location, item.section].filter(Boolean).join(' / ')).filter(Boolean))]
+      const identitySelections = evidenceGroups.map(group => chooseReviewIdentity(userFacts, group))
+      const userDateConflict = identitySelections.some(item => item.userDateConflict)
+      const userLocationConflict = identitySelections.some(item => item.userLocationConflict)
       const purpose = requestPlan
         ? this.purposeFromPlan(requestPlan)
         : await this.requestPurposeRecommendation(note, evidence)
@@ -1071,19 +1079,18 @@ Page(themed({
         ? { type: purpose.recommendation.record_type, confidence: purpose.recommendation.confidence, reason: purpose.recommendation.reason }
         : { type: '待定', confidence: 0, reason: '' }
       const hasActionIntent = purpose.intent === 'create_record'
-      // 绝对日期是用户对业务日期的明确指定，可以覆盖照片日期；“今天/今日”
-      // 只是相对线索。当照片存在多个日期时保留照片分组，避免跨日期照片被
-      // 静默合成一条记录，同时把差异展示给用户确认。
-      const preserveEvidenceDateGroups = Boolean(userFacts.dateKind === 'relative' && dates.length > 1)
       const eventGroups = hasActionIntent ? evidenceGroups.map(group => ({
         ...group,
-        date: absoluteUserDate ? userFacts.date : group.date,
       })) : []
       const notices: string[] = []
-      if (preserveEvidenceDateGroups) {
-        notices.push(`你说的是“今天”，但照片识别到 ${dates.length} 个不同日期，已按照片日期分别保留为候选事项。`)
-      } else if (absoluteUserDate && dates.length && !dates.includes(userFacts.date)) {
-        notices.push(`你描述的业务日期是 ${userFacts.date}，照片识别到的日期为 ${dates.join('、')}；已优先采用你的明确描述，照片日期保留为证据提示。`)
+      if (userDateConflict) {
+        notices.push(`你描述的日期是 ${userFacts.date}，照片水印/EXIF 识别到的日期为 ${dates.join('、')}；客观日期以照片证据为准，你的描述保留为冲突提示。`)
+      } else if (dates.length > 1) {
+        notices.push(`照片识别到 ${dates.length} 个不同日期，已按客观日期分别保留为候选事项。`)
+      }
+      if (userLocationConflict) {
+        const evidencePlaces = places.join('、')
+        notices.push(`你描述的地点与照片水印不一致；地点和部位优先采用照片证据（${evidencePlaces}），你的描述保留用于核对。`)
       }
       if (eventGroups.length > 1) {
         const dimensions = [
@@ -1095,33 +1102,33 @@ Page(themed({
           notices.push(`照片中的${dimensions.join('、')}并不完全一致，已保留为 ${eventGroups.length} 个候选事项；未静默合并，可在下方逐项核对。`)
         }
       }
-      const sourceForEvidence = (evidenceIds: string[]) => {
-        const sources = evidence.filter(item => evidenceIds.includes(item.id)).map(item => item.observedDateSource).filter(Boolean)
-        return sources.includes('watermark') ? 'watermark' : sources.includes('exif') ? 'exif' : ''
-      }
       const events: ReviewPlan['events'] = hasActionIntent ? eventGroups.map((group, index) => {
         const groupEvidence = evidence.filter(item => group.evidenceIds.includes(item.id))
         const workAreas = [...new Set(groupEvidence.map(item => item.activity || '').filter(Boolean))]
         const activity = workAreas.join('；')
         const inferredForEvent = inferred
-        const location = userFacts.location || group.location || group.section
-        const date = absoluteUserDate ? userFacts.date : group.date
-        const dateSource = absoluteUserDate ? 'user_message' : sourceForEvidence(group.evidenceIds)
+        const identity = chooseReviewIdentity(userFacts, group)
         return ({
         id: `event-${index + 1}`, title: activity || note.trim().slice(0, 80) || '现场工作事项（待核对）',
-        location, date, dateConfirmed: Boolean(date), dateSource, evidenceIds: group.evidenceIds, forms: [],
+        location: identity.location, date: identity.date, dateConfirmed: Boolean(identity.date), dateSource: identity.dateSource, evidenceIds: group.evidenceIds, forms: [],
         recordType: inferredForEvent.type, recordTypeConfidence: inferredForEvent.confidence, recordTypeReason: inferredForEvent.reason,
         fieldSources: {
-          ...(date ? { date: dateSource || 'evidence' } : {}),
-          ...(userFacts.location ? { location: 'user_message' } : location ? { location: group.location ? 'watermark' : 'watermark_section' } : {}),
+          ...(identity.date ? { date: identity.dateSource || 'evidence' } : {}),
+          ...(identity.location ? { location: identity.locationSource || 'evidence' } : {}),
         }, content: note.trim(),
       })}) : []
-      if (hasActionIntent && events.length === 0) events.push({
-        id: 'event-1', title: note.trim().slice(0, 80) || '现场工作事项（待核对）',
-        location: userFacts.location, date: userFacts.date, dateConfirmed: Boolean(userFacts.date), dateSource: userFacts.date ? 'user_message' : '', evidenceIds: evidence.map(item => item.id), forms: [],
-        recordType: inferred.type, recordTypeConfidence: inferred.confidence, recordTypeReason: inferred.reason,
-        fieldSources: { ...(userFacts.location ? { location: 'user_message' } : {}), ...(userFacts.date && !preserveEvidenceDateGroups ? { date: 'user_message' } : {}) }, content: note.trim(),
-      })
+      if (hasActionIntent && events.length === 0) {
+        const identity = chooseReviewIdentity(userFacts, { date: '', location: '', section: '' })
+        events.push({
+          id: 'event-1', title: note.trim().slice(0, 80) || '现场工作事项（待核对）',
+          location: identity.location, date: identity.date, dateConfirmed: Boolean(identity.date), dateSource: identity.dateSource, evidenceIds: evidence.map(item => item.id), forms: [],
+          recordType: inferred.type, recordTypeConfidence: inferred.confidence, recordTypeReason: inferred.reason,
+          fieldSources: {
+            ...(identity.location ? { location: identity.locationSource } : {}),
+            ...(identity.date ? { date: identity.dateSource } : {}),
+          }, content: note.trim(),
+        })
+      }
       const assigned = new Set(events.flatMap(event => event.evidenceIds))
       const plan: ReviewPlan = {
         schemaVersion: 1, scenario: 0, revision: 1, requestText: note.trim() || '用户仅上传图片，尚未说明整理用途',
@@ -1131,7 +1138,7 @@ Page(themed({
       const saved = await createReviewPlan(conversationId, plan)
       this.addMessage({
         role: 'assistant',
-        text: `已整理 ${evidence.length} 张图片${saved.events.length ? `，归纳出 ${saved.events.length} 个事项` : '，还没有确定记录用途'}${userFacts.location ? `，已采用你说的地点“${userFacts.location}”` : ''}${userFacts.date && !preserveEvidenceDateGroups ? `，已采用你说的日期 ${userFacts.date}` : ''}。图片中的水印和观察结果会保留在草稿证据区；先整理工作记录，不自动生成表单。`,
+        text: `已整理 ${evidence.length} 张图片${saved.events.length ? `，归纳出 ${saved.events.length} 个事项` : '，还没有确定记录用途'}。日期、地点和部位优先采用照片水印/EXIF 中成功识别的客观信息；水印没有提供对应字段时，再采用你的描述。你的原始描述和图片证据都会保留，便于核对；先整理工作记录，不自动生成表单。`,
         reviewPlan: saved,
         reviewEvents: this.inlineReviewEvents(saved),
         reviewUnassignedEvidence: this.inlineReviewUnassignedEvidence(saved),
@@ -1163,20 +1170,19 @@ Page(themed({
     return `${matched[1]}-${matched[2].padStart(2, '0')}-${matched[3].padStart(2, '0')}`
   },
 
-  extractReviewFacts(note: string): { date: string; location: string; dateKind: 'absolute' | 'relative' | '' } {
+  extractReviewFacts(note: string): { date: string; location: string } {
     const text = String(note || '').trim()
     const now = new Date()
     let date = ''
-    let dateKind: 'absolute' | 'relative' | '' = ''
     const full = text.match(/(20\d{2})\s*[年./-]\s*(\d{1,2})\s*[月./-]\s*(\d{1,2})\s*(?:日)?/)
     const short = text.match(/(?<!\d)(\d{1,2})\s*月\s*(\d{1,2})\s*日?/)
-    if (full) { date = this.normalizeReviewDate(Number(full[1]), Number(full[2]), Number(full[3])); dateKind = 'absolute' }
-    else if (short) { date = this.normalizeReviewDate(now.getFullYear(), Number(short[1]), Number(short[2])); dateKind = 'absolute' }
-    else if (/(今天|今日|当天)/.test(text)) { date = this.localDateString(now); dateKind = 'relative' }
+    if (full) date = this.normalizeReviewDate(Number(full[1]), Number(full[2]), Number(full[3]))
+    else if (short) date = this.normalizeReviewDate(now.getFullYear(), Number(short[1]), Number(short[2]))
+    else if (/(今天|今日|当天)/.test(text)) date = this.localDateString(now)
     let location = ''
     const locationMatch = text.match(/(?:在|位于|地点为|位置为)\s*([^，。；,;\n]{2,80}?)(?=(?:进行|开展|完成|做了|做|干了|检查|施工|浇筑|验收|旁站|巡视|巡查|记录)|[，。；,;\n]|$)/u)
     if (locationMatch) location = locationMatch[1].trim()
-    return { date, location, dateKind }
+    return { date, location }
   },
 
   normalizeReviewDate(year: number, month: number, day: number): string {
