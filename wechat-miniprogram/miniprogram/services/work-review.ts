@@ -55,6 +55,8 @@ export interface ReviewPlan {
   status?: 'draft' | 'confirmed' | 'executed'
   executedRevision?: number | null
   executionResult?: ReviewExecutionResult | null
+  /** 对话内解释证据冲突或需要确认的原因。 */
+  notices?: string[]
 }
 
 export interface ReviewExecutionRecord {
@@ -124,6 +126,7 @@ function fromServerPlan(result: ReviewPlanResponse): ReviewPlan {
     status: result.status,
     executedRevision: result.executed_revision == null ? null : Number(result.executed_revision),
     executionResult: result.execution_result || null,
+    notices: Array.isArray(raw.notices) ? raw.notices.map(String) : [],
   }
   validatePlan(plan)
   return plan
@@ -147,6 +150,7 @@ function toServerPlan(plan: ReviewPlan): Record<string, unknown> {
       fields: item.fields || {},
     })),
     unassigned_ids: plan.unassignedIds,
+    notices: plan.notices || [],
   }
 }
 
