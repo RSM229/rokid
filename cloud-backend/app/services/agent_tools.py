@@ -41,7 +41,7 @@ from app.models.hazard import Hazard, HazardStatus
 from app.models.security_audit import SecurityAudit
 from app.models.user import Project, User
 from app.models.work_record import WorkRecord, WorkRecordStatus
-from app.services import model_gateway, provform_schema, record_field_spec
+from app.services import agent_request_plan, model_gateway, provform_schema, record_field_spec
 from app.services.agent_context import (
     append_context_message,
     extract_explicit_message_facts,
@@ -54,8 +54,8 @@ from app.services.record_fields import project_fields
 
 logger = logging.getLogger(__name__)
 
-# 记录类型（与 WorkRecordType 取值一致；「待定」为无照片入口的兜底类型）
-RECORD_TYPES = ("巡视", "旁站", "验收", "见证", "待定")
+# 记录类型来自统一业务目录；「待定」只作为仍待用户确认的草稿状态。
+RECORD_TYPES = tuple(agent_request_plan.RECORD_TYPES) + ("待定",)
 
 # 省统表 11 类记录 → 友好名（供 LLM 选表；文案与 form_registry 一致）
 PROVFORM_CHOICES = (
@@ -185,6 +185,9 @@ def _norm_record_type(value: Any) -> str | None:
     raw = str(value or "").strip()
     if not raw:
         return None
+    canonical = agent_request_plan.canonical_record_type(raw)
+    if canonical:
+        return canonical
     for t in RECORD_TYPES:
         if t in raw:
             return t
