@@ -104,6 +104,12 @@
   padding: 0 8rpx;
 }
 
+/* 邀请码校验成功的企业回显：绿色，与 .error 的红区分开 */
+.invite-hint {
+  color: #1a9c5b;
+  margin-bottom: 16rpx;
+}
+
 .btn-primary {
   width: 100%;
   height: 88rpx;

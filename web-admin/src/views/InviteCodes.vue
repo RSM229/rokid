@@ -280,8 +280,9 @@ async function save() {
   }
   saving.value = true
   try {
-    // 项目邀请码：码带 project_id + role，成员在「加入项目」填写后即获该岗位。
-    // 与注册解耦 —— 注册只产出裸用户，权限全靠这条路径授予。
+    // 项目邀请码：码带 project_id + role。持码人可在小程序注册时直接填它建号入项目，
+    // 或已登录后在「加入项目」页填写 —— 两条路径共用同一套校验与使用次数递增。
+    // 🔴 2026-10-21 起这是成员进入项目的**唯一**通道（注册已改为必填邀请码）。
     const res: any = await authApi.createProjectInviteCode(form.projectId, {
       role: form.role,
       level: form.level,

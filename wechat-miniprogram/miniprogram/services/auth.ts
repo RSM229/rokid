@@ -210,20 +210,30 @@ interface RegisterResponse {
 }
 
 /**
- * 路径 A：微信授权即注册（零短信成本）。
- * 用 /miniprogram/auth/login 拿到的 bind_token（含 openid）一键建裸用户并自动登录；
- * 后端自动生成用户名（wx_<openid>）、随机密码，不依赖手机号/短信。
- * 注册产出零权限裸用户，项目岗位由「加入项目」动作授予（见 joinProjectByInvite）。
+ * 微信授权注册：bind_token + **项目邀请码** → 建号即入组织。
+ *
+ * 🔴 2026-10-21 起 `inviteCode` 是**必填**（类型上就不可省），注册不再产出
+ * 零权限裸用户：码上的 org_id / project_id / role 直接决定新账号的企业归属、
+ * 项目与岗位；码带 project_id 时注册即入项目，无需再去 join-project 页。
+ * 手机号 + 短信验证码那条注册路已整体下线。
  */
-export async function wechatRegister(params?: {
-  real_name?: string
-  wx_nickname?: string
-}): Promise<RegisterResponse> {
+export async function wechatRegister(
+  inviteCode: string,
+  params?: {
+    real_name?: string
+    wx_nickname?: string
+  },
+): Promise<RegisterResponse> {
+  const code = (inviteCode || '').trim().toUpperCase()
+  if (!code) {
+    throw new Error('请填写项目负责人发放的邀请码')
+  }
   const data = await request<RegisterResponse>('/miniprogram/auth/wechat-register', {
     method: 'POST',
     auth: false,
     data: {
       bind_token: session.getBindToken() || undefined,
+      invite_code: code,
       real_name: params?.real_name ? params.real_name.trim() : undefined,
       wx_nickname: params?.wx_nickname ? params.wx_nickname.trim() : undefined,
     },
@@ -232,6 +242,27 @@ export async function wechatRegister(params?: {
     persistLogin(data as unknown as LoginResponse)
   }
   return data
+}
+
+/** 邀请码只读校验结果（不消耗使用次数），供注册页实时回显 */
+export interface InviteCodeInfo {
+  valid: boolean
+  level?: string | null
+  role?: string | null
+  org_name?: string | null
+}
+
+/**
+ * 校验邀请码并回显企业名（`GET /auth/invite-codes/validate`，公开只读）。
+ * 让用户在点「注册」之前就看到这个码会把自己放进哪家公司，填错立刻发现。
+ */
+export async function validateInviteCode(code: string): Promise<InviteCodeInfo> {
+  const c = (code || '').trim().toUpperCase()
+  if (!c) throw new Error('请填写邀请码')
+  return await request<InviteCodeInfo>(
+    `/auth/invite-codes/validate?code=${encodeURIComponent(c)}`,
+    { method: 'GET', auth: false },
+  )
 }
 
 export interface JoinProjectResult {
