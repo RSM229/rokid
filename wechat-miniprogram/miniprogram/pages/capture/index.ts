@@ -44,6 +44,7 @@ interface MediaUploadResult {
   file_hash: string
   hazard_id?: number
   detection?: DetectionResult
+  watermark?: { available?: boolean; recognized?: boolean; fields?: Record<string, string>; lines?: string[]; labeled_items?: Array<{ label: string; value: string }> }
 }
 
 interface AiImage {
@@ -69,6 +70,7 @@ Page(themed({
     uploading: false,
     mediaType: '' as '' | 'image' | 'video',
     mediaPath: '',
+    cameraCapture: false,
     previewUrl: '',
     section: '',
     location: '',
@@ -170,6 +172,7 @@ Page(themed({
         this.setData({
           mediaType: 'image',
           mediaPath: result.tempImagePath,
+          cameraCapture: true,
           previewUrl: result.tempImagePath,
           result: null,
         })
@@ -348,7 +351,7 @@ Page(themed({
     wx.chooseMedia({
       count: 1,
       mediaType: this.data.workMode ? ['image'] : ['image', 'video'],
-      sourceType: ['album', 'camera'],
+        sourceType: ['album'],
       maxDuration: 60,
       camera: 'back',
       success: (result) => {
@@ -357,6 +360,7 @@ Page(themed({
         this.setData({
           mediaType,
           mediaPath: file.tempFilePath,
+          cameraCapture: false,
           previewUrl: file.tempFilePath,
           result: null,
           durationSeconds: mediaType === 'video' ? Math.round(file.duration || 0) : 0,
@@ -481,6 +485,7 @@ Page(themed({
       weather: this.data.weather,
       work_content: this.data.workContent,
       trigger_detection: this.data.triggerDetection,
+      add_system_watermark: this.data.cameraCapture,
       business_type: this.data.businessType || undefined,
       business_id: this.data.businessId || undefined,
       duration_seconds: this.data.mediaType === 'video'
@@ -631,6 +636,7 @@ Page(themed({
       location: this.data.location,
       work_content: this.data.workContent,
       source: 'miniprogram',
+      camera_capture: this.data.cameraCapture,
     })
   },
   refreshQueue() {

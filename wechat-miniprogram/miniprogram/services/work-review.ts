@@ -21,6 +21,15 @@ export interface Evidence {
   image: string
   observedDate: string
   observedDateSource?: 'watermark' | 'exif' | 'user_message' | string
+  project?: string
+  section?: string
+  location?: string
+  activity?: string
+  observation?: string
+  watermarkAvailable?: boolean
+  watermarkStatus?: 'recognized' | 'empty' | 'unavailable'
+  watermarkFields?: Record<string, string>
+  watermarkItems?: Array<{ label: string; value: string }>
   note: string
 }
 export interface WorkEvent {
@@ -57,6 +66,21 @@ export interface ReviewPlan {
   executionResult?: ReviewExecutionResult | null
   /** 对话内解释证据冲突或需要确认的原因。 */
   notices?: string[]
+}
+
+export interface ReviewEvidenceGroup {
+  date: string
+  project: string
+  location: string
+  section: string
+  evidenceIds: string[]
+}
+
+export interface ReviewEvidenceTarget {
+  date?: string
+  project?: string
+  location?: string
+  section?: string
 }
 
 export interface ReviewExecutionRecord {
@@ -104,6 +128,12 @@ function fromServerPlan(result: ReviewPlanResponse): ReviewPlan {
     evidence: evidence.map(item => ({
       id: String(item.id || ''), mediaId: item.media_id == null ? undefined : Number(item.media_id), image: absoluteMediaUrl(String(item.image || '')),
       observedDate: String(item.observed_date || ''), observedDateSource: String(item.observed_date_source || ''), note: String(item.note || ''),
+      project: String(item.project || ''), section: String(item.section || ''),
+      location: String(item.location || ''), activity: String(item.activity || ''), observation: String(item.observation || ''),
+      watermarkAvailable: item.watermark_available === true,
+      watermarkStatus: item.watermark_status === 'recognized' || item.watermark_status === 'empty' ? item.watermark_status : 'unavailable',
+      watermarkFields: item.watermark_fields && typeof item.watermark_fields === 'object' ? item.watermark_fields as Record<string, string> : {},
+      watermarkItems: Array.isArray(item.watermark_items) ? item.watermark_items.map((entry: any) => ({ label: String(entry?.label || ''), value: String(entry?.value || '') })) : [],
     })),
     events: events.map(item => ({
       id: String(item.id || ''), title: String(item.title || ''),
@@ -137,6 +167,11 @@ function toServerPlan(plan: ReviewPlan): Record<string, unknown> {
     schema_version: 1, request_text: plan.requestText,
     evidence: plan.evidence.map(item => ({
       id: item.id, media_id: item.mediaId, image: item.image, observed_date: item.observedDate, observed_date_source: item.observedDateSource || '', note: item.note,
+      project: item.project || '', section: item.section || '',
+      location: item.location || '', activity: item.activity || '', observation: item.observation || '', watermark_available: item.watermarkAvailable === true,
+      watermark_fields: item.watermarkFields || {},
+      watermark_items: item.watermarkItems || [],
+      watermark_status: item.watermarkStatus || (item.watermarkAvailable ? 'recognized' : 'unavailable'),
     })),
     events: plan.events.map(item => ({
       id: item.id, title: item.title, location: item.location, content: item.content,
@@ -265,6 +300,75 @@ export function candidateDates(plan: ReviewPlan, event: WorkEvent): string[] {
   return [...new Set(plan.evidence.filter(photo => event.evidenceIds.includes(photo.id)).map(photo => photo.observedDate).filter(Boolean))].sort()
 }
 
+function normalizedEvidenceText(value: unknown): string {
+  return String(value || '').normalize('NFKC').toLocaleLowerCase().replace(/[\s\p{P}\p{S}]+/gu, '')
+}
+
+function compatibleEvidenceText(left: unknown, right: unknown): boolean {
+  const a = normalizedEvidenceText(left)
+  const b = normalizedEvidenceText(right)
+  if (!a || !b || a === b) return true
+  return a.includes(b) || b.includes(a)
+}
+
+/**
+ * Group evidence only when the known identity fields are compatible.
+ * A missing field is unknown, not a conflict. Non-empty differences split.
+ */
+export function groupReviewEvidence(
+  evidence: Evidence[],
+  options: { ignoreDate?: boolean } = {},
+): ReviewEvidenceGroup[] {
+  const groups: ReviewEvidenceGroup[] = []
+  for (const item of evidence) {
+    const candidate: ReviewEvidenceGroup = {
+      date: options.ignoreDate ? '' : String(item.observedDate || ''),
+      project: String(item.project || ''),
+      location: String(item.location || ''),
+      section: String(item.section || ''),
+      evidenceIds: [item.id],
+    }
+    const group = groups.find(existing =>
+      compatibleEvidenceText(existing.date, candidate.date) &&
+      compatibleEvidenceText(existing.project, candidate.project) &&
+      compatibleEvidenceText(existing.location, candidate.location) &&
+      compatibleEvidenceText(existing.section, candidate.section),
+    )
+    if (!group) {
+      groups.push(candidate)
+      continue
+    }
+    if (!group.date && candidate.date) group.date = candidate.date
+    if (!group.project && candidate.project) group.project = candidate.project
+    if (!group.location && candidate.location) group.location = candidate.location
+    if (!group.section && candidate.section) group.section = candidate.section
+    group.evidenceIds.push(item.id)
+  }
+  return groups
+}
+
+/** Fields whose known watermark values disagree with the record being amended. */
+export function evidenceTargetConflicts(
+  evidence: Evidence[],
+  target: ReviewEvidenceTarget,
+): string[] {
+  const labels: Array<[keyof ReviewEvidenceTarget, string, (item: Evidence) => unknown]> = [
+    ['date', '日期', item => item.observedDate],
+    ['project', '项目', item => item.project],
+    ['location', '地点', item => item.location],
+    ['section', '部位', item => item.section],
+  ]
+  const conflicts = new Set<string>()
+  for (const item of evidence) {
+    for (const [key, label, read] of labels) {
+      const expected = String(target[key] || '')
+      const actual = String(read(item) || '')
+      if (expected && actual && !compatibleEvidenceText(expected, actual)) conflicts.add(label)
+    }
+  }
+  return [...conflicts]
+}
+
 // Every material must belong to exactly one event or the unassigned pool in this prototype.
 export function validatePlan(plan: ReviewPlan): void {
   if (plan.schemaVersion !== 1 || !Number.isInteger(plan.revision) || plan.revision < 1) throw new Error('草稿版本无效')
@@ -312,6 +416,19 @@ export function editFormField(plan: ReviewPlan, id: string, formCode: string, ke
   if (!event) throw new Error('事项不存在')
   const fields = { ...(event.fields || {}), [formCode]: { ...(event.fields?.[formCode] || {}), [key]: value } }
   return revised(plan, { events: plan.events.map(item => item.id === id ? { ...item, fields } : item) })
+}
+export function editEvidenceWatermark(plan: ReviewPlan, id: string, itemIndex: number, key: 'label' | 'value', value: string): ReviewPlan {
+  const evidence = plan.evidence.find(item => item.id === id)
+  if (!evidence) throw new Error('图片资料不存在')
+  const items = [...(evidence.watermarkItems || [])]
+  if (!items[itemIndex]) throw new Error('水印字段不存在')
+  items[itemIndex] = { ...items[itemIndex], [key]: value }
+  return revised(plan, { evidence: plan.evidence.map(item => item.id === id ? { ...item, watermarkItems: items } : item) })
+}
+export function addEvidenceWatermark(plan: ReviewPlan, id: string): ReviewPlan {
+  const evidence = plan.evidence.find(item => item.id === id)
+  if (!evidence) throw new Error('图片资料不存在')
+  return revised(plan, { evidence: plan.evidence.map(item => item.id === id ? { ...item, watermarkItems: [...(item.watermarkItems || []), { label: '', value: '' }] } : item) })
 }
 export function addEvent(plan: ReviewPlan, id: string): ReviewPlan {
   return revised(plan, { events: [...plan.events, newEvent(id)] })
