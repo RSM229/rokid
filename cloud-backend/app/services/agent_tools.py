@@ -459,6 +459,9 @@ def field_view(field: dict, value: str = "") -> dict:
     control = _control_for_field(field)
     return {
         "name": canonical,
+        "key": str(field.get("key") or canonical),
+        "canonical": canonical,
+        "definition_source": "record_field_spec",
         "label": label,
         "control": control,
         "required": bool(field.get("required")),

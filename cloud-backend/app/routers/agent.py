@@ -125,6 +125,8 @@ def _generic_fields(missing: list[str], options: dict[str, list[str]]) -> list[d
         opts = [str(x) for x in (options.get(label) or [])]
         fields.append({
             "name": _generic_field_name(label), "label": label,
+            "key": _generic_field_name(label), "canonical": _generic_field_name(label),
+            "definition_source": "fallback",
             "control": "select" if opts else "text",
             "required": True, "value": "", "options": opts,
             "placeholder": "", "hint": "", "section": "",
@@ -154,10 +156,12 @@ def _agent_form(
                                 or agent_tools.record_field_spec.RECORD_TYPE_TO_FORM)]
         return {
             "id": "record_type", "kind": "record_type",
+            "schema_version": 1, "field_schema": "record_field_spec.v1", "form_code": "",
             "title": "先选记录类型",
             "hint": "照片和已有信息已保留；选好类型后按对应表格补齐。",
             "fields": [{
                 "name": "record_type", "label": "记录类型", "control": "select",
+                "key": "record_type", "canonical": "record_type", "definition_source": "agent_action",
                 "required": True, "value": "", "options": opts,
                 "placeholder": "", "hint": "", "section": "",
             }],
@@ -174,6 +178,7 @@ def _agent_form(
         card = result.get("card") or {}
         return {
             "id": f"work_record_photos:{record_id}", "kind": "attachments",
+            "schema_version": 1, "field_schema": "record_field_spec.v1", "form_code": form_code or "",
             "record_id": int(record_id),
             "title": f"{record_type}记录已保存 · 补充现场照片",
             "hint": "这一步可以跳过；照片会自动加水印并挂到这条记录。",
@@ -204,6 +209,7 @@ def _agent_form(
         return {
             "id": f"{tool}:{form_code or 'form'}",
             "kind": "work_record" if form_code else "form",
+            "schema_version": 1, "field_schema": "record_field_spec.v1", "form_code": form_code or "",
             "title": f"{record_type}记录 · 补齐信息" if record_type else "补齐信息",
             "hint": "带「必填」的填完即可保存；其余留空也能提交。" if has_required
                     else "都可以留空，直接提交也行。",

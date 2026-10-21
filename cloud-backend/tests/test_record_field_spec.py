@@ -141,6 +141,12 @@ hint = at.ask_hint(d, ["旁站的关键工序", lbl])
 check("hint 区分参数与槽位",
       "参数 station_process" in hint and 'extra_fields["qa_onsite"]' in hint, f"hint={hint}")
 
+print("== 9. 表单字段带版本化定义元数据 ==")
+view = at.field_view(f_qa)
+check("字段定义来源", view.get("definition_source") == "record_field_spec", f"got={view}")
+check("字段保留规范键", view.get("canonical") == "qa_onsite", f"got={view}")
+check("字段保留模板键", bool(view.get("key")), f"got={view}")
+
 print()
 if FAILED:
     print(f"FAILED {len(FAILED)}: {FAILED}")
