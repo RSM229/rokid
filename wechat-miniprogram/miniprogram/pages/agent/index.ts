@@ -734,25 +734,32 @@ Page(themed({
       }
       const hasActionIntent = this.wantsActionIntent(note)
       const inferred = this.inferRecordType(note)
-      const events: ReviewPlan['events'] = hasActionIntent ? [...dateGroups.entries()].map(([date, evidenceIds], index) => ({
+      const userFacts = this.extractReviewFacts(note)
+      // Explicit user facts have priority over image metadata. If the user
+      // names one date, keep the batch together under that date and retain
+      // the photo dates as evidence notes rather than silently overriding it.
+      const eventGroups = userFacts.date
+        ? [[userFacts.date, evidence.map(item => item.id)] as [string, string[]]]
+        : [...dateGroups.entries()]
+      const events: ReviewPlan['events'] = hasActionIntent ? eventGroups.map(([date, evidenceIds], index) => ({
         id: `event-${index + 1}`, title: note.trim().slice(0, 80) || '现场工作事项（待核对）',
-        location: '', date, dateConfirmed: true, dateSource: 'watermark', evidenceIds, forms: [],
+        location: userFacts.location, date, dateConfirmed: true, dateSource: userFacts.date ? 'user_message' : 'watermark', evidenceIds, forms: [],
         recordType: inferred.type, recordTypeConfidence: inferred.confidence, recordTypeReason: inferred.reason,
-        fieldSources: { date: 'watermark' }, content: note.trim(),
+        fieldSources: { date: userFacts.date ? 'user_message' : 'watermark', ...(userFacts.location ? { location: 'user_message' } : {}) }, content: note.trim(),
       })) : []
       const datedIds = new Set(events.flatMap(event => event.evidenceIds))
       const undatedIds = hasActionIntent ? evidence.filter(item => !datedIds.has(item.id)).map(item => item.id) : []
       if (note.trim() && undatedIds.length) events.push({
         id: `event-${events.length + 1}`, title: note.trim().slice(0, 80) || '现场工作事项（待核对）',
-        location: '', date: '', dateConfirmed: false, dateSource: '', evidenceIds: undatedIds, forms: [],
+        location: userFacts.location, date: userFacts.date, dateConfirmed: Boolean(userFacts.date), dateSource: userFacts.date ? 'user_message' : '', evidenceIds: undatedIds, forms: [],
         recordType: inferred.type, recordTypeConfidence: inferred.confidence, recordTypeReason: inferred.reason,
-        fieldSources: {}, content: note.trim(),
+        fieldSources: userFacts.location || userFacts.date ? { ...(userFacts.location ? { location: 'user_message' } : {}), ...(userFacts.date ? { date: 'user_message' } : {}) } : {}, content: note.trim(),
       })
       if (hasActionIntent && events.length === 0) events.push({
         id: 'event-1', title: note.trim().slice(0, 80) || '现场工作事项（待核对）',
-        location: '', date: '', dateConfirmed: false, dateSource: '', evidenceIds: evidence.map(item => item.id), forms: [],
+        location: userFacts.location, date: userFacts.date, dateConfirmed: Boolean(userFacts.date), dateSource: userFacts.date ? 'user_message' : '', evidenceIds: evidence.map(item => item.id), forms: [],
         recordType: inferred.type, recordTypeConfidence: inferred.confidence, recordTypeReason: inferred.reason,
-        fieldSources: {}, content: note.trim(),
+        fieldSources: { ...(userFacts.location ? { location: 'user_message' } : {}), ...(userFacts.date ? { date: 'user_message' } : {}) }, content: note.trim(),
       })
       const assigned = new Set(events.flatMap(event => event.evidenceIds))
       const plan: ReviewPlan = {
@@ -763,7 +770,7 @@ Page(themed({
       const saved = await createReviewPlan(conversationId, plan)
       this.addMessage({
         role: 'assistant',
-        text: `已整理 ${evidence.length} 张图片${dateGroups.size ? `，按照片日期整理出 ${dateGroups.size} 个事项` : ''}。我会先生成工作记录草稿，记录类型是建议值，可在这里修改；确认前不会写入正式记录。`,
+        text: `已整理 ${evidence.length} 张图片${eventGroups.length ? `，整理出 ${eventGroups.length} 个事项` : ''}${userFacts.location ? `，已采用你说的地点“${userFacts.location}”` : ''}${userFacts.date ? `，已采用你说的日期 ${userFacts.date}` : ''}。我会先生成工作记录草稿，记录类型是建议值，可在这里修改；确认前不会写入正式记录。`,
         reviewPlan: saved,
         reviewEvents: this.inlineReviewEvents(saved),
         reviewIssues: reviewIssues(saved),
@@ -782,6 +789,31 @@ Page(themed({
     const date = new Date(Date.UTC(year, month - 1, day))
     if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return ''
     return `${matched[1]}-${matched[2].padStart(2, '0')}-${matched[3].padStart(2, '0')}`
+  },
+
+  extractReviewFacts(note: string): { date: string; location: string } {
+    const text = String(note || '').trim()
+    const now = new Date()
+    let date = ''
+    const full = text.match(/(20\d{2})\s*[年./-]\s*(\d{1,2})\s*[月./-]\s*(\d{1,2})\s*(?:日)?/)
+    const short = text.match(/(?<!\d)(\d{1,2})\s*月\s*(\d{1,2})\s*日?/)
+    if (full) date = this.normalizeReviewDate(Number(full[1]), Number(full[2]), Number(full[3]))
+    else if (short) date = this.normalizeReviewDate(now.getFullYear(), Number(short[1]), Number(short[2]))
+    else if (/(今天|今日|当天)/.test(text)) date = this.localDateString(now)
+    let location = ''
+    const locationMatch = text.match(/(?:在|位于|地点为|位置为)\s*([^，。；,;\n]{2,80}?)(?=(?:进行|开展|完成|做了|做|干了|检查|施工|浇筑|验收|旁站|巡视|巡查|记录)|[，。；,;\n]|$)/u)
+    if (locationMatch) location = locationMatch[1].trim()
+    return { date, location }
+  },
+
+  normalizeReviewDate(year: number, month: number, day: number): string {
+    const candidate = new Date(year, month - 1, day)
+    if (candidate.getFullYear() !== year || candidate.getMonth() !== month - 1 || candidate.getDate() !== day) return ''
+    return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+  },
+
+  localDateString(value: Date): string {
+    return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`
   },
 
   inferRecordType(note: string): { type: string; confidence: number; reason: string } {
