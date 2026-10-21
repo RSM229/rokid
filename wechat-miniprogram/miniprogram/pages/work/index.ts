@@ -38,6 +38,24 @@ interface WorkRecordItem {
   checked?: boolean
 }
 
+interface RecordFormOption {
+  form_code: string
+  name: string
+  form_number?: string
+  has_template?: boolean
+}
+
+interface MediaEvidence {
+  id: number
+  url: string
+  section?: string | null
+  location?: string | null
+  weather?: string | null
+  capture_time?: string | null
+  capture_time_source?: string | null
+  watermark?: Record<string, string>
+}
+
 interface DetailItem {
   generated_doc_id?: number
   id?: number
@@ -84,6 +102,8 @@ interface DetailItem {
   suggestion?: string
   image_url?: string
   evidence?: string[]
+  content_json?: Record<string, any>
+  media_evidence?: MediaEvidence[]
 }
 
 interface MenuItem {
@@ -159,6 +179,10 @@ Page(themed({
     detail: {} as DetailItem,
     detailType: 'record' as 'record' | 'hazard',
     detailPhotos: [] as string[],
+    detailMediaEvidence: [] as MediaEvidence[],
+    detailForms: [] as RecordFormOption[],
+    selectedFormCode: '',
+    loadingForms: false,
 
     // 记录菜单
     showRecordMenu: false,
@@ -596,9 +620,14 @@ Page(themed({
   },
 
   /** 详情弹窗「生成文书」：记录 → 省统表文书并归档「工作文书」；隐患 → 安全隐患整改通知单 */
-  async generateRecordDocument() {
+  async generateRecordDocument(event?: WechatMiniprogram.TouchEvent) {
     const record = this.data.detail
     if (!record?.id || this.data.generatingDoc) return
+    const formCode = String(event?.currentTarget?.dataset?.formCode || '')
+    if (this.data.detailType === 'record' && !formCode && !record.generated_doc_id) {
+      wx.showToast({ title: '请先选择要生成的表单', icon: 'none' })
+      return
+    }
     this.setData({ generatingDoc: true })
     wx.showLoading({ title: '生成文书...', mask: true })
     try {
@@ -614,7 +643,7 @@ Page(themed({
       } else {
         const res = await request<{ doc_id: number; title: string }>('/form-docs/generate', {
           method: 'POST',
-          data: { record_id: record.id },
+          data: { record_id: record.id, form_code: formCode || undefined },
           timeout: 60000,
         })
         docId = res.doc_id
@@ -787,7 +816,9 @@ Page(themed({
             created_at: result.created_at?.replace('T', ' ').slice(0, 16),
           },
           detailPhotos: photos,
+          detailMediaEvidence: (result.media_evidence || []).map(item => ({ ...item, url: absoluteMediaUrl(item.url) })),
         })
+        void this.loadRecordForms(Number(id))
       }
     } catch (error) {
       wx.showToast({ title: (error as Error).message, icon: 'none' })
@@ -797,7 +828,26 @@ Page(themed({
   },
 
   closeDetail() {
-    this.setData({ showDetail: false, detail: {}, detailPhotos: [] })
+    this.setData({ showDetail: false, detail: {}, detailPhotos: [], detailMediaEvidence: [], detailForms: [], selectedFormCode: '' })
+  },
+
+  selectRecordForm(event: WechatMiniprogram.TouchEvent) {
+    const formCode = String(event.currentTarget.dataset.formCode || '')
+    if (!formCode) return
+    this.setData({ selectedFormCode: this.data.selectedFormCode === formCode ? '' : formCode })
+  },
+
+  async loadRecordForms(recordId: number) {
+    this.setData({ loadingForms: true, detailForms: [], selectedFormCode: '' })
+    try {
+      const result = await request<{ forms?: RecordFormOption[] }>(`/form-docs/record/${recordId}/forms`)
+      this.setData({ detailForms: result.forms || [] })
+    } catch (error) {
+      console.warn('加载可用表单失败', error)
+      this.setData({ detailForms: [] })
+    } finally {
+      this.setData({ loadingForms: false })
+    }
   },
 
   previewDetailPhoto(event: WechatMiniprogram.TouchEvent) {
