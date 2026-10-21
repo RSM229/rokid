@@ -30,8 +30,15 @@
       <!-- Hero（ima 风格空状态：大问候语 + 竖排建议按钮） -->
       <view wx:if="{{messages.length <= 1 && !loading}}" class="hero">
         <view class="hero-greeting">你好，{{userName}}</view>
+        <!-- 🔴 无项目时的常驻引导条：说清「现在能用什么」+「下一步去哪」，
+             取代原来那个必然 403 的「创建新项目」弹窗（该接口仅超管可调用，
+             而超管不允许登录小程序 ⇒ 小程序里任何人都建不了项目）。 -->
+        <view wx:if="{{noProject}}" class="no-project-tip">
+          <text class="no-project-tip-text">你还没有加入项目。规范查询、AI 问答、天气等现在就能用；现场记录需要先加入项目。</text>
+          <view class="no-project-tip-btn" bindtap="goJoinProject">去加入项目</view>
+        </view>
         <view class="hero-actions">
-          <view class="hero-pill" wx:for="{{heroActions}}" wx:for-item="act" wx:for-index="ai" wx:key="ai" data-command="{{act.command}}" bindtap="handleActionTap">
+          <view class="hero-pill" wx:for="{{visibleHeroActions}}" wx:for-item="act" wx:for-index="ai" wx:key="ai" data-command="{{act.command}}" bindtap="handleActionTap">
             <view class="hero-pill-icon {{act.icon}}"></view>
             <text>{{act.text}}</text>
           </view>
@@ -297,18 +304,23 @@
             class="chat-input chat-textarea"
             focus="{{draftFocus}}"
             value="{{input}}"
-            placeholder="{{attachments.length ? '可补充说明，再点发送' : '发消息或按住说话'}}"
+            placeholder="{{attachments.length ? '可补充说明，再点发送' : (noProject ? '问我规范、工艺、天气都行；记录现场工作需先加入项目' : '发消息或按住说话')}}"
             placeholder-class="input-placeholder"
             bindinput="onInput"
             maxlength="-1"
             auto-height
             show-confirm-bar="{{false}}"
-            disabled="{{!projectCreated}}"
           />
           <view wx:else class="recording-hint">
             <view class="rec-dot"></view>
             <text>录音中…松开发送</text>
           </view>
+          <!-- 🔴 2026-10-21 上面的 textarea 去掉了 disabled="{{!projectCreated}}"：
+               无项目时后端 /agent/chat 对 read 类工具（查规范/查天气/查记录）照常放行、
+               对 write 类工具返回「去加入项目」导航卡，前端把输入框整个禁掉等于把这套
+               降级能力全埋没，裸用户连问一句规范都做不到。
+               注：本注释放在 wx:if/wx:else **结构之外**——WXML 要求 wx:if 与 wx:else
+               必须是相邻兄弟节点，中间插注释会导致 wx:else 匹配不到 wx:if。 -->
         </view>
       </view>
 

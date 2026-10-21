@@ -10,6 +10,17 @@
             </span>
           </div>
           <div>
+            <!-- 项目范围筛选（2026-10-21）：后端 GET /project/list 对超管**无条件返回全平台项目**
+                 （`_can_view_all_projects` = is_super_admin，不走成员归属过滤），所以切换项目后
+                 本页看着没变化。筛选放前端做，默认跟随顶栏当前项目。 -->
+            <el-select
+              v-model="scopeFilter"
+              size="small"
+              style="width: 150px; margin-right: 12px"
+            >
+              <el-option label="仅当前项目" value="current" />
+              <el-option label="全部项目" value="all" />
+            </el-select>
             <el-checkbox
               v-model="includeClosed"
               style="margin-right: 12px"
@@ -24,7 +35,7 @@
         </div>
       </template>
 
-      <el-table :data="items" v-loading="loading" stripe>
+      <el-table :data="visibleItems" v-loading="loading" stripe>
         <el-table-column label="项目名称" min-width="180">
           <template #default="{ row }">
             <span class="pname">{{ row.name }}</span>
@@ -81,7 +92,7 @@
         </el-table-column>
       </el-table>
 
-      <el-empty v-if="!loading && !items.length" description="暂无项目" />
+      <el-empty v-if="!loading && !visibleItems.length" :description="emptyText" />
     </el-card>
 
     <el-dialog v-model="dialogVisible" :title="editingId ? '编辑项目资料' : '新建项目'" width="600px">
@@ -125,7 +136,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
@@ -170,6 +181,39 @@ async function load() {
     loading.value = false
   }
 }
+
+// ---- 项目范围筛选（2026-10-21，纯前端）----
+// 超管在 `GET /project/list` 上走的是「不加 where」分支，返回全平台项目，
+// 与顶栏选中的项目无关。这里默认只看当前项目，需要纵览时切「全部项目」。
+const scopeFilter = ref<'current' | 'all'>('all')
+
+const visibleItems = computed(() => {
+  // 当前项目置顶，其余按原顺序（后端已按创建时间倒序）
+  const sorted = [...items.value].sort((a, b) => {
+    const ca = a.id === currentProjectId.value ? 0 : 1
+    const cb = b.id === currentProjectId.value ? 0 : 1
+    return ca - cb
+  })
+  if (scopeFilter.value === 'current') {
+    if (!currentProjectId.value) return []
+    return sorted.filter((row) => row.id === currentProjectId.value)
+  }
+  return sorted
+})
+
+const emptyText = computed(() =>
+  scopeFilter.value === 'current' && !currentProjectId.value
+    ? '当前账号未绑定项目，请切到「全部项目」查看'
+    : '暂无项目',
+)
+
+// 顶栏切换项目 / 视角变化后，列表筛选跟随：
+// 选中具体项目 → 只看该项目；「全部项目」视角或未绑定项目 → 看全部
+watch(
+  () => [auth.currentProjectId, auth.allProjects] as const,
+  ([pid, all]) => { scopeFilter.value = all || !pid ? 'all' : 'current' },
+  { immediate: true },
+)
 
 async function openEdit(row: any) {
   editingId.value = row.id
@@ -241,14 +285,9 @@ async function switchTo(row: any) {
 }
 
 function goMembers(row: any) {
-  // 成员管理在「用户管理」页；带上项目提示，避免用户找不到
-  ElMessageBox.alert(
-    `请前往「用户管理 → 项目成员管理」，在弹窗中选择「${row.name}」后分配人员。`,
-    '分配人员',
-    { confirmButtonText: '去用户管理' },
-  )
-    .then(() => router.push('/user-manage'))
-    .catch(() => {})
+  // 成员管理在「用户管理」页；直接带上项目 id 跳转，落地即锁定该项目的账号筛选，
+  // 免得超管在全量账号里自己找（2026-10-21 改：不再弹提示框）。
+  router.push({ path: '/user-manage', query: { project_id: String(row.id) } })
 }
 
 // ---- Step 5：项目生命周期（结项 / 恢复）----
