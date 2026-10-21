@@ -35,12 +35,12 @@ def test_plan_requires_every_evidence_exactly_once():
         raise AssertionError("duplicate evidence assignment should fail")
 
 
-def test_plan_rejects_unconfirmed_date_or_unknown_form():
+def test_plan_allows_unconfirmed_date_and_rejects_unknown_form():
     plan = base_plan()
     plan["unassigned_ids"] = []
     plan["events"][0]["date_confirmed"] = False
     review_plan.validate_plan(plan)
-    assert any("日期待确认" in issue for issue in review_plan.review_issues(plan))
+    assert not any("日期待确认" in issue for issue in review_plan.review_issues(plan))
     plan["events"][0]["forms"] = ["guess_form"]
     try:
         review_plan.validate_plan(plan)
