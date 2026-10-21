@@ -107,6 +107,8 @@ interface Message {
 /** /agent/chat 响应：kind=action 表示服务端已执行动作，chat 表示纯问答 */
 interface AgentChatResponse {
   kind: 'action' | 'chat'
+  conversation_id?: string
+  history_saved?: boolean
   tool?: string
   reply: string
   card?: AgentCard | null
@@ -124,10 +126,25 @@ interface AgentChatResponse {
 
 interface ChatHistory {
   id: number
+  conversationId?: string
   title: string
   modelId: string
   messages: Message[]
   updatedAt: string
+  messageCount?: number
+  remote?: boolean
+}
+
+interface RemoteConversationSummary {
+  conversation_id: string
+  title: string
+  message_count: number
+  updated_at: string
+  updatedAt: string
+}
+
+interface RemoteConversationDetail extends RemoteConversationSummary {
+  messages: Array<Record<string, any>>
 }
 
 function conversationIdFor(sessionId: number): string {
@@ -145,7 +162,17 @@ interface Attachment {
   cameraCapture?: boolean
 }
 
-const HISTORY_KEY = `gdjl_${config.storageScope}_chat_history`
+const LEGACY_HISTORY_KEY = `gdjl_${config.storageScope}_chat_history`
+
+function historyStorageKey(userId?: number): string {
+  return `${LEGACY_HISTORY_KEY}_${userId || 'anonymous'}`
+}
+
+function sessionIdFromConversationId(conversationId: string): number {
+  const match = /(\d+)$/.exec(conversationId || '')
+  const parsed = match ? Number(match[1]) : 0
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : Date.now()
+}
 
 interface CommandRoute {
   level1?: string
@@ -411,9 +438,12 @@ Page(themed({
     })
 
     this.initMessages()
+    const openingSessionId = this.currentSessionId
     this.initRecorder()
     if (['inspection', 'station', 'acceptance', 'witness'].includes(options.createRecord || '')) {
       this.openWorkForm(options.createRecord!)
+    } else {
+      void this.restoreLatestConversation(openingSessionId)
     }
   },
 
@@ -518,6 +548,52 @@ Page(themed({
         text: '您好，我是白泽监理智能助手。可以询问规范流程、生成文书、管理隐患等。',
       }],
     })
+  },
+
+  /** 登录后恢复当前账号最近一次会话；新对话尚未写入时保持欢迎页。 */
+  async restoreLatestConversation(expectedSessionId: number) {
+    try {
+      const result = await request<{ conversations: RemoteConversationSummary[] }>('/agent/conversations', {
+        data: { limit: 1 },
+      })
+      const latest = result.conversations?.[0]
+      if (!latest) return
+      const detail = await request<RemoteConversationDetail>(
+        `/agent/conversations/${encodeURIComponent(latest.conversation_id)}`,
+      )
+      if (this.currentSessionId !== expectedSessionId || this.data.messages.some(message => message.role === 'user')) {
+        return
+      }
+      this.applyConversationDetail(detail)
+    } catch {
+      // 网络不可用时保留本地欢迎页，历史入口仍会回退到本地缓存。
+    }
+  },
+
+  historyMessageFromRemote(raw: Record<string, any>): Message {
+    const response = raw.response as AgentChatResponse | undefined
+    if (raw.role === 'assistant' && response && typeof response === 'object') {
+      return this.agentReplyToMessage(response)
+    }
+    return {
+      role: raw.role === 'assistant' ? 'assistant' : 'user',
+      text: String(raw.text || ''),
+    }
+  },
+
+  applyConversationDetail(detail: RemoteConversationDetail) {
+    const messages = (detail.messages || [])
+      .map(message => this.historyMessageFromRemote(message))
+      .filter(message => Boolean(message.text || message.cards?.length || message.agentForm))
+    if (!messages.length) return
+    this.currentSessionId = sessionIdFromConversationId(detail.conversation_id)
+    this.setData({
+      showHistory: false,
+      mode: 'chat',
+      hazardMode: false,
+      messages,
+    })
+    void this.loadPendingDrafts()
   },
 
   initRecorder() {
@@ -1601,8 +1677,8 @@ Page(themed({
     }
   },
 
-  /** 把 /agent/chat 回执渲染成一条助手消息（卡片/动作/chips/缺项提示） */
-  applyAgentReply(result: AgentChatResponse, messages: Message[]) {
+  /** 把服务端回执还原成可持久化的助手消息。 */
+  agentReplyToMessage(result: AgentChatResponse): Message {
     const cards: AgentCard[] = result.cards && result.cards.length
       ? result.cards
       : (result.card ? [result.card] : [])
@@ -1645,18 +1721,21 @@ Page(themed({
       }]
       actions.splice(0, actions.length, ...actions.filter(action => action.label !== '撤销'))
     }
-    this.setData({
-      messages: [...messages, {
-        role: 'assistant',
-        text: result.reply || '智能体未返回内容',
-        cards,
-        actions,
-        chips: chips.length ? chips : undefined,
-        hint: missing,
-        agentForm,
-        inputComponents: agentForm ? undefined : (inputComponents.length ? inputComponents : undefined),
-      }],
-    })
+    return {
+      role: 'assistant',
+      text: result.reply || '智能体未返回内容',
+      cards,
+      actions,
+      chips: chips.length ? chips : undefined,
+      hint: missing,
+      agentForm,
+      inputComponents: agentForm ? undefined : (inputComponents.length ? inputComponents : undefined),
+    }
+  },
+
+  /** 把 /agent/chat 回执渲染成一条助手消息（卡片/动作/chips/缺项提示） */
+  applyAgentReply(result: AgentChatResponse, messages: Message[]) {
+    this.setData({ messages: [...messages, this.agentReplyToMessage(result)] })
   },
 
   updateAgentForm(messageIndex: number, patch: (form: AgentForm) => AgentForm) {
@@ -3279,24 +3358,60 @@ Page(themed({
     const title = userMsg ? userMsg.text.slice(0, 15) : '新对话'
     const d = new Date()
     const now = `${d.getMonth() + 1}/${d.getDate()} ${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`
-    const list = (wx.getStorageSync(HISTORY_KEY) || []) as ChatHistory[]
+    const storageKey = historyStorageKey(session.getUser()?.user_id)
+    const list = (wx.getStorageSync(storageKey) || []) as ChatHistory[]
     // 复用当前会话 id：同一会话多次保存只覆盖同一条，不产生重复记录
     const id = this.currentSessionId || Date.now()
     this.currentSessionId = id
     const entry: ChatHistory = {
       id,
+      conversationId: conversationIdFor(id),
       title,
       modelId: this.data.currentModel,
       messages,
       updatedAt: now,
     }
-    wx.setStorageSync(HISTORY_KEY, [entry, ...list.filter(h => h.id !== id)].slice(0, 30))
+    wx.setStorageSync(storageKey, [entry, ...list.filter(h => h.id !== id)].slice(0, 30))
   },
 
-  openHistory() {
+  remoteSummaryToHistory(item: RemoteConversationSummary): ChatHistory {
+    return {
+      id: sessionIdFromConversationId(item.conversation_id),
+      conversationId: item.conversation_id,
+      title: item.title || '新对话',
+      modelId: this.data.currentModel,
+      messages: [],
+      updatedAt: item.updatedAt || '',
+      messageCount: item.message_count,
+      remote: true,
+    }
+  },
+
+  async openHistory() {
     this.saveCurrentSession()
-    this.setData({ historyList: wx.getStorageSync(HISTORY_KEY) || [], showHistory: true })
-    this.loadProjectSummary()
+    const storageKey = historyStorageKey(session.getUser()?.user_id)
+    const local = (wx.getStorageSync(storageKey) || []) as ChatHistory[]
+    this.setData({
+      historyList: local,
+      showHistory: true,
+      drawerHistoryExpanded: true,
+    })
+    void this.loadProjectSummary()
+    try {
+      const result = await request<{ conversations: RemoteConversationSummary[] }>('/agent/conversations', {
+        data: { limit: 30 },
+      })
+      const remote = (result.conversations || []).map(item => {
+        const summary = this.remoteSummaryToHistory(item)
+        const cached = local.find(history => history.conversationId === summary.conversationId)
+        return cached ? { ...summary, modelId: cached.modelId, messages: cached.messages } : summary
+      })
+      const remoteIds = new Set(remote.map(item => item.conversationId))
+      const localOnly = local.filter(item => !item.conversationId || !remoteIds.has(item.conversationId))
+      this.setData({ historyList: [...remote, ...localOnly].slice(0, 30) })
+    } catch {
+      // 服务端暂时不可用时保留本地历史，不阻塞侧边栏。
+    }
   },
 
   /** 拉取当前项目概况（名称/地点/描述），用于侧边栏顶部展示与「点进去修改」回填 */
@@ -3402,11 +3517,24 @@ Page(themed({
     }
   },
 
-  loadHistoryItem(event: WechatMiniprogram.TouchEvent) {
+  async loadHistoryItem(event: WechatMiniprogram.TouchEvent) {
     const id = Number(event.currentTarget.dataset.id)
-    const list = (wx.getStorageSync(HISTORY_KEY) || []) as ChatHistory[]
-    const item = list.find(h => h.id === id)
+    const item = this.data.historyList.find(h => h.id === id)
     if (!item) return
+    if (item.conversationId) {
+      try {
+        const detail = await request<RemoteConversationDetail>(
+          `/agent/conversations/${encodeURIComponent(item.conversationId)}`,
+        )
+        this.applyConversationDetail(detail)
+        return
+      } catch {
+        if (!item.messages.length) {
+          wx.showToast({ title: '历史会话加载失败，请稍后重试', icon: 'none' })
+          return
+        }
+      }
+    }
     // 接续该历史会话：继续对话时覆盖同一条历史，而不是新建
     this.currentSessionId = item.id
     this.setData({
@@ -3418,11 +3546,27 @@ Page(themed({
     void this.loadPendingDrafts()
   },
 
-  deleteHistoryItem(event: WechatMiniprogram.TouchEvent) {
+  async deleteHistoryItem(event: WechatMiniprogram.TouchEvent) {
     const id = Number(event.currentTarget.dataset.id)
-    const list = ((wx.getStorageSync(HISTORY_KEY) || []) as ChatHistory[]).filter(h => h.id !== id)
-    wx.setStorageSync(HISTORY_KEY, list)
-    this.setData({ historyList: list })
+    const item = this.data.historyList.find(history => history.id === id)
+    if (!item) return
+    if (item.conversationId) {
+      try {
+        await request(`/agent/conversations/${encodeURIComponent(item.conversationId)}`, { method: 'DELETE' })
+      } catch (error) {
+        wx.showToast({ title: (error as Error).message || '删除失败', icon: 'none' })
+        return
+      }
+    }
+    const storageKey = historyStorageKey(session.getUser()?.user_id)
+    const local = ((wx.getStorageSync(storageKey) || []) as ChatHistory[]).filter(h => h.id !== id)
+    wx.setStorageSync(storageKey, local)
+    const historyList = this.data.historyList.filter(h => h.id !== id)
+    this.setData({ historyList })
+    if (this.currentSessionId === id) {
+      this.currentSessionId = 0
+      this.initMessages()
+    }
   },
 
   newChat() {
