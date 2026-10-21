@@ -87,4 +87,6 @@ class AgentReviewPlan(Base):
     status: Mapped[str] = mapped_column(String(24), default="draft")
     plan_json: Mapped[str] = mapped_column(Text, default="{}")
     confirmed_revision: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    executed_revision: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    execution_result_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, index=True)
