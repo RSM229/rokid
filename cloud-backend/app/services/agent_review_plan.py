@@ -11,6 +11,12 @@ ALLOWED_FORMS = {
     "gdaq_30306_weida", "anquan_jianli_rizhi",
 }
 
+# These form definitions can be materialized from the existing WorkRecord model.
+EXECUTABLE_RECORD_FORMS = {
+    "gd_b_212_pangzhan", "gd_b_213_pingxing", "gd_b_214_xunshi",
+    "acceptance_record", "gdaq_30306_weida",
+}
+
 
 def validate_plan(plan: dict[str, Any]) -> None:
     if not isinstance(plan, dict) or plan.get("schema_version") != 1:
