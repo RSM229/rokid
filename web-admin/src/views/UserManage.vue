@@ -20,6 +20,8 @@
               </el-dropdown-item>
               <el-dropdown-item v-if="canManageUsers" command="export" :disabled="exporting">
                 导出 Excel
+                <!-- 下拉菜单 teleport 到 body，scoped 样式命不中，故用内联 -->
+                <span style="color: var(--el-text-color-secondary); font-size: 12px">{{ exportScopeLabel }}</span>
               </el-dropdown-item>
               <el-dropdown-item
                 v-if="canManageUsers"
@@ -1366,11 +1368,31 @@ async function runImport(dryRun: boolean) {
   }
 }
 
+/**
+ * 「导出 Excel」菜单项上的范围提示。
+ *
+ * 账号表带**初始口令明文**，导出范围错了等于把别的项目的口令发出去，
+ * 所以点之前就要让人看清这次导的是谁 —— 不能等文件下载完才发现不对。
+ */
+const exportScopeLabel = computed(() => {
+  if (projectFilter.value === NO_PROJECT) return '（当前不可导出）'
+  if (projectFilter.value > 0) return `（${projectName(projectFilter.value)}）`
+  return '（全部项目）'
+})
+
 async function exportAccounts() {
+  // 🔴 导出跟随页面筛选（2026-10-21）：屏幕上是哪个项目的人，导出的就是那批人。
+  // 「未分配项目」后端参数表达不了（只接受具体项目 id），**不能静默导全量** ——
+  // 账号表里带初始口令明文，导错范围等于把别的项目的口令发出去，故明确拒绝并给替代做法。
+  if (projectFilter.value === NO_PROJECT) {
+    ElMessage.warning('「未分配项目」不支持导出，请切到具体项目或「全部项目」后再导出')
+    return
+  }
+  const pid = projectFilter.value > 0 ? projectFilter.value : null
   exporting.value = true
   try {
-    saveBlob((await authApi.exportUsers()) as any, exportFileName())
-    ElMessage.success('账号表已导出')
+    saveBlob((await authApi.exportUsers(pid)) as any, exportFileName(pid))
+    ElMessage.success(pid ? `已导出「${projectName(pid)}」的账号表` : '账号表已导出（全部项目）')
   } catch (error: any) {
     ElMessage.error(await blobErrorText(error, '导出失败'))
   } finally {
@@ -1378,10 +1400,14 @@ async function exportAccounts() {
   }
 }
 
-function exportFileName() {
+function exportFileName(projectId?: number | null) {
   const now = new Date()
   const pad = (value: number) => String(value).padStart(2, '0')
-  return `白泽_账号表_${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}.xlsx`
+  // 带项目名，避免同时导多个项目时分不清谁是谁（文件名非法字符替换掉）
+  const name = projectId ? projectName(projectId) : ''
+  const safe = name.replace(/[\\/:*?"<>|#]/g, '_').slice(0, 40)
+  const part = safe ? `_${safe}` : ''
+  return `白泽_账号表${part}_${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}.xlsx`
 }
 
 onMounted(async () => {
