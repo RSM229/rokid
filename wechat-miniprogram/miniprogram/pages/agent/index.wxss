@@ -99,6 +99,8 @@
 .inline-review-empty { padding: 16rpx 0; color: var(--ink-3, #6b7c93); font-size: 24rpx; }
 .inline-review-event { padding: 18rpx 0; border-top: 1rpx solid rgba(20,45,65,.10); }
 .inline-review-event-head, .inline-review-date-row, .inline-review-form-row { display: flex; align-items: center; justify-content: space-between; gap: 12rpx; }
+.inline-merge-toggle { flex: none; padding: 7rpx 12rpx; border: 1rpx solid rgba(36,95,86,.24); border-radius: 12rpx; color: #245f56; background: rgba(255,255,255,.75); font-size: 20rpx; }
+.inline-merge-toggle.selected { color: #fff; border-color: #245f56; background: #245f56; }
 .inline-review-event-title { flex: 1; font-size: 26rpx; color: var(--ink, #12253d); font-weight: 600; }
 .inline-review-label { font-size: 23rpx; color: var(--ink-3, #6b7c93); }
 .inline-review-date-status { font-size: 24rpx; font-weight: 600; }
@@ -115,6 +117,19 @@
 .inline-review-selected { margin-top: 10rpx; }
 .inline-review-issues { margin-top: 12rpx; padding: 12rpx 14rpx; border-left: 4rpx solid #c87833; background: rgba(200,120,51,.08); }
 .inline-review-issue { display: block; font-size: 22rpx; line-height: 1.6; color: #8b5427; }
+.inline-review-missing { display: flex; flex-wrap: wrap; align-items: center; gap: 8rpx; margin-top: 12rpx; padding: 10rpx 12rpx; border-radius: 12rpx; background: rgba(200,120,51,.08); }
+.inline-review-missing-title { font-size: 21rpx; color: #8b5427; font-weight: 600; }
+.inline-review-missing-item { padding: 4rpx 9rpx; border-radius: 9rpx; background: rgba(255,255,255,.8); color: #8b5427; font-size: 20rpx; }
+.inline-review-field { margin-top: 12rpx; }
+.inline-review-field > text { display: block; margin-bottom: 6rpx; color: var(--ink-3, #6b7c93); font-size: 21rpx; }
+.inline-review-field input, .inline-review-field textarea { width: 100%; min-height: 62rpx; padding: 10rpx 12rpx; box-sizing: border-box; border: 1rpx solid rgba(20,45,65,.13); border-radius: 10rpx; background: rgba(255,255,255,.82); color: var(--ink, #12253d); font-size: 23rpx; }
+.inline-review-field textarea { min-height: 92rpx; line-height: 1.5; }
+.inline-review-field-grid { display: flex; gap: 12rpx; }
+.inline-review-field-grid .inline-review-field { flex: 1; min-width: 0; }
+.inline-evidence-actions { display: flex; flex-wrap: wrap; gap: 12rpx; margin-top: 10rpx; }
+.inline-review-action { padding: 8rpx 12rpx; border-radius: 10rpx; border: 1rpx solid rgba(36,95,86,.2); background: rgba(255,255,255,.76); color: #245f56; font-size: 21rpx; }
+.inline-review-remove { margin-top: 14rpx; color: #a65d35; font-size: 21rpx; text-align: right; }
+.inline-review-merge { margin: 14rpx 0 0; height: 62rpx; line-height: 62rpx; border-radius: 12rpx; color: #fff; background: #3e7469; font-size: 23rpx; }
 .inline-review-confirm { margin: 18rpx 0 0; height: 72rpx; line-height: 72rpx; border-radius: 16rpx; color: #fff; background: #245f56; font-size: 25rpx; }
 .inline-review-confirm[disabled] { opacity: .55; }
 .inline-review-result, .inline-review-done { display: block; margin-top: 14rpx; font-size: 23rpx; color: #245f56; }

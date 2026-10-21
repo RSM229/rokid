@@ -102,20 +102,41 @@
                 </block>
                 <text wx:else class="inline-review-source">暂未提取到可显示的水印字段；原图仍已保留。</text>
                 <text wx:if="{{photo.note}}" class="inline-review-source">图片内容与原始识别：{{photo.note}}</text>
+                <view class="inline-evidence-actions">
+                  <picker wx:if="{{item.reviewEventOptions && item.reviewEventOptions.length}}" range="{{item.reviewEventOptions}}" range-key="title" data-index="{{mi}}" data-evidence="{{photo.id}}" bindchange="assignInlineEvidence">
+                    <view class="inline-review-action">加入已有事项</view>
+                  </picker>
+                  <view class="inline-review-action" data-index="{{mi}}" data-evidence="{{photo.id}}" bindtap="addInlineEventForEvidence">设为独立事项</view>
+                </view>
               </view>
             </view>
             <view wx:for="{{item.reviewEvents}}" wx:for-item="event" wx:for-index="ei" wx:key="id" class="inline-review-event">
               <view class="inline-review-event-head">
+                <view class="inline-merge-toggle {{event.mergeSelected ? 'selected' : ''}}" data-index="{{mi}}" data-id="{{event.id}}" bindtap="toggleInlineMerge">{{event.mergeSelected ? '已选' : '选择合并'}}</view>
                 <text class="inline-review-event-title">{{ei + 1}}. {{event.title}}</text>
                 <text class="inline-review-event-count">{{event.evidenceCount}} 张图片</text>
               </view>
+              <view wx:if="{{event.missingFields.length}}" class="inline-review-missing">
+                <text class="inline-review-missing-title">待补信息</text>
+                <text wx:for="{{event.missingFields}}" wx:key="*this" class="inline-review-missing-item">{{item}}</text>
+              </view>
+              <view wx:if="{{event.issues.length}}" class="inline-review-clues">
+                <text wx:for="{{event.issues}}" wx:key="*this" class="inline-review-issue">{{item}}</text>
+              </view>
+              <view class="inline-review-field">
+                <text>工作名称</text>
+                <input value="{{event.title}}" placeholder="例如：3号楼二层钢筋绑扎巡视" data-index="{{mi}}" data-id="{{event.id}}" data-field="title" bindblur="changeInlineReviewField" />
+              </view>
+              <view class="inline-review-field-grid">
+                <view class="inline-review-field"><text>地点</text><input value="{{event.location}}" placeholder="可补充" data-index="{{mi}}" data-id="{{event.id}}" data-field="location" bindblur="changeInlineReviewField" /></view>
+                <view class="inline-review-field"><text>施工部位</text><input value="{{event.section}}" placeholder="可补充" data-index="{{mi}}" data-id="{{event.id}}" data-field="section" bindblur="changeInlineReviewField" /></view>
+              </view>
+              <view class="inline-review-field"><text>工作描述</text><textarea value="{{event.content}}" auto-height maxlength="-1" placeholder="补充现场工作情况" data-index="{{mi}}" data-id="{{event.id}}" data-field="content" bindblur="changeInlineReviewField" /></view>
               <view class="inline-review-date-row">
                 <text class="inline-review-label">业务日期</text>
                 <text class="inline-review-date-status {{event.date ? 'confirmed' : 'pending'}}">{{event.date ? event.date : '待补充'}}</text>
               </view>
-              <text wx:if="{{event.dateSource}}" class="inline-review-source">日期依据：{{event.dateSource === 'watermark' ? '照片水印' : (event.dateSource === 'exif' ? '照片 EXIF' : (event.dateSource === 'user_message' ? '你的文字描述' : event.dateSource))}}</text>
-              <text wx:if="{{event.location}}" class="inline-review-detail">地点/部位：{{event.location}}{{event.locationSource === 'user_message' ? '（来自你的描述）' : ''}}</text>
-              <text wx:if="{{event.content}}" class="inline-review-detail">工作描述：{{event.content}}</text>
+              <text wx:if="{{event.dateSource}}" class="inline-review-source">日期依据：{{event.dateSource === 'watermark' ? '照片水印' : (event.dateSource === 'exif' ? '照片 EXIF' : (event.dateSource === 'watermark_or_exif' ? '照片水印/EXIF' : (event.dateSource === 'user_message' ? '你的文字描述' : event.dateSource)))}}</text>
               <text wx:if="{{event.evidenceSummary}}" class="inline-review-source">图片证据：{{event.evidenceSummary}}</text>
               <text wx:if="{{event.watermarkSummary}}" class="inline-review-source">水印字段（待核对）：{{event.watermarkSummary}}</text>
               <text wx:if="{{!event.watermarkSummary && event.evidenceCount}}" class="inline-review-source">水印字段未识别到；地点、区域、参建单位及记录表所需信息可在对话中补充。</text>
@@ -126,6 +147,10 @@
                   <input value="{{field.value}}" placeholder="未识别/未知，可补充" data-index="{{mi}}" data-evidence="{{photo.id}}" data-item="{{field.index}}" data-key="value" bindblur="changeInlineWatermarkField" />
                 </view>
                 <view class="inline-watermark-add" data-index="{{mi}}" data-evidence="{{photo.id}}" bindtap="addInlineWatermarkField">+ 补充字段或备注</view>
+                <view class="inline-evidence-actions">
+                  <view class="inline-review-action" data-index="{{mi}}" data-evidence="{{photo.id}}" bindtap="releaseInlineEvidence">移出本事项</view>
+                  <view wx:if="{{event.evidenceCount > 1}}" class="inline-review-action" data-index="{{mi}}" data-evidence="{{photo.id}}" bindtap="splitInlineEvidence">拆成独立事项</view>
+                </view>
               </view>
               <text wx:if="{{event.sourceText}}" class="inline-review-source">证据来源：{{event.sourceText}}</text>
               <view wx:if="{{event.dateOptions && event.dateOptions.length}}" class="inline-review-clues">
@@ -145,7 +170,9 @@
                 <view wx:for="{{event.recordTypeOptions}}" wx:for-item="type" wx:key="label" class="inline-review-chip form-chip {{type.checked ? 'selected' : ''}}" data-index="{{mi}}" data-id="{{event.id}}" data-type="{{type.label}}" bindtap="changeInlineReviewType">{{type.label}}</view>
               </view>
               <text wx:if="{{event.recordTypeReason}}" class="inline-review-source">判断依据：{{event.recordTypeReason}}</text>
+              <view class="inline-review-remove" data-index="{{mi}}" data-id="{{event.id}}" bindtap="removeInlineReviewEvent">删除此事项（照片保留到待分配）</view>
             </view>
+            <button wx:if="{{item.reviewMergeSelection.length >= 2}}" class="inline-review-merge" data-index="{{mi}}" bindtap="mergeInlineReview">合并已选 {{item.reviewMergeSelection.length}} 个事项</button>
             <view wx:if="{{item.reviewIssues && item.reviewIssues.length}}" class="inline-review-issues">
               <text wx:for="{{item.reviewIssues}}" wx:key="*this" class="inline-review-issue">{{item}}</text>
             </view>
@@ -227,18 +254,18 @@
           </view>
           <view wx:if="{{item.inputComponents && item.inputComponents.length}}" class="agent-input-form">
             <view wx:for="{{item.inputComponents}}" wx:for-item="inputItem" wx:key="field" class="agent-input-field">
-              <view class="agent-input-head"><text>{{inputItem.label}}{{inputItem.required ? ' *' : ''}}</text><text wx:if="inputItem.reason" class="agent-input-reason">建议</text></view>
-              <view wx:if="inputItem.recommendation" class="agent-input-recommendation">
+              <view class="agent-input-head"><text>{{inputItem.label}}{{inputItem.required ? ' *' : ''}}</text><text wx:if="{{inputItem.reason}}" class="agent-input-reason">建议</text></view>
+              <view wx:if="{{inputItem.recommendation}}" class="agent-input-recommendation">
                 <text>推荐：{{inputItem.recommendation}}</text>
                 <view class="agent-input-pick" data-message="{{mi}}" data-field="{{inputItem.field}}" data-value="{{inputItem.recommendation}}" bindtap="chooseAgentInputOption">采用</view>
               </view>
-              <view wx:if="inputItem.options && inputItem.options.length" class="agent-input-options">
+              <view wx:if="{{inputItem.options && inputItem.options.length}}" class="agent-input-options">
                 <view wx:for="{{inputItem.options}}" wx:for-item="option" wx:key="*this" class="agent-input-option {{inputItem.value === option ? 'selected' : ''}}" data-message="{{mi}}" data-field="{{inputItem.field}}" data-value="{{option}}" bindtap="chooseAgentInputOption">{{option}}</view>
               </view>
-              <picker wx:if="inputItem.control === 'date'" mode="date" value="{{inputItem.value || '2000-01-01'}}" data-message="{{mi}}" data-field="{{inputItem.field}}" bindchange="onAgentInputDateChange"><view class="agent-input-control">{{inputItem.value || '选择日期'}}　›</view></picker>
-              <textarea wx:if="inputItem.control === 'textarea'" class="agent-input-textarea" value="{{inputItem.value}}" auto-height maxlength="-1" placeholder="填写{{inputItem.label}}，也可以用下方语音或图片补充" data-message="{{mi}}" data-field="{{inputItem.field}}" bindinput="onAgentInputChange" />
-              <input wx:if="inputItem.control === 'datetime'" class="agent-input-control" value="{{inputItem.value}}" placeholder="输入日期和时间" data-message="{{mi}}" data-field="{{inputItem.field}}" bindinput="onAgentInputChange" />
-              <view wx:if="inputItem.control === 'attachment'" class="agent-input-attachment" bindtap="openAgentInputAttachments">添加照片或文件</view>
+              <picker wx:if="{{inputItem.control === 'date'}}" mode="date" value="{{inputItem.value || '2000-01-01'}}" data-message="{{mi}}" data-field="{{inputItem.field}}" bindchange="onAgentInputDateChange"><view class="agent-input-control">{{inputItem.value || '选择日期'}}　›</view></picker>
+              <textarea wx:if="{{inputItem.control === 'textarea'}}" class="agent-input-textarea" value="{{inputItem.value}}" auto-height maxlength="-1" placeholder="填写{{inputItem.label}}，也可以用下方语音或图片补充" data-message="{{mi}}" data-field="{{inputItem.field}}" bindinput="onAgentInputChange" />
+              <input wx:if="{{inputItem.control === 'datetime'}}" class="agent-input-control" value="{{inputItem.value}}" placeholder="输入日期和时间" data-message="{{mi}}" data-field="{{inputItem.field}}" bindinput="onAgentInputChange" />
+              <view wx:if="{{inputItem.control === 'attachment'}}" class="agent-input-attachment" bindtap="openAgentInputAttachments">添加照片或文件</view>
               <button class="agent-input-submit" data-message="{{mi}}" data-field="{{inputItem.field}}" bindtap="submitAgentInput">提交补充</button>
             </view>
             <text class="agent-input-channel-note">也可以直接在下方说、录音，或添加图片/文件；我会把补充内容归入当前事项。</text>

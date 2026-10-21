@@ -19,17 +19,27 @@ loaded.require = (id) => {
 loaded._compile(compiled, file)
 const model = loaded.exports
 
+function chooseRecordTypes(plan, recordType = '巡视') {
+  return plan.events.reduce((current, event) => model.editEvent(current, event.id, {
+    recordType, recordTypeConfidence: 1, recordTypeReason: '测试中由用户确认',
+  }), plan)
+}
+
 test('nine photo dates remain nine distinct candidate events and use watermark dates', () => {
-  const plan = model.createExample(1)
+  let plan = model.createExample(1)
   assert.equal(plan.evidence.length, 9)
   assert.equal(plan.events.length, 9)
   assert.equal(plan.events.filter(event => event.dateConfirmed).length, 9)
+  assert.equal(model.reviewIssues(plan).length, 9)
+  assert.match(model.reviewIssues(plan)[0], /请选择工作记录类型/)
+  plan = chooseRecordTypes(plan)
   assert.equal(model.reviewIssues(plan).length, 0)
 })
 
 test('watermark labels and values can be edited per evidence and invalidate confirmation', () => {
   let plan = model.createExample(2)
   const evidenceId = plan.events[0].evidenceIds[0]
+  plan = chooseRecordTypes(plan)
   plan = { ...plan, evidence: plan.evidence.map(item => item.id === evidenceId ? { ...item, watermarkItems: [{ label: '备注', value: '' }] } : item) }
   plan = model.confirmPlan(plan)
   plan = model.editEvidenceWatermark(plan, evidenceId, 0, 'value', '补充：夜间施工')
@@ -157,6 +167,7 @@ test('split, merge and unassigned/assignment preserve every piece of evidence', 
 
 test('confirm does not require a form or manual date; any later edit invalidates confirmation', () => {
   let plan = model.createExample(0)
+  plan = chooseRecordTypes(plan)
   plan = model.confirmPlan(plan)
   assert.equal(plan.confirmedRevision, plan.revision)
   plan = model.editRequest(plan, '改过的工作要求')
@@ -174,8 +185,44 @@ test('text-only requests can be confirmed without requiring photo evidence', () 
   let plan = model.createExample(4)
   assert.equal(plan.evidence.length, 0)
   for (const event of plan.events) plan = model.editEvent(plan, event.id, { date: '2026-10-20', dateConfirmed: true })
+  plan = chooseRecordTypes(plan)
   assert.equal(model.reviewIssues(plan).length, 0)
   assert.equal(model.confirmPlan(plan).confirmedRevision, plan.revision)
+})
+
+test('server item plan is adapted without re-grouping and keeps every evidence item accounted for', () => {
+  const evidence = [
+    { id: 'p1', image: 'p1.jpg', observedDate: '2026-10-18', location: 'A区', section: '3号楼二层', note: '' },
+    { id: 'p2', image: 'p2.jpg', observedDate: '2026-10-18', location: 'A区', section: '3号楼二层', note: '' },
+    { id: 'p3', image: 'p3.jpg', observedDate: '', location: '', section: '', note: '' },
+  ]
+  const plan = model.reviewPlanFromItemPlan({
+    items: [
+      {
+        id: 'item_1', record_type: '巡视',
+        fields: {
+          record_date: { value: '2026-10-18', source: 'watermark', status: 'evidence_extracted' },
+          section: { value: '3号楼二层', source: 'watermark', status: 'evidence_extracted' },
+        },
+        evidence_indexes: [0, 1], missing_fields: ['location'], issues: ['地点待核对'],
+        notes: ['钢筋绑扎'], confidence: 0.9, status: 'candidate',
+      },
+      {
+        id: 'item_2', record_type: '验收',
+        fields: { record_date: { value: '2026-10-19', source: 'user_message', status: 'user_stated_candidate' } },
+        evidence_indexes: [], missing_fields: ['location', 'section'], issues: [], confidence: 0.75, status: 'candidate',
+      },
+    ],
+    unassigned_evidence_indexes: [],
+    issues: ['识别到 2 个可能事项；合并或拆分必须由用户确认'],
+  }, evidence, '记录今天的工作')
+  assert.deepEqual(plan.events.map(event => event.id), ['item_1', 'item_2'])
+  assert.deepEqual(plan.events[0].evidenceIds, ['p1', 'p2'])
+  assert.equal(plan.events[0].dateSource, 'watermark')
+  assert.deepEqual(plan.events[0].missingFields, ['location'])
+  assert.deepEqual(plan.unassignedIds, ['p3'])
+  assert.ok(plan.notices.some(notice => notice.includes('合并或拆分')))
+  assert.equal(plan.evidence.length, 3)
 })
 
 test('removing an event releases its evidence without deleting photos', () => {

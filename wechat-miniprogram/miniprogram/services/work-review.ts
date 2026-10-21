@@ -36,6 +36,7 @@ export interface WorkEvent {
   id: string
   title: string
   location: string
+  section?: string
   date: string
   dateConfirmed: boolean
   dateSource?: string
@@ -48,6 +49,11 @@ export interface WorkEvent {
   fieldSources?: Record<string, string>
   content: string
   fields?: Record<string, Record<string, unknown>>
+  /** Fields the planner could not establish from user text, watermark/EXIF or vision. */
+  missingFields?: string[]
+  /** Item-level conflicts and caveats retained for review in the conversation. */
+  issues?: string[]
+  itemStatus?: string
 }
 export interface ReviewPlan {
   schemaVersion: 1
@@ -66,6 +72,45 @@ export interface ReviewPlan {
   executionResult?: ReviewExecutionResult | null
   /** 对话内解释证据冲突或需要确认的原因。 */
   notices?: string[]
+  /** Immutable request-plan snapshot used to create this draft. */
+  requestPlan?: Record<string, unknown>
+}
+
+export interface RequestPlanFact {
+  field: string
+  value: unknown
+  source: string
+  status: string
+  confidence?: number
+}
+
+export interface RequestPlanField {
+  value: unknown
+  source: string
+  status: string
+}
+
+export interface RequestPlanItem {
+  id: string
+  record_type?: string | null
+  record_type_confidence?: number
+  fields: Record<string, RequestPlanField>
+  evidence_indexes: number[]
+  notes?: string[]
+  missing_fields?: string[]
+  issues?: string[]
+  confidence?: number
+  status?: string
+}
+
+export interface RequestPlanItemPlan {
+  items: RequestPlanItem[]
+  candidate_count?: number
+  unassigned_evidence_indexes: number[]
+  requires_confirmation?: boolean
+  issues?: string[]
+  grouping_fields?: string[]
+  write_allowed?: boolean
 }
 
 export interface ReviewEvidenceGroup {
@@ -151,7 +196,7 @@ function fromServerPlan(result: ReviewPlanResponse): ReviewPlan {
     })),
     events: events.map(item => ({
       id: String(item.id || ''), title: String(item.title || ''),
-      location: String(item.location || ''), content: String(item.content || ''),
+      location: String(item.location || ''), section: String(item.section || ''), content: String(item.content || ''),
       date: String(item.date || ''), dateConfirmed: item.date_confirmed === true,
       dateSource: String(item.date_source || ''),
       evidenceIds: Array.isArray(item.evidence_ids) ? item.evidence_ids.map(String) : [],
@@ -161,6 +206,9 @@ function fromServerPlan(result: ReviewPlanResponse): ReviewPlan {
       recordTypeReason: String(item.record_type_reason || ''),
       fieldSources: item.field_sources && typeof item.field_sources === 'object' ? item.field_sources as Record<string, string> : {},
       fields: item.fields && typeof item.fields === 'object' ? item.fields as Record<string, Record<string, unknown>> : {},
+      missingFields: Array.isArray(item.missing_fields) ? item.missing_fields.map(String) : [],
+      issues: Array.isArray(item.issues) ? item.issues.map(String) : [],
+      itemStatus: String(item.item_status || ''),
     })),
     unassignedIds: Array.isArray(raw.unassigned_ids) ? raw.unassigned_ids.map(String) : [],
     confirmedRevision: result.confirmed_revision,
@@ -171,6 +219,7 @@ function fromServerPlan(result: ReviewPlanResponse): ReviewPlan {
     executedRevision: result.executed_revision == null ? null : Number(result.executed_revision),
     executionResult: result.execution_result || null,
     notices: Array.isArray(raw.notices) ? raw.notices.map(String) : [],
+    requestPlan: raw.request_plan && typeof raw.request_plan === 'object' ? raw.request_plan as Record<string, unknown> : undefined,
   }
   validatePlan(plan)
   return plan
@@ -188,7 +237,7 @@ function toServerPlan(plan: ReviewPlan): Record<string, unknown> {
       watermark_status: item.watermarkStatus || (item.watermarkAvailable ? 'recognized' : 'unavailable'),
     })),
     events: plan.events.map(item => ({
-      id: item.id, title: item.title, location: item.location, content: item.content,
+      id: item.id, title: item.title, location: item.location, section: item.section || '', content: item.content,
       date: item.date, date_confirmed: item.dateConfirmed,
       date_source: item.dateSource || '',
       evidence_ids: item.evidenceIds, forms: item.forms.map(value => FORM_CODE_BY_LABEL[value] || value),
@@ -197,9 +246,13 @@ function toServerPlan(plan: ReviewPlan): Record<string, unknown> {
       record_type_reason: item.recordTypeReason || '',
       field_sources: item.fieldSources || {},
       fields: item.fields || {},
+      missing_fields: item.missingFields || [],
+      issues: item.issues || [],
+      item_status: item.itemStatus || '',
     })),
     unassigned_ids: plan.unassignedIds,
     notices: plan.notices || [],
+    request_plan: plan.requestPlan || {},
   }
 }
 
@@ -387,6 +440,104 @@ export function groupReviewEvidence(
   return groups
 }
 
+function requestFieldValue(item: RequestPlanItem, key: string): string {
+  const field = item.fields?.[key]
+  return String(field?.value == null ? '' : field.value).trim()
+}
+
+/**
+ * Adapt the server-owned item plan into the editable draft consumed by chat.
+ * The adapter never invents an event count: item IDs, evidence indexes and
+ * unresolved fields all come from the planner. Evidence the planner could not
+ * place stays visible in the unassigned pool.
+ */
+export function reviewPlanFromItemPlan(
+  itemPlan: RequestPlanItemPlan,
+  evidence: Evidence[],
+  requestText: string,
+  notices: string[] = [],
+  requestPlan?: Record<string, unknown>,
+): ReviewPlan {
+  const usedEventIds = new Set<string>()
+  const events: WorkEvent[] = []
+  for (const [index, item] of (itemPlan.items || []).entries()) {
+    const baseId = String(item.id || `item-${index + 1}`)
+    let eventId = baseId
+    let suffix = 2
+    while (usedEventIds.has(eventId)) eventId = `${baseId}-${suffix++}`
+    usedEventIds.add(eventId)
+    const evidenceIds = [...new Set((item.evidence_indexes || [])
+      .map(evidenceIndex => evidence[evidenceIndex]?.id)
+      .filter((id): id is string => Boolean(id)))]
+    const date = requestFieldValue(item, 'record_date')
+    const project = requestFieldValue(item, 'project')
+    const location = requestFieldValue(item, 'location')
+    const section = requestFieldValue(item, 'section')
+    const recordType = ['巡视', '验收', '见证', '旁站', '待定'].includes(String(item.record_type || ''))
+      ? String(item.record_type)
+      : '待定'
+    const dateField = item.fields?.record_date
+    const locationField = item.fields?.location
+    const sectionField = item.fields?.section
+    const notes = (item.notes || []).map(String).filter(Boolean)
+    const place = [project, section, location].filter(Boolean).join(' / ')
+    const title = notes[0]?.slice(0, 80) || (place ? `${recordType === '待定' ? '现场工作' : recordType} · ${place}` : '')
+    events.push({
+      id: eventId,
+      title: title || requestText.trim().slice(0, 80) || '现场工作事项（待核对）',
+      location,
+      section,
+      date,
+      dateConfirmed: Boolean(date),
+      dateSource: dateField?.source || '',
+      evidenceIds,
+      forms: [],
+      recordType,
+      recordTypeConfidence: typeof item.record_type_confidence === 'number' ? item.record_type_confidence : 0,
+      recordTypeReason: recordType === '待定' ? '尚未确定记录类型，请从下方选择' : '由服务端受控动作和语义候选归一化',
+      fieldSources: {
+        ...(date ? { date: dateField?.source || 'candidate' } : {}),
+        ...(location ? { location: locationField?.source || 'candidate' } : {}),
+        ...(section ? { section: sectionField?.source || 'candidate' } : {}),
+      },
+      content: requestText.trim(),
+      missingFields: [...new Set((item.missing_fields || []).map(String))],
+      issues: [...new Set((item.issues || []).map(String))],
+      itemStatus: item.status || '',
+    })
+  }
+
+  const knownIds = new Set(evidence.map(item => item.id))
+  const assigned = new Set(events.flatMap(event => event.evidenceIds))
+  const unassignedIds: string[] = []
+  for (const evidenceIndex of itemPlan.unassigned_evidence_indexes || []) {
+    const id = evidence[evidenceIndex]?.id
+    if (id && knownIds.has(id) && !assigned.has(id) && !unassignedIds.includes(id)) unassignedIds.push(id)
+  }
+  for (const item of evidence) {
+    if (!assigned.has(item.id) && !unassignedIds.includes(item.id)) unassignedIds.push(item.id)
+  }
+
+  const plan: ReviewPlan = {
+    schemaVersion: 1,
+    scenario: 0,
+    revision: 1,
+    requestText: requestText.trim() || '用户上传资料，尚未说明整理用途',
+    evidence,
+    events,
+    unassignedIds,
+    confirmedRevision: null,
+    notices: [...new Set([
+      ...notices,
+      ...(itemPlan.issues || []).map(String),
+      ...events.flatMap(event => event.issues || []),
+    ].filter(Boolean))],
+    requestPlan,
+  }
+  validatePlan(plan)
+  return plan
+}
+
 /** Fields whose known watermark values disagree with the record being amended. */
 export function evidenceTargetConflicts(
   evidence: Evidence[],
@@ -427,6 +578,8 @@ export function validatePlan(plan: ReviewPlan): void {
     if (event.recordType && !['巡视', '验收', '见证', '旁站', '待定'].includes(event.recordType)) throw new Error('记录类型无效')
     if (event.recordTypeConfidence != null && (typeof event.recordTypeConfidence !== 'number' || event.recordTypeConfidence < 0 || event.recordTypeConfidence > 1)) throw new Error('记录类型置信度无效')
     if (new Set(event.forms).size !== event.forms.length || event.forms.some(form => !FORM_TYPES.includes(form))) throw new Error('表式无效')
+    if (event.missingFields && (!Array.isArray(event.missingFields) || event.missingFields.some(field => typeof field !== 'string'))) throw new Error('缺项信息无效')
+    if (event.issues && (!Array.isArray(event.issues) || event.issues.some(issue => typeof issue !== 'string'))) throw new Error('事项提示无效')
   }
   if (plan.confirmedRevision !== null && plan.confirmedRevision !== plan.revision) throw new Error('确认版本已过期')
 }
@@ -447,7 +600,7 @@ function revised(plan: ReviewPlan, patch: Partial<ReviewPlan>): ReviewPlan {
 export function editRequest(plan: ReviewPlan, requestText: string): ReviewPlan {
   return revised(plan, { requestText })
 }
-export function editEvent(plan: ReviewPlan, id: string, patch: Partial<Pick<WorkEvent, 'title' | 'location' | 'date' | 'dateConfirmed' | 'dateSource' | 'forms' | 'content' | 'recordType' | 'recordTypeConfidence' | 'recordTypeReason'>>): ReviewPlan {
+export function editEvent(plan: ReviewPlan, id: string, patch: Partial<Pick<WorkEvent, 'title' | 'location' | 'section' | 'date' | 'dateConfirmed' | 'dateSource' | 'forms' | 'content' | 'recordType' | 'recordTypeConfidence' | 'recordTypeReason' | 'fieldSources' | 'missingFields' | 'issues'>>): ReviewPlan {
   if (!plan.events.some(event => event.id === id)) throw new Error('事项不存在')
   return revised(plan, { events: plan.events.map(event => event.id === id ? { ...event, ...patch } : event) })
 }
@@ -514,13 +667,17 @@ export function mergeEvents(plan: ReviewPlan, selectedIds: string[], newId: stri
   const dates = [...new Set(selected.map(event => event.date))]
   const merged: WorkEvent = {
     ...newEvent(newId, selected.flatMap(event => event.evidenceIds), dates.length === 1 ? dates[0] : ''),
-    title: '合并事项（待核对）', forms: [...new Set(selected.flatMap(event => event.forms))],
+    title: [...new Set(selected.map(event => event.title).filter(Boolean))].join('；').slice(0, 80) || '合并事项（待核对）',
+    forms: [...new Set(selected.flatMap(event => event.forms))],
     recordType: selected.every(event => event.recordType === selected[0].recordType) ? (selected[0].recordType || '待定') : '待定',
     recordTypeConfidence: selected.every(event => event.recordType === selected[0].recordType) ? Math.min(...selected.map(event => event.recordTypeConfidence || 0)) : 0,
     recordTypeReason: '合并事项后需要重新核对记录类型',
     content: selected.map(event => event.content).filter(Boolean).join('\n'),
     location: [...new Set(selected.map(event => event.location).filter(Boolean))].join('；'),
+    section: [...new Set(selected.map(event => event.section).filter(Boolean))].join('；'),
     fields,
+    missingFields: [...new Set(selected.flatMap(event => event.missingFields || []))],
+    issues: [...new Set(selected.flatMap(event => event.issues || []))],
   }
   const first = plan.events.findIndex(event => selectedIds.includes(event.id))
   const events = plan.events.filter(event => !selectedIds.includes(event.id))
@@ -536,6 +693,7 @@ export function reviewIssues(plan: ReviewPlan): string[] {
   plan.events.forEach((event, i) => {
     if (!event.title.trim()) issues.push(`事项 ${i + 1} 缺少名称`)
     if (!event.evidenceIds.length && !event.content.trim()) issues.push(`事项 ${i + 1} 缺少工作描述或资料`)
+    if (!event.recordType || event.recordType === '待定') issues.push(`事项 ${i + 1} 请选择工作记录类型`)
   })
   return issues
 }
