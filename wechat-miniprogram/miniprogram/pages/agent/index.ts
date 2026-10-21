@@ -8,7 +8,10 @@ import { getCached, invalidateCache, invalidateByPrefix, CACHE_KEYS } from '../.
 import { ensurePrivacy } from '../../utils/privacy'
 import { themed } from '../../utils/theme'
 import { cleanMarkdown } from '../../utils/markdown'
-import { createReviewPlan, type ReviewPlan } from '../../services/work-review'
+import { createReviewPlan, saveReviewPlan, confirmReviewPlan, executeReviewPlan, editEvent, confirmPlan, reviewIssues, type ReviewPlan } from '../../services/work-review'
+
+/** 整理计划当前可直接执行的记录表式；其余表式属于独立文书/台账流程。 */
+const INLINE_REVIEW_FORMS = ['巡视记录', '危大工程巡视记录', '旁站记录', '平行检验记录', '验收记录']
 
 const recorder = wx.getRecorderManager()
 const player = wx.createInnerAudioContext()
@@ -37,6 +40,21 @@ interface Message {
   cards?: AgentCard[]
   /** 追问的快速候选值（点击即作为回答发送，如 巡视/旁站/验收/见证） */
   chips?: string[]
+  reviewPlan?: ReviewPlan
+  reviewEvents?: Array<{
+    id: string
+    title: string
+    date: string
+    dateConfirmed: boolean
+    dateOptions: string[]
+    forms: string[]
+    formsText: string
+    formOptions: Array<{ label: string; checked: boolean }>
+    evidenceCount: number
+  }>
+  reviewBusy?: boolean
+  reviewResult?: string
+  reviewIssues?: string[]
 }
 
 /** /agent/chat 响应：kind=action 表示服务端已执行动作，chat 表示纯问答 */
@@ -177,6 +195,7 @@ Page(themed({
   pendingRecordCancel: false,
   /** 当前会话在本地历史里的 id（稳定不变，重复保存=覆盖同一条，避免产生重复历史） */
   currentSessionId: 0,
+  inlinePlanSaveQueues: {} as Record<string, Promise<void>>,
 
   data: {
     messages: [] as Message[],
@@ -603,6 +622,7 @@ Page(themed({
     const runHazardDetection = needsHazardDetection(note)
     /** 每张图的原始识别结果：聊天里只展示结论，落库时复用同一份结论（不再调一次视觉模型） */
     const detections: { path: string; raw: any }[] = []
+    const watermarks: Record<string, string>[] = []
     /** 水印读到的拍摄时间/地点/天气——相机记的比转述可靠，用来预填记录字段 */
     const wmFields: Record<string, string> = {}
     try {
@@ -613,6 +633,7 @@ Page(themed({
           const det = runHazardDetection ? await this.detectImageOnce(img.path) : null
           return { path: img.path, det, wm }
         }))
+        watermarks.push(...results.map(result => result.wm))
         results.forEach((res, i) => {
           if (res.det) detections.push({ path: res.path, raw: res.det.raw })
           const wmLine = this.formatWatermark(res.wm)
@@ -641,7 +662,7 @@ Page(themed({
       const material = blocks.join('\n\n')
       if (!runHazardDetection) {
         if (images.length) {
-          await this.createReviewPlanFromAttachments(note, images)
+          await this.createReviewPlanFromAttachments(note, images, watermarks)
           return
         }
         await this.runAgentWithMaterial(
@@ -682,21 +703,20 @@ Page(themed({
     }
   },
 
-  async createReviewPlanFromAttachments(note: string, images: Attachment[]) {
+  async createReviewPlanFromAttachments(note: string, images: Attachment[], watermarks: Record<string, string>[]) {
     try {
       if (!this.currentSessionId) this.currentSessionId = Date.now()
       const conversationId = conversationIdFor(this.currentSessionId)
       const evidence: ReviewPlan['evidence'] = []
-      for (const image of images) {
+      for (const [index, image] of images.entries()) {
         const uploaded = await uploadImage<{ id: number; url: string; watermark?: Record<string, string> }>(image.path, {
           source: 'agent_review_plan', trigger_detection: false,
         })
-        const watermark = uploaded.watermark || {}
+        const watermark = watermarks[index] && Object.keys(watermarks[index]).length
+          ? watermarks[index]
+          : uploaded.watermark || {}
         const takenAt = String(watermark.taken_at || '')
-        const matched = takenAt.match(/(\d{4})\s*[-/年]\s*(\d{1,2})\s*[-/月]\s*(\d{1,2})/)
-        const observedDate = matched
-          ? `${matched[1]}-${matched[2].padStart(2, '0')}-${matched[3].padStart(2, '0')}`
-          : ''
+        const observedDate = this.watermarkDate(takenAt)
         const details = [watermark.location, watermark.section, takenAt].filter(Boolean).join(' · ')
         evidence.push({
           id: String(uploaded.id), mediaId: uploaded.id,
@@ -710,19 +730,25 @@ Page(themed({
         dateGroups.set(item.observedDate, [...(dateGroups.get(item.observedDate) || []), item.id])
       }
       const hasActionIntent = this.wantsActionIntent(note)
+      const formByIntent: Array<[RegExp, string]> = [
+        [/危大/, '危大工程巡视记录'], [/旁站/, '旁站记录'], [/平行检验/, '平行检验记录'],
+        [/验收/, '验收记录'], [/巡视|巡查/, '巡视记录'],
+      ]
+      const suggestedForms = formByIntent.filter(([pattern]) => pattern.test(note)).map(([, form]) => form)
+      const selectedForms = suggestedForms.length === 1 ? suggestedForms : []
       const events: ReviewPlan['events'] = hasActionIntent ? [...dateGroups.entries()].map(([date, evidenceIds], index) => ({
         id: `event-${index + 1}`, title: note.trim().slice(0, 80) || '现场工作事项（待核对）',
-        location: '', date, dateConfirmed: false, evidenceIds, forms: [], content: note.trim(),
+        location: '', date, dateConfirmed: false, evidenceIds, forms: selectedForms, content: note.trim(),
       })) : []
       const datedIds = new Set(events.flatMap(event => event.evidenceIds))
       const undatedIds = hasActionIntent ? evidence.filter(item => !datedIds.has(item.id)).map(item => item.id) : []
       if (note.trim() && undatedIds.length) events.push({
         id: `event-${events.length + 1}`, title: note.trim().slice(0, 80) || '现场工作事项（待核对）',
-        location: '', date: '', dateConfirmed: false, evidenceIds: undatedIds, forms: [], content: note.trim(),
+        location: '', date: '', dateConfirmed: false, evidenceIds: undatedIds, forms: selectedForms, content: note.trim(),
       })
       if (hasActionIntent && events.length === 0) events.push({
         id: 'event-1', title: note.trim().slice(0, 80) || '现场工作事项（待核对）',
-        location: '', date: '', dateConfirmed: false, evidenceIds: evidence.map(item => item.id), forms: [], content: note.trim(),
+        location: '', date: '', dateConfirmed: false, evidenceIds: evidence.map(item => item.id), forms: selectedForms, content: note.trim(),
       })
       const assigned = new Set(events.flatMap(event => event.evidenceIds))
       const plan: ReviewPlan = {
@@ -733,14 +759,128 @@ Page(themed({
       const saved = await createReviewPlan(conversationId, plan)
       this.addMessage({
         role: 'assistant',
-        text: `已把 ${evidence.length} 张图片保存为整理资料，水印日期用于生成候选分组，用户描述已原样保留。计划尚未创建正式业务记录，请核对事项、日期和表式。`,
-        actions: [{ label: '整理资料', command: `navigate:/pages/work-review/index?planId=${saved.serverId}` }],
+        text: `已整理 ${evidence.length} 张图片${dateGroups.size ? `，识别到 ${dateGroups.size} 个照片日期` : ''}。请在对话中核对日期并选择要生成的记录类型。确认前不会创建正式记录。`,
+        reviewPlan: saved,
+        reviewEvents: this.inlineReviewEvents(saved),
+        reviewIssues: reviewIssues(saved),
       })
-      wx.navigateTo({ url: `/pages/work-review/index?planId=${saved.serverId}` })
     } catch (error) {
       this.addMessage({ role: 'assistant', text: `整理计划创建失败：${(error as Error).message}。已上传的资料不会自动创建业务记录。` })
     } finally {
       this.setData({ loading: false })
+    }
+  },
+
+  watermarkDate(value: string): string {
+    const matched = String(value || '').match(/(\d{4})\s*[-/.年]\s*(\d{1,2})\s*[-/.月]\s*(\d{1,2})/)
+    if (!matched) return ''
+    const year = Number(matched[1]), month = Number(matched[2]), day = Number(matched[3])
+    const date = new Date(Date.UTC(year, month - 1, day))
+    if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return ''
+    return `${matched[1]}-${matched[2].padStart(2, '0')}-${matched[3].padStart(2, '0')}`
+  },
+
+  inlineReviewEvents(plan: ReviewPlan) {
+    return plan.events.map(event => ({
+      id: event.id, title: event.title, date: event.date, dateConfirmed: event.dateConfirmed,
+      dateOptions: [...new Set(plan.evidence.filter(item => event.evidenceIds.includes(item.id)).map(item => item.observedDate).filter(Boolean))],
+      forms: event.forms, formsText: event.forms.join('、'),
+      formOptions: INLINE_REVIEW_FORMS.map(label => ({ label, checked: event.forms.includes(label) })),
+      evidenceCount: event.evidenceIds.length,
+    }))
+  },
+
+  updateInlineReview(index: number, candidate: ReviewPlan) {
+    const messages = [...this.data.messages]
+    const message = { ...messages[index], reviewPlan: candidate, reviewEvents: this.inlineReviewEvents(candidate), reviewIssues: reviewIssues(candidate), reviewResult: '' }
+    messages[index] = message
+    this.setData({ messages })
+    if (!candidate.serverId) return Promise.reject(new Error('整理计划尚未保存到服务端'))
+    const key = String(candidate.serverId)
+    const previous = this.inlinePlanSaveQueues[key] || Promise.resolve()
+    const task = previous.catch(() => {}).then(async () => {
+      const current = this.data.messages[index]?.reviewPlan
+      if (!current?.serverId || (current.serverRevision || 0) >= current.revision) return
+      const saved = await saveReviewPlan(current, current.serverRevision || current.revision - 1)
+      const latestMessages = [...this.data.messages]
+      const latest = latestMessages[index]
+      if (!latest?.reviewPlan || latest.reviewPlan.serverId !== saved.serverId) return
+      const latestPlan = latest.reviewPlan
+      const plan = latestPlan.revision === current.revision
+        ? saved
+        : { ...latestPlan, serverRevision: saved.serverRevision }
+      latestMessages[index] = { ...latest, reviewPlan: plan, reviewEvents: this.inlineReviewEvents(plan), reviewIssues: reviewIssues(plan) }
+      this.setData({ messages: latestMessages })
+    })
+    this.inlinePlanSaveQueues[key] = task
+    return task
+  },
+
+  changeInlineReviewDate(event: WechatMiniprogram.PickerChange) {
+    const index = Number(event.currentTarget.dataset.index)
+    const id = String(event.currentTarget.dataset.id)
+    const plan = this.data.messages[index]?.reviewPlan
+    if (!plan) return
+    const candidate = editEvent(plan, id, { date: String(event.detail.value), dateConfirmed: true })
+    void this.updateInlineReview(index, candidate).catch(error => wx.showToast({ title: `日期保存失败：${(error as Error).message}`, icon: 'none' }))
+  },
+
+  adoptInlineReviewDate(event: WechatMiniprogram.TouchEvent) {
+    const index = Number(event.currentTarget.dataset.index)
+    const id = String(event.currentTarget.dataset.id)
+    const date = String(event.currentTarget.dataset.date)
+    const plan = this.data.messages[index]?.reviewPlan
+    if (!plan) return
+    const candidate = editEvent(plan, id, { date, dateConfirmed: true })
+    void this.updateInlineReview(index, candidate).catch(error => wx.showToast({ title: `日期保存失败：${(error as Error).message}`, icon: 'none' }))
+  },
+
+  toggleInlineReviewForm(event: WechatMiniprogram.TouchEvent) {
+    const index = Number(event.currentTarget.dataset.index)
+    const id = String(event.currentTarget.dataset.id)
+    const form = String(event.currentTarget.dataset.form)
+    const plan = this.data.messages[index]?.reviewPlan
+    const target = plan?.events.find(item => item.id === id)
+    if (!plan || !target) return
+    const forms = target.forms.includes(form) ? target.forms.filter(value => value !== form) : [...target.forms, form]
+    const candidate = editEvent(plan, id, { forms })
+    void this.updateInlineReview(index, candidate).catch(error => wx.showToast({ title: `表式保存失败：${(error as Error).message}`, icon: 'none' }))
+  },
+
+  async confirmInlineReview(event: WechatMiniprogram.TouchEvent) {
+    const index = Number(event.currentTarget.dataset.index)
+    const message = this.data.messages[index]
+    let plan = message?.reviewPlan
+    if (!plan || message.reviewBusy) return
+    const issues = reviewIssues(plan)
+    if (issues.length) {
+      wx.showToast({ title: issues[0], icon: 'none' })
+      return
+    }
+    const messages = [...this.data.messages]
+    messages[index] = { ...message, reviewBusy: true, reviewResult: '' }
+    this.setData({ messages })
+    try {
+      const key = String(plan.serverId || '')
+      await this.inlinePlanSaveQueues[key]
+      plan = this.data.messages[index]?.reviewPlan || plan
+      plan = confirmPlan(plan)
+      const confirmed = await confirmReviewPlan(plan, plan.serverRevision || plan.revision)
+      const savedMessages = [...this.data.messages]
+      savedMessages[index] = { ...savedMessages[index], reviewPlan: confirmed, reviewEvents: this.inlineReviewEvents(confirmed) }
+      this.setData({ messages: savedMessages })
+      const executed = await executeReviewPlan(confirmed, confirmed.serverRevision || confirmed.revision)
+      const finalMessages = [...this.data.messages]
+      finalMessages[index] = { ...finalMessages[index], reviewPlan: executed, reviewEvents: this.inlineReviewEvents(executed), reviewResult: `已生成 ${executed.executionResult?.created_count || 0} 条记录。` }
+      this.setData({ messages: finalMessages })
+    } catch (error) {
+      const latest = [...this.data.messages]
+      latest[index] = { ...latest[index], reviewResult: `暂未生成：${(error as Error).message}` }
+      this.setData({ messages: latest })
+    } finally {
+      const latest = [...this.data.messages]
+      if (latest[index]) latest[index] = { ...latest[index], reviewBusy: false }
+      this.setData({ messages: latest })
     }
   },
 

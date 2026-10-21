@@ -43,7 +43,7 @@
         </view>
       </view>
       <block wx:else>
-        <view wx:for="{{messages}}" wx:key="index" class="message {{item.role}}" id="msg-{{index}}">
+        <view wx:for="{{messages}}" wx:for-index="mi" wx:key="index" class="message {{item.role}}" id="msg-{{mi}}">
           <view class="bubble">
             <image wx:if="{{item.image}}" class="msg-image" src="{{item.image}}" mode="widthFix" data-url="{{item.image}}" bindtap="previewImageUrl" />
             <view wx:if="{{item.images && item.images.length}}" class="msg-images">
@@ -64,6 +64,47 @@
               <text wx:if="{{cd.sub}}" class="agent-card-sub">{{cd.sub}}</text>
               <text wx:if="{{cd.time}}" class="agent-card-time">{{cd.time}}</text>
             </view>
+          </view>
+          <!-- 整理计划直接在对话中完成：识别日期是候选，点击后才确认，不再跳转独立页面。 -->
+          <view wx:if="{{item.reviewPlan}}" class="inline-review">
+            <view class="inline-review-head">
+              <text class="inline-review-title">整理计划</text>
+              <text class="inline-review-meta">{{item.reviewPlan.evidence.length}} 张图片 · {{item.reviewPlan.events.length}} 个事项</text>
+            </view>
+            <view wx:if="{{!item.reviewEvents || !item.reviewEvents.length}}" class="inline-review-empty">尚未判断整理用途，请在消息中补充要做什么。</view>
+            <view wx:for="{{item.reviewEvents}}" wx:for-item="event" wx:for-index="ei" wx:key="id" class="inline-review-event">
+              <view class="inline-review-event-head">
+                <text class="inline-review-event-title">{{ei + 1}}. {{event.title}}</text>
+                <text class="inline-review-event-count">{{event.evidenceCount}} 张图片</text>
+              </view>
+              <view class="inline-review-date-row">
+                <text class="inline-review-label">业务日期</text>
+                <text class="inline-review-date-status {{event.dateConfirmed ? 'confirmed' : 'pending'}}">{{event.dateConfirmed ? event.date : '待确认'}}</text>
+              </view>
+              <view wx:if="{{event.dateOptions && event.dateOptions.length}}" class="inline-review-clues">
+                <text class="inline-review-clue-label">照片水印识别到：</text>
+                <view class="inline-review-chip-row">
+                  <view wx:for="{{event.dateOptions}}" wx:for-item="date" wx:key="*this" class="inline-review-chip {{event.date === date && event.dateConfirmed ? 'selected' : ''}}" data-index="{{mi}}" data-id="{{event.id}}" data-date="{{date}}" bindtap="adoptInlineReviewDate">采用 {{date}}</view>
+                </view>
+              </view>
+              <picker mode="date" value="{{event.date || '2000-01-01'}}" data-index="{{mi}}" data-id="{{event.id}}" bindchange="changeInlineReviewDate">
+                <view class="inline-review-date-picker">{{event.dateConfirmed ? '修改业务日期' : (event.dateOptions && event.dateOptions.length ? '日期不一致？手动选择' : '选择业务日期')}} <text>▾</text></view>
+              </picker>
+              <view class="inline-review-form-row">
+                <text class="inline-review-label">拟生成表式</text>
+                <text wx:if="{{!event.forms.length}}" class="inline-review-date-status pending">待选择</text>
+              </view>
+              <view class="inline-review-chip-row">
+                <view wx:for="{{event.formOptions}}" wx:for-item="form" wx:key="label" class="inline-review-chip form-chip {{form.checked ? 'selected' : ''}}" data-index="{{mi}}" data-id="{{event.id}}" data-form="{{form.label}}" bindtap="toggleInlineReviewForm">{{form.label}}</view>
+              </view>
+              <view wx:if="{{event.forms.length}}" class="inline-review-selected">已选择：{{event.formsText}}</view>
+            </view>
+            <view wx:if="{{item.reviewIssues && item.reviewIssues.length}}" class="inline-review-issues">
+              <text wx:for="{{item.reviewIssues}}" wx:key="*this" class="inline-review-issue">{{item}}</text>
+            </view>
+            <text wx:if="{{item.reviewResult}}" class="inline-review-result">{{item.reviewResult}}</text>
+            <button wx:if="{{item.reviewPlan.status !== 'executed'}}" class="inline-review-confirm" loading="{{item.reviewBusy}}" bindtap="confirmInlineReview" data-index="{{mi}}">{{item.reviewBusy ? '正在生成' : '确认并生成记录'}}</button>
+            <text wx:if="{{item.reviewPlan.status === 'executed'}}" class="inline-review-done">已完成建档，正式记录已创建。</text>
           </view>
           <!-- 会话内的操作按钮（如语音提取后的「查看表单」）仍跟随气泡 -->
           <view wx:if="{{item.hint || (item.actions && item.actions.length) || (item.chips && item.chips.length)}}" class="message-prompts">
