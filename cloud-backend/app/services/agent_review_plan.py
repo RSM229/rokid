@@ -58,6 +58,12 @@ def validate_plan(plan: dict[str, Any]) -> None:
         forms = event.get("forms")
         if not isinstance(event_evidence, list) or not isinstance(forms, list):
             raise ValueError("事项资料或表式格式无效")
+        fields = event.get("fields", {})
+        if not isinstance(fields, dict) or any(
+            not isinstance(key, str) or not isinstance(value, dict)
+            for key, value in fields.items()
+        ):
+            raise ValueError("事项专用字段格式无效")
         if len(set(event_evidence)) != len(event_evidence) or any(item not in evidence_ids for item in event_evidence):
             raise ValueError("事项资料关联无效")
         assigned.extend(event_evidence)

@@ -57,3 +57,14 @@ def test_empty_evidence_text_only_event_is_valid():
     plan["events"][0]["evidence_ids"] = []
     review_plan.validate_plan(plan)
     assert not review_plan.review_issues(plan)
+
+
+def test_form_specific_fields_must_be_objects():
+    plan = base_plan()
+    plan["events"][0]["fields"] = {"gd_b_213_pingxing": "合格"}
+    try:
+        review_plan.validate_plan(plan)
+    except ValueError as exc:
+        assert "专用字段" in str(exc)
+    else:
+        raise AssertionError("non-object form fields should fail")
