@@ -15,7 +15,16 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-engine = create_async_engine(settings.database_url, echo=settings.database_echo)
+engine_options = {
+    "echo": settings.database_echo,
+    # SSH tunnel or MySQL may silently drop idle connections. Check a pooled
+    # connection before handing it to a request instead of failing the request.
+    "pool_pre_ping": True,
+}
+if settings.database_url.startswith("mysql+aiomysql:"):
+    engine_options["pool_recycle"] = 300
+    engine_options["pool_timeout"] = 30
+engine = create_async_engine(settings.database_url, **engine_options)
 async_session = async_sessionmaker(engine, expire_on_commit=False)
 
 
@@ -122,4 +131,9 @@ async def get_db() -> AsyncSession:
 
 async def close_db() -> None:
     """释放数据库连接池，避免服务重载或测试退出时遗留连接。"""
-    await engine.dispose()
+    try:
+        await engine.dispose()
+    except Exception as exc:  # noqa: BLE001
+        # During uvicorn reload the SSH tunnel may disappear before the old
+        # worker closes its sockets. Shutdown must never crash the reloader.
+        logger.warning("数据库连接池关闭时连接已断开，忽略退出异常：%s", exc)
