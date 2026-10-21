@@ -1,8 +1,12 @@
 """照片水印识别（OCR）。
 
-工作台上传的现场照片可能已带第三方水印（今日水印相机 / 工程相机等），
-本模块用 RapidOCR 离线读出水印文字，并抽取结构化字段：
-拍摄时间 / 位置 / 天气 / 人员 / 项目名称 / 部位 / 经纬度。
+工作台上传的现场照片可能已带第三方水印（今日水印相机 / 工程相机等）。
+不同相机的水印字段名、顺序、排版都不一样，所以这里不做「字段名白名单」：
+
+1. 通用抽取所有「标签: 值」/「标签 + 下一行值」，原文保留在 ``labeled_items``；
+2. 只对「类型」做正则识别：时间、天气、经纬度、地址；
+3. 需要落到业务字段时，按省统表字段表（record_field_spec）做名称匹配，
+   匹配不到也保留原文，交给上层或模型按上下文映射。
 
 - 上传链路（/media/images）用识别结果回填记录字段（请求未提供时才回填）。
 - 独立接口（/media/watermark/recognize）供工作台"先识别一下"预览。
@@ -20,10 +24,14 @@ from typing import Optional
 
 from PIL import Image
 
+from app.services import record_field_spec
+
 logger = logging.getLogger(__name__)
 
-# OCR 前把大图等比压到该边长以内，兼顾速度与水印可读性
+# OCR 前把大图等比压到该边长以内；小图适当放大，避免水印小字漏识别。
 _MAX_SIDE = 1600
+_MIN_SIDE = 900
+_MIN_SCORE = 0.35
 
 _engine = None
 _engine_lock = threading.Lock()
@@ -45,21 +53,27 @@ def _get_engine():
 
 
 def _preprocess(image_bytes: bytes):
-    """解码并按需缩图，返回 BGR ndarray 供 OCR；解码失败返回 None。"""
+    """解码并按需缩放，返回 BGR ndarray 供 OCR；解码失败返回 None。"""
     import cv2
     import numpy as np
 
     img = Image.open(io.BytesIO(image_bytes))
     img = img.convert("RGB")
     w, h = img.size
-    scale = min(1.0, _MAX_SIDE / max(w, h))
-    if scale < 1.0:
-        img = img.resize((int(w * scale), int(h * scale)))
+    long_side = max(w, h)
+    if long_side > _MAX_SIDE:
+        scale = _MAX_SIDE / long_side
+    elif long_side < _MIN_SIDE:
+        scale = _MIN_SIDE / long_side
+    else:
+        scale = 1.0
+    if scale != 1.0:
+        img = img.resize((max(1, int(w * scale)), max(1, int(h * scale))), Image.LANCZOS)
     arr = np.asarray(img)[:, :, ::-1]  # RGB -> BGR
     return np.ascontiguousarray(arr)
 
 
-# ---------------------------------------------------------------- 字段抽取
+# ---------------------------------------------------------------- 类型正则
 
 _DT_RE = re.compile(
     r"(20\d{2})\s*[年./\-]\s*(\d{1,2})\s*[月./\-]\s*(\d{1,2})\s*日?"
@@ -71,90 +85,304 @@ _WEATHER_RE = re.compile(
 )
 _TEMP_RE = re.compile(r"([-+]?\d{1,2})\s*[℃°]")
 _GPS_RE = re.compile(r"([01]?\d{1,2}\.\d{3,})\s*[,，]\s*([01]?\d{1,2}\.\d{3,})")
-_LABEL_RE = re.compile(r"(项目|工程名称|工程|监理|拍摄人|拍照人|记录人|人员|位置|地点|地址|部位|天气)\s*[:：]\s*(.*)")
+_SEP_RE = re.compile(r"^\s*([^:：]{1,28})\s*[:：]\s*(.*)$")
 # 地址行：含行政区划/道路关键词
 _ADDR_RE = re.compile(
     r"(省|市|区|县|镇|乡|街道|路|大道|街|巷|村|大厦|广场|工地|项目|标段|栋|号楼|隧道|桥)"
 )
 
+# 「概念」别名：这些是跨表单的通用语义，不是某一家水印的字段名。
+# 任意其它标签都不会丢，会原样进入 labeled_items。
+_SEMANTIC_ALIASES = {
+    "项目": "project", "工程": "project", "项目名称": "project",
+    "工程名称": "project", "建设项目": "project", "单位工程": "project",
+    "位置": "location", "地点": "location", "地址": "location",
+    "施工地点": "location", "拍摄地点": "location",
+    "拍摄时间": "taken_at", "拍照时间": "taken_at", "时间": "taken_at",
+    "日期": "taken_at", "记录时间": "taken_at",
+    "天气": "weather", "气温": "weather",
+    "拍摄人": "person", "拍照人": "person", "记录人": "person",
+    "人员": "person", "检查人员": "person", "监理人员": "person",
+    "建设单位": "owner_unit", "施工单位": "contractor", "监理单位": "supervision_unit",
+    "建设单位名称": "owner_unit", "施工单位名称": "contractor", "监理单位名称": "supervision_unit",
+    "施工区域名称": "work_area",
+    "部位": "section", "施工部位": "section", "施工区域": "work_area",
+    "危大名称": "hazard_name", "危大工程名称": "hazard_name",
+    "备注": "remark",
+}
+
+# 无冒号时，靠「标签后缀」判断下一行是否为值。只是排版启发式，不是字段白名单。
+_LABEL_SUFFIXES = (
+    "名称", "单位", "人员", "时间", "日期", "地点", "位置", "地址", "部位",
+    "区域", "天气", "气温", "编号", "内容", "类型", "数量", "规格", "厂家",
+    "品牌", "工程", "项目", "备注", "结论", "结果", "说明", "情况", "原因",
+)
+
+_SCHEMA_INDEX: dict[str, str] | None = None
+_PREFIX_KEYS: list[str] | None = None
+
+
+def _clean_line(raw: str) -> str:
+    text = str(raw or "").replace("：", ":").replace("，", ",")
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _norm_label(value: str) -> str:
+    text = str(value or "").strip().lower()
+    text = text.replace("（", "(").replace("）", ")")
+    return re.sub(r"[\s:·•,，.。;；/\\_\-—]+", "", text)
+
+
+def _schema_index() -> dict[str, str]:
+    """省统表字段表的「标签 → canonical」索引（数据驱动，不手写字段名）。"""
+    global _SCHEMA_INDEX
+    if _SCHEMA_INDEX is None:
+        index: dict[str, str] = {}
+        for form in record_field_spec.FORMS.values():
+            for field in form.get("fields") or []:
+                canonical = str(field.get("canonical") or "")
+                if not canonical:
+                    continue
+                for key in (field.get("label"), field.get("raw_label"), canonical, field.get("key")):
+                    norm = _norm_label(str(key or ""))
+                    if norm:
+                        index.setdefault(norm, canonical)
+        _SCHEMA_INDEX = index
+    return _SCHEMA_INDEX
+
+
+def _prefix_keys() -> list[str]:
+    """可用于「无分隔符标签」切分的已知标签，长标签优先。"""
+    global _PREFIX_KEYS
+    if _PREFIX_KEYS is None:
+        keys = set(_SEMANTIC_ALIASES) | set(_schema_index())
+        _PREFIX_KEYS = sorted((key for key in keys if len(key) >= 4), key=len, reverse=True)
+    return _PREFIX_KEYS
+
+
+def _split_known_prefix(text: str) -> tuple[str, str] | None:
+    """无冒号时按已知标签前缀切分，如「危大名称脚手架工程」。"""
+    norm = _norm_label(text)
+    if not norm:
+        return None
+    for key in _prefix_keys():
+        if norm.startswith(key) and len(norm) > len(key):
+            remainder = norm[len(key):]
+            if remainder in _LABEL_SUFFIXES:
+                return None
+            return key, remainder
+    return None
+
+
+def _best_containment(norm: str, index: dict[str, str]) -> str | None:
+    best_value, best_score = None, 0.0
+    for key, canonical in index.items():
+        if len(key) < 2 or len(norm) < 2:
+            continue
+        if norm in key or key in norm:
+            score = min(len(norm), len(key)) / max(len(norm), len(key))
+            if score > best_score:
+                best_value, best_score = canonical, score
+    return best_value if best_score >= 0.5 else None
+
+
+def match_form_field(label: str, form_code: str | None = None) -> str | None:
+    """把任意水印标签匹配到业务字段 canonical。
+
+    优先目标表单的字段表，其次全量字段表；匹配不到返回 None，原文仍会保留。
+    """
+    norm = _norm_label(label)
+    if not norm:
+        return None
+    semantic = _SEMANTIC_ALIASES.get(norm)
+    if semantic:
+        return semantic
+    if form_code:
+        local: dict[str, str] = {}
+        for field in record_field_spec.fields_of(form_code):
+            canonical = str(field.get("canonical") or "")
+            if not canonical:
+                continue
+            for key in (field.get("label"), field.get("raw_label"), canonical, field.get("key")):
+                value = _norm_label(str(key or ""))
+                if value:
+                    local.setdefault(value, canonical)
+        if norm in local:
+            return local[norm]
+        matched = _best_containment(norm, local)
+        if matched:
+            return matched
+    index = _schema_index()
+    if norm in index:
+        return index[norm]
+    return _best_containment(norm, index)
+
+
+# ---------------------------------------------------------------- 字段抽取
+
+def _valid_label(label: str) -> bool:
+    text = label.strip(" \t-—·•")
+    if not (1 <= len(text) <= 28):
+        return False
+    if re.search(r"\s", text):
+        return False
+    if re.search(r"https?$", text, re.IGNORECASE):
+        return False
+    if _DT_RE.search(text) or _GPS_RE.search(text):
+        return False
+    if re.fullmatch(r"[\d./\-:]+", text):
+        return False
+    return True
+
+
+def _looks_like_bare_label(line: str) -> bool:
+    text = line.strip()
+    if not (2 <= len(text) <= 16):
+        return False
+    if re.search(r"[:：]", text) or re.search(r"\d", text):
+        return False
+    if _DT_RE.search(text) or _WEATHER_RE.search(text):
+        return False
+    if match_form_field(text):
+        return True
+    return text.endswith(_LABEL_SUFFIXES)
+
+
+def _looks_like_value(line: str) -> bool:
+    text = str(line or "").strip()
+    if not text or _SEP_RE.match(text):
+        return False
+    return not _looks_like_bare_label(text)
+
+
+def _iso_time(match: "re.Match[str]") -> str | None:
+    try:
+        year, month, day = int(match.group(1)), int(match.group(2)), int(match.group(3))
+        hour = int(match.group(4) or 0)
+        minute = int(match.group(5) or 0)
+        second = int(match.group(6) or 0)
+        return datetime(year, month, day, hour, minute, second).isoformat()
+    except (TypeError, ValueError):
+        return None
+
+
+def _weather_text(line: str) -> str:
+    weather = _WEATHER_RE.search(line)
+    if not weather:
+        return ""
+    temp = _TEMP_RE.search(line)
+    return weather.group(1) + (f" {temp.group(1)}℃" if temp else "")
+
 
 def parse_watermark_fields(lines: list[str]) -> dict:
-    """从 OCR 文本行抽取水印结构化字段（纯函数，可单测）。"""
+    """从 OCR 文本行抽取水印字段（纯函数，可单测）。
+
+    任意 ``标签: 值`` 都会进入 ``labeled_items``，不会因为不在白名单里被丢掉。
+    """
     fields: dict = {}
     clean: list[str] = []
     for raw in lines:
-        if not raw:
+        if not raw or not str(raw).strip():
             continue
-        # 全角冒号/逗号归一，去多余空白
-        text = raw.replace("：", ":").strip()
-        text = re.sub(r"\s+", " ", text)
-        clean.append(text)
+        clean.append(_clean_line(raw))
 
-    addr_candidates: list[str] = []
-    for text in clean:
-        label = _LABEL_RE.match(text)
-        pairs = {}
-        if label:
-            pairs[label.group(1)] = label.group(2).strip()
-        for key, value in pairs.items():
-            if not value:
+    labeled_items: list[dict[str, str]] = []
+    pairs: list[tuple[str, str]] = []
+    consumed: set[int] = set()
+
+    for index, text in enumerate(clean):
+        if index in consumed:
+            continue
+        matched = _SEP_RE.match(text)
+        if matched:
+            label = matched.group(1).strip(" \t-—·•")
+            value = matched.group(2).strip()
+            if not _valid_label(label):
                 continue
-            if key in ("项目", "工程名称", "工程") and "project" not in fields:
-                fields["project"] = value
-            elif key == "监理" and "person" not in fields:
-                fields["person"] = value
-            elif key in ("拍摄人", "拍照人", "记录人", "人员") and "person" not in fields:
-                fields["person"] = value
-            elif key in ("位置", "地点", "地址") and "location" not in fields:
-                fields["location"] = value
-            elif key == "部位" and "section" not in fields:
-                fields["section"] = value
-            elif key == "天气" and "weather" not in fields:
-                m = _WEATHER_RE.search(value)
-                t = _TEMP_RE.search(value)
-                fields["weather"] = "".join(
-                    x for x in [m.group(1) if m else "", f" {t.group(1)}℃" if t else ""] if x
-                )
+            if not value:
+                next_line = clean[index + 1] if index + 1 < len(clean) else ""
+                if next_line and _looks_like_value(next_line):
+                    value = next_line
+                    consumed.add(index + 1)
+            pairs.append((label, value))
+            labeled_items.append({"label": label, "value": value})
+        elif _looks_like_bare_label(text):
+            next_line = clean[index + 1] if index + 1 < len(clean) else ""
+            if next_line and _looks_like_value(next_line):
+                pairs.append((text, next_line))
+                labeled_items.append({"label": text, "value": next_line})
+                consumed.add(index + 1)
+            else:
+                split = _split_known_prefix(text)
+                if split:
+                    pairs.append(split)
+                    labeled_items.append({"label": split[0], "value": split[1]})
+        else:
+            split = _split_known_prefix(text)
+            if split:
+                pairs.append(split)
+                labeled_items.append({"label": split[0], "value": split[1]})
 
-        # 时间
-        if "taken_at" not in fields:
-            m = _DT_RE.search(text)
-            if m:
-                try:
-                    y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
-                    hh = int(m.group(4) or 0)
-                    mi = int(m.group(5) or 0)
-                    ss = int(m.group(6) or 0)
-                    fields["taken_at"] = datetime(y, mo, d, hh, mi, ss).isoformat()
-                except ValueError:
-                    pass
+    # 标签 → 业务字段：字段表匹配，不覆盖已有值
+    for label, value in pairs:
+        if not value:
+            continue
+        canonical = match_form_field(label)
+        if canonical and canonical not in fields:
+            fields[canonical] = value
 
-        # 天气（无标签的 "晴 25℃" 形式）
-        if "weather" not in fields:
-            m = _WEATHER_RE.search(text)
-            if m:
-                t = _TEMP_RE.search(text)
-                fields["weather"] = "".join(
-                    x for x in [m.group(1), f" {t.group(1)}℃" if t else ""] if x
-                )
+    # 拍摄时间：优先标签值，其次任意一行的日期时间
+    taken_raw = str(fields.get("taken_at") or "")
+    taken_match = _DT_RE.search(taken_raw) if taken_raw else None
+    if taken_match is None:
+        for text in clean:
+            taken_match = _DT_RE.search(text)
+            if taken_match:
+                break
+    if taken_match:
+        iso = _iso_time(taken_match)
+        if iso:
+            fields["taken_at"] = iso
 
-        # 经纬度
-        if "lat" not in fields:
-            m = _GPS_RE.search(text)
-            if m:
-                a, b = float(m.group(1)), float(m.group(2))
-                # 粗判：纬度小、经度大（中国大陆范围）
-                lat, lon = (a, b) if a < b else (b, a)
-                if 15 <= lat <= 60 and 70 <= lon <= 140:
-                    fields["lat"], fields["lon"] = lat, lon
+    # 天气
+    if not fields.get("weather"):
+        for text in clean:
+            weather = _weather_text(text)
+            if weather:
+                fields["weather"] = weather
+                break
+    else:
+        weather = _weather_text(str(fields["weather"]))
+        if weather:
+            fields["weather"] = weather
 
-        # 地址候选（无标签）
-        if _ADDR_RE.search(text) and not _DT_RE.search(text):
-            addr_candidates.append(text)
+    # 经纬度
+    if "lat" not in fields:
+        for text in clean:
+            matched = _GPS_RE.search(text)
+            if not matched:
+                continue
+            first, second = float(matched.group(1)), float(matched.group(2))
+            lat, lon = (first, second) if first < second else (second, first)
+            if 15 <= lat <= 60 and 70 <= lon <= 140:
+                fields["lat"], fields["lon"] = lat, lon
+                break
 
-    if "location" not in fields and addr_candidates:
-        # 取最长的地址候选
-        fields["location"] = max(addr_candidates, key=len)
+    # 无标签地址：只取没有被当作标签值的独立行
+    if not fields.get("location"):
+        candidates: list[str] = []
+        for index, text in enumerate(clean):
+            if index in consumed or _SEP_RE.match(text) or _DT_RE.search(text):
+                continue
+            if _WEATHER_RE.search(text):
+                continue
+            if _ADDR_RE.search(text):
+                candidates.append(text)
+        if candidates:
+            fields["location"] = max(candidates, key=len)
+
+    if labeled_items:
+        fields["labeled_items"] = labeled_items
 
     return fields
 
@@ -163,29 +391,51 @@ async def recognize_watermark(image_bytes: bytes) -> dict:
     """识别图片上的水印文字并抽取字段。
 
     返回：
-        {"available": bool, "fields": {...}, "lines": [...], "reason": str?}
+        {"available": bool, "recognized": bool, "fields": {...},
+         "labeled_items": [...], "unmapped_labels": [...], "lines": [...], "reason": str?}
     """
     engine = _get_engine()
     if engine is None:
-        return {"available": False, "fields": {}, "lines": [], "reason": "ocr_not_installed"}
+        return {"available": False, "recognized": False, "fields": {}, "labeled_items": [],
+                "unmapped_labels": [], "lines": [], "reason": "ocr_not_installed"}
     try:
         arr = await asyncio.to_thread(_preprocess, image_bytes)
         if arr is None:
-            return {"available": False, "fields": {}, "lines": [], "reason": "image_decode_failed"}
+            return {"available": False, "recognized": False, "fields": {}, "labeled_items": [],
+                    "unmapped_labels": [], "lines": [], "reason": "image_decode_failed"}
         result, _ = await asyncio.to_thread(engine, arr)
     except Exception as exc:
         logger.warning("水印 OCR 失败：%s", type(exc).__name__)
-        return {"available": False, "fields": {}, "lines": [], "reason": f"ocr_failed:{exc}"}
+        return {"available": False, "recognized": False, "fields": {}, "labeled_items": [],
+                "unmapped_labels": [], "lines": [], "reason": f"ocr_failed:{exc}"}
 
-    lines: list[str] = []
+    rows: list[tuple[float, float, str]] = []
     if result:
         for item in result:
             try:
-                text = item[1]
+                box, text = item[0], item[1]
                 score = float(item[2]) if len(item) > 2 else 0.0
+                top = min(point[1] for point in box)
+                left = min(point[0] for point in box)
             except (IndexError, TypeError, ValueError):
                 continue
-            if text and score >= 0.5:
-                lines.append(text)
+            if text and score >= _MIN_SCORE:
+                rows.append((top, left, str(text)))
+    # 按阅读顺序排；RapidOCR 默认顺序不保证从上到下，标签/值配对会错位
+    rows.sort(key=lambda row: (round(row[0] / 12), row[1]))
+    lines = [text for _top, _left, text in rows]
+
     fields = parse_watermark_fields(lines)
-    return {"available": True, "fields": fields, "lines": lines}
+    labeled_items = fields.get("labeled_items") or []
+    unmapped = [
+        item for item in labeled_items
+        if item.get("value") and not match_form_field(item.get("label") or "")
+    ]
+    return {
+        "available": True,
+        "recognized": bool([key for key in fields if key != "labeled_items"] or labeled_items),
+        "fields": fields,
+        "labeled_items": labeled_items,
+        "unmapped_labels": unmapped,
+        "lines": lines,
+    }
