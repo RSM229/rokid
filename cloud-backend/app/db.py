@@ -94,7 +94,9 @@ async def init_db():
     from app.models import equipment  # noqa: F401
     from app.models import archive  # noqa: F401,F811  # P3.7：追加 ArchiveRecord/IssueTicket（archive 上方已导入）
     from app.models import project_member, security_audit  # noqa: F401  # 项目成员边界 + 安全审计
-    from app.models import verification_code  # noqa: F401  # 短信验证码（手机号注册/登录）
+    # 🔴 2026-10-21：verification_code（短信验证码）模型已随「注册改邀请码 +
+    #    下线 OTP 登录」一起删除。生产库里的 verification_codes 表**保留不动**
+    #    （不再写入，删表无收益且有数据风险）。
     from app.models import invite_code  # noqa: F401  # 邀请码（含 project_id 升级）
     from app.models import role_permission  # noqa: F401  # Step 3：角色与权限矩阵
     from app.models import security_question  # noqa: F401  # 密保问题（忘记密码自助重置）

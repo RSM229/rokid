@@ -13,6 +13,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.db import get_db
+# 🔴 注册改成「邀请码准入」后需要这三个模型（原先只有 _token_response 里
+#    局部 import 了 Project as ProjectModel）。顶层导入无循环风险：
+#    models.* 都是纯模型模块，且 auth.py 顶层也是这么导入的。
+from app.models.invite_code import InviteCode
+from app.models.project_member import ProjectMember
 from app.models.miniprogram import (
     WechatBindingAudit,
     WechatLoginCodeUse,
@@ -23,16 +28,16 @@ from app.models.user import (
     AUDIT_PENDING,
     AUDIT_REJECTED,
     ORG_ROLES,
+    Project,
     User,
     UserRole,
 )
 from app.routers.auth import (
-    _PHONE_RE,
-    _verify_sms_code,
     create_access_token,
     get_current_user,
     hash_password,
     pwd_context,
+    validate_invite_code,
 )
 
 router = APIRouter()
@@ -52,34 +57,25 @@ class BindAccountRequest(BaseModel):
     wx_nickname: str | None = Field(default=None, max_length=64)
 
 
-class RegisterRequest(BaseModel):
-    """小程序注册：手机号 + 短信验证码，可选择性绑定当前微信身份。
-
-    与 Web 注册同口径（设计说明 §8.8.3 新版）：注册产出**零权限裸用户**，
-    项目岗位由「加入项目」动作授予，注册即激活、自动登录。
-    """
-    username: str
-    password: str
-    real_name: str
-    # 主岗占位（项目岗位由加入项目决定）；拒绝公司级角色伪装。
-    role: str | None = None
-    phone: str  # 必填：手机号注册
-    sms_code: str  # 必填：短信验证码（用途=register）
-    # 可选：先调用 /login 拿到 bind_token（微信身份），注册后直接绑定并登录。
-    bind_token: str | None = None
-    # 绑定微信时用户确认的微信昵称（可空，见 BindAccountRequest 注释）
-    wx_nickname: str | None = Field(default=None, max_length=64)
-
-
 class WechatRegisterRequest(BaseModel):
-    """路径 A 微信自助注册：用 /login 拿到的 bind_token（含 openid）一键注册。
+    """微信自助注册：用 /login 拿到的 bind_token（含 openid）+ **项目邀请码**建号。
 
-    与 :class:`RegisterRequest`（手机号+短信）并列，二者都走 ``_token_response``
-    唯一出口，且都产出零权限裸用户（``org_role=None`` / ``project_id=None`` /
-    ``AUDIT_APPROVED``）。区别：本端点身份锚点是微信 openid，**不依赖手机号/短信**，
-    零成本，契合监理通「组织系统」定位（已知、受公司背书的人纳入组织）。
+    🔴 2026-10-21 起：注册**必须**提供有效邀请码（`invite_code`），不再有「零门槛
+    注册出零权限裸用户」这条通道。理由：
+      - 监理通是「组织系统」，准入应由**已知的、受公司背书的人**发码驱动；
+      - 原「微信一键注册 → 事后另填码加入项目」会让任何陌生人凭空建号，
+        库里的无项目裸用户只会越来越多（用户管理页还得专门给它们加筛选项）；
+      - 手机号+短信验证码那条路（旧 `RegisterRequest`）已整体下线，
+        腾讯云短信资质 2~3 周审批 + 每条短信的费用都不再需要。
+
+    邀请码承载什么，注册就得到什么（与 `/invite-codes/{code}/join` 同口径）：
+      - `org_id`（码上的企业归属）→ 写 `users.org_id`；
+      - `project_id` 非空（项目负责人发的项目码）→ 注册即入该项目、拿码上的
+        `role` 岗位，并写 `project_members`、递增 `used_count`；
+      - `project_id` 为空（仅企业归属码）→ 注册进企业，岗位待项目负责人另发码加入。
     """
     bind_token: str
+    invite_code: str = Field(min_length=4, max_length=20)
     real_name: str | None = Field(default=None, max_length=64)
     # 用户在注册表单确认的微信昵称（官方「头像昵称填写能力」），可空。
     wx_nickname: str | None = Field(default=None, max_length=64)
@@ -364,104 +360,25 @@ async def bind_account(
     return await _token_response(user, db)
 
 
-@router.post("/register")
-async def register_account(
-    req: RegisterRequest,
-    db: AsyncSession = Depends(get_db),
-):
-    """小程序注册：手机号 + 短信验证码（与 Web 同口径）。
-
-    **权限隔离铁律（设计说明 §8.8.3 新版）**：注册产出**零权限裸用户**——
-      - ``org_role`` = None，注册通道不可能拿到公司级角色；
-      - ``project_id`` = None，项目岗位由「加入项目」动作授予；
-      - ``audit_status`` = AUDIT_APPROVED，注册即激活、自动登录；
-      - 微信 ``bind_token`` 绑定保留（绑定与激活解耦，绑定后即可用小程序）。
-    授权全部来自「项目负责人发项目邀请码 → 成员加入项目」独立路径。
-    """
-    if not settings.allow_public_registration:
-        raise HTTPException(status_code=403, detail="公开注册已关闭，请联系系统管理员创建账号")
-
-    phone = (req.phone or "").strip()
-    if not _PHONE_RE.match(phone):
-        raise HTTPException(status_code=400, detail="手机号格式不正确")
-
-    # 拒绝公司级角色伪装：注册只产出项目级裸用户
-    if req.role and req.role in ORG_ROLES:
-        raise HTTPException(status_code=400, detail="注册不支持公司级角色")
-
-    # 先做「不消耗验证码」的校验：用户名/手机号查重失败时验证码仍可用
-    username = req.username.strip()
-    if username.lower() == "admin":
-        raise HTTPException(status_code=400, detail="该用户名不可注册")
-
-    existing = await db.execute(select(User).where(User.username == username))
-    if existing.scalar_one_or_none():
-        raise HTTPException(status_code=409, detail="用户名已存在")
-    # 手机号唯一（防止同一手机号绑定多个账号）
-    phone_taken = await db.execute(select(User).where(User.phone == phone))
-    if phone_taken.scalar_one_or_none():
-        raise HTTPException(status_code=409, detail="该手机号已被其他账号绑定")
-
-    # 校验短信验证码（注册用途）
-    if not await _verify_sms_code(db, phone, "register", req.sms_code):
-        raise HTTPException(status_code=400, detail="验证码错误或已过期")
-
-    user = User(
-        username=username,
-        password_hash=hash_password(req.password),
-        real_name=req.real_name.strip(),
-        role=req.role or "inspector",   # 主岗占位（项目岗位由加入项目决定）
-        phone=phone,
-        project_id=None,
-        org_id=settings.registration_default_org_id,
-        org_role=None,                  # 注册绝不给公司级角色
-        audit_status=AUDIT_APPROVED,    # 注册即激活
-    )
-    db.add(user)
-    await db.flush()
-
-    bound_openid: str | None = None
-    if req.bind_token:
-        try:
-            payload = jwt.decode(
-                req.bind_token,
-                settings.secret_key,
-                algorithms=[settings.algorithm],
-            )
-        except Exception:
-            raise HTTPException(status_code=401, detail="绑定凭证无效或已过期")
-        if payload.get("purpose") != "wechat_bind" or not payload.get("openid"):
-            raise HTTPException(status_code=401, detail="绑定凭证用途错误")
-        bound_openid = payload["openid"]
-        # 与 /bind 同口径：旧绑定账号在小程序端不可用（如被公司级账号占用）
-        # → 释放并接管；正常占用 → 409。修「注册页报已绑定其他账号」死局。
-        await _release_unusable_binding(db, bound_openid)
-        db.add(WechatUserBinding(
-            user_id=user.id,
-            openid=bound_openid,
-            unionid=payload.get("unionid"),
-            wx_nickname=(req.wx_nickname or "").strip()[:64] or None,
-        ))
-
-    await db.commit()
-    await db.refresh(user)
-
-    # 注册即激活 + 自动登录：复用同一小程序发 token 出口（内含公司级/审批拦截）。
-    return await _token_response(user, db)
-
-
 @router.post("/wechat-register")
 async def wechat_register(
     req: WechatRegisterRequest,
     db: AsyncSession = Depends(get_db),
 ):
-    """路径 A：微信授权即注册（零短信成本）。
+    """微信授权注册：bind_token（含 openid）+ **项目邀请码** → 建号即入组织。
 
-    用 bind_token 里的 openid **自动建裸用户**：
-      - ``username`` = ``wx_<openid 前段>``（openid 在本小程序全局唯一 ⇒ 用户名唯一）；
+    用 bind_token 里的 openid 自动建号：
+      - ``username`` = ``wx_<openid>``（openid 在本小程序全局唯一 ⇒ 用户名唯一）；
       - 随机强密码哈希（用户本人未知，须走 ``/password`` 设密才能在 Web 端登录）；
-      - ``org_role=None`` / ``project_id=None`` / ``audit_status=AUDIT_APPROVED``。
-    绑微信后走 ``_token_response`` 发 token（内含公司级/审批拦截）。
+      - ``org_role=None``（注册通道绝不给公司级角色）、``audit_status=APPROVED``；
+      - ``org_id`` / ``project_id`` / ``role`` **全部取自邀请码**。
+
+    🔴 邀请码是准入闸门（2026-10-21）：码无效直接 400，**不建号**。
+    码带 ``project_id``（项目负责人发的项目码）⇒ 注册即入该项目并获码上岗位；
+    码只有 ``org_id``（企业归属码）⇒ 进企业、岗位待项目负责人另发码加入。
+
+    事务顺序刻意安排为「校验 → 建号 → 消耗次数」且同一事务提交：
+    任一步失败整体回滚，不会出现「码被吃掉但号没建出来」。
     """
     if not settings.allow_wechat_registration:
         raise HTTPException(status_code=403, detail="微信自助注册已关闭，请联系管理员创建账号")
@@ -480,7 +397,9 @@ async def wechat_register(
     openid = payload["openid"]
     unionid = payload.get("unionid")
 
-    # 该微信已注册且绑定可用 ⇒ 直接登录（幂等，避免重复建号）
+    # 该微信已注册且绑定可用 ⇒ 直接登录（幂等，避免重复建号）。
+    # 🔴 放在邀请码校验**之前**：老用户误触注册不该被要求再填一个码，
+    #    更不能因此白白吃掉一次邀请码使用次数。
     existing = await db.execute(
         select(WechatUserBinding).where(WechatUserBinding.openid == openid)
     )
@@ -497,6 +416,30 @@ async def wechat_register(
             return await _token_response(old_user, db)
         # 旧绑定不可用（超管/禁用/已拒绝）⇒ 释放后由本次接管
         await _release_unusable_binding(db, openid)
+
+    # ---- 🔴 邀请码校验（与 /invite-codes/{code}/join 同一个 validate_invite_code，
+    #      不存在第二套规则）。放在建号之前：码无效就不该留下任何半成品数据。
+    invite_code = (req.invite_code or "").strip().upper()
+    result = await validate_invite_code(invite_code, db)
+    if not result["valid"]:
+        raise HTTPException(status_code=400, detail=result["message"] or "邀请码无效")
+
+    invite_id = result.get("invite_id")
+    invite_org_id = result.get("org_id")
+    invite_project_id = result.get("project_id")
+    # 码上的岗位＝项目岗位；无项目码时仅占位（真正岗位由后续 join 授予）
+    invite_role = result.get("role") or UserRole.INSPECTOR.value
+
+    target_project = None
+    if invite_project_id:
+        target_project = await db.get(Project, invite_project_id)
+        if target_project is None:
+            # 码指向的项目已被删除：准入信息不自洽，拒绝而不是静默降级成裸用户
+            raise HTTPException(status_code=400, detail="邀请码指向的项目不存在，请联系发放人重新生成")
+        # 排他岗位基数校验（总监/总代每项目 1 名）——与 join 同口径
+        from app.routers.project import _assert_exclusive_ok
+
+        await _assert_exclusive_ok(db, invite_project_id, invite_role)
 
     # 生成唯一 username：openid 全局唯一；超长则哈希降级到 64 位以内。
     username = f"wx_{openid}"
@@ -518,15 +461,26 @@ async def wechat_register(
         username=username,
         password_hash=hash_password(secrets.token_urlsafe(16)),
         real_name=real_name,
-        role=UserRole.INSPECTOR.value,       # 主岗占位（项目岗位由加入项目决定）
+        # 主岗：项目码 → 码上岗位；企业码 → 监理员占位（加入项目时再更新）
+        role=invite_role if invite_project_id else UserRole.INSPECTOR.value,
         phone=None,
-        project_id=None,
-        org_id=settings.registration_default_org_id,
-        org_role=None,                        # 微信注册绝不给公司级角色
-        audit_status=AUDIT_APPROVED,          # 注册即激活
+        project_id=invite_project_id,     # 🔴 注册即带项目（原来恒为 None）
+        # 码上的企业归属优先；老码没有 org_id 时回落到默认注册组织
+        org_id=invite_org_id or settings.registration_default_org_id,
+        org_role=None,                    # 注册通道绝不给公司级角色
+        audit_status=AUDIT_APPROVED,      # 注册即激活（准入已由邀请码把关）
     )
     db.add(user)
     await db.flush()
+
+    # 项目码：同时写成员表（归属真源在 project_members，users.project_id 只是当前上下文）
+    if invite_project_id:
+        db.add(ProjectMember(
+            project_id=invite_project_id,
+            user_id=user.id,
+            role=invite_role,
+        ))
+
     db.add(WechatUserBinding(
         user_id=user.id,
         openid=openid,
@@ -538,6 +492,19 @@ async def wechat_register(
         openid_hash=hashlib.sha256(openid.encode("utf-8")).hexdigest(),
         action="bind",
     ))
+
+    # ---- 🔴 最后才消耗邀请码次数（与 join_project_by_invite 同一套递增规则）。
+    #      放在建号/成员/绑定之后、commit 之前：任何一步抛错都整体回滚，
+    #      绝不会出现「码被吃掉但账号没建出来」。
+    if invite_id:
+        inv = await db.get(InviteCode, invite_id)
+        if inv is not None:
+            inv.used_count = (inv.used_count or 0) + 1
+            inv.used_by = user.id
+            inv.used_at = datetime.now()
+            if inv.max_uses and inv.used_count >= inv.max_uses:
+                inv.is_active = False
+
     await db.commit()
     await db.refresh(user)
     return await _token_response(user, db)
