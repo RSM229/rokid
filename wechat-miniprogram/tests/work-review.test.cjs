@@ -52,6 +52,23 @@ test('one event may produce multiple selected forms and separate records', () =>
   assert.equal(plan.events.flatMap(event => event.forms).length, 4)
 })
 
+test('form-specific values survive edits and compatible event merges', () => {
+  let plan = model.createExample(0)
+  plan = model.editFormField(plan, 'event-1', 'gd_b_213_pingxing', 'conclusion', '合格')
+  plan = model.editFormField(plan, 'event-2', 'gd_b_213_pingxing', 'basis', 'GB 50204')
+  plan = model.mergeEvents(plan, ['event-1', 'event-2'], 'merged-fields')
+  assert.deepEqual(plan.events.find(event => event.id === 'merged-fields').fields, {
+    gd_b_213_pingxing: { conclusion: '合格', basis: 'GB 50204' },
+  })
+})
+
+test('merging events refuses to silently overwrite conflicting form values', () => {
+  let plan = model.createExample(0)
+  plan = model.editFormField(plan, 'event-1', 'gd_b_213_pingxing', 'conclusion', '合格')
+  plan = model.editFormField(plan, 'event-2', 'gd_b_213_pingxing', 'conclusion', '不合格')
+  assert.throws(() => model.mergeEvents(plan, ['event-1', 'event-2'], 'merged-fields'), /内容冲突/)
+})
+
 test('split, merge and unassigned/assignment preserve every piece of evidence', () => {
   let plan = model.createExample(0)
   plan = model.splitEvidence(plan, 'photo-1', 'event-split')
