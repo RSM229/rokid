@@ -237,8 +237,14 @@ export const authApi = {
     return http.post('/auth/users/batch-import', form, { timeout: 180000 })
   },
   // 导出账号表（xlsx，含初始口令；真实密码不可逆）
-  exportUsers: () =>
-    http.get('/auth/users/export', { responseType: 'blob', timeout: 60000 }),
+  // projectId：仅公司级账号生效（后端对非公司级账号**直接忽略**该参数，防止越权导出
+  // 别的项目的账号表——那里面有初始口令明文）。传 null/0 = 导出全部。
+  exportUsers: (projectId?: number | null) =>
+    http.get('/auth/users/export', {
+      params: projectId && projectId > 0 ? { project_id: projectId } : {},
+      responseType: 'blob',
+      timeout: 60000,
+    }),
 }
 
 // 角色权限配置（Step 3；后端权限 key = role_grant，当前仅超管持有）
