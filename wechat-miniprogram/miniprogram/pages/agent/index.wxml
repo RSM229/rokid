@@ -79,8 +79,9 @@
               </view>
               <view class="inline-review-date-row">
                 <text class="inline-review-label">业务日期</text>
-                <text class="inline-review-date-status {{event.dateConfirmed ? 'confirmed' : 'pending'}}">{{event.dateConfirmed ? event.date : '待确认'}}</text>
+                <text class="inline-review-date-status {{event.date ? 'confirmed' : 'pending'}}">{{event.date ? event.date : '未提供，执行时使用当前日期'}}</text>
               </view>
+              <text wx:if="{{event.dateSource}}" class="inline-review-source">日期依据：{{event.dateSource === 'watermark' ? '照片水印' : event.dateSource}}</text>
               <view wx:if="{{event.dateOptions && event.dateOptions.length}}" class="inline-review-clues">
                 <text class="inline-review-clue-label">照片水印识别到：</text>
                 <view class="inline-review-chip-row">
@@ -91,13 +92,13 @@
                 <view class="inline-review-date-picker">{{event.dateConfirmed ? '修改业务日期' : (event.dateOptions && event.dateOptions.length ? '日期不一致？手动选择' : '选择业务日期')}} <text>▾</text></view>
               </picker>
               <view class="inline-review-form-row">
-                <text class="inline-review-label">拟生成表式</text>
-                <text wx:if="{{!event.forms.length}}" class="inline-review-date-status pending">待选择</text>
+                <text class="inline-review-label">工作记录类型</text>
+                <text class="inline-review-date-status {{event.recordType === '待定' ? 'pending' : 'confirmed'}}">{{event.recordType}} · {{event.recordTypeConfidenceText}}</text>
               </view>
               <view class="inline-review-chip-row">
-                <view wx:for="{{event.formOptions}}" wx:for-item="form" wx:key="label" class="inline-review-chip form-chip {{form.checked ? 'selected' : ''}}" data-index="{{mi}}" data-id="{{event.id}}" data-form="{{form.label}}" bindtap="toggleInlineReviewForm">{{form.label}}</view>
+                <view wx:for="{{event.recordTypeOptions}}" wx:for-item="type" wx:key="label" class="inline-review-chip form-chip {{type.checked ? 'selected' : ''}}" data-index="{{mi}}" data-id="{{event.id}}" data-type="{{type.label}}" bindtap="changeInlineReviewType">{{type.label}}</view>
               </view>
-              <view wx:if="{{event.forms.length}}" class="inline-review-selected">已选择：{{event.formsText}}</view>
+              <text wx:if="{{event.recordTypeReason}}" class="inline-review-source">判断依据：{{event.recordTypeReason}}</text>
             </view>
             <view wx:if="{{item.reviewIssues && item.reviewIssues.length}}" class="inline-review-issues">
               <text wx:for="{{item.reviewIssues}}" wx:key="*this" class="inline-review-issue">{{item}}</text>

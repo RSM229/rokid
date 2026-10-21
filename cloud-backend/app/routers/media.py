@@ -36,6 +36,11 @@ from app.services.watermark_service import apply_watermark_to_image
 from app.services.watermark_ocr import recognize_watermark
 from app.services.media_validation import assert_valid_audio, assert_valid_image
 
+try:
+    from PIL import Image as PILImage
+except Exception:  # pragma: no cover - image validation remains available without EXIF support
+    PILImage = None
+
 router = APIRouter()
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
@@ -88,6 +93,27 @@ def _safe_ext(filename: str | None, allowed: set[str]) -> str:
     if ext not in allowed:
         raise HTTPException(status_code=400, detail=f"不支持的文件类型：{ext or '未知'}")
     return ext
+
+
+def _extract_exif_capture_time(data: bytes) -> datetime | None:
+    """Read the original capture timestamp without treating it as an authoritative business date."""
+    if PILImage is None:
+        return None
+    try:
+        with PILImage.open(io.BytesIO(data)) as image:
+            exif = image.getexif()
+            raw = exif.get(36867) or exif.get(306)  # DateTimeOriginal / DateTime
+    except Exception:
+        return None
+    if not raw:
+        return None
+    text = str(raw).strip()
+    for candidate in (text, text.replace(':', '-', 2)):
+        try:
+            return datetime.fromisoformat(candidate.replace('Z', '+00:00')).replace(tzinfo=None)
+        except ValueError:
+            continue
+    return None
 
 
 def _assert_image(data: bytes) -> None:
@@ -237,6 +263,15 @@ async def upload_image(
         location = location or watermark_fields.get("location") or None
         weather = weather or watermark_fields.get("weather") or None
         section = section or watermark_fields.get("section") or None
+    exif_taken_at = _extract_exif_capture_time(data)
+    watermark_taken_at = None
+    if watermark_fields.get("taken_at"):
+        try:
+            watermark_taken_at = datetime.fromisoformat(str(watermark_fields["taken_at"]).replace("Z", "+00:00"))
+        except ValueError:
+            pass
+    observed_taken_at = watermark_taken_at or exif_taken_at
+    taken_at_source = "watermark" if watermark_taken_at else "exif" if exif_taken_at else "server_upload_time"
 
     directory = _media_dir(MediaType.IMAGE.value)
     file_id = uuid.uuid4().hex
@@ -272,7 +307,11 @@ async def upload_image(
         section=section,
         location=location,
         weather=weather,
-        metadata_json={"watermark": watermark_fields} if watermark_fields else None,
+        metadata_json={
+            **({"watermark": watermark_fields} if watermark_fields else {}),
+            "capture_time": observed_taken_at.isoformat() if observed_taken_at else None,
+            "capture_time_source": taken_at_source,
+        },
     )
     db.add(record)
     await db.flush()
@@ -361,11 +400,7 @@ async def upload_image(
         source=source,
         original_path=record.original_path,
         watermarked_path=record.processed_path,
-        taken_at=(
-            datetime.fromisoformat(watermark_fields["taken_at"])
-            if watermark_fields.get("taken_at")
-            else datetime.now()
-        ),
+        taken_at=observed_taken_at or datetime.now(),
         location=location,
         section=section,
         weather=weather,
@@ -385,6 +420,8 @@ async def upload_image(
         "hazard_id": hazard_id,
         "detection": hazard_payload,
         "watermark": watermark_fields or None,
+        "capture_time": observed_taken_at.isoformat() if observed_taken_at else None,
+        "capture_time_source": taken_at_source,
     }
 
 

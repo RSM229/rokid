@@ -19,12 +19,12 @@ loaded.require = (id) => {
 loaded._compile(compiled, file)
 const model = loaded.exports
 
-test('nine photo dates remain nine distinct candidate events, none confirmed', () => {
+test('nine photo dates remain nine distinct candidate events and use watermark dates', () => {
   const plan = model.createExample(1)
   assert.equal(plan.evidence.length, 9)
   assert.equal(plan.events.length, 9)
-  assert.equal(plan.events.filter(event => event.dateConfirmed).length, 0)
-  assert.equal(model.reviewIssues(plan).length, 18)
+  assert.equal(plan.events.filter(event => event.dateConfirmed).length, 9)
+  assert.equal(model.reviewIssues(plan).length, 0)
 })
 
 test('photos on the same observed date do not force one event per photo', () => {
@@ -32,7 +32,7 @@ test('photos on the same observed date do not force one event per photo', () => 
   assert.equal(plan.evidence.length, 9)
   assert.equal(plan.events.length, 3)
   assert.equal(new Set(plan.events.map(event => event.date)).size, 1)
-  assert.equal(plan.events.some(event => event.dateConfirmed), false)
+  assert.equal(plan.events.every(event => event.dateConfirmed), true)
 })
 
 test('unknown intent does not infer events; evidence can remain explicitly unassigned', () => {
@@ -84,12 +84,8 @@ test('split, merge and unassigned/assignment preserve every piece of evidence', 
   assert.equal(plan.events.flatMap(event => event.evidenceIds).length + plan.unassignedIds.length, 9)
 })
 
-test('confirm requires explicit date and form; any later edit invalidates confirmation', () => {
+test('confirm does not require a form or manual date; any later edit invalidates confirmation', () => {
   let plan = model.createExample(0)
-  assert.throws(() => model.confirmPlan(plan), /日期待确认/)
-  plan = model.editEvent(plan, 'event-1', { date: '2026-10-18', dateConfirmed: true, forms: ['巡视记录'] })
-  plan = model.editEvent(plan, 'event-2', { date: '2026-10-19', dateConfirmed: true, forms: ['旁站记录'] })
-  plan = model.editEvent(plan, 'event-3', { date: '2026-10-20', dateConfirmed: true, forms: ['验收记录'] })
   plan = model.confirmPlan(plan)
   assert.equal(plan.confirmedRevision, plan.revision)
   plan = model.editRequest(plan, '改过的工作要求')

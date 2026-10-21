@@ -17,6 +17,8 @@ EXECUTABLE_RECORD_FORMS = {
     "acceptance_record", "gdaq_30306_weida",
 }
 
+RECORD_TYPES = {"巡视", "验收", "见证", "旁站", "待定"}
+
 
 def validate_plan(plan: dict[str, Any]) -> None:
     if not isinstance(plan, dict) or plan.get("schema_version") != 1:
@@ -69,6 +71,12 @@ def validate_plan(plan: dict[str, Any]) -> None:
         assigned.extend(event_evidence)
         if len(set(forms)) != len(forms) or any(form not in ALLOWED_FORMS for form in forms):
             raise ValueError("存在不支持的表式")
+        record_type = event.get("record_type", "待定")
+        if record_type not in RECORD_TYPES:
+            raise ValueError("工作记录类型无效")
+        confidence = event.get("record_type_confidence", 0)
+        if isinstance(confidence, bool) or not isinstance(confidence, (int, float)) or not 0 <= confidence <= 1:
+            raise ValueError("记录类型置信度无效")
     if len(set(unassigned)) != len(unassigned) or any(item not in evidence_ids for item in unassigned):
         raise ValueError("待分配资料无效")
     assigned.extend(unassigned)
@@ -86,10 +94,6 @@ def review_issues(plan: dict[str, Any]) -> list[str]:
     for i, event in enumerate(events, 1):
         if not str(event.get("title") or "").strip():
             issues.append(f"事项 {i} 缺少名称")
-        if not event.get("date_confirmed"):
-            issues.append(f"事项 {i} 日期待确认")
-        if not event.get("forms"):
-            issues.append(f"事项 {i} 表式待确定")
         if not event.get("evidence_ids") and not str(event.get("content") or "").strip():
             issues.append(f"事项 {i} 缺少工作描述或资料")
     return issues
