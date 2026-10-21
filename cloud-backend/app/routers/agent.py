@@ -22,11 +22,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
 from app.models.user import Project, User
-from app.models.agent_draft import AgentReviewPlan
+from app.models.agent_draft import AgentFlowInstance, AgentReviewPlan
 from app.models.miniprogram import MediaRecord, MediaType
 from app.routers.auth import get_current_user
 from app.routers.local_ai import _PLAINTEXT_SUFFIX
-from app.services import agent_fact_model, agent_request_plan, agent_tools, model_gateway
+from app.services import agent_fact_model, agent_request_plan, agent_runtime, agent_tools, model_gateway
 from app.services.agent_context import (
     extract_explicit_message_facts,
     render_context_summary,
@@ -41,6 +41,7 @@ router = APIRouter()
 
 class AgentChatRequest(BaseModel):
     message: str
+    request_id: Optional[str] = None
     conversation_id: Optional[str] = None
     # 最近若干轮对话（前端只传 role/text），用于「把这条生成日志」这类指代消解
     history: list[dict] = Field(default_factory=list)
@@ -84,6 +85,7 @@ class RequestPlanEvidence(BaseModel):
 
 class RequestPlanRequest(BaseModel):
     message: str = ""
+    request_id: Optional[str] = None
     evidence_summary: str = ""
     evidence: list[RequestPlanEvidence] = Field(default_factory=list)
     attachment_count: int = 0
@@ -242,15 +244,19 @@ class AgentUndoRequest(BaseModel):
 class ReviewPlanCreate(BaseModel):
     conversation_id: str
     plan: dict[str, Any]
+    request_id: Optional[str] = None
 
 
 class ReviewPlanUpdate(BaseModel):
     revision: int
     plan: dict[str, Any]
+    request_id: Optional[str] = None
 
 
 class ReviewPlanConfirm(BaseModel):
     revision: int
+    request_id: Optional[str] = None
+    execution_id: Optional[str] = None
 
 
 async def _validate_review_plan_media(
@@ -614,7 +620,7 @@ async def _generate_request_plan(
 @router.post("/request-plan")
 async def request_plan(
     req: RequestPlanRequest,
-    _user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user),
 ):
     """Build a validated, non-executing plan for text and uploaded evidence."""
     message = (req.message or "").strip()
@@ -623,18 +629,50 @@ async def request_plan(
         0,
         req.attachment_count or sum(1 for item in evidence if item.get("kind") == "image"),
     )
-    plan, model_id = await _generate_request_plan(
-        message=message,
-        evidence_summary=req.evidence_summary,
-        evidence=evidence,
-        attachment_count=attachment_count,
-        file_count=max(0, req.file_count),
-        history=req.history,
-        provider=req.provider,
-        model=req.model,
+    request_id = await agent_runtime.start_request(
+        request_id=req.request_id,
+        user_id=user.id,
+        project_id=getattr(user, "project_id", None),
+        conversation_id=None,
+        endpoint="/api/agent/request-plan",
+        stage="request_plan",
+        message=message or req.evidence_summary,
+        provider=req.provider or "",
+        model=req.model or "",
     )
-    plan["model"] = model_id
-    return plan
+    try:
+        plan, model_id = await _generate_request_plan(
+            message=message,
+            evidence_summary=req.evidence_summary,
+            evidence=evidence,
+            attachment_count=attachment_count,
+            file_count=max(0, req.file_count),
+            history=req.history,
+            provider=req.provider,
+            model=req.model,
+        )
+        plan["model"] = model_id
+        plan["request_id"] = request_id
+        await agent_runtime.finish_request(
+            request_id=request_id,
+            user_id=user.id,
+            endpoint="/api/agent/request-plan",
+            stage="request_plan",
+            request_plan=plan,
+            result={"intent": plan.get("intent"), "actions": plan.get("actions")},
+            model=model_id,
+        )
+        return plan
+    except Exception as exc:
+        await agent_runtime.finish_request(
+            request_id=request_id,
+            user_id=user.id,
+            endpoint="/api/agent/request-plan",
+            stage="request_plan",
+            status="failed",
+            error=exc,
+        )
+        raise
 
 
 @router.post("/recommend-purpose")
@@ -1026,7 +1064,29 @@ async def agent_chat(
 ):
     """Run one agent turn, then persist the exact assistant result for restore."""
     conversation_id = (req.conversation_id or "").strip()[:64] or None
-    result = await _agent_chat_impl(req, user=user, db=db)
+    request_id = await agent_runtime.start_request(
+        request_id=req.request_id,
+        user_id=user.id,
+        project_id=getattr(user, "project_id", None),
+        conversation_id=conversation_id,
+        endpoint="/api/agent/chat",
+        stage="agent_chat",
+        message=req.message,
+        provider=req.provider or "",
+        model=req.model or "",
+    )
+    try:
+        result = await _agent_chat_impl(req, user=user, db=db)
+    except Exception as exc:
+        await agent_runtime.finish_request(
+            request_id=request_id,
+            user_id=user.id,
+            endpoint="/api/agent/chat",
+            stage="agent_chat",
+            status="failed",
+            error=exc,
+        )
+        raise
     plan = result.get("request_plan") if isinstance(result, dict) else None
     conflicts = plan.get("field_conflicts") if isinstance(plan, dict) else None
     if isinstance(conflicts, list) and conflicts and isinstance(result, dict):
@@ -1058,6 +1118,25 @@ async def agent_chat(
             logger.exception("保存智能体会话回复失败，conversation_id=%s", conversation_id)
             await db.rollback()
             result["history_saved"] = False
+    if isinstance(result, dict):
+        result["request_id"] = request_id
+        plan_result = result.get("request_plan") if isinstance(result.get("request_plan"), dict) else None
+        cards = result.get("cards") if isinstance(result.get("cards"), list) else []
+        record_refs = [
+            {"kind": item.get("kind"), "id": item.get("id")}
+            for item in cards
+            if isinstance(item, dict) and item.get("id") is not None
+        ]
+        await agent_runtime.finish_request(
+            request_id=request_id,
+            user_id=user.id,
+            endpoint="/api/agent/chat",
+            stage="agent_chat",
+            request_plan=plan_result,
+            result=result,
+            created_record_refs=record_refs,
+            model=str(result.get("model") or req.model or ""),
+        )
     return result
 
 
@@ -1129,6 +1208,53 @@ async def agent_tools_list(user: User = Depends(get_current_user)):
     return {"count": len(items), "tools": items}
 
 
+@router.get("/requests")
+async def list_agent_requests(
+    limit: int = 20,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """List request-level traces owned by the current account and project."""
+    rows = await agent_runtime.list_request_traces(
+        db, user.id, getattr(user, "project_id", None), limit,
+    )
+    return {"requests": [agent_runtime.trace_payload(row) for row in rows]}
+
+
+@router.get("/requests/{request_id}")
+async def get_agent_request(
+    request_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return one trace by id; ids are scoped to the authenticated account."""
+    normalized = agent_runtime.normalize_request_id(request_id)
+    row = await agent_runtime.get_request_trace(db, normalized, user.id)
+    if not row:
+        raise HTTPException(404, "请求追踪不存在")
+    if row.project_id is not None and row.project_id != getattr(user, "project_id", None):
+        raise HTTPException(403, "请求追踪不属于当前项目")
+    return agent_runtime.trace_payload(row)
+
+
+@router.get("/executions/{execution_id}")
+async def get_agent_execution(
+    execution_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Read a durable execution result after timeout, disconnect or restart."""
+    normalized = agent_runtime.normalize_execution_id(execution_id)
+    row = (await db.execute(select(AgentFlowInstance).where(
+        AgentFlowInstance.execution_id == normalized,
+        AgentFlowInstance.user_id == user.id,
+        AgentFlowInstance.project_id == getattr(user, "project_id", None),
+    ))).scalars().first()
+    if not row:
+        raise HTTPException(404, "执行实例不存在")
+    return agent_runtime.flow_payload(row)
+
+
 class AgentClearDraftsRequest(BaseModel):
     """放弃草稿：指定 tool 只清该工具草稿；省略则清空当前用户全部待补全草稿。"""
     tool: Optional[str] = None
@@ -1170,8 +1296,17 @@ def _review_plan_payload(row: AgentReviewPlan) -> dict[str, Any]:
         execution_result = json.loads(row.execution_result_json or "null")
     except (TypeError, ValueError):
         execution_result = None
+    request_plan = plan.get("request_plan") if isinstance(plan.get("request_plan"), dict) else {}
+    request_id = agent_runtime.normalize_request_id(
+        plan.get("request_id") or request_plan.get("request_id")
+        or f"legacy-review-plan-{row.id}",
+    )
     return {
         "id": row.id, "conversation_id": row.conversation_id,
+        "request_id": request_id,
+        "execution_id": agent_runtime.review_execution_id(
+            row.id, row.confirmed_revision or row.revision,
+        ),
         "revision": row.revision, "status": row.status,
         "confirmed_revision": row.confirmed_revision,
         "executed_revision": row.executed_revision,
@@ -1191,38 +1326,78 @@ async def create_review_plan(
     conversation_id = req.conversation_id.strip()[:64]
     if not conversation_id:
         raise HTTPException(400, "conversation_id 不能为空")
+    request_plan = req.plan.get("request_plan") if isinstance(req.plan.get("request_plan"), dict) else {}
+    request_id = agent_runtime.normalize_request_id(
+        req.request_id or req.plan.get("request_id") or request_plan.get("request_id"),
+    )
+    stored_plan = {**req.plan, "request_id": request_id}
+    await agent_runtime.start_request(
+        request_id=request_id,
+        user_id=user.id,
+        project_id=getattr(user, "project_id", None),
+        conversation_id=conversation_id,
+        endpoint="/api/agent/review-plans",
+        stage="review_plan_save",
+        message=stored_plan.get("request_text") or "",
+    )
     try:
-        agent_review_plan.validate_plan(req.plan)
-    except ValueError as exc:
-        raise HTTPException(422, str(exc)) from exc
-    await _validate_review_plan_media(db, user, req.plan)
-    existing = (await db.execute(select(AgentReviewPlan).where(
-        AgentReviewPlan.user_id == user.id,
-        AgentReviewPlan.project_id == getattr(user, "project_id", None),
-        AgentReviewPlan.conversation_id == conversation_id,
-    ).with_for_update())).scalars().first()
-    if existing:
-        if existing.status == "executed":
+        agent_review_plan.validate_plan(stored_plan)
+        await _validate_review_plan_media(db, user, stored_plan)
+        existing = (await db.execute(select(AgentReviewPlan).where(
+            AgentReviewPlan.user_id == user.id,
+            AgentReviewPlan.project_id == getattr(user, "project_id", None),
+            AgentReviewPlan.conversation_id == conversation_id,
+        ).with_for_update())).scalars().first()
+        if existing:
+            if existing.status != "executed":
+                raise HTTPException(409, "该会话已有整理计划，请读取并修订现有计划")
             existing.revision += 1
             existing.status = "draft"
-            existing.plan_json = json.dumps(req.plan, ensure_ascii=False)
+            existing.plan_json = json.dumps(stored_plan, ensure_ascii=False)
             existing.confirmed_revision = None
             existing.executed_revision = None
             existing.execution_result_json = None
             existing.updated_at = datetime.now()
-            await db.commit()
-            await db.refresh(existing)
-            return _review_plan_payload(existing)
-        raise HTTPException(409, "该会话已有整理计划，请读取并修订现有计划")
-    row = AgentReviewPlan(
-        user_id=user.id, conversation_id=conversation_id,
-        project_id=getattr(user, "project_id", None),
-        revision=1, status="draft", plan_json=json.dumps(req.plan, ensure_ascii=False),
-    )
-    db.add(row)
-    await db.commit()
-    await db.refresh(row)
-    return _review_plan_payload(row)
+            row = existing
+        else:
+            row = AgentReviewPlan(
+                user_id=user.id, conversation_id=conversation_id,
+                project_id=getattr(user, "project_id", None),
+                revision=1, status="draft", plan_json=json.dumps(stored_plan, ensure_ascii=False),
+            )
+            db.add(row)
+        await db.commit()
+        await db.refresh(row)
+        payload = _review_plan_payload(row)
+        await agent_runtime.finish_request(
+            request_id=request_id,
+            user_id=user.id,
+            endpoint="/api/agent/review-plans",
+            stage="review_plan_save",
+            request_plan=request_plan,
+            result={
+                "plan_id": row.id,
+                "revision": row.revision,
+                "status": row.status,
+                "event_count": len(stored_plan.get("events") or []),
+                "evidence_count": len(stored_plan.get("evidence") or []),
+            },
+            review_plan_id=row.id,
+        )
+        return payload
+    except Exception as exc:
+        await db.rollback()
+        await agent_runtime.finish_request(
+            request_id=request_id,
+            user_id=user.id,
+            endpoint="/api/agent/review-plans",
+            stage="review_plan_save",
+            status="failed",
+            error=exc,
+        )
+        if isinstance(exc, ValueError):
+            raise HTTPException(422, str(exc)) from exc
+        raise
 
 
 @router.get("/review-plans")
@@ -1276,17 +1451,63 @@ async def update_review_plan(
     if row.revision != req.revision:
         raise HTTPException(409, "整理计划已在其他请求中更新，请重新加载")
     try:
-        agent_review_plan.validate_plan(req.plan)
+        current_plan = json.loads(row.plan_json or "{}")
+        request_id = agent_runtime.normalize_request_id(
+            req.request_id or req.plan.get("request_id") or current_plan.get("request_id"),
+        )
+        stored_plan = {**req.plan, "request_id": request_id}
+        agent_review_plan.validate_plan(stored_plan)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
-    await _validate_review_plan_media(db, user, req.plan)
-    row.revision += 1
-    row.plan_json = json.dumps(req.plan, ensure_ascii=False)
-    row.confirmed_revision = None
-    row.updated_at = datetime.now()
-    await db.commit()
-    await db.refresh(row)
-    return _review_plan_payload(row)
+    await agent_runtime.start_request(
+        request_id=request_id,
+        user_id=user.id,
+        project_id=row.project_id,
+        conversation_id=row.conversation_id,
+        endpoint="/api/agent/review-plans/{plan_id}",
+        stage="review_plan_save",
+        message=stored_plan.get("request_text") or "",
+    )
+    try:
+        await _validate_review_plan_media(db, user, stored_plan)
+        row.revision += 1
+        row.plan_json = json.dumps(stored_plan, ensure_ascii=False)
+        row.confirmed_revision = None
+        row.updated_at = datetime.now()
+        await db.commit()
+        await db.refresh(row)
+        payload = _review_plan_payload(row)
+        stored_request_plan = (
+            stored_plan.get("request_plan")
+            if isinstance(stored_plan.get("request_plan"), dict) else {}
+        )
+        await agent_runtime.finish_request(
+            request_id=request_id,
+            user_id=user.id,
+            endpoint="/api/agent/review-plans/{plan_id}",
+            stage="review_plan_save",
+            request_plan=stored_request_plan,
+            result={
+                "plan_id": row.id,
+                "revision": row.revision,
+                "status": row.status,
+                "event_count": len(stored_plan.get("events") or []),
+                "evidence_count": len(stored_plan.get("evidence") or []),
+            },
+            review_plan_id=row.id,
+        )
+        return payload
+    except Exception as exc:
+        await db.rollback()
+        await agent_runtime.finish_request(
+            request_id=request_id,
+            user_id=user.id,
+            endpoint="/api/agent/review-plans/{plan_id}",
+            stage="review_plan_save",
+            status="failed",
+            error=exc,
+        )
+        raise
 
 
 @router.post("/review-plans/{plan_id}/confirm")
@@ -1317,11 +1538,46 @@ async def confirm_review_plan(
     issues = agent_review_plan.review_issues(plan)
     if issues:
         raise HTTPException(422, {"message": "整理计划仍有待确认项", "issues": issues})
-    row.status = "confirmed"
-    row.confirmed_revision = row.revision
-    row.updated_at = datetime.now()
-    await db.commit()
-    await db.refresh(row)
+    stored_request_plan = plan.get("request_plan") if isinstance(plan.get("request_plan"), dict) else {}
+    request_id = agent_runtime.normalize_request_id(
+        req.request_id or plan.get("request_id") or stored_request_plan.get("request_id")
+        or f"legacy-review-plan-{plan_id}",
+    )
+    await agent_runtime.start_request(
+        request_id=request_id,
+        user_id=user.id,
+        project_id=row.project_id,
+        conversation_id=row.conversation_id,
+        endpoint="/api/agent/review-plans/{plan_id}/confirm",
+        stage="review_confirm",
+        message=plan.get("request_text") or "",
+    )
+    try:
+        row.status = "confirmed"
+        row.confirmed_revision = row.revision
+        row.updated_at = datetime.now()
+        await db.commit()
+        await db.refresh(row)
+        await agent_runtime.finish_request(
+            request_id=request_id,
+            user_id=user.id,
+            endpoint="/api/agent/review-plans/{plan_id}/confirm",
+            stage="review_confirm",
+            result={"plan_id": plan_id, "revision": row.confirmed_revision, "status": row.status},
+            review_plan_id=plan_id,
+        )
+    except Exception as exc:
+        await db.rollback()
+        await agent_runtime.finish_request(
+            request_id=request_id,
+            user_id=user.id,
+            endpoint="/api/agent/review-plans/{plan_id}/confirm",
+            stage="review_confirm",
+            status="failed",
+            error=exc,
+            review_plan_id=plan_id,
+        )
+        raise
     return _review_plan_payload(row)
 
 
@@ -1332,15 +1588,106 @@ async def execute_review_plan(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Execute one exact confirmed revision and create formal records atomically."""
-    row = (await db.execute(select(AgentReviewPlan).where(
+    """Execute one confirmed revision with durable, idempotent recovery."""
+    preview = (await db.execute(select(AgentReviewPlan).where(
         AgentReviewPlan.id == plan_id, AgentReviewPlan.user_id == user.id,
-    ).with_for_update())).scalars().first()
-    if not row:
+    ))).scalars().first()
+    if not preview:
         raise HTTPException(404, "整理计划不存在")
-    if row.project_id != getattr(user, "project_id", None):
+    project_id = getattr(user, "project_id", None)
+    if preview.project_id != project_id:
         raise HTTPException(403, "整理计划不属于当前项目")
-    from app.services.agent_review_execute import execute_confirmed_plan
-    await execute_confirmed_plan(db, row, user, req.revision)
-    await db.refresh(row)
-    return _review_plan_payload(row)
+    preview_plan = json.loads(preview.plan_json or "{}")
+    stored_request_plan = (
+        preview_plan.get("request_plan")
+        if isinstance(preview_plan.get("request_plan"), dict) else {}
+    )
+    request_id = agent_runtime.normalize_request_id(
+        req.request_id or preview_plan.get("request_id") or stored_request_plan.get("request_id")
+        or f"legacy-review-plan-{plan_id}",
+    )
+    execution_id = agent_runtime.review_execution_id(plan_id, req.revision)
+    await agent_runtime.start_request(
+        request_id=request_id,
+        user_id=user.id,
+        project_id=project_id,
+        conversation_id=preview.conversation_id,
+        endpoint="/api/agent/review-plans/{plan_id}/execute",
+        stage="review_execute",
+        message=preview_plan.get("request_text") or "",
+    )
+    execution_prepared = False
+    try:
+        flow = await agent_runtime.prepare_execution(
+            db,
+            execution_id=execution_id,
+            request_id=request_id,
+            flow_type="review_plan_execute",
+            scope_id=f"review-plan:{plan_id}",
+            user_id=user.id,
+            project_id=project_id,
+            conversation_id=preview.conversation_id,
+            expected_revision=req.revision,
+        )
+        execution_prepared = True
+        locked_flow = await agent_runtime.lock_execution(db, execution_id)
+        if locked_flow is None:
+            raise HTTPException(409, "执行实例已丢失，请重新发起")
+        if locked_flow.status == "COMMITTED":
+            result = agent_runtime.execution_result(locked_flow)
+            await db.commit()
+            await db.refresh(preview)
+            await agent_runtime.finish_request(
+                request_id=request_id,
+                user_id=user.id,
+                endpoint="/api/agent/review-plans/{plan_id}/execute",
+                stage="review_execute",
+                result=result,
+                review_plan_id=plan_id,
+                created_record_refs=result.get("records") or [],
+            )
+            return _review_plan_payload(preview)
+
+        agent_runtime.mark_execution_running(locked_flow)
+        row = (await db.execute(select(AgentReviewPlan).where(
+            AgentReviewPlan.id == plan_id,
+            AgentReviewPlan.user_id == user.id,
+        ).with_for_update())).scalars().first()
+        if not row:
+            raise HTTPException(404, "整理计划不存在")
+        if row.project_id != project_id:
+            raise HTTPException(403, "整理计划不属于当前项目")
+        from app.services.agent_review_execute import execute_confirmed_plan
+
+        result = await execute_confirmed_plan(db, row, user, req.revision)
+        agent_runtime.mark_execution_committed(locked_flow, result)
+        # Formal records, review-plan terminal state and COMMITTED are atomic.
+        await db.commit()
+        await db.refresh(row)
+        await agent_runtime.finish_request(
+            request_id=request_id,
+            user_id=user.id,
+            endpoint="/api/agent/review-plans/{plan_id}/execute",
+            stage="review_execute",
+            result=result,
+            review_plan_id=plan_id,
+            created_record_refs=result.get("records") or [],
+        )
+        return _review_plan_payload(row)
+    except Exception as exc:
+        await db.rollback()
+        if execution_prepared:
+            await agent_runtime.mark_execution_failed(
+                execution_id=execution_id, error=exc,
+                user_id=user.id, project_id=project_id,
+            )
+        await agent_runtime.finish_request(
+            request_id=request_id,
+            user_id=user.id,
+            endpoint="/api/agent/review-plans/{plan_id}/execute",
+            stage="review_execute",
+            status="failed",
+            error=exc,
+            review_plan_id=plan_id,
+        )
+        raise

@@ -221,5 +221,6 @@ async def execute_confirmed_plan(
     row.executed_revision = expected_revision
     row.execution_result_json = json.dumps(result, ensure_ascii=False)
     row.updated_at = datetime.now()
-    await db.commit()
+    # The caller owns the transaction so the formal rows, the review-plan
+    # terminal state and AgentFlowInstance.COMMITTED commit as one atomic unit.
     return result

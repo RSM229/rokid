@@ -126,21 +126,29 @@ async def init_db():
 
 
 async def ensure_agent_history_schema() -> None:
-    """Create the isolated chat-history table even when shared DB init is skipped."""
-    from app.models.agent_draft import AgentConversationMessage
+    """Create isolated agent runtime tables even when shared DB init is skipped."""
+    from app.models.agent_draft import (
+        AgentConversationMessage,
+        AgentFlowInstance,
+        AgentRequestTrace,
+    )
 
     try:
         async with engine.begin() as conn:
             await conn.run_sync(
                 Base.metadata.create_all,
-                tables=[AgentConversationMessage.__table__],
+                tables=[
+                    AgentConversationMessage.__table__,
+                    AgentRequestTrace.__table__,
+                    AgentFlowInstance.__table__,
+                ],
             )
     except SQLAlchemyError:
         # Shared-DB app accounts may be intentionally read/write-only. A
         # missing table must not take the whole API down; deploy the checked-in
         # migration once with a schema-owner account instead.
         logger.exception(
-            "聊天历史表不可用；请使用 migrations/2026-10-21_agent_conversation_history.sql 初始化"
+            "Agent 运行态表不可用；请使用 migrations 中的 SQL 以 schema-owner 账号初始化"
         )
 
 
