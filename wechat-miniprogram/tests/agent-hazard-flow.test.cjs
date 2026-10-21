@@ -18,3 +18,11 @@ test('hazard confirmation uses the server-side atomic batch endpoint, not per-im
   assert.doesNotMatch(page, /\/hazard\/commit-detection/)
   assert.doesNotMatch(page, /wantsRecordIntent/)
 })
+
+test('a combined record and hazard plan renders both controlled sub-flows', () => {
+  assert.match(page, /async appendHazardCandidateMessage\(/)
+  assert.match(
+    page,
+    /if \(wantsRecordPlan\) \{[\s\S]{0,900}createReviewPlanFromAttachments[\s\S]{0,500}appendHazardCandidateMessage/,
+  )
+})

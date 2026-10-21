@@ -26,6 +26,9 @@ interface AgentCard {
 
 interface AgentFormField {
   name: string
+  key?: string
+  canonical?: string
+  definition_source?: string
   label: string
   control: 'text' | 'textarea' | 'select' | 'date' | 'datetime' | 'number' | string
   required: boolean
@@ -41,6 +44,9 @@ interface AgentFormField {
 interface AgentForm {
   id: string
   kind: string
+  schema_version?: number
+  field_schema?: string
+  form_code?: string
   record_id?: number
   title: string
   hint?: string
@@ -94,7 +100,6 @@ interface Message {
   hazardCandidateBusy?: boolean
   hazardCandidateResult?: string
   hazardPendingCount?: number
-  inputComponents?: Array<{ field: string; label: string; control: string; required?: boolean; options?: string[]; value?: string; recommendation?: string; reason?: string }>
   reviewPlan?: ReviewPlan
   reviewEvents?: Array<{
     id: string
@@ -974,12 +979,16 @@ Page(themed({
       )
       if (wantsRecordPlan) {
         if (detections.length) {
-          this.addMessage({
-            role: 'assistant',
-            text: `已完成 ${detections.length} 张图片的安全隐患分析，结果作为候选证据保留；不会自动创建隐患记录。`,
-          })
+          await this.createReviewPlanFromAttachments(note, images, watermarks, observations, requestPlan)
+          await this.appendHazardCandidateMessage(
+            detections,
+            images,
+            watermarks,
+            '工作记录候选与安全隐患候选已分开整理。隐患识别不会自动建档，请分别核对后确认。',
+          )
+        } else {
+          await this.createReviewPlanFromAttachments(note, images, watermarks, observations, requestPlan)
         }
-        await this.createReviewPlanFromAttachments(note, images, watermarks, observations, requestPlan)
         return
       }
 
@@ -1002,20 +1011,12 @@ Page(themed({
           },
           timeout: 120000,
         })
-        let hazardCandidates = this.buildHazardCandidates(detections, images, watermarks)
-        if (hazardCandidates.length) {
-          hazardCandidates = await this.registerHazardCandidateMedia(hazardCandidates)
-        }
-        this.addMessage({
-          role: 'assistant',
-          text: (result.answer || result.reply || '识别未返回内容') + (
-            hazardCandidates.length
-              ? `\n\n已整理 ${hazardCandidates.length} 个隐患候选。这里只做识别，尚未创建正式隐患记录；请在下方核对勾选后确认建档。`
-              : '\n\n本次未形成需要建档的隐患候选。'
-          ),
-          hazardCandidates,
-          hazardPendingCount: hazardCandidates.length,
-        })
+        await this.appendHazardCandidateMessage(
+          detections,
+          images,
+          watermarks,
+          result.answer || result.reply || '识别未返回内容',
+        )
         return
       }
 
@@ -1714,6 +1715,28 @@ Page(themed({
     return registered
   },
 
+  /** Present hazard analysis as a non-writing sub-flow of the same request. */
+  async appendHazardCandidateMessage(
+    detections: { path: string; raw: any }[],
+    images: Attachment[],
+    watermarks: Array<Record<string, any>>,
+    leadText = '',
+  ) {
+    let hazardCandidates = this.buildHazardCandidates(detections, images, watermarks)
+    if (hazardCandidates.length) {
+      hazardCandidates = await this.registerHazardCandidateMedia(hazardCandidates)
+    }
+    const candidateText = hazardCandidates.length
+      ? `已整理 ${hazardCandidates.length} 个隐患候选。这里只做识别，尚未创建正式隐患记录；请在下方核对勾选后确认建档。`
+      : '本次未形成需要建档的隐患候选。'
+    this.addMessage({
+      role: 'assistant',
+      text: [leadText, candidateText].filter(Boolean).join('\n\n'),
+      hazardCandidates,
+      hazardPendingCount: hazardCandidates.length,
+    })
+  },
+
   toggleHazardCandidate(event: WechatMiniprogram.TouchEvent) {
     const index = Number(event.currentTarget.dataset.index)
     const id = String(event.currentTarget.dataset.id || '')
@@ -2066,14 +2089,39 @@ Page(themed({
       const recommendation = recommendations.find(item => item.field === input.field || item.field === input.label)
       return { ...input, value: '', recommendation: recommendation?.value || '', reason: recommendation?.reason || '' }
     })
-    const agentForm: AgentForm | undefined = result.form ? {
-      ...result.form,
-      fields: (result.form.fields || []).map(field => {
-        const recommendation = recommendations.find(item => item.field === field.name || item.field === field.label)
+    const legacyFields: AgentFormField[] = inputComponents.map(input => ({
+      name: input.field,
+      key: input.field,
+      canonical: input.field,
+      definition_source: 'legacy_input_components',
+      label: input.label,
+      control: input.control,
+      required: input.required === true,
+      value: input.value || '',
+      options: input.options || [],
+      recommendation: input.recommendation,
+      reason: input.reason,
+    }))
+    const sourceForm: AgentForm | undefined = result.form || (legacyFields.length ? {
+      id: 'legacy-input-form',
+      kind: 'form',
+      schema_version: 1,
+      field_schema: 'legacy_input_components.v1',
+      title: '补齐信息',
+      fields: legacyFields,
+      submit_label: '提交',
+      skippable: false,
+    } : undefined)
+    const agentForm: AgentForm | undefined = sourceForm ? {
+      ...sourceForm,
+      fields: (sourceForm.fields || []).map(field => {
+        const recommendation = recommendations.find(item => (
+          item.field === field.name || item.field === field.label || item.field === field.canonical
+        ))
         return { ...field, value: field.value || '', options: field.options || [], recommendation: recommendation?.value || '', reason: recommendation?.reason || '' }
       }),
-      attachments: result.form.attachments ? { ...result.form.attachments, picked: result.form.attachments.picked || [] } : undefined,
-      actions: [...(result.form.actions || [])],
+      attachments: sourceForm.attachments ? { ...sourceForm.attachments, picked: sourceForm.attachments.picked || [] } : undefined,
+      actions: [...(sourceForm.actions || [])],
       busy: false,
     } : undefined
     if (agentForm && result.undo) {
@@ -2090,7 +2138,6 @@ Page(themed({
       chips: chips.length ? chips : undefined,
       hint: missing,
       agentForm,
-      inputComponents: agentForm ? undefined : (inputComponents.length ? inputComponents : undefined),
     }
   },
 
@@ -2122,7 +2169,13 @@ Page(themed({
     const value = String(event.detail.value)
     this.updateAgentForm(messageIndex, form => ({
       ...form,
-      fields: form.fields.map(field => field.name === name ? { ...field, value } : field),
+      fields: form.fields.map(field => {
+        if (field.name !== name) return field
+        const selected = field.control === 'select'
+          ? (field.options[Number(value)] || value)
+          : value
+        return { ...field, value: selected }
+      }),
     }))
   },
 
@@ -2324,60 +2377,6 @@ Page(themed({
       return
     }
     if (command) this.handleActionTap({ currentTarget: { dataset: { command } } } as unknown as WechatMiniprogram.TouchEvent)
-  },
-
-  onAgentInputChange(event: WechatMiniprogram.Input) {
-    const messageIndex = Number(event.currentTarget.dataset.message)
-    const field = String(event.currentTarget.dataset.field || '')
-    const messages = [...this.data.messages]
-    const message = messages[messageIndex]
-    if (!message?.inputComponents) return
-    message.inputComponents = message.inputComponents.map(item => item.field === field ? { ...item, value: event.detail.value } : item)
-    this.setData({ messages })
-  },
-
-  onAgentInputDateChange(event: WechatMiniprogram.PickerChange) {
-    const messageIndex = Number(event.currentTarget.dataset.message)
-    const field = String(event.currentTarget.dataset.field || '')
-    const messages = [...this.data.messages]
-    const message = messages[messageIndex]
-    if (!message?.inputComponents) return
-    message.inputComponents = message.inputComponents.map(item => item.field === field ? { ...item, value: String(event.detail.value) } : item)
-    this.setData({ messages })
-  },
-
-  chooseAgentInputOption(event: WechatMiniprogram.TouchEvent) {
-    const messageIndex = Number(event.currentTarget.dataset.message)
-    const field = String(event.currentTarget.dataset.field || '')
-    const value = String(event.currentTarget.dataset.value || '')
-    const messages = [...this.data.messages]
-    const message = messages[messageIndex]
-    if (!message?.inputComponents) return
-    message.inputComponents = message.inputComponents.map(item => item.field === field ? { ...item, value } : item)
-    this.setData({ messages })
-  },
-
-  submitAgentInput(event: WechatMiniprogram.TouchEvent) {
-    const messageIndex = Number(event.currentTarget.dataset.message)
-    const field = String(event.currentTarget.dataset.field || '')
-    const component = this.data.messages[messageIndex]?.inputComponents?.find(item => item.field === field)
-    const value = String(component?.value || '').trim()
-    if (!value) {
-      wx.showToast({ title: `请补充${component?.label || '这一项'}`, icon: 'none' })
-      return
-    }
-    const answer = `${component?.label || field}：${value}`
-    this.handleLlmChat(answer, { role: 'user', text: answer })
-  },
-
-  openAgentInputAttachments() {
-    wx.chooseMedia({
-      count: 9, mediaType: ['image'], sourceType: ['album', 'camera'],
-      success: result => {
-        const added: Attachment[] = result.tempFiles.map(file => ({ id: `${Date.now()}-${Math.random()}`, kind: 'image', path: file.tempFilePath, name: file.tempFilePath.split('/').pop() || '现场照片' }))
-        this.setData({ attachments: [...this.data.attachments, ...added], canSend: true })
-      },
-    })
   },
 
   async handleCommand(route: CommandRoute, userMsg: Message) {

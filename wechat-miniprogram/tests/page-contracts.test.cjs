@@ -5,6 +5,17 @@ const path = require('node:path')
 const ts = require('typescript')
 const root = path.join(__dirname, '../miniprogram')
 const app = JSON.parse(fs.readFileSync(path.join(root, 'app.json'), 'utf8'))
+const agentPage = fs.readFileSync(path.join(root, 'pages/agent/index.ts'), 'utf8')
+const agentTemplate = fs.readFileSync(path.join(root, 'pages/agent/index.wxml'), 'utf8')
+
+test('agent select controls store the selected label instead of the picker index', () => {
+  assert.match(agentPage, /field\.control === 'select'[\s\S]{0,160}field\.options\[Number\(value\)\]/)
+})
+
+test('agent uses one chat-native form renderer and normalizes legacy input components', () => {
+  assert.match(agentPage, /legacy_input_components\.v1/)
+  assert.doesNotMatch(agentTemplate, /item\.inputComponents/)
+})
 
 for (const route of app.pages) {
   test(`${route}: page files, components and event handlers exist`, () => {

@@ -279,24 +279,6 @@
               <text wx:for="{{item.agentForm.actions}}" wx:for-item="formAction" wx:key="label" class="agent-task-link" data-type="{{formAction.type}}" data-url="{{formAction.url}}" data-record-id="{{formAction.record_id}}" data-command="{{formAction.command}}" bindtap="handleAgentFormAction">{{formAction.label}}</text>
             </view>
           </view>
-          <view wx:if="{{item.inputComponents && item.inputComponents.length}}" class="agent-input-form">
-            <view wx:for="{{item.inputComponents}}" wx:for-item="inputItem" wx:key="field" class="agent-input-field">
-              <view class="agent-input-head"><text>{{inputItem.label}}{{inputItem.required ? ' *' : ''}}</text><text wx:if="{{inputItem.reason}}" class="agent-input-reason">建议</text></view>
-              <view wx:if="{{inputItem.recommendation}}" class="agent-input-recommendation">
-                <text>推荐：{{inputItem.recommendation}}</text>
-                <view class="agent-input-pick" data-message="{{mi}}" data-field="{{inputItem.field}}" data-value="{{inputItem.recommendation}}" bindtap="chooseAgentInputOption">采用</view>
-              </view>
-              <view wx:if="{{inputItem.options && inputItem.options.length}}" class="agent-input-options">
-                <view wx:for="{{inputItem.options}}" wx:for-item="option" wx:key="*this" class="agent-input-option {{inputItem.value === option ? 'selected' : ''}}" data-message="{{mi}}" data-field="{{inputItem.field}}" data-value="{{option}}" bindtap="chooseAgentInputOption">{{option}}</view>
-              </view>
-              <picker wx:if="{{inputItem.control === 'date'}}" mode="date" value="{{inputItem.value || '2000-01-01'}}" data-message="{{mi}}" data-field="{{inputItem.field}}" bindchange="onAgentInputDateChange"><view class="agent-input-control">{{inputItem.value || '选择日期'}}　›</view></picker>
-              <textarea wx:if="{{inputItem.control === 'textarea'}}" class="agent-input-textarea" value="{{inputItem.value}}" auto-height maxlength="-1" placeholder="填写{{inputItem.label}}，也可以用下方语音或图片补充" data-message="{{mi}}" data-field="{{inputItem.field}}" bindinput="onAgentInputChange" />
-              <input wx:if="{{inputItem.control === 'datetime'}}" class="agent-input-control" value="{{inputItem.value}}" placeholder="输入日期和时间" data-message="{{mi}}" data-field="{{inputItem.field}}" bindinput="onAgentInputChange" />
-              <view wx:if="{{inputItem.control === 'attachment'}}" class="agent-input-attachment" bindtap="openAgentInputAttachments">添加照片或文件</view>
-              <button class="agent-input-submit" data-message="{{mi}}" data-field="{{inputItem.field}}" bindtap="submitAgentInput">提交补充</button>
-            </view>
-            <text class="agent-input-channel-note">也可以直接在下方说、录音，或添加图片/文件；我会把补充内容归入当前事项。</text>
-          </view>
           <!-- 工作记录字段候选：点选即填入，不符合的走「自己填写」 -->
           <view wx:if="{{item.commands && item.commands.length}}" class="field-groups">
             <view class="field-group" wx:for="{{item.commands}}" wx:for-item="grp" wx:key="field">
