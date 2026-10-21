@@ -19,6 +19,7 @@ from app.db import get_db
 from app.models.hazard import Hazard, HazardStatus
 from app.models.image import ImageRecord
 from app.models.miniprogram import MediaRecord, MediaType
+from app.models.parallel import ParallelInspection
 from app.models.rectification import RectificationRecord
 from app.models.task_assignment import TaskAssignment
 from app.models.user import Project, User
@@ -144,6 +145,7 @@ async def _validate_business_link(
         "work_record": WorkRecord,
         "hazard": Hazard,
         "task": TaskAssignment,
+        "parallel_inspection": ParallelInspection,
     }
     model = model_map.get(business_type)
     if model is None:

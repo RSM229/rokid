@@ -6,7 +6,7 @@ export const FORM_TYPES = [
   '材料台账', '监理通知单', '安全隐患整改通知单', '监理日志', '监理月报', '安全监理日志',
 ]
 export const SCENARIOS = ['混合日期与缺失水印', '九张图片 / 九个日期', '同一历史日期 / 多项工作', '资料不足 / 用途不明', '纯文字 / 无图片']
-const FORM_CODE_BY_LABEL: Record<string, string> = {
+export const FORM_CODE_BY_LABEL: Record<string, string> = {
   '旁站记录': 'gd_b_212_pangzhan', '平行检验记录': 'gd_b_213_pingxing',
   '巡视记录': 'gd_b_214_xunshi', '监理通知单': 'gd_b_215_tongzhi',
   '安全隐患整改通知单': 'gdaq_30308_yinhuan', '验收记录': 'acceptance_record',
@@ -31,6 +31,7 @@ export interface WorkEvent {
   evidenceIds: string[]
   forms: string[]
   content: string
+  fields?: Record<string, Record<string, unknown>>
 }
 export interface ReviewPlan {
   schemaVersion: 1
@@ -57,6 +58,7 @@ export interface ReviewExecutionRecord {
   document_id: number
   document_title: string
   media_ids: number[]
+  pending_fields: string[]
 }
 
 export interface ReviewExecutionResult {
@@ -97,6 +99,7 @@ function fromServerPlan(result: ReviewPlanResponse): ReviewPlan {
       date: String(item.date || ''), dateConfirmed: item.date_confirmed === true,
       evidenceIds: Array.isArray(item.evidence_ids) ? item.evidence_ids.map(String) : [],
       forms: Array.isArray(item.forms) ? item.forms.map(value => FORM_LABEL_BY_CODE[String(value)] || String(value)) : [],
+      fields: item.fields && typeof item.fields === 'object' ? item.fields as Record<string, Record<string, unknown>> : {},
     })),
     unassignedIds: Array.isArray(raw.unassigned_ids) ? raw.unassigned_ids.map(String) : [],
     confirmedRevision: result.confirmed_revision,
@@ -121,6 +124,7 @@ function toServerPlan(plan: ReviewPlan): Record<string, unknown> {
       id: item.id, title: item.title, location: item.location, content: item.content,
       date: item.date, date_confirmed: item.dateConfirmed,
       evidence_ids: item.evidenceIds, forms: item.forms.map(value => FORM_CODE_BY_LABEL[value] || value),
+      fields: item.fields || {},
     })),
     unassigned_ids: plan.unassignedIds,
   }
@@ -128,6 +132,19 @@ function toServerPlan(plan: ReviewPlan): Record<string, unknown> {
 
 export async function fetchReviewPlan(id: number): Promise<ReviewPlan> {
   return fromServerPlan(await request<ReviewPlanResponse>(`/agent/review-plans/${id}`))
+}
+
+export interface ReviewFormField {
+  key: string
+  label: string
+  type: string
+  required?: boolean
+  system?: boolean
+  options?: string[]
+}
+export interface ReviewFormSchema { form_code: string; name: string; sections: Array<{ name: string; fields: ReviewFormField[] }> }
+export async function fetchReviewFormSchema(formCode: string): Promise<ReviewFormSchema> {
+  return request<ReviewFormSchema>(`/provform/schemas/${formCode}`)
 }
 
 export async function createReviewPlan(conversationId: string, plan: ReviewPlan): Promise<ReviewPlan> {
@@ -264,6 +281,12 @@ export function editEvent(plan: ReviewPlan, id: string, patch: Partial<Pick<Work
   if (!plan.events.some(event => event.id === id)) throw new Error('事项不存在')
   return revised(plan, { events: plan.events.map(event => event.id === id ? { ...event, ...patch } : event) })
 }
+export function editFormField(plan: ReviewPlan, id: string, formCode: string, key: string, value: unknown): ReviewPlan {
+  const event = plan.events.find(item => item.id === id)
+  if (!event) throw new Error('事项不存在')
+  const fields = { ...(event.fields || {}), [formCode]: { ...(event.fields?.[formCode] || {}), [key]: value } }
+  return revised(plan, { events: plan.events.map(item => item.id === id ? { ...item, fields } : item) })
+}
 export function addEvent(plan: ReviewPlan, id: string): ReviewPlan {
   return revised(plan, { events: [...plan.events, newEvent(id)] })
 }
@@ -292,12 +315,26 @@ export function splitEvidence(plan: ReviewPlan, id: string, newId: string): Revi
 export function mergeEvents(plan: ReviewPlan, selectedIds: string[], newId: string): ReviewPlan {
   const selected = plan.events.filter(event => selectedIds.includes(event.id))
   if (selected.length < 2) throw new Error('请先选中至少两个事项')
+  const fields: Record<string, Record<string, unknown>> = {}
+  for (const event of selected) {
+    for (const [form, values] of Object.entries(event.fields || {})) {
+      fields[form] ||= {}
+      for (const [key, value] of Object.entries(values)) {
+        const previous = fields[form][key]
+        if (previous != null && previous !== '' && value != null && value !== '' && previous !== value) {
+          throw new Error(`事项合并时「${form}」字段「${key}」内容冲突，请先分别核对`)
+        }
+        if (previous == null || previous === '') fields[form][key] = value
+      }
+    }
+  }
   const dates = [...new Set(selected.map(event => event.date))]
   const merged: WorkEvent = {
     ...newEvent(newId, selected.flatMap(event => event.evidenceIds), dates.length === 1 ? dates[0] : ''),
     title: '合并事项（待核对）', forms: [...new Set(selected.flatMap(event => event.forms))],
     content: selected.map(event => event.content).filter(Boolean).join('\n'),
     location: [...new Set(selected.map(event => event.location).filter(Boolean))].join('；'),
+    fields,
   }
   const first = plan.events.findIndex(event => selectedIds.includes(event.id))
   const events = plan.events.filter(event => !selectedIds.includes(event.id))

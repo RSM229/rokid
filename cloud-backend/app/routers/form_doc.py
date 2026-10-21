@@ -207,9 +207,10 @@ def _content_from_record(record: WorkRecord, user: User) -> dict:
     # 文书模板有对应栏位就带出来；已有值的以记录本体为准，不覆盖
     prov = (record.content_json or {}).get("prov_fields")
     if isinstance(prov, dict):
+        confirmed_plan = (record.content_json or {}).get("source") == "agent_review_plan"
         for key, value in prov.items():
             text = str(value if value is not None else "").strip()
-            if text and not str(base.get(key) or "").strip():
+            if text and (confirmed_plan or not str(base.get(key) or "").strip()):
                 base[str(key)] = text
     return base
 
