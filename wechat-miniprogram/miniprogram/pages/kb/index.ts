@@ -37,6 +37,10 @@ Page(themed({
   recTimer: null as number | null,
   recorderStopHandler: null as Parameters<typeof recorder.onStop>[0] | null,
   recorderErrorHandler: null as Parameters<typeof recorder.onError>[0] | null,
+  /** 等待选好文件夹后再上传的暂存内容（不放进 data，避免无谓的渲染层序列化） */
+  pendingFiles: [] as string[],
+  pendingAudio: '',
+  pendingAudioName: '',
   data: {
     kbId: 0,
     kbName: '资料库',
@@ -48,11 +52,19 @@ Page(themed({
 
     folders: [] as KbFolderNode[],
     folderMap: {} as Record<number, KbFolderNode>,
+    /** 拍平后的文件夹清单（带层级缩进），供上传选目标 / 移动文档时选择 */
+    folderOptions: [] as Array<{ id: number; name: string; depth: number }>,
     currentFolderId: 0,
     breadcrumb: [] as Array<{ id: number; name: string }>,
     currentSubfolders: [] as KbFolderNode[],
     /** 后端尚未提供分类树接口时的降级标记（仍按平铺文档展示） */
     treeUnavailable: false,
+
+    /** 文件夹选择器：上传前选目标文件夹 / 文档移动 */
+    showPicker: false,
+    pickerMode: '' as '' | 'upload' | 'audio' | 'move',
+    pickerTitle: '选择文件夹',
+    pickerDocId: 0,
 
     recording: false,
     recSec: 0,
@@ -93,7 +105,7 @@ Page(themed({
       if (!this.data.recording) return
       this.stopRecTimer()
       this.setData({ recording: false })
-      if (res && res.tempFilePath) this.uploadAudio(res.tempFilePath, '录音转写')
+      if (res && res.tempFilePath) this.startAudioUpload(res.tempFilePath, '录音转写')
     }
     this.recorderErrorHandler = (err: WechatMiniprogram.GeneralCallbackResult) => {
       if (!this.data.recording) return
@@ -191,18 +203,20 @@ Page(themed({
     try {
       const res = await request<{ items: KbFolderNode[] }>(`/kb/${this.data.kbId}/folders`)
       const map: Record<number, KbFolderNode> = {}
-      const flatten = (nodes: KbFolderNode[]) => {
+      const options: Array<{ id: number; name: string; depth: number }> = []
+      const flatten = (nodes: KbFolderNode[], depth = 0) => {
         for (const n of nodes) {
           map[n.id] = n
-          if (n.children && n.children.length) flatten(n.children)
+          options.push({ id: n.id, name: n.name, depth })
+          if (n.children && n.children.length) flatten(n.children, depth + 1)
         }
       }
       flatten(res.items || [])
-      this.setData({ folders: res.items || [], folderMap: map, treeUnavailable: false })
+      this.setData({ folders: res.items || [], folderMap: map, folderOptions: options, treeUnavailable: false })
       this.refreshCurrentFolder()
     } catch (error) {
       // 分类树接口不可用（后端未部署）时降级为平铺文档列表，不阻断上传与查看
-      this.setData({ folders: [], folderMap: {}, treeUnavailable: true, breadcrumb: [], currentSubfolders: [] })
+      this.setData({ folders: [], folderMap: {}, folderOptions: [], treeUnavailable: true, breadcrumb: [], currentSubfolders: [] })
       await this.loadDocs(0)
       wx.showToast({ title: (error as Error).message, icon: 'none' })
     }
@@ -248,7 +262,20 @@ Page(themed({
       success: (res) => {
         const files = res.tempFiles || []
         if (!files.length) return
-        this.doUpload(files.map((f) => f.path))
+        const paths = files.map((f) => f.path)
+        // 已在某个文件夹内：直接归档到当前文件夹
+        if (this.data.currentFolderId) {
+          this.doUpload(paths, this.data.currentFolderId)
+          return
+        }
+        // 根目录：先选目标文件夹，保证文档一定落在文件夹里；
+        // 若分类接口不可用（降级模式没有任何文件夹），退回旧的未分类上传，不阻断使用
+        if (!this.data.folderOptions.length) {
+          this.doUpload(paths, 0)
+          return
+        }
+        this.pendingFiles = paths
+        this.openPicker('upload', '上传到哪个文件夹')
       },
       fail: (err) => {
         wx.showModal({
@@ -260,9 +287,8 @@ Page(themed({
     })
   },
 
-  async doUpload(paths: string[]) {
+  async doUpload(paths: string[], folderId: number) {
     const token = session.getToken()
-    const folderId = this.data.currentFolderId
     const formData = folderId ? { folder_id: String(folderId) } : {}
     let done = 0
     try {
@@ -298,9 +324,23 @@ Page(themed({
     }
   },
 
-  async uploadAudio(path: string, name?: string) {
+  /** 录音/音频统一入口：在文件夹内直接归档，在根目录先选文件夹 */
+  startAudioUpload(path: string, name: string) {
+    if (this.data.currentFolderId) {
+      this.uploadAudio(path, name, this.data.currentFolderId)
+      return
+    }
+    if (!this.data.folderOptions.length) {
+      this.uploadAudio(path, name, 0)
+      return
+    }
+    this.pendingAudio = path
+    this.pendingAudioName = name
+    this.openPicker('audio', '这段录音存到哪个文件夹')
+  },
+
+  async uploadAudio(path: string, name: string | undefined, folderId: number) {
     const token = session.getToken()
-    const folderId = this.data.currentFolderId
     const formData: Record<string, string> = {}
     if (name) formData.name = name
     if (folderId) formData.folder_id = String(folderId)
@@ -360,7 +400,7 @@ Page(themed({
         const f = res.tempFiles && res.tempFiles[0]
         if (!f) { wx.showToast({ title: '未选择音频', icon: 'none' }); return }
         const base = (f.name || '录音').replace(/\.[^.]+$/, '')
-        this.uploadAudio(f.path, base)
+        this.startAudioUpload(f.path, base)
       },
       fail: (err) => {
         wx.showModal({
@@ -426,12 +466,72 @@ Page(themed({
     })
   },
 
+  openPicker(mode: 'upload' | 'audio' | 'move', title: string, docId = 0) {
+    if (!this.data.folderOptions.length) {
+      wx.showToast({ title: '还没有文件夹，请先新建', icon: 'none' })
+      return
+    }
+    this.setData({ showPicker: true, pickerMode: mode, pickerTitle: title, pickerDocId: docId })
+  },
+
+  hidePicker() {
+    // 取消时丢弃暂存内容，避免下次误传
+    this.pendingFiles = []
+    this.pendingAudio = ''
+    this.pendingAudioName = ''
+    this.setData({ showPicker: false, pickerMode: '', pickerDocId: 0 })
+  },
+
+  async choosePickerFolder(event: WechatMiniprogram.TouchEvent) {
+    const targetId = Number(event.currentTarget.dataset.id)
+    const mode = this.data.pickerMode
+    const docId = this.data.pickerDocId
+    this.setData({ showPicker: false, pickerMode: '', pickerDocId: 0 })
+
+    if (mode === 'upload') {
+      const paths = this.pendingFiles
+      this.pendingFiles = []
+      if (paths.length) await this.doUpload(paths, targetId)
+      return
+    }
+    if (mode === 'audio') {
+      const path = this.pendingAudio
+      const name = this.pendingAudioName
+      this.pendingAudio = ''
+      this.pendingAudioName = ''
+      if (path) await this.uploadAudio(path, name || undefined, targetId)
+      return
+    }
+    if (mode === 'move') await this.moveDoc(docId, targetId)
+  },
+
+  openMoveDoc(event: WechatMiniprogram.TouchEvent) {
+    const docId = Number(event.currentTarget.dataset.id)
+    this.openPicker('move', '移动到哪个文件夹', docId)
+  },
+
+  async moveDoc(docId: number, folderId: number) {
+    wx.showLoading({ title: '移动中...', mask: true })
+    try {
+      await request(`/kb/${this.data.kbId}/documents/${docId}/folder`, {
+        method: 'PUT',
+        data: { folder_id: folderId },
+      })
+      wx.hideLoading()
+      wx.showToast({ title: folderId ? '已移动' : '已移回未分类', icon: 'success' })
+      this.loadFolders()
+    } catch (error) {
+      wx.hideLoading()
+      wx.showToast({ title: (error as Error).message, icon: 'none' })
+    }
+  },
+
   showNewFolder() { this.setData({ showNewFolder: true, newFolderName: '' }) },
   hideNewFolder() { this.setData({ showNewFolder: false }) },
   onNewFolderInput(event: WechatMiniprogram.Input) { this.setData({ newFolderName: event.detail.value }) },
   async confirmNewFolder() {
     const name = this.data.newFolderName.trim()
-    if (!name) { wx.showToast({ title: '请输入分类名称', icon: 'none' }); return }
+    if (!name) { wx.showToast({ title: '请输入文件夹名称', icon: 'none' }); return }
     this.setData({ creatingFolder: true })
     wx.showLoading({ title: '创建中...', mask: true })
     try {
