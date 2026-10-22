@@ -65,7 +65,7 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="300" fixed="right">
+        <el-table-column label="操作" width="360" fixed="right">
           <template #default="{ row }">
             <el-button
               v-if="row.id !== currentProjectId && row.status === 'active'"
@@ -88,6 +88,12 @@
               type="primary"
               @click="reopenProject(row)"
             >恢复</el-button>
+            <el-button
+              v-if="isSuperAdmin && row.id !== currentProjectId"
+              link
+              type="danger"
+              @click="openDelete(row)"
+            >删除</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -132,6 +138,36 @@
         <el-button type="primary" :loading="saving" @click="save">{{ editingId ? '保存' : '创建' }}</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="deleteVisible" title="删除项目" width="520px">
+      <div v-if="deleting" class="del-target">
+        <div class="del-name">{{ deleting.name }}</div>
+        <div class="del-code">项目编号：{{ deleting.code }}</div>
+      </div>
+      <el-alert
+        type="warning"
+        :closable="false"
+        show-icon
+        title="此操作不可逆，将从数据库彻底移除该项目"
+        description="仅「从未产生业务数据」的空壳项目可删（无成员任命、无文书/巡视/验收/资料等任何记录、无图纸与档案文件）。若项目已有数据，请改用「结项」——结项可恢复、保留责任追溯链。请输入项目编号以确认。"
+        style="margin-bottom: 12px"
+      />
+      <el-input
+        v-model="deleteCode"
+        :placeholder="`请输入项目编号 ${deleting?.code || ''}`"
+        maxlength="64"
+        clearable
+      />
+      <template #footer>
+        <el-button @click="deleteVisible = false">取消</el-button>
+        <el-button
+          type="danger"
+          :loading="deleteSaving"
+          :disabled="!deleting || deleteCode.trim().toUpperCase() !== (deleting.code || '').toUpperCase()"
+          @click="confirmDelete"
+        >确认删除</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -159,6 +195,8 @@ const includeClosed = ref(false)
 const canCreate = computed(() => auth.hasPermission('project_create'))
 // Step 5：结项/恢复（权限 project_complete，默认仅超管可配）
 const canComplete = computed(() => auth.hasPermission('project_complete'))
+// 物理删除只给超管（与后端 `_require_super` 同口径，不走权限键）
+const isSuperAdmin = computed(() => String(auth.userInfo?.org_role || '') === 'super_admin')
 const currentProjectId = computed(() => auth.userInfo?.project_id ?? null)
 
 const form = reactive({
@@ -354,6 +392,36 @@ async function reopenProject(row: any) {
   }
 }
 
+// ---- 空壳项目物理删除（2026-10-22，仅超管；门槛见后端 delete_project）----
+
+const deleteVisible = ref(false)
+const deleteSaving = ref(false)
+const deleting = ref<any | null>(null)
+const deleteCode = ref('')
+
+function openDelete(row: any) {
+  deleting.value = row
+  deleteCode.value = ''
+  deleteVisible.value = true
+}
+
+async function confirmDelete() {
+  if (!deleting.value) return
+  deleteSaving.value = true
+  try {
+    const res: any = await projectApi.remove(deleting.value.id, deleteCode.value.trim())
+    ElMessage.success(res?.detail || '项目已删除')
+    deleteVisible.value = false
+    deleting.value = null
+    await load()
+  } catch (e: any) {
+    // 后端对"有业务数据"返回 409，detail 已说明原因，直接透出
+    ElMessage.error(e?.response?.data?.detail || '删除失败')
+  } finally {
+    deleteSaving.value = false
+  }
+}
+
 onMounted(load)
 </script>
 
@@ -386,6 +454,21 @@ onMounted(load)
   font-size: 12px;
   color: var(--el-text-color-secondary);
   line-height: 1.6;
+  margin-top: 4px;
+}
+.del-target {
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  border-radius: 4px;
+  background: var(--el-fill-color-lighter);
+}
+.del-name {
+  font-weight: 600;
+}
+.del-code {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  font-family: 'SF Mono', Consolas, monospace;
   margin-top: 4px;
 }
 </style>
