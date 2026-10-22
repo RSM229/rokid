@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import secrets
 import subprocess
 import sys
@@ -13,6 +14,11 @@ from sqlalchemy.engine import URL
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 LOCAL_DIR = BACKEND_DIR / ".local"
 MODEL_DIR = LOCAL_DIR / "models" / "bge-small-zh-v1.5"
+# SSH host used to reach the shared server. Override for environments where the
+# R640 reverse tunnel is not set up (e.g. direct cloud access via `rokid-deploy`).
+SSH_HOST = os.getenv("ROKID_SSH_HOST", "rokid-r640")
+# Extra ssh options (space separated) for environments that cannot read ~/.ssh/config.
+SSH_ARGS = [a for a in os.getenv("ROKID_SSH_ARGS", "").split() if a]
 
 # Values are captured directly into a private local file, never printed to logs.
 REMOTE_SETTINGS = '''
@@ -56,8 +62,8 @@ def ssh_python(code: str, data: str | None = None) -> str:
         f'"import base64; exec(base64.b64decode(\'{encoded}\'))"'
     )
     result = subprocess.run(
-        ["ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes",
-         "-o", "ConnectTimeout=10", "rokid-r640", command],
+        ["ssh", *SSH_ARGS, "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes",
+         "-o", "ConnectTimeout=10", SSH_HOST, command],
         input=data, text=True, encoding="utf-8", capture_output=True, timeout=60,
     )
     if result.returncode:
@@ -81,8 +87,8 @@ def sync_embedding_model() -> None:
         try:
             with temporary.open("wb") as output:
                 subprocess.run(
-                    ["ssh", "-T", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes",
-                     "-o", "ConnectTimeout=10", "rokid-r640",
+                    ["ssh", "-T", *SSH_ARGS, "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes",
+                     "-o", "ConnectTimeout=10", SSH_HOST,
                      f"docker exec rokid-backend cat /app/models/bge-small-zh-v1.5/{name}"],
                     stdout=output, check=True, timeout=600,
                 )

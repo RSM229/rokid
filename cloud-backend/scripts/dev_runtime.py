@@ -9,7 +9,13 @@ import subprocess
 import sys
 import time
 
-from scripts.configure_local_services import BACKEND_DIR, LOCAL_DIR, sync_embedding_model
+from scripts.configure_local_services import (
+    BACKEND_DIR,
+    LOCAL_DIR,
+    SSH_ARGS,
+    SSH_HOST,
+    sync_embedding_model,
+)
 
 
 def listening(port: int) -> bool:
@@ -52,10 +58,10 @@ def main() -> None:
     tunnel = server = None
     try:
         tunnel = subprocess.Popen([
-            "ssh", "-NT", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes",
+            "ssh", "-NT", *SSH_ARGS, "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes",
             "-o", "ExitOnForwardFailure=yes", "-o", "ConnectTimeout=10",
             "-o", "ServerAliveInterval=30", "-o", "ServerAliveCountMax=3",
-            "-L", "127.0.0.1:13308:127.0.0.1:3308", "rokid-r640",
+            "-L", "127.0.0.1:13308:127.0.0.1:3308", SSH_HOST,
         ], **creation)
         for _ in range(30):
             if tunnel.poll() is not None:
