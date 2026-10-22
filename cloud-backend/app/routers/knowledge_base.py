@@ -305,6 +305,38 @@ async def list_knowledge_bases(
     return {"items": items}
 
 
+@router.get("/mine")
+async def my_home_knowledge_base(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """返回当前用户的首页资料库（个人主库，没有则自动创建）。
+
+    小程序「资料库」tab 直接以它为根渲染分类树，不再让用户先选库。
+    """
+    result = await db.execute(
+        select(KnowledgeBase)
+        .where(KnowledgeBase.owner_id == user.id, KnowledgeBase.kb_type == "personal")
+        .order_by(KnowledgeBase.id)
+    )
+    kb = result.scalars().first()
+    if kb is None:
+        kb = KnowledgeBase(name="我的资料库", kb_type="personal", owner_id=user.id)
+        db.add(kb)
+        await db.flush()
+        db.add(KnowledgeBaseMember(kb_id=kb.id, user_id=user.id, role="owner"))
+        await db.commit()
+        await db.refresh(kb)
+    await ensure_kb_folder_tree(db, kb.id)
+    return {
+        "id": kb.id,
+        "name": kb.name,
+        "role": "owner",
+        "is_owner": True,
+        "kb_type": kb.kb_type,
+    }
+
+
 @router.post("")
 async def create_knowledge_base(
     req: KnowledgeBaseCreate,

@@ -1,83 +1,67 @@
-<view class="page tab-host" style="{{themeStyle}}">
-  <glass-nav-bar title="资料库" left="back" />
-  <!-- 2026-10-08 起「资料库」是底部第 4 个 tab，本页即其落点 -->
+<view class="page" style="{{themeStyle}}">
+  <glass-nav-bar title="{{kbName}}" left="back" />
+  <!-- 2026-10-08 起「资料库」是底部第 4 个 tab，本页即其落点；已改为直接渲染分类树 -->
   <tab-bar active="kb" />
 
-  <view class="tabs">
-    <view class="{{tab === 'mine' ? 'active' : ''}}" data-tab="mine" bindtap="onTab">我的</view>
-    <view class="{{tab === 'shared' ? 'active' : ''}}" data-tab="shared" bindtap="onTab">共享</view>
-    <view class="{{tab === 'plaza' ? 'active' : ''}}" data-tab="plaza" bindtap="onTab">广场</view>
-  </view>
-
-  <view class="toolbar">
-    <button class="btn-primary" size="mini" bindtap="showCreate">+ 新建资料库</button>
-    <button class="btn-green" size="mini" bindtap="showJoin">加入共享库</button>
-  </view>
-
-  <block wx:if="{{tab !== 'plaza'}}">
-    <view wx:if="{{loading && !list.length}}" class="empty">正在加载…</view>
-    <view wx:elif="{{!list.length}}" class="empty">还没有资料库，点上方“新建资料库”</view>
-    <view wx:for="{{list}}" wx:key="id" class="card kb" data-id="{{item.id}}" bindtap="open">
-      <view class="kb-head">
-        <view class="kb-name">{{item.name}}</view>
-        <view class="kb-tag {{item.kb_type}}">{{item.is_builtin ? '内置' : (item.kb_type === 'shared' ? '共享' : '个人')}}</view>
-      </view>
-      <view wx:if="{{item.description}}" class="kb-desc">{{item.description}}</view>
-      <view class="kb-sub">{{item.document_count}} 份文档 · {{item.member_count}} 位成员 · {{roleLabel[item.role]}}</view>
-    </view>
-  </block>
+  <view wx:if="{{resolving}}" class="empty">正在加载资料库…</view>
 
   <block wx:else>
-    <view wx:if="{{plazaLoading && !list.length}}" class="empty">正在加载广场…</view>
-    <view wx:elif="{{!list.length}}" class="empty">广场暂无公开资料库</view>
-    <view wx:for="{{list}}" wx:key="id" class="card kb">
-      <view class="kb-head">
-        <view class="kb-name">{{item.name}}</view>
-        <view class="kb-tag {{item.is_builtin ? 'builtin' : 'shared'}}">{{item.is_builtin ? '内置' : '公开'}}</view>
+    <!-- 面包屑：非根层显示，可点「全部」回到根 -->
+    <view wx:if="{{currentFolderId !== 0}}" class="breadcrumb">
+      <text class="crumb root" data-id="0" bindtap="goBreadcrumb">全部</text>
+      <text wx:for="{{breadcrumb}}" wx:key="id" class="crumb" data-id="{{item.id}}" bindtap="goBreadcrumb">{{item.name}}</text>
+    </view>
+
+    <!-- 子分类卡片 -->
+    <view wx:if="{{currentSubfolders.length}}" class="folder-grid">
+      <view wx:for="{{currentSubfolders}}" wx:key="id" class="fcard" data-id="{{item.id}}" bindtap="selectFolder">
+        <view class="ficon">📁</view>
+        <view class="fname">{{item.name}}</view>
+        <view class="fcount">{{item.count}} 份</view>
       </view>
-      <view wx:if="{{item.description}}" class="kb-desc">{{item.description}}</view>
-      <view class="kb-sub">{{item.owner_name}} · {{item.document_count}} 份文档 · {{item.member_count}} 人订阅</view>
-      <view class="plaza-actions">
-        <button class="btn-primary" size="mini" data-id="{{item.id}}" bindtap="subscribe">{{item.joined ? '进入资料库' : '订阅'}}</button>
+    </view>
+
+    <!-- 文档 -->
+    <view wx:if="{{docsLoading && !docs.length}}" class="empty">正在加载…</view>
+    <view wx:elif="{{!currentSubfolders.length && !docs.length}}" class="empty">这个分类下还没有文档，点下方按钮上传归档</view>
+    <view wx:for="{{docs}}" wx:key="id" class="card doc">
+      <view class="doc-name">{{item.name}}</view>
+      <view class="doc-meta">{{item.sizeText}} · {{item.uploader_name}}</view>
+      <view class="doc-btns">
+        <text class="link-green" data-id="{{item.id}}" bindtap="openContent">查看</text>
+        <text class="link-gray" data-id="{{item.id}}" bindtap="downloadDoc">下载</text>
+        <text wx:if="{{canUpload}}" class="link-red" data-id="{{item.id}}" bindtap="deleteDoc">删除</text>
       </view>
     </view>
   </block>
 
-  <view wx:if="{{showCreate}}" class="mask" bindtap="hideCreate">
+  <!-- 底部操作栏 -->
+  <view class="action-bar">
+    <button wx:if="{{canUpload}}" class="btn-primary" size="mini" bindtap="uploadDoc">+ 上传文档</button>
+    <button wx:if="{{canUpload}}" class="btn-green" size="mini" bindtap="chooseAudio">录音转写</button>
+    <button wx:if="{{canUpload}}" class="btn-plain" size="mini" bindtap="showNewFolder">新建分类</button>
+  </view>
+
+  <!-- 文档内容预览 -->
+  <view wx:if="{{showContent}}" class="mask" bindtap="closeContent">
     <view class="modal" catchtap="">
-      <view class="modal-title">新建资料库</view>
-      <view class="field-group">
-        <text class="field-label">名称</text>
-        <input class="field-input" value="{{createName}}" data-field="createName" placeholder="如：项目规范库" bindinput="onCreateInput" />
-      </view>
-      <view class="field-group">
-        <text class="field-label">类型</text>
-        <view class="type-row">
-          <view class="type-opt {{createType === 'personal' ? 'on' : ''}}" data-type="personal" bindtap="onCreateType">个人</view>
-          <view class="type-opt {{createType === 'shared' ? 'on' : ''}}" data-type="shared" bindtap="onCreateType">共享</view>
-        </view>
-      </view>
-      <view class="field-group">
-        <text class="field-label">描述（可选）</text>
-        <input class="field-input" value="{{createDesc}}" data-field="createDesc" placeholder="一句话说明" bindinput="onCreateInput" />
-      </view>
-      <view class="modal-btns">
-        <button class="btn-cancel" bindtap="hideCreate">取消</button>
-        <button class="btn-primary" loading="{{creating}}" bindtap="confirmCreate">创建</button>
-      </view>
+      <view class="modal-title">{{contentTitle}}</view>
+      <scroll-view scroll-y class="content-box"><text>{{contentText}}</text></scroll-view>
+      <button class="btn-cancel" bindtap="closeContent">关闭</button>
     </view>
   </view>
 
-  <view wx:if="{{showJoin}}" class="mask" bindtap="hideJoin">
+  <!-- 新建分类 -->
+  <view wx:if="{{showNewFolder}}" class="mask" bindtap="hideNewFolder">
     <view class="modal" catchtap="">
-      <view class="modal-title">加入共享资料库</view>
+      <view class="modal-title">新建分类</view>
       <view class="field-group">
-        <text class="field-label">邀请码</text>
-        <input class="field-input" value="{{joinCode}}" placeholder="输入邀请码" bindinput="onJoinInput" />
+        <text class="field-label">分类名称</text>
+        <input class="field-input" value="{{newFolderName}}" placeholder="如：合同与资质" bindinput="onNewFolderInput" />
       </view>
       <view class="modal-btns">
-        <button class="btn-cancel" bindtap="hideJoin">取消</button>
-        <button class="btn-primary" loading="{{joining}}" bindtap="confirmJoin">加入</button>
+        <button class="btn-cancel" bindtap="hideNewFolder">取消</button>
+        <button class="btn-primary" loading="{{creatingFolder}}" bindtap="confirmNewFolder">创建</button>
       </view>
     </view>
   </view>
