@@ -226,12 +226,66 @@ test('server item plan is adapted without re-grouping and keeps every evidence i
   assert.equal(plan.evidence.length, 3)
 })
 
+test('entity conflicts survive the item-plan adapter and block confirmation until selected', () => {
+  const evidence = [{ id: 'p1', image: 'p1.jpg', observedDate: '2026-10-09', section: '安全巡视', note: '' }]
+  const plan = model.reviewPlanFromItemPlan({
+    items: [{
+      id: 'item_1', record_type: '巡视',
+      fields: {
+        record_date: { value: '2026-10-09', source: 'watermark', status: 'evidence_extracted' },
+        section: { value: '安全巡视', source: 'watermark', status: 'evidence_extracted' },
+        project: {
+          value: '广东省中西医结合应急救治中心项目', source: 'watermark', status: 'conflict',
+          candidates: ['广东省中西医结合应急救治中心项目', '111'],
+        },
+        construction_unit: {
+          value: '广州一建建设集团有限公司', source: 'watermark', status: 'conflict',
+          candidates: ['广州一建建设集团有限公司', '系统施工单位'],
+        },
+      },
+      evidence_indexes: [0], missing_fields: [], issues: ['项目存在多个候选值'],
+    }],
+    unassigned_evidence_indexes: [], issues: [],
+  }, evidence, '记录这个工作')
+  assert.equal(plan.events[0].entityFields.project_name, '广东省中西医结合应急救治中心项目')
+  assert.equal(plan.events[0].entityFields.construction_unit, '广州一建建设集团有限公司')
+  assert.deepEqual(plan.events[0].fieldCandidates.project_name, ['广东省中西医结合应急救治中心项目', '111'])
+  assert.deepEqual(plan.events[0].unresolvedConflicts.sort(), ['construction_unit', 'project_name'])
+  let confirmed = chooseRecordTypes(plan)
+  assert.ok(model.reviewIssues(confirmed).some(issue => issue.includes('项目存在多个候选值')))
+  confirmed = model.editEvent(confirmed, 'item_1', {
+    entityFields: { ...confirmed.events[0].entityFields, project_name: '111' },
+    unresolvedConflicts: confirmed.events[0].unresolvedConflicts.filter(field => field !== 'project_name'),
+  })
+  assert.ok(!model.reviewIssues(confirmed).some(issue => issue.includes('项目存在多个候选值')))
+})
+
 test('removing an event releases its evidence without deleting photos', () => {
   const plan = model.removeEvent(model.createExample(), 'event-1')
   assert.equal(plan.evidence.length, 9)
   assert.deepEqual(plan.unassignedIds, ['photo-1', 'photo-2', 'photo-3'])
   assert.throws(() => model.assignEvidence(plan, 'photo-1', 'missing-event'), /不存在/)
   assert.equal(model.restorePlan(plan).events.length, 2)
+})
+
+test('merging events keeps conflicting parties selectable instead of concatenating them', () => {
+  let plan = model.createExample()
+  plan = model.editEvent(plan, plan.events[0].id, {
+    entityFields: { project_name: '项目甲', construction_unit: '单位甲' },
+    fieldCandidates: { project_name: ['项目甲', '项目乙'], construction_unit: ['单位甲', '单位乙'] },
+    unresolvedConflicts: ['project_name', 'construction_unit'],
+  })
+  plan = model.editEvent(plan, plan.events[1].id, {
+    entityFields: { project_name: '项目乙', construction_unit: '单位乙' },
+    fieldCandidates: { project_name: ['项目甲', '项目乙'], construction_unit: ['单位甲', '单位乙'] },
+    unresolvedConflicts: ['project_name', 'construction_unit'],
+  })
+  const merged = model.mergeEvents(plan, [plan.events[0].id, plan.events[1].id], 'merged-conflict')
+  const event = merged.events.find(item => item.id === 'merged-conflict')
+  assert.equal(event.entityFields.project_name, '项目甲')
+  assert.deepEqual(event.fieldCandidates.project_name, ['项目甲', '项目乙'])
+  assert.ok(event.unresolvedConflicts.includes('project_name'))
+  assert.ok(event.unresolvedConflicts.includes('construction_unit'))
 })
 
 test('merging dates preserves original clues and requires explicit new confirmation', () => {

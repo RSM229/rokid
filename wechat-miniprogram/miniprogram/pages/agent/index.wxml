@@ -131,6 +131,17 @@
                 <view class="inline-review-field"><text>地点</text><input value="{{event.location}}" placeholder="可补充" data-index="{{mi}}" data-id="{{event.id}}" data-field="location" bindblur="changeInlineReviewField" /></view>
                 <view class="inline-review-field"><text>施工部位</text><input value="{{event.section}}" placeholder="可补充" data-index="{{mi}}" data-id="{{event.id}}" data-field="section" bindblur="changeInlineReviewField" /></view>
               </view>
+              <view wx:for="{{event.entityFieldRows}}" wx:for-item="entityField" wx:for-index="efi" wx:key="field" class="inline-review-field entity-field {{entityField.conflict ? 'conflict' : ''}}">
+                <view class="inline-review-entity-head">
+                  <text>{{entityField.label}}</text>
+                  <text wx:if="{{entityField.conflict}}" class="inline-review-conflict">待确认</text>
+                  <text wx:elif="{{entityField.value}}" class="inline-review-source-tag">已有识别值</text>
+                </view>
+                <input value="{{entityField.value}}" placeholder="未识别，可直接补充" data-index="{{mi}}" data-id="{{event.id}}" data-field="{{entityField.field}}" bindblur="changeInlineReviewEntityField" />
+                <view wx:if="{{entityField.values.length > 1}}" class="inline-review-chip-row entity-choice-row">
+                  <view wx:for="{{entityField.values}}" wx:for-item="choice" wx:for-index="choiceIndex" wx:key="choiceIndex" class="inline-review-chip {{entityField.value === choice ? 'selected' : ''}}" data-index="{{mi}}" data-id="{{event.id}}" data-field="{{entityField.field}}" data-value="{{choice}}" bindtap="changeInlineReviewEntityField">采用 {{choice}}</view>
+                </view>
+              </view>
               <view class="inline-review-field"><text>工作描述</text><textarea value="{{event.content}}" auto-height maxlength="-1" placeholder="补充现场工作情况" data-index="{{mi}}" data-id="{{event.id}}" data-field="content" bindblur="changeInlineReviewField" /></view>
               <view class="inline-review-date-row">
                 <text class="inline-review-label">业务日期</text>

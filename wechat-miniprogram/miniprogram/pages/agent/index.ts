@@ -190,11 +190,17 @@ interface AgentRequestPlan {
   field_status: Record<string, unknown>
   field_conflicts: Array<{
     field: string
+    label?: string
+    system_value?: unknown
+    system_source?: string
     user_value: unknown
     evidence_values: unknown[]
+    evidence_sources?: string[]
     preferred_value: unknown
     preferred_source: string
     resolution: string
+    options?: string[]
+    needs_confirmation?: boolean
   }>
   item_plan: RequestPlanItemPlan
   needs_hazard_analysis: boolean
@@ -1103,10 +1109,20 @@ Page(themed({
         ? this.purposeFromPlan(requestPlan)
         : await this.requestPurposeRecommendation(note, evidence)
       const notices = (requestPlan?.field_conflicts || []).map(conflict => {
-        const label: Record<string, string> = { record_date: '日期', project: '项目', location: '地点', section: '部位', weather: '天气' }
+        const label: Record<string, string> = {
+          record_date: '日期', project: '项目', location: '地点', section: '部位', weather: '天气',
+          owner_unit: '建设单位', construction_unit: '施工单位', supervision_unit: '监理单位',
+          supervision_org: '项目监理机构', inspector: '检查人员',
+        }
+        const candidates = [
+          conflict.system_value ? `系统项目资料：${String(conflict.system_value)}` : '',
+          conflict.user_value ? `你的描述：${String(conflict.user_value)}` : '',
+          conflict.evidence_values?.length ? `照片水印/EXIF：${conflict.evidence_values.map(String).join('、')}` : '',
+        ].filter(Boolean)
         const source = conflict.preferred_source === 'watermark_or_exif' || conflict.preferred_source === 'watermark'
-          ? '照片水印/EXIF' : '你的描述'
-        return `${label[conflict.field] || conflict.field}存在不一致：你描述的是 ${String(conflict.user_value || '未知')}，照片证据是 ${conflict.evidence_values.map(String).join('、') || '未知'}；候选按${source}采用 ${String(conflict.preferred_value || '未知')}，原始冲突值均保留。`
+          ? '照片水印/EXIF' : conflict.preferred_source === 'system_project'
+            ? '系统项目资料' : conflict.preferred_source === 'user_profile' ? '登录用户资料' : '你的描述'
+        return `${conflict.label || label[conflict.field] || conflict.field}存在不一致（${candidates.join('；') || '候选值不同'}）。当前建议先采用${source}的“${String(conflict.preferred_value || '未知')}”，请在下面事项中点选确认。`
       })
       const itemPlan: RequestPlanItemPlan = requestPlan?.item_plan || {
         items: [], candidate_count: 0,
@@ -1313,6 +1329,22 @@ Page(themed({
         record_date: '业务日期', project: '项目', location: '地点', section: '施工部位', title: '工作名称', content: '工作描述',
       } as Record<string, string>)[field] || field),
       issues: event.issues || [],
+      entityFieldRows: [
+        ['project_name', '项目名称'], ['owner_unit', '建设单位'], ['construction_unit', '施工单位'],
+        ['supervision_unit', '监理单位'], ['supervision_org', '项目监理机构'],
+        ['inspector', '检查人员'], ['weather', '天气'], ['problems', '问题及处理'],
+        ['treatment', '处理措施'],
+      ].map(([field, label]) => ({
+        field,
+        label,
+        value: event.entityFields?.[field] || '',
+        values: [...new Set([
+          event.entityFields?.[field] || '',
+          ...(event.fieldCandidates?.[field] || []),
+        ].filter(Boolean))],
+        conflict: (event.unresolvedConflicts || []).includes(field),
+      })).filter(row => row.value || row.values.length),
+      hasUnresolvedConflicts: Boolean(event.unresolvedConflicts?.length),
       mergeSelected: selectedIds.includes(event.id),
       evidenceSummary: [...new Set(plan.evidence.filter(item => event.evidenceIds.includes(item.id)).map(item => item.note).filter(Boolean))].join('；'),
       watermarkSummary: [...new Set(plan.evidence.filter(item => event.evidenceIds.includes(item.id)).flatMap(item => Object.entries(item.watermarkFields || {}).map(([key, value]) => `${key}：${value}`)))].join('；'),
@@ -1404,6 +1436,12 @@ Page(themed({
           recordTypeReason: type.type !== '待定' ? '用户已选择记录类型' : (preserveType ? previous!.recordTypeReason || '' : event.recordTypeReason),
           forms: previous?.forms?.length ? previous.forms : event.forms,
           fields: previous?.fields && Object.keys(previous.fields).length ? previous.fields : event.fields,
+          entityFields: { ...event.entityFields, ...(previous?.entityFields || {}) },
+          fieldCandidates: { ...event.fieldCandidates, ...(previous?.fieldCandidates || {}) },
+          unresolvedConflicts: [...new Set([
+            ...(event.unresolvedConflicts || []),
+            ...(previous?.unresolvedConflicts || []),
+          ])].filter(field => !previous?.entityFields?.[field] || previous?.unresolvedConflicts?.includes(field)),
         }
       })
       revisedPlan.unassignedIds = generated.unassignedIds
@@ -1533,12 +1571,32 @@ Page(themed({
       : field === 'content' ? { content: value }
         : field === 'location' ? { location: value } : { section: value }
     const sourceKey = field === 'section' ? 'section' : field === 'location' ? 'location' : ''
+    const unresolvedKey = field === 'content' ? 'work_content' : sourceKey
     const candidate = editEvent(plan, id, {
       ...patch,
       ...(sourceKey ? { fieldSources: { ...target.fieldSources, [sourceKey]: 'user_message' } } : {}),
+      ...(unresolvedKey ? {
+        unresolvedConflicts: (target.unresolvedConflicts || []).filter(item => item !== unresolvedKey),
+      } : {}),
       missingFields: value.trim() ? (target.missingFields || []).filter(item => item !== field) : target.missingFields,
     })
     void this.updateInlineReview(index, candidate).catch(error => wx.showToast({ title: `字段保存失败：${(error as Error).message}`, icon: 'none' }))
+  },
+
+  changeInlineReviewEntityField(event: WechatMiniprogram.Input) {
+    const index = Number(event.currentTarget.dataset.index)
+    const id = String(event.currentTarget.dataset.id)
+    const field = String(event.currentTarget.dataset.field)
+    const value = String(event.currentTarget.dataset.value ?? event.detail?.value ?? '').trim()
+    const plan = this.data.messages[index]?.reviewPlan
+    const target = plan?.events.find(item => item.id === id)
+    if (!plan || !target || !field) return
+    const candidate = editEvent(plan, id, {
+      entityFields: { ...(target.entityFields || {}), [field]: value },
+      unresolvedConflicts: (target.unresolvedConflicts || []).filter(item => item !== field),
+      fieldSources: { ...(target.fieldSources || {}), [field]: 'user_message' },
+    })
+    void this.updateInlineReview(index, candidate).catch(error => wx.showToast({ title: `事项字段保存失败：${(error as Error).message}`, icon: 'none' }))
   },
 
   toggleInlineMerge(event: WechatMiniprogram.TouchEvent) {

@@ -55,6 +55,12 @@ export interface WorkEvent {
   /** Item-level conflicts and caveats retained for review in the conversation. */
   issues?: string[]
   itemStatus?: string
+  /** Form-relevant scalar facts resolved from the item plan (project/units/person). */
+  entityFields?: Record<string, string>
+  /** Candidate values that require an explicit user decision. */
+  fieldCandidates?: Record<string, string[]>
+  /** Candidate fields with more than one known value that are not yet confirmed. */
+  unresolvedConflicts?: string[]
 }
 export interface ReviewPlan {
   schemaVersion: 1
@@ -91,6 +97,7 @@ export interface RequestPlanField {
   value: unknown
   source: string
   status: string
+  candidates?: unknown[]
 }
 
 export interface RequestPlanItem {
@@ -214,6 +221,15 @@ function fromServerPlan(result: ReviewPlanResponse): ReviewPlan {
       missingFields: Array.isArray(item.missing_fields) ? item.missing_fields.map(String) : [],
       issues: Array.isArray(item.issues) ? item.issues.map(String) : [],
       itemStatus: String(item.item_status || ''),
+      entityFields: item.entity_fields && typeof item.entity_fields === 'object'
+        ? Object.fromEntries(Object.entries(item.entity_fields as Record<string, unknown>).map(([key, value]) => [key, String(value ?? '')]))
+        : {},
+      fieldCandidates: item.field_candidates && typeof item.field_candidates === 'object'
+        ? Object.fromEntries(Object.entries(item.field_candidates as Record<string, unknown>).map(([key, value]) => [
+          key, Array.isArray(value) ? value.map(String) : [],
+        ]))
+        : {},
+      unresolvedConflicts: Array.isArray(item.unresolved_conflicts) ? item.unresolved_conflicts.map(String) : [],
     })),
     unassignedIds: Array.isArray(raw.unassigned_ids) ? raw.unassigned_ids.map(String) : [],
     confirmedRevision: result.confirmed_revision,
@@ -255,6 +271,9 @@ function toServerPlan(plan: ReviewPlan): Record<string, unknown> {
       missing_fields: item.missingFields || [],
       issues: item.issues || [],
       item_status: item.itemStatus || '',
+      entity_fields: item.entityFields || {},
+      field_candidates: item.fieldCandidates || {},
+      unresolved_conflicts: item.unresolvedConflicts || [],
     })),
     unassigned_ids: plan.unassignedIds,
     notices: plan.notices || [],
@@ -506,6 +525,26 @@ export function reviewPlanFromItemPlan(
     const dateField = item.fields?.record_date
     const locationField = item.fields?.location
     const sectionField = item.fields?.section
+    const entityFields: Record<string, string> = {}
+    const fieldCandidates: Record<string, string[]> = {}
+    const unresolvedConflicts: string[] = []
+    const canonicalEntityKeys: Record<string, string> = {
+      project: 'project_name', project_name: 'project_name', location: 'location', section: 'section',
+      owner_unit: 'owner_unit', construction_unit: 'construction_unit',
+      supervision_unit: 'supervision_unit', supervision_org: 'supervision_org',
+      inspector: 'inspector', weather: 'weather', work_content: 'work_content',
+      problems: 'problems', treatment: 'treatment', handling: 'handling', remark: 'remark',
+    }
+    for (const [sourceKey, field] of Object.entries(item.fields || {})) {
+      const key = canonicalEntityKeys[sourceKey]
+      if (!key) continue
+      const value = String(field?.value ?? '').trim()
+      if (value) entityFields[key] = value
+      const candidates = [...new Set((field?.candidates || []).map(String).map(value => value.trim()).filter(Boolean))]
+      if (value && !candidates.includes(value)) candidates.unshift(value)
+      if (candidates.length > 1) fieldCandidates[key] = candidates
+      if (field?.status === 'conflict') unresolvedConflicts.push(key)
+    }
     const notes = (item.notes || []).map(String).filter(Boolean)
     const place = [project, section, location].filter(Boolean).join(' / ')
     const title = notes[0]?.slice(0, 80) || (place ? `${recordType === '待定' ? '现场工作' : recordType} · ${place}` : '')
@@ -527,10 +566,13 @@ export function reviewPlanFromItemPlan(
         ...(location ? { location: locationField?.source || 'candidate' } : {}),
         ...(section ? { section: sectionField?.source || 'candidate' } : {}),
       },
-      content: requestText.trim(),
+      content: entityFields.work_content || requestText.trim(),
       missingFields: [...new Set((item.missing_fields || []).map(String))],
       issues: [...new Set((item.issues || []).map(String))],
       itemStatus: item.status || '',
+      entityFields,
+      fieldCandidates,
+      unresolvedConflicts: [...new Set(unresolvedConflicts)],
     })
   }
 
@@ -628,7 +670,7 @@ function revised(plan: ReviewPlan, patch: Partial<ReviewPlan>): ReviewPlan {
 export function editRequest(plan: ReviewPlan, requestText: string): ReviewPlan {
   return revised(plan, { requestText })
 }
-export function editEvent(plan: ReviewPlan, id: string, patch: Partial<Pick<WorkEvent, 'title' | 'location' | 'section' | 'date' | 'dateConfirmed' | 'dateSource' | 'forms' | 'content' | 'recordType' | 'recordTypeConfidence' | 'recordTypeReason' | 'fieldSources' | 'missingFields' | 'issues'>>): ReviewPlan {
+export function editEvent(plan: ReviewPlan, id: string, patch: Partial<Pick<WorkEvent, 'title' | 'location' | 'section' | 'date' | 'dateConfirmed' | 'dateSource' | 'forms' | 'content' | 'recordType' | 'recordTypeConfidence' | 'recordTypeReason' | 'fieldSources' | 'missingFields' | 'issues' | 'entityFields' | 'fieldCandidates' | 'unresolvedConflicts'>>): ReviewPlan {
   if (!plan.events.some(event => event.id === id)) throw new Error('事项不存在')
   return revised(plan, { events: plan.events.map(event => event.id === id ? { ...event, ...patch } : event) })
 }
@@ -693,6 +735,29 @@ export function mergeEvents(plan: ReviewPlan, selectedIds: string[], newId: stri
     }
   }
   const dates = [...new Set(selected.map(event => event.date))]
+  const descriptiveFields = new Set(['work_content', 'problems', 'treatment', 'handling', 'remark'])
+  const entityFields: Record<string, string> = {}
+  const fieldCandidates: Record<string, string[]> = {}
+  const unresolvedConflicts = new Set(selected.flatMap(event => event.unresolvedConflicts || []))
+  for (const key of [...new Set(selected.flatMap(event => Object.keys(event.entityFields || {})))]) {
+    const values = [...new Set(
+      selected
+        .map(event => String(event.entityFields?.[key] || '').trim())
+        .filter(Boolean),
+    )]
+    const candidates = [...new Set(selected.flatMap(event => event.fieldCandidates?.[key] || []))]
+    if (!candidates.length) candidates.push(...values)
+    if (candidates.length > 1) fieldCandidates[key] = candidates
+    if (!values.length) continue
+    if (descriptiveFields.has(key)) {
+      entityFields[key] = values.join('\n')
+    } else {
+      // Identity/unit/person fields must remain one exact value. Pick the
+      // current preferred value but keep every alternative selectable.
+      entityFields[key] = values[0]
+      if (values.length > 1) unresolvedConflicts.add(key)
+    }
+  }
   const merged: WorkEvent = {
     ...newEvent(newId, selected.flatMap(event => event.evidenceIds), dates.length === 1 ? dates[0] : ''),
     title: [...new Set(selected.map(event => event.title).filter(Boolean))].join('；').slice(0, 80) || '合并事项（待核对）',
@@ -706,6 +771,9 @@ export function mergeEvents(plan: ReviewPlan, selectedIds: string[], newId: stri
     fields,
     missingFields: [...new Set(selected.flatMap(event => event.missingFields || []))],
     issues: [...new Set(selected.flatMap(event => event.issues || []))],
+    entityFields,
+    fieldCandidates,
+    unresolvedConflicts: [...unresolvedConflicts],
   }
   const first = plan.events.findIndex(event => selectedIds.includes(event.id))
   const events = plan.events.filter(event => !selectedIds.includes(event.id))
@@ -722,6 +790,14 @@ export function reviewIssues(plan: ReviewPlan): string[] {
     if (!event.title.trim()) issues.push(`事项 ${i + 1} 缺少名称`)
     if (!event.evidenceIds.length && !event.content.trim()) issues.push(`事项 ${i + 1} 缺少工作描述或资料`)
     if (!event.recordType || event.recordType === '待定') issues.push(`事项 ${i + 1} 请选择工作记录类型`)
+    for (const field of event.unresolvedConflicts || []) {
+      const label = ({
+        project_name: '项目', owner_unit: '建设单位', construction_unit: '施工单位',
+        supervision_unit: '监理单位', supervision_org: '项目监理机构', inspector: '检查人员',
+        location: '地点', section: '施工部位',
+      } as Record<string, string>)[field] || field
+      issues.push(`事项 ${i + 1} 的${label}存在多个候选值，请先选择`)
+    }
   })
   return issues
 }
