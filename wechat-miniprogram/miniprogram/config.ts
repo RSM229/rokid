@@ -41,13 +41,14 @@ const isRelease = currentEnv === 'release'
 const productionApiBaseUrl = trimTrailingSlash(
   ext.apiBaseUrl || 'https://www.baize.gdces.cn:4432/api',
 )
-// IDE 模拟器通常不注入 ext.json（getExtConfigSync 返回空）。本地后端必须**显式**
-// 开启（ext 里 useLocalBackend === true），避免模拟器默认打不到任何后端；正式/体验
-// 版不受影响，始终走生产。
-const useLocalBackend = currentEnv === 'develop' && ext.useLocalBackend === true
+// IDE 模拟器通常不注入 ext.json（getExtConfigSync 返回空）。develop 环境默认走
+// 本地后端（8001，隧道版：本地代码 + 服务器共享库），连不上时 request.ts 会给出
+// 明确的启动指引；要临时直连生产，在 ext.json 里显式设 useLocalBackend=false。
+// 正式/体验版不受影响，始终走生产。
+const useLocalBackend = currentEnv === 'develop' && ext.useLocalBackend !== false
 const apiBaseUrl = trimTrailingSlash(
   useLocalBackend
-    ? ext.localApiBaseUrl || 'http://127.0.0.1:8000/api'
+    ? ext.localApiBaseUrl || 'http://127.0.0.1:8001/api'
     : productionApiBaseUrl,
 )
 const storageScope = encodeURIComponent(apiBaseUrl)
