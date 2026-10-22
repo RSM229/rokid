@@ -196,6 +196,7 @@ def _serialize_doc(doc: KnowledgeDocument, uploader: User | None = None) -> dict
         "size_bytes": doc.size_bytes,
         "uploader_id": doc.uploader_id,
         "uploader_name": info["real_name"],
+        "folder_id": doc.folder_id,
         "created_at": doc.created_at.isoformat() if doc.created_at else None,
     }
 

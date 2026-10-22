@@ -12,12 +12,17 @@
       <text wx:for="{{breadcrumb}}" wx:key="id" class="crumb" data-id="{{item.id}}" bindtap="goBreadcrumb">{{item.name}}</text>
     </view>
 
+    <!-- 分类树接口未上线时的降级提示 -->
+    <view wx:if="{{treeUnavailable}}" class="tree-tip">当前服务端暂未提供分类目录，已按平铺文档显示</view>
+
     <!-- 子分类卡片 -->
     <view wx:if="{{currentSubfolders.length}}" class="folder-grid">
       <view wx:for="{{currentSubfolders}}" wx:key="id" class="fcard" data-id="{{item.id}}" bindtap="selectFolder">
-        <view class="ficon">📁</view>
-        <view class="fname">{{item.name}}</view>
-        <view class="fcount">{{item.count}} 份</view>
+        <view class="ficon-wrap"><text class="ficon">📁</text></view>
+        <view class="fbody">
+          <view class="fname">{{item.name}}</view>
+          <view class="fcount">{{item.count}} 份</view>
+        </view>
       </view>
     </view>
 
@@ -25,8 +30,13 @@
     <view wx:if="{{docsLoading && !docs.length}}" class="empty">正在加载…</view>
     <view wx:elif="{{!currentSubfolders.length && !docs.length}}" class="empty">这个分类下还没有文档，点下方按钮上传归档</view>
     <view wx:for="{{docs}}" wx:key="id" class="card doc">
-      <view class="doc-name">{{item.name}}</view>
-      <view class="doc-meta">{{item.sizeText}} · {{item.uploader_name}}</view>
+      <view class="doc-head">
+        <view class="doc-icon">📄</view>
+        <view class="doc-info">
+          <view class="doc-name">{{item.name}}</view>
+          <view class="doc-meta">{{item.sizeText}} · {{item.uploader_name}}</view>
+        </view>
+      </view>
       <view class="doc-btns">
         <text class="link-green" data-id="{{item.id}}" bindtap="openContent">查看</text>
         <text class="link-gray" data-id="{{item.id}}" bindtap="downloadDoc">下载</text>

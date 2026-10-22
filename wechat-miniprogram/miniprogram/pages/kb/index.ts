@@ -51,6 +51,8 @@ Page(themed({
     currentFolderId: 0,
     breadcrumb: [] as Array<{ id: number; name: string }>,
     currentSubfolders: [] as KbFolderNode[],
+    /** 后端尚未提供分类树接口时的降级标记（仍按平铺文档展示） */
+    treeUnavailable: false,
 
     recording: false,
     recSec: 0,
@@ -140,9 +142,31 @@ Page(themed({
       wx.setNavigationBarTitle({ title: home.name || '资料库' })
       await this.loadFolders()
     } catch (error) {
-      wx.showToast({ title: (error as Error).message, icon: 'none' })
+      // 后端版本较旧（尚无 /kb/mine，或分类树未上线）时降级：从资料库列表里定位个人库，
+      // 保证文档、上传、录音仍可用，不把整页留成空白。
+      const kb = await this.resolveHomeFallback()
+      if (kb) {
+        this.setData({ kbId: kb.id, kbName: kb.name, canUpload: true, treeUnavailable: true })
+        wx.setNavigationBarTitle({ title: kb.name || '资料库' })
+        await this.loadDocs(0)
+      } else {
+        wx.showToast({ title: (error as Error).message, icon: 'none' })
+      }
     } finally {
       this.setData({ resolving: false })
+    }
+  },
+
+  async resolveHomeFallback(): Promise<{ id: number; name: string } | null> {
+    try {
+      const res = await request<{ items: Array<{ id: number; name: string; kb_type?: string; role?: string; is_builtin?: boolean }> }>('/kb')
+      const items = (res.items || []).filter((i) => !i.is_builtin)
+      const personal = items.find((i) => i.kb_type === 'personal' && (i.role === 'owner' || i.role === 'admin'))
+        || items.find((i) => i.role === 'owner' || i.role === 'admin')
+        || items[0]
+      return personal ? { id: personal.id, name: personal.name } : null
+    } catch {
+      return null
     }
   },
 
@@ -174,9 +198,12 @@ Page(themed({
         }
       }
       flatten(res.items || [])
-      this.setData({ folders: res.items || [], folderMap: map })
+      this.setData({ folders: res.items || [], folderMap: map, treeUnavailable: false })
       this.refreshCurrentFolder()
     } catch (error) {
+      // 分类树接口不可用（后端未部署）时降级为平铺文档列表，不阻断上传与查看
+      this.setData({ folders: [], folderMap: {}, treeUnavailable: true, breadcrumb: [], currentSubfolders: [] })
+      await this.loadDocs(0)
       wx.showToast({ title: (error as Error).message, icon: 'none' })
     }
   },
