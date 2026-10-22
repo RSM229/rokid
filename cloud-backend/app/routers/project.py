@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, Form
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import case, delete, func, or_, select, update
+from sqlalchemy import case, delete, or_, select, text, update
 from pydantic import BaseModel
 from typing import Optional
 
@@ -997,10 +997,45 @@ async def reopen_project(
 #   users               —— users.project_id 只是"当前上下文"单值，置空即可
 _CLEANUP_TABLES = {"project_members", "project_view_grants", "users"}
 
+# fail-closed 阈值：生产 information_schema 应返回 25+ 张带 project_id 的表。
+# 若扫到的表数少于此，说明判定依据本身失效（库连错/metadata 未加载），
+# 此时**必须拒绝删除**，绝不能"没查到引用"就放行。
+_MIN_REFERENCE_TABLES = 5
+
 
 class DeleteProjectRequest(BaseModel):
     """删除请求体：必须回显项目编号，防止在长列表里点错行。"""
     confirm_code: str
+
+
+async def _tables_with_project_id(db: AsyncSession) -> list[str]:
+    """返回库里所有带 ``project_id`` 列的表名（**数据库真源优先**）。
+
+    🔴 不能只依赖 ``Base.metadata``：ORM 元数据的内容取决于**哪些模型模块被
+    import 过**。实测 ``from app.main import app`` 得到 53 张表，但**缺
+    ``kb_chunks``**（``kb_chunk`` 模块只在 ``init_db()`` 里导入）—— 用元数据
+    扫描会漏掉这类表，而"漏表"在本接口里等价于"放行删除"，留下指向不存在
+    项目的孤儿数据（记忆里就有"kb_chunks 逻辑引用不清会 RAG 幻觉"的前车之鉴）。
+    所以优先查 ``information_schema``（MySQL 真源），失败再回退元数据。
+    """
+    try:
+        rows = (
+            await db.execute(
+                text(
+                    "SELECT table_name FROM information_schema.columns "
+                    "WHERE column_name = 'project_id' AND table_schema = DATABASE()"
+                )
+            )
+        ).all()
+        names = sorted({r[0] for r in rows if r[0]})
+        if names:
+            return names
+    except Exception:  # noqa: BLE001  SQLite 等无 information_schema 时回退
+        pass
+
+    from app.db import Base
+
+    return sorted(t.name for t in Base.metadata.sorted_tables if "project_id" in t.columns)
 
 
 def _project_file_refs(project_id: int, *subdirs: str) -> dict[str, int]:
@@ -1048,13 +1083,17 @@ async def delete_project(
 
     1. 仅超级管理员（``_require_super``），不认 ``project_complete`` 之类的权限键；
     2. 请求体必须回显项目编号（``confirm_code``），大小写不敏感但内容必须一致；
-    3. 遍历 ORM 元数据中**所有**外键指向 ``projects.id`` 的表，任一表存在该项目
-       的记录即 409 拒绝 —— 用元数据扫描而非硬编码表名，新增业务表自动纳入；
-    4. 图纸 / 档案目录（文件 + meta，不入库）单独清点，有文件即 409 拒绝，
+    3. 不许删自己当前所在的项目（否则下面清空上下文会把操作者自己锁在项目外）；
+    4. 以 **information_schema 为真源**枚举所有带 ``project_id`` 列的表，任一表
+       存在该项目的记录即 409 拒绝 —— 用列名而非外键判定（部分表无 FK 约束），
+       用库真源而非 ORM 元数据（元数据取决于 import 过哪些模型，会漏表）；
+       枚举结果少于安全阈值时 **fail-closed**（500 中止），绝不"没查到就放行"；
+    5. 图纸 / 档案目录（文件 + meta，不入库）单独清点，有文件即 409 拒绝，
        要求先删文件，避免留下指向不存在项目的孤儿文件。
 
     通过全部检查后才清理成员行、查看授权、用户当前上下文，最后删项目行，
     并写一条 ``project_delete`` 安全审计（含被清掉的成员名单，便于追责）。
+    被拒的场景同样落 ``project_delete_denied`` 审计——抵赖不了。
     """
     _require_super(user)
     project = await _get_project_or_404(db, project_id)
@@ -1082,24 +1121,39 @@ async def delete_project(
 
     # ---- ③ 业务数据拦截：扫描所有指向本项目的表 ----
     # 判定口径用**列名 project_id** 而非"是否有 FK"：agent_draft.AgentFlowInstance、
-    # kb_chunk 等表带 project_id 但**没有**外键约束，只扫 FK 会漏掉它们，
+    # kb_chunks 等表带 project_id 但**没有**外键约束，只扫 FK 会漏掉它们，
     # 删完留下指向不存在项目的孤儿数据。宁严勿松。
-    from app.db import Base
+    ref_tables = [t for t in await _tables_with_project_id(db) if t not in _CLEANUP_TABLES]
+
+    # 🔴 fail-closed：判定依据本身失效（库连错 / 元数据未加载 / information_schema
+    # 不可用）时，"没扫到引用"不等于"没有引用"。宁可拒绝删除，不可误删。
+    if len(ref_tables) < _MIN_REFERENCE_TABLES:
+        _write_audit(
+            db, user, "project_delete_denied",
+            f"项目 #{project_id} {project.name} 删除被拒（引用表枚举异常，仅 {len(ref_tables)} 张，"
+            f"低于安全阈值 {_MIN_REFERENCE_TABLES}）",
+            await _client_ip(request),
+        )
+        await db.commit()
+        raise HTTPException(
+            status_code=500,
+            detail="无法完成引用检查（业务表枚举异常），为避免误删已中止。请联系管理员排查。",
+        )
 
     blockers: list[str] = []
-    for table in Base.metadata.sorted_tables:
-        if table.name in _CLEANUP_TABLES:
-            continue
-        column = table.columns.get("project_id")
-        if column is None:
+    for name in ref_tables:
+        # 表名来自 information_schema，仍按标识符白名单校验后再拼接，杜绝注入
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+            blockers.append(f"{name}（表名非法，无法检查）")
             continue
         count = (
             await db.execute(
-                select(func.count()).select_from(table).where(column == project_id)
+                text(f'SELECT COUNT(*) FROM `{name}` WHERE project_id = :pid'),
+                {"pid": project_id},
             )
         ).scalar() or 0
         if count:
-            blockers.append(f"{table.name} {count} 条")
+            blockers.append(f"{name} {count} 条")
 
     # ---- ④ 图纸 / 档案文件拦截（不入库，FK 扫描看不见）----
     file_hits = _project_file_refs(project_id, "drawings", "archives")
