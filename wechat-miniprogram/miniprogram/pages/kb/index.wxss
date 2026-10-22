@@ -1,9 +1,6 @@
 /* 资料库首页：直接渲染分类树（去掉多库列表） */
 .page { padding: 0 24rpx calc(180rpx + env(safe-area-inset-bottom)); box-sizing: border-box; }
 
-/* 临时构建标记：确认新版式已生效后可删（wxml 里的 .build-tag） */
-.build-tag { margin: 0 0 16rpx; padding: 10rpx 20rpx; background: #d9534f; color: #fff; font-size: 24rpx; font-weight: 600; border-radius: 10rpx; width: fit-content; }
-
 /* 文档卡沿用全局 .card 玻璃风格（app.wxss），这里只补内部排版 */
 .doc { padding: 24rpx 26rpx; }
 .doc-head { display: flex; align-items: center; gap: 18rpx; }

@@ -1,7 +1,5 @@
 <view class="page" style="{{themeStyle}}">
   <glass-nav-bar title="{{kbName}}" left="back" />
-  <!-- 2026-10-22 排版改版 v2：构建标记，确认新版式生效后可删 -->
-  <view class="build-tag">v2 排版</view>
   <!-- 2026-10-08 起「资料库」是底部第 4 个 tab，本页即其落点；已改为直接渲染分类树 -->
   <tab-bar active="kb" />
 
