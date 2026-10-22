@@ -15,10 +15,10 @@
     <!-- 分类树接口未上线时的降级提示 -->
     <view wx:if="{{treeUnavailable}}" class="tree-tip">当前服务端暂未提供分类目录，已按平铺文档显示</view>
 
-    <!-- 子分类：竖排列表（文件管理器式），不再用双列小卡 -->
+    <!-- 文件夹：竖排列表（文件管理器式）。根目录只列文件夹，文档只在文件夹内部出现 -->
     <view wx:if="{{currentSubfolders.length}}" class="sec">
       <view class="sec-head">
-        <text class="sec-title">分类</text>
+        <text class="sec-title">文件夹</text>
         <text wx:if="{{canUpload}}" class="sec-act" bindtap="showNewFolder">+ 新建</text>
       </view>
       <view class="folder-list">
@@ -33,14 +33,14 @@
       </view>
     </view>
 
-    <!-- 文档 -->
-    <view class="sec">
+    <!-- 文档：仅当「在文件夹内」或「根目录存在未分类文档」时出现，避免和文件夹并列成同级 -->
+    <view wx:if="{{currentFolderId !== 0 || docs.length}}" class="sec">
       <view class="sec-head">
-        <text class="sec-title">文档</text>
+        <text class="sec-title">{{currentFolderId !== 0 ? '文档' : '未分类文档'}}</text>
         <text class="sec-count">{{docs.length}}</text>
       </view>
       <view wx:if="{{docsLoading && !docs.length}}" class="empty-mini">正在加载…</view>
-      <view wx:elif="{{!docs.length}}" class="empty-mini">这里还没有文档。点下方「上传文档」直接归档，或先进分类再上传。</view>
+      <view wx:elif="{{!docs.length}}" class="empty-mini">这个文件夹下还没有文档。点下方「上传文档」会直接归档到这里。</view>
     </view>
     <view wx:for="{{docs}}" wx:key="id" class="card doc">
       <view class="doc-head">
@@ -58,7 +58,7 @@
     </view>
   </block>
 
-  <!-- 底部操作栏：新建分类已移到「分类」分组标题右侧，这里只留两个主操作 -->
+  <!-- 底部操作栏：新建文件夹已移到「文件夹」分组标题右侧，这里只留两个主操作 -->
   <view class="action-bar">
     <button wx:if="{{canUpload}}" class="btn-primary" size="mini" bindtap="uploadDoc">+ 上传文档</button>
     <button wx:if="{{canUpload}}" class="btn-plain" size="mini" bindtap="chooseAudio">录音转写</button>
@@ -73,13 +73,13 @@
     </view>
   </view>
 
-  <!-- 新建分类 -->
+  <!-- 新建文件夹 -->
   <view wx:if="{{showNewFolder}}" class="mask" bindtap="hideNewFolder">
     <view class="modal" catchtap="">
-      <view class="modal-title">新建分类</view>
+      <view class="modal-title">新建文件夹</view>
       <view class="field-group">
-        <text class="field-label">分类名称</text>
-        <input class="field-input" value="{{newFolderName}}" placeholder="如：合同与资质" bindinput="onNewFolderInput" />
+        <text class="field-label">文件夹名称</text>
+        <input class="field-input" value="{{newFolderName}}" placeholder="如：合同与资质、巡视记录" bindinput="onNewFolderInput" />
       </view>
       <view class="modal-btns">
         <button class="btn-cancel" bindtap="hideNewFolder">取消</button>
