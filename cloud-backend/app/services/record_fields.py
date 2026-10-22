@@ -21,18 +21,31 @@ def business_date(record):
 
 # 「无异常」类结论：不是「发现问题」，落文书正文时不冠「发现问题：」前缀（与 agent_tools._NO_ISSUE_HINTS 同口径）
 _NO_ISSUE_HINTS = ("符合要求", "无异常", "没有发现问题", "没有问题", "无问题", "未发现问题", "正常", "一切正常")
+_INSTRUCTION_ONLY_HINTS = (
+    "记录这个工作", "记录今天的工作", "帮我记录", "生成记录", "生成工作记录",
+    "整理一下", "帮我整理", "创建记录", "建立记录", "记录一下",
+)
+
+
+def is_instruction_only(value) -> bool:
+    """Whether text is only a command to the agent, not a business field value."""
+    text = str(value or "").strip()
+    if not text:
+        return False
+    compact = "".join(text.split()).strip("，。；;：:")
+    return compact in {item.strip("，。；;：:") for item in _INSTRUCTION_ONLY_HINTS}
 
 
 def problem_text(record):
     problems = str(getattr(record, "problems", "") or "").strip()
     treatment = str(getattr(record, "treatment", "") or "").strip()
     lines = []
-    if problems:
+    if problems and not is_instruction_only(problems):
         if any(k in problems for k in _NO_ISSUE_HINTS):
             lines.append(problems)  # 「符合要求」原样落正文，避免出现「发现问题：符合要求」的自相矛盾
         else:
             lines.append(f"发现问题：{problems}")
-    if treatment:
+    if treatment and not is_instruction_only(treatment):
         lines.append(f"处理情况：{treatment}")
     return "\n".join(lines)
 
@@ -47,11 +60,22 @@ def validate_times(start, end):
 def validate_record(record, project):
     """对正式提交校验。缺失数据不以默认合格、默认人数或虚构单位替代。"""
     missing = []
+    content = record.content_json if isinstance(record.content_json, dict) else {}
+    confirmed = {}
+    for key in ("form_context", "form_field_candidates", "field_resolutions"):
+        value = content.get(key)
+        if isinstance(value, dict):
+            confirmed.update(value)
+    construction_unit = (
+        getattr(project, "construction_unit", None)
+        or confirmed.get("construction_unit")
+        or confirmed.get("contractor")
+    )
     if not project or not project.name:
         missing.append("工程项目名称")
     rtype = record.record_type
-    if rtype in ("巡视", "旁站") and not getattr(project, "construction_unit", None):
-        missing.append("项目信息中的施工单位")
+    if rtype in ("巡视", "旁站") and not construction_unit:
+        missing.append("施工单位")
     if rtype == "巡视":
         if not record.section:
             missing.append("巡视工程部位")

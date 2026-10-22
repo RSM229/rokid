@@ -72,7 +72,7 @@ async def auto_create_record_document(
         project = await db.get(Project, record.project_id)
 
     from app.routers.form_doc import _record_attach_photos
-    photos = _record_attach_photos(record)
+    photos = await _record_attach_photos(db, record)
     # 用 SAVEPOINT 包住：文书生成失败只回滚这一次尝试，
     # 不会把调用方尚未提交的工作记录一起回滚掉。
     try:
@@ -97,7 +97,9 @@ async def auto_create_record_document(
     from app.services.record_fields import project_fields
     from app.services.form_registry import FORM_BY_CODE
     from app.routers.form_doc import RECORD_TYPE_TO_FORM
-    content.update(project_fields(project))
+    for key, value in project_fields(project).items():
+        if not str(content.get(key) or "").strip():
+            content[key] = value
     spec = FORM_BY_CODE.get(RECORD_TYPE_TO_FORM.get(record.record_type))
     content["doc_number"] = f"{spec.form_number if spec else 'JL'}-{record.id:05d}"
     content.setdefault("date", datetime.now().strftime("%Y-%m-%d"))
@@ -1707,12 +1709,14 @@ async def update_work_record(
         from app.routers.form_doc import _content_from_record, _record_attach_photos
         from app.services.record_fields import project_fields
         content = _content_from_record(record, await db.get(User, record.creator_id))
-        content.update(project_fields(await db.get(Project, record.project_id)))
+        for key, value in project_fields(await db.get(Project, record.project_id)).items():
+            if not str(content.get(key) or "").strip():
+                content[key] = value
         content["doc_number"] = (linked_doc.content or {}).get("doc_number", "")
         linked_doc.content = content
         linked_doc.section = record.section
         linked_doc.location = record.location
-        linked_doc.attached_images = _record_attach_photos(record)
+        linked_doc.attached_images = await _record_attach_photos(db, record)
         linked_doc.status = DocStatus.DRAFT.value
         invalidate_document(linked_doc)
     await db.commit()

@@ -10,6 +10,7 @@ import asyncio
 import os
 import sys
 import tempfile
+from datetime import datetime
 from pathlib import Path
 
 _WORKDIR = tempfile.mkdtemp(prefix="gdjl_formdoc_")
@@ -65,6 +66,142 @@ async def _seed() -> dict:
         return {"user_id": user.id, "project_id": project.id, "record_id": record.id}
 
 
+async def _seed_agent_record(ids: dict, user_id: int) -> int:
+    async with async_session() as db:
+        record = WorkRecord(
+            record_type=WorkRecordType.INSPECTION.value,
+            status=WorkRecordStatus.SUBMITTED.value,
+            creator_id=user_id,
+            project_id=ids["project_id"],
+            section="安全巡视",
+            location="广州市南沙区·广东省中医院南沙",
+            work_content="记录这个工作",
+            inspection_remark="记录这个工作",
+            # Agent records use content_json.media_ids as their immutable
+            # evidence snapshot; this mutable legacy field must be ignored.
+            inspection_photos=["/uploads/unrelated-history-photo.jpg"],
+            # 防止测试数据混入 test_aggregate_day 的当日统计。
+            created_at=datetime(2025, 1, 2, 9, 0),
+            content_json={
+                "source": "agent_review_plan",
+                "media_ids": [],
+                "form_context": {
+                    "project_name": "广东省中西医结合应急救治中心项目",
+                    "owner_unit": "广州市南沙区建设中心",
+                    "construction_unit": "广州一建建设集团有限公司",
+                    "supervision_unit": "广州珠江监理咨询集团有限公司",
+                    "inspector": "陈宇文",
+                },
+                "form_field_candidates": {
+                    "project_name": "广东省中西医结合应急救治中心项目",
+                    "construction_unit": "广州一建建设集团有限公司",
+                    "inspector": "陈宇文",
+                },
+            },
+        )
+        db.add(record)
+        await db.commit()
+        return record.id
+
+
+async def _seed_legacy_agent_record(ids: dict, user_id: int) -> int:
+    """Record saved before project_name aliases; raw OCR must still recover it."""
+    async with async_session() as db:
+        record = WorkRecord(
+            record_type=WorkRecordType.INSPECTION.value,
+            status=WorkRecordStatus.SUBMITTED.value,
+            creator_id=user_id,
+            project_id=ids["project_id"],
+            section="安全巡视",
+            location="广州市南沙区·广东省中医院南沙",
+            work_content="记录这个工作",
+            inspection_remark="记录这个工作",
+            created_at=datetime(2025, 1, 2, 9, 0),
+            content_json={
+                "source": "agent_review_plan",
+                "media_ids": [],
+                "evidence_notes": [
+                    "施工单位：广州一建建设集团有限公司 · OCR文字：广东省中西医结合应急救治；"
+                    "中心项目；珠江监理；施工区域：安全巡视；检查人员：陈宇文；"
+                    "建设单位：广州市南沙区建设中心；监理单位：广州珠江监理咨询集团有限公司；"
+                    "施工单位：广州一建建设集团有限公司 · 图片观察：施工现场",
+                ],
+                "evidence_watermark_fields": [{
+                    "evidence_id": "legacy-1",
+                    "fields": {"person": "陈宇文", "contractor": "广州一建建设集团有限公司"},
+                }],
+            },
+        )
+        db.add(record)
+        await db.commit()
+        return record.id
+
+
+async def _seed_typed_agent_record(ids: dict, user_id: int, record_type: str) -> int:
+    async with async_session() as db:
+        common_json = {
+            "source": "agent_review_plan",
+            "media_ids": [],
+            "form_context": {
+                "project_name": "广东省中西医结合应急救治中心项目",
+                "construction_unit": "广州一建建设集团有限公司",
+                "supervision_unit": "广州珠江监理咨询集团有限公司",
+                "inspector": "陈宇文",
+            },
+            "form_field_candidates": {
+                "project_name": "广东省中西医结合应急救治中心项目",
+                "construction_unit": "广州一建建设集团有限公司",
+                "inspector": "陈宇文",
+                "weather": "晴",
+            },
+        }
+        if record_type == WorkRecordType.STATION.value:
+            record = WorkRecord(
+                record_type=record_type,
+                status=WorkRecordStatus.SUBMITTED.value,
+                creator_id=user_id,
+                project_id=ids["project_id"],
+                record_date=datetime(2025, 1, 2).date(),
+                created_at=datetime(2025, 1, 2, 10, 0),
+                section="西楼A区十层墙柱",
+                station_location="西楼A区十层墙柱",
+                station_process="混凝土浇筑",
+                station_content="现场按专项方案连续浇筑，人员机械到位。",
+                station_conclusion="符合要求",
+                content_json=common_json,
+            )
+        else:
+            record = WorkRecord(
+                record_type=record_type,
+                status=WorkRecordStatus.SUBMITTED.value,
+                creator_id=user_id,
+                project_id=ids["project_id"],
+                record_date=datetime(2025, 1, 2).date(),
+                created_at=datetime(2025, 1, 2, 11, 0),
+                section="地下室底板",
+                work_content="钢筋原材见证取样",
+                witness_material_name="热轧带肋钢筋",
+                witness_material_spec="HRB400E φ20",
+                witness_quantity="3",
+                witness_unit="组",
+                witness_cert_no="CERT-2025-001",
+                witness_accept_result="合格",
+                content_json={
+                    **common_json,
+                    "form_field_candidates": {
+                        **common_json["form_field_candidates"],
+                        "witness_quantity": "3",
+                        "witness_unit": "组",
+                        "witness_cert_no": "CERT-2025-001",
+                        "witness_accept_result": "合格",
+                    },
+                },
+            )
+        db.add(record)
+        await db.commit()
+        return record.id
+
+
 @pytest.fixture(scope="module")
 def ctx():
     ids = asyncio.run(_seed())
@@ -89,6 +226,27 @@ def test_forms_list(ctx):
     codes = [f["form_code"] for g in body["groups"] for f in g["forms"]]
     assert "gd_b_214_xunshi" in codes
     assert "gd_b_212_pangzhan" in codes
+
+
+def test_sheng_tong_biao_templates_are_blank_source_documents():
+    """正式省统表模板必须是空白源表，不能夹带样例照片或已填写记录。"""
+    import zipfile
+
+    from app.config import settings
+    from app.services.form_registry import FORMS
+
+    folder = settings.knowledge_base_path / "省统表word版"
+    checked = 0
+    for spec in FORMS:
+        if spec.folder != "sheng_tong_biao" or not spec.template:
+            continue
+        path = folder / spec.template
+        assert path.exists(), f"模板不存在：{path}"
+        with zipfile.ZipFile(path) as archive:
+            media = [name for name in archive.namelist() if name.startswith("word/media/")]
+        assert not media, f"正式模板混入图片：{path.name} -> {media}"
+        checked += 1
+    assert checked >= 20
 
 
 def test_record_forms(ctx):
@@ -123,6 +281,95 @@ def test_generate_from_record(ctx):
     assert "巡视的工程部位" in table_text
     assert "3#楼二层" in table_text
     assert "发现一处垫块缺失" in table_text
+
+
+def test_generate_agent_record_keeps_watermark_identity_and_ignores_instruction_as_problem(ctx):
+    record_id = asyncio.run(_seed_agent_record(ctx, ctx["user_id"]))
+    resp = ctx["client"].post(
+        "/api/form-docs/generate",
+        json={"record_id": record_id},
+        headers=ctx["auth_headers"](),
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    export = Path(__file__).resolve().parent.parent / "exports" / Path(body["docx_url"]).name
+    import docx
+    document = docx.Document(str(export))
+    text = "\n".join(p.text for p in document.paragraphs)
+    text += "\n" + " ".join(c.text for t in document.tables for r in t.rows for c in r.cells)
+    assert "广东省中西医结合应急救治中心项目" in text
+    assert "广州一建建设集团有限公司" in text
+    assert "陈宇文" in text
+    assert "符合要求" in text
+    assert "记录这个工作" not in text
+    assert "111" not in text
+    tail_text = document.tables[0].cell(3, 0).text
+    assert "巡视发现的问题及处理情况：符合要求" in tail_text
+    assert "巡视监理人员（签名）：陈宇文" in tail_text
+    import zipfile
+    with zipfile.ZipFile(export) as archive:
+        embedded = [name for name in archive.namelist() if name.startswith("word/media/")]
+    assert embedded == []
+
+
+def test_generate_legacy_agent_record_recovers_split_watermark_project_title(ctx):
+    record_id = asyncio.run(_seed_legacy_agent_record(ctx, ctx["user_id"]))
+    resp = ctx["client"].post(
+        "/api/form-docs/generate",
+        json={"record_id": record_id},
+        headers=ctx["auth_headers"](),
+    )
+    assert resp.status_code == 200, resp.text
+    export = Path(__file__).resolve().parent.parent / "exports" / Path(resp.json()["docx_url"]).name
+    import docx
+    document = docx.Document(str(export))
+    text = "\n".join(p.text for p in document.paragraphs)
+    text += "\n" + " ".join(c.text for t in document.tables for r in t.rows for c in r.cells)
+    assert "广东省中西医结合应急救治中心项目" in text
+    assert "广州一建建设集团有限公司" in text
+    assert "陈宇文" in text
+    assert "111" not in text
+    assert "记录这个工作" not in text
+
+
+def test_generate_pangzhan_keeps_units_inspector_and_conclusion(ctx):
+    record_id = asyncio.run(_seed_typed_agent_record(ctx, ctx["user_id"], WorkRecordType.STATION.value))
+    resp = ctx["client"].post(
+        "/api/form-docs/generate",
+        json={"record_id": record_id},
+        headers=ctx["auth_headers"](),
+    )
+    assert resp.status_code == 200, resp.text
+    export = Path(__file__).resolve().parent.parent / "exports" / Path(resp.json()["docx_url"]).name
+    import docx
+    document = docx.Document(str(export))
+    text = "\n".join(p.text for p in document.paragraphs)
+    text += "\n" + " ".join(c.text for t in document.tables for r in t.rows for c in r.cells)
+    for expected in (
+        "广东省中西医结合应急救治中心项目", "广州一建建设集团有限公司",
+        "西楼A区十层墙柱", "混凝土浇筑", "符合要求", "陈宇文",
+    ):
+        assert expected in text
+
+
+def test_generate_witness_keeps_material_quantity_certificate_and_acceptance(ctx):
+    record_id = asyncio.run(_seed_typed_agent_record(ctx, ctx["user_id"], WorkRecordType.WITNESS.value))
+    resp = ctx["client"].post(
+        "/api/form-docs/generate",
+        json={"record_id": record_id},
+        headers=ctx["auth_headers"](),
+    )
+    assert resp.status_code == 200, resp.text
+    export = Path(__file__).resolve().parent.parent / "exports" / Path(resp.json()["docx_url"]).name
+    import docx
+    document = docx.Document(str(export))
+    text = "\n".join(p.text for p in document.paragraphs)
+    text += "\n" + " ".join(c.text for t in document.tables for r in t.rows for c in r.cells)
+    for expected in (
+        "热轧带肋钢筋", "HRB400E φ20", "3组", "合格", "陈宇文",
+        "广东省中西医结合应急救治中心项目",
+    ):
+        assert expected in text
 
 
 def test_aggregate_day(ctx):

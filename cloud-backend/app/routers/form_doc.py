@@ -23,6 +23,7 @@ from app.config import settings
 from app.db import get_db
 from app.models.document import DocStatus, DocType, Document
 from app.models.hazard import Hazard
+from app.models.miniprogram import MediaRecord, MediaType
 from app.models.rectification import RectificationRecord
 from app.models.user import Project, User
 from app.models.work_record import WorkRecord
@@ -119,18 +120,141 @@ async def list_record_forms(
     }
 
 
-def _record_attach_photos(record: WorkRecord) -> list:
-    """文书附加影像：只取现场照片；见证记录现场照片为空时回落其见证照片（该记录唯一的拍照来源）。"""
+async def _record_attach_photos(db: AsyncSession, record: WorkRecord) -> list:
+    """Only attach media that belong to this record's confirmed evidence set.
+
+    Agent-created records can be amended later. In that case the mutable photo
+    array may contain images added for another event. ``content_json.media_ids``
+    is the immutable evidence snapshot for the record and therefore wins.
+    """
+    cj = record.content_json or {}
+    agent_snapshot = cj.get("source") == "agent_review_plan"
+    media_ids = [
+        int(value) for value in (cj.get("media_ids") or [])
+        if isinstance(value, (int, str)) and str(value).isdigit()
+    ]
+    if agent_snapshot:
+        # An empty snapshot is authoritative too. ``inspection_photos`` is a
+        # mutable convenience array and may later contain photos from another
+        # event; it must never leak into an Agent-created record's form.
+        if not media_ids:
+            return []
+        rows = (await db.execute(select(MediaRecord).where(
+            MediaRecord.id.in_(media_ids),
+            MediaRecord.business_type == "work_record",
+            MediaRecord.business_id == record.id,
+            MediaRecord.media_type == MediaType.IMAGE.value,
+        ))).scalars().all()
+        by_id = {row.id: row for row in rows}
+        return [
+            by_id[media_id].processed_path or by_id[media_id].original_path
+            for media_id in media_ids if media_id in by_id
+        ]
     photos = list(record.inspection_photos or [])
     if not photos and record.record_type == "见证":
         photos = list(record.witness_photos or [])
     return photos
 
 
+def _record_extracted_fields(record: WorkRecord) -> dict:
+    """Flatten source-aware fields saved by the agent execution layer."""
+    cj = record.content_json if isinstance(record.content_json, dict) else {}
+    out: dict = {}
+    sources = (
+        cj.get("form_context") if isinstance(cj.get("form_context"), dict) else {},
+        cj.get("form_field_candidates") if isinstance(cj.get("form_field_candidates"), dict) else {},
+        cj.get("field_resolutions") if isinstance(cj.get("field_resolutions"), dict) else {},
+    )
+    for source in sources:
+        for key, value in source.items():
+            if value not in (None, "") and not isinstance(value, (dict, list)):
+                out[str(key)] = value
+    for legacy, canonical in {
+        "project": "project_name", "contractor": "construction_unit",
+        "person": "inspector", "work_area": "section",
+    }.items():
+        if out.get(legacy) not in (None, "") and out.get(canonical) in (None, ""):
+            out[canonical] = out[legacy]
+    for key, value in _legacy_watermark_fields(cj).items():
+        if not str(out.get(key) or "").strip():
+            out[key] = value
+    return out
+
+
+def _legacy_watermark_fields(content: dict) -> dict[str, str]:
+    """Recover watermark fields from records created before canonical aliases.
+
+    Older Agent records stored the raw OCR transcript and watermark fields but
+    did not persist ``project_name``. Re-parsing that immutable evidence keeps
+    regeneration correct without replacing it with the logged-in system
+    project. New records take the normal structured path above.
+    """
+    aliases = {
+        "project_name": ("project_name", "project", "engineering_name"),
+        "owner_unit": ("owner_unit", "owner_unit_name"),
+        "construction_unit": ("construction_unit", "contractor", "contractor_unit"),
+        "supervision_unit": ("supervision_unit", "supervision_unit_name"),
+        "inspector": ("inspector", "person", "checker", "inspection_person"),
+        "section": ("section", "work_area"),
+        "location": ("location", "address"),
+        "weather": ("weather",),
+    }
+    recovered: dict[str, str] = {}
+
+    def absorb(fields: dict) -> None:
+        for canonical, source_keys in aliases.items():
+            if recovered.get(canonical):
+                continue
+            value = next(
+                (str(fields.get(key) or "").strip() for key in source_keys
+                 if str(fields.get(key) or "").strip()),
+                "",
+            )
+            if value:
+                recovered[canonical] = value
+
+    for key in ("extracted_watermark_fields", "form_field_candidates"):
+        fields = content.get(key)
+        if not isinstance(fields, dict):
+            continue
+        absorb(fields)
+
+    evidence_fields = content.get("evidence_watermark_fields")
+    if isinstance(evidence_fields, list):
+        for item in evidence_fields:
+            fields = item.get("fields") if isinstance(item, dict) else None
+            if isinstance(fields, dict):
+                absorb(fields)
+
+    from app.services.watermark_ocr import parse_watermark_fields
+    for note in content.get("evidence_notes") or []:
+        text = str(note or "")
+        marker = "OCR文字："
+        if marker not in text:
+            continue
+        transcript = text.split(marker, 1)[1].split(" · ", 1)[0]
+        lines = [part.strip() for part in transcript.split("；") if part.strip()]
+        absorb(parse_watermark_fields(lines))
+    return recovered
+
+
 def _content_from_record(record: WorkRecord, user: User) -> dict:
     """工作记录 → 表单内容字段。"""
-    from app.services.record_fields import business_date, problem_text
+    from app.services.record_fields import business_date, is_instruction_only, problem_text
     now = record.created_at or datetime.now()
+    extracted = _record_extracted_fields(record)
+    explicit_problems = problem_text(record)
+    legacy_remark = str(record.inspection_remark or "").strip()
+    if not explicit_problems and legacy_remark and not is_instruction_only(legacy_remark):
+        explicit_problems = legacy_remark
+    work_content = str(record.work_content or "").strip()
+    if is_instruction_only(work_content):
+        work_content = ""
+    extracted_content = str(
+        extracted.get("work_content") or extracted.get("content") or extracted.get("activity") or ""
+    ).strip()
+    if is_instruction_only(extracted_content):
+        extracted_content = ""
     base = {
         "project_name": "",
         "doc_number": "",
@@ -145,14 +269,19 @@ def _content_from_record(record: WorkRecord, user: User) -> dict:
         "problems": problem_text(record),
         "handling": record.treatment or "",
         "treatment": record.treatment or "",
+        "owner_unit": str(extracted.get("owner_unit") or ""),
+        "construction_unit": str(extracted.get("construction_unit") or ""),
+        "supervision_unit": str(extracted.get("supervision_unit") or ""),
+        "supervision_org": str(extracted.get("supervision_org") or extracted.get("supervision_unit") or ""),
+        "inspector": str(extracted.get("inspector") or record.acceptance_participants or user.real_name or ""),
     }
     rtype = record.record_type
     if rtype == "巡视":
         base.update({
             "section": record.section or "",
-            "content": record.work_content or record.inspection_remark or "",
-            # 房建 GD-B-214 的问题栏：有独立问题/处理用问题，否则回落现场描述（内容不再塞进预印清单）
-            "problems": problem_text(record) or record.inspection_remark or record.work_content or "",
+            "content": work_content or extracted_content or f"{record.section or '现场'}巡视检查",
+            # 问题栏只接受业务问题；指令、工作描述和水印活动不得冒充问题。
+            "problems": explicit_problems or str(extracted.get("problems") or "") or "符合要求",
             "worker_count": record.worker_count,
             "start_time": record.inspection_start_time.isoformat(sep=" ", timespec="minutes") if record.inspection_start_time else "",
             "end_time": record.inspection_end_time.isoformat(sep=" ", timespec="minutes") if record.inspection_end_time else "",
@@ -168,41 +297,66 @@ def _content_from_record(record: WorkRecord, user: User) -> dict:
             # JSON 列不能存 datetime，统表 time 字段用 HH:MM
             "start_time": start.isoformat(sep=" ", timespec="minutes") if start else "",
             "end_time": end.isoformat(sep=" ", timespec="minutes") if end else "",
-            "content": record.station_content or record.work_content or "",
+            "content": record.station_content or work_content or extracted_content or "",
             "conclusion": record.station_conclusion or "",
             "problems": problem_text(record),
             "supervision_status": record.station_supervision_status or "",
         })
     elif rtype == "验收":
+        acceptance_content = (
+            str(extracted.get("acceptance_content") or "").strip()
+            or str((record.content_json or {}).get("acceptance_content") or "").strip()
+            or record.work_content or ""
+        )
         base.update({
             "section": record.section or "",
-            "acceptance_content": (record.content_json or {}).get("acceptance_content")
-            or record.work_content or "",
-            "content": (record.content_json or {}).get("acceptance_content")
-            or record.work_content or "",
+            "acceptance_content": acceptance_content,
+            "content": acceptance_content,
             "conclusion": f"验收结果：{record.acceptance_result or ''}",
-            "record": (record.content_json or {}).get("acceptance_content") or "",
+            "record": acceptance_content,
             "acceptance_result": record.acceptance_result or "",
-            "acceptance_type": (record.content_json or {}).get("acceptance_type") or "",
+            "acceptance_type": record.acceptance_type if hasattr(record, "acceptance_type") else str(extracted.get("acceptance_type") or (record.content_json or {}).get("acceptance_type") or ""),
             "acceptance_participants": record.acceptance_participants or "",
-            "basis": record.acceptance_basis or "",
+            "basis": record.acceptance_basis or str(extracted.get("basis") or ""),
         })
     elif rtype == "见证":
         cj = record.content_json or {}
+        material_name = record.witness_material_name or str(extracted.get("material_name") or extracted.get("witness_material_name") or "")
+        material_spec = record.witness_material_spec or str(extracted.get("material_spec") or extracted.get("witness_material_spec") or "")
         base.update({
             "section": record.section or "",
-            "material_name": record.witness_material_name or "",
-            "material_spec": record.witness_material_spec or "",
+            "material_name": material_name,
+            "material_spec": material_spec,
+            "witness_quantity": record.witness_quantity or str(extracted.get("quantity") or extracted.get("witness_quantity") or ""),
+            "witness_unit": record.witness_unit or str(extracted.get("unit") or extracted.get("witness_unit") or ""),
+            "witness_cert_no": record.witness_cert_no or str(extracted.get("witness_cert_no") or extracted.get("cert_no") or ""),
+            "witness_accept_result": record.witness_accept_result or str(extracted.get("witness_accept_result") or extracted.get("acceptance_result") or ""),
+            "sampler": str(extracted.get("inspector") or base.get("inspector") or ""),
+            "sample_date": business_date(record).isoformat(),
+            "acceptance_date": business_date(record).isoformat(),
             "manufacturer": cj.get("manufacturer") or "",
             "batch_no": cj.get("batch_no") or "",
             "content": (
-                f"见证取样材料：{record.witness_material_name or ''} "
-                f"{record.witness_material_spec or ''}"
+                f"见证取样材料：{material_name} {material_spec}"
             ).strip(),
             "time": (record.created_at or now).strftime("%Y-%m-%d %H:%M"),
         })
     else:
-        base["content"] = record.work_content or ""
+        base["content"] = work_content or extracted_content or ""
+    # Watermark/selected fields fill columns with no dedicated WorkRecord
+    # column, while explicit record values remain authoritative.
+    for key, value in extracted.items():
+        text = str(value if value is not None else "").strip()
+        if not text or is_instruction_only(text):
+            continue
+        if key in {"project", "contractor", "person", "work_area"}:
+            continue
+        if not str(base.get(key) or "").strip():
+            base[key] = text
+    base["project_name"] = str(extracted.get("project_name") or "").strip()
+    base["supervisor"] = str(
+        extracted.get("inspector") or base.get("supervisor") or user.real_name or ""
+    ).strip()
     # 字段表追问收集到的栏目（content_json.prov_fields，键=字段表 canonical）
     # 文书模板有对应栏位就带出来；已有值的以记录本体为准，不覆盖
     prov = (record.content_json or {}).get("prov_fields")
@@ -251,8 +405,12 @@ async def generate_form_from_record(
     author = await db.get(User, record.creator_id) or user
     content = _content_from_record(record, author)
     from app.services.record_fields import project_fields
-    content.update(project_fields(project))
+    for key, value in project_fields(project).items():
+        if not str(content.get(key) or "").strip():
+            content[key] = value
     content["doc_number"] = doc_number or (f"{spec.form_number}-{record.id:05d}")
+    attached_photos = await _record_attach_photos(db, record)
+    content["attached_images"] = attached_photos
 
     # 危大巡视（GDAQ30306）：栏位比普通巡视多（风力/专业分包/危大类型/逐项检查结果）
     if spec.form_code == "gdaq_30306_weida":
@@ -293,7 +451,7 @@ async def generate_form_from_record(
         from app.services.record_fields import invalidate_document
         invalidate_document(existing)
         existing.content = content
-        existing.attached_images = _record_attach_photos(record)
+        existing.attached_images = attached_photos
         existing.docx_path = f"/exports/{docx_file.name}"
         await db.flush()
         return existing, spec, content
@@ -307,7 +465,7 @@ async def generate_form_from_record(
         project_id=project.id if project else record.project_id,
         creator_id=user.id,
         status=DocStatus.DRAFT.value,
-        attached_images=_record_attach_photos(record),
+        attached_images=attached_photos,
         pdf_path=None,
         docx_path=f"/exports/{docx_file.name}",
     )

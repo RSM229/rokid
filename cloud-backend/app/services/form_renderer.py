@@ -584,8 +584,17 @@ def fill_xunshi(doc: DocxDocument, data: dict) -> None:
     try:
         tail = _Cell(tcs_of(tail_row)[0], table)
         if problems:
-            if not _insert_after_text(tail.paragraphs, "问题及处理情况：", str(problems)):
-                _insert_after_text(tail.paragraphs, "问题及处理情况", str(problems))
+            # 省统表模板写作「巡视发现的问题及处理情况」，房建样例使用
+            # 「巡视的问题及处理情况」。从最具体到最宽松依次匹配，避免
+            # 正文被插入错误栏目或静默丢失。
+            for marker in (
+                "发现的问题及处理情况：",
+                "发现的问题及处理情况",
+                "问题及处理情况：",
+                "问题及处理情况",
+            ):
+                if _insert_after_text(tail.paragraphs, marker, str(problems)):
+                    break
         name = str(data.get("supervisor") or data.get("creator_name") or "")
         if name:
             for marker in ("（签字）：", "（签名）：", "（签名）", "（签字）"):
