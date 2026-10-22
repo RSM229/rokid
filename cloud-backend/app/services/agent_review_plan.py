@@ -77,6 +77,9 @@ def validate_plan(plan: dict[str, Any]) -> None:
         confidence = event.get("record_type_confidence", 0)
         if isinstance(confidence, bool) or not isinstance(confidence, (int, float)) or not 0 <= confidence <= 1:
             raise ValueError("记录类型置信度无效")
+        unresolved = event.get("unresolved_conflicts", [])
+        if not isinstance(unresolved, list) or any(not isinstance(item, str) or not item for item in unresolved):
+            raise ValueError("事项冲突字段格式无效")
     if len(set(unassigned)) != len(unassigned) or any(item not in evidence_ids for item in unassigned):
         raise ValueError("待分配资料无效")
     assigned.extend(unassigned)
@@ -98,6 +101,13 @@ def review_issues(plan: dict[str, Any]) -> list[str]:
             issues.append(f"事项 {i} 缺少工作描述或资料")
         if str(event.get("record_type") or "待定") == "待定":
             issues.append(f"事项 {i} 请选择工作记录类型")
+        labels = {
+            "project_name": "项目", "owner_unit": "建设单位", "construction_unit": "施工单位",
+            "supervision_unit": "监理单位", "supervision_org": "项目监理机构",
+            "inspector": "检查人员", "location": "地点", "section": "施工部位",
+        }
+        for field in event.get("unresolved_conflicts") or []:
+            issues.append(f"事项 {i} 的{labels.get(field, field)}存在多个候选值，请先选择")
     return issues
 
 

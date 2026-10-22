@@ -563,6 +563,7 @@ async def _generate_request_plan(
     history: list[dict] | None = None,
     provider: str | None = None,
     model: str | None = None,
+    system_facts: list[dict[str, Any]] | None = None,
 ) -> tuple[dict[str, Any], str]:
     """Ask for semantic candidates, then pass them through the server gate."""
     evidence_items = [item for item in (evidence or []) if isinstance(item, dict)]
@@ -600,11 +601,13 @@ async def _generate_request_plan(
             attachment_count=max(0, attachment_count),
             evidence_count=evidence_count,
             evidence=evidence_items,
+            system_facts=system_facts,
         )
         plan = agent_request_plan.enrich_plan_facts(
             plan,
             extract_explicit_message_facts(message, message_ref=message),
             evidence=evidence_items,
+            system_facts=system_facts,
         )
         return plan, config.model_id
     except (model_gateway.ModelGatewayError, TypeError, ValueError) as exc:
@@ -621,6 +624,7 @@ async def _generate_request_plan(
 async def request_plan(
     req: RequestPlanRequest,
     user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     """Build a validated, non-executing plan for text and uploaded evidence."""
     message = (req.message or "").strip()
@@ -641,6 +645,14 @@ async def request_plan(
         model=req.model or "",
     )
     try:
+        project = await db.get(Project, user.project_id) if getattr(user, "project_id", None) else None
+        system_facts = agent_fact_model.build_system_facts(
+            project_name=project.name if project else "",
+            construction_unit=(project.construction_unit if project else "") or "",
+            supervision_unit=(project.supervision_unit if project else "") or "",
+            supervision_org=(project.supervision_org if project else "") or "",
+            inspector=user.real_name or "",
+        )
         plan, model_id = await _generate_request_plan(
             message=message,
             evidence_summary=req.evidence_summary,
@@ -650,6 +662,7 @@ async def request_plan(
             history=req.history,
             provider=req.provider,
             model=req.model,
+            system_facts=system_facts,
         )
         plan["model"] = model_id
         plan["request_id"] = request_id
@@ -708,6 +721,13 @@ async def _agent_chat_impl(
 
     project_id = getattr(user, "project_id", None)
     project = await db.get(Project, project_id) if project_id else None
+    system_facts = agent_fact_model.build_system_facts(
+        project_name=project.name if project else "",
+        construction_unit=(project.construction_unit if project else "") or "",
+        supervision_unit=(project.supervision_unit if project else "") or "",
+        supervision_org=(project.supervision_org if project else "") or "",
+        inspector=user.real_name or "",
+    )
     prefill = req.prefill if isinstance(req.prefill, dict) else {}
     conversation_id = (req.conversation_id or "").strip()[:64] or None
     earlier_messages = await agent_tools.record_conversation_message(
@@ -797,11 +817,13 @@ async def _agent_chat_impl(
         attachment_count=1 if material else 0,
         evidence_count=1 if material else 0,
         evidence=[],
+        system_facts=system_facts,
     )
     semantic_plan = agent_request_plan.enrich_plan_facts(
         semantic_plan,
         extract_explicit_message_facts(message, message_ref=message),
         evidence=[],
+        system_facts=system_facts,
     )
     if has_external_plan:
         # The precomputed attachment plan is authoritative for actions and
@@ -811,7 +833,11 @@ async def _agent_chat_impl(
         )
         incoming_plan = dict(external_plan)
         incoming_plan["facts"] = merged_facts
-        incoming_plan["field_status"] = agent_fact_model.fact_context_fields(merged_facts)
+        incoming_plan["system_facts"] = system_facts
+        incoming_plan["field_status"] = {
+            **agent_fact_model.fact_context_fields(system_facts),
+            **agent_fact_model.fact_context_fields(merged_facts),
+        }
         prefill_evidence = [{
             "record_date": prefill.get("record_date") or _iso_date(prefill.get("taken_at")),
             "observed_date_source": "watermark",
@@ -826,7 +852,7 @@ async def _agent_chat_impl(
             },
         }] if prefill else []
         prefill_conflicts = agent_fact_model.detect_source_conflicts(
-            merged_facts, prefill_evidence,
+            merged_facts, prefill_evidence, system_facts,
         )
         existing_conflicts = [
             item for item in (external_plan.get("field_conflicts") or [])
@@ -1093,6 +1119,8 @@ async def agent_chat(
         labels = {
             "record_date": "日期", "project": "项目",
             "location": "地点", "section": "工程部位", "weather": "天气",
+            "owner_unit": "建设单位", "construction_unit": "施工单位",
+            "supervision_unit": "监理单位", "inspector": "检查人员",
         }
         lines = ["发现你描述的信息与图片证据不一致："]
         for item in conflicts[:4]:
@@ -1100,10 +1128,15 @@ async def agent_chat(
                 continue
             label = labels.get(str(item.get("field") or ""), str(item.get("field") or "字段"))
             evidence = "、".join(str(value) for value in (item.get("evidence_values") or []))
-            lines.append(
-                f"- {label}：你说的是「{item.get('user_value')}」，图片证据是「{evidence}」"
-            )
-        lines.append("当前候选优先采用照片水印/EXIF 中的客观字段；你的描述保留为冲突提示，可在表单中核对修改。")
+            candidates = []
+            if str(item.get("system_value") or "").strip():
+                candidates.append(f"系统资料为「{item.get('system_value')}」")
+            if str(item.get("user_value") or "").strip():
+                candidates.append(f"你描述的是「{item.get('user_value')}」")
+            if evidence:
+                candidates.append(f"照片水印是「{evidence}」")
+            lines.append(f"- {label}：" + "；".join(candidates))
+        lines.append("当前候选优先保留照片水印/EXIF 证据；系统资料和你的描述不会静默覆盖，需在草稿中核对确认。")
         result["field_conflicts"] = conflicts
         result["reply"] = "\n".join(lines) + "\n" + str(result.get("reply") or "").strip()
     if conversation_id and isinstance(result, dict):

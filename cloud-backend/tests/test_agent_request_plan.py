@@ -62,7 +62,7 @@ def test_watermark_field_wins_and_user_value_is_reported_when_evidence_disagrees
     assert plan["field_conflicts"][0]["user_value"] == "2026-10-18"
     assert plan["field_conflicts"][0]["evidence_values"] == ["2026-10-19"]
     assert plan["field_conflicts"][0]["preferred_value"] == "2026-10-19"
-    assert plan["field_conflicts"][0]["preferred_source"] == "watermark_or_exif"
+    assert plan["field_conflicts"][0]["preferred_source"] == "watermark"
     assert plan["field_conflicts"][0]["resolution"] == "evidence_value_preferred_pending_confirmation"
     assert plan["item_plan"]["candidate_count"] == 1
 

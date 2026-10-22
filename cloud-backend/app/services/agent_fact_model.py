@@ -27,6 +27,17 @@ _FACT_ALIASES = {
     "date": "record_date",
     "business_date": "record_date",
     "content": "work_content",
+    "work_description": "work_content",
+    "project_name": "project",
+    "engineering_name": "project",
+    "contractor": "construction_unit",
+    "contractor_unit": "construction_unit",
+    "owner": "owner_unit",
+    "owner_unit_name": "owner_unit",
+    "supervision_unit_name": "supervision_unit",
+    "person": "inspector",
+    "checker": "inspector",
+    "inspection_person": "inspector",
     "work_area": "section",
     "part": "section",
 }
@@ -36,8 +47,37 @@ _FACT_ALIASES = {
 _ALLOWED_FACT_FIELDS = {
     "record_type", "record_date", "project", "location", "section",
     "work_content", "problems", "treatment", "worker_count", "weather",
+    "owner_unit", "construction_unit", "supervision_unit", "supervision_org",
+    "inspector",
     "station_part", "station_process", "station_content", "station_conclusion",
     "acceptance_result", "witness_material_name", "hazard_type", "description",
+}
+
+# Evidence producers are allowed to keep legacy keys, but comparisons and
+# form filling use one canonical name. This prevents a watermarked
+# ``施工单位`` from becoming ``contractor`` in one layer and disappearing
+# behind ``construction_unit`` in another.
+_EVIDENCE_FIELD_KEYS = {
+    "record_date": ("record_date", "observed_date", "taken_at", "date"),
+    "project": ("project", "project_name", "engineering_name"),
+    "location": ("location", "address"),
+    "section": ("section", "work_area"),
+    "weather": ("weather",),
+    "owner_unit": ("owner_unit", "owner_unit_name"),
+    "construction_unit": ("construction_unit", "contractor", "contractor_unit"),
+    "supervision_unit": ("supervision_unit", "supervision_unit_name"),
+    "inspector": ("inspector", "person", "checker", "inspection_person"),
+}
+_FACT_FIELD_LABELS = {
+    "record_date": "日期",
+    "project": "项目",
+    "location": "地点",
+    "section": "工程部位",
+    "weather": "天气",
+    "owner_unit": "建设单位",
+    "construction_unit": "施工单位",
+    "supervision_unit": "监理单位",
+    "inspector": "检查人员",
 }
 
 
@@ -144,6 +184,58 @@ def user_fact_map(facts: Iterable[dict[str, Any]] | None) -> dict[str, dict[str,
     return out
 
 
+def system_fact_map(facts: Iterable[dict[str, Any]] | None) -> dict[str, dict[str, Any]]:
+    """Return configured project/profile values used as non-destructive baselines."""
+    out: dict[str, dict[str, Any]] = {}
+    for item in facts or []:
+        if not isinstance(item, dict):
+            continue
+        field = _FACT_ALIASES.get(_text(item.get("field")), _text(item.get("field")))
+        if not field or not _usable_value(item.get("value")):
+            continue
+        if item.get("source") not in {"system_project", "user_profile"}:
+            continue
+        out[field] = item
+    return out
+
+
+def build_system_facts(
+    *,
+    project_name: str = "",
+    construction_unit: str = "",
+    supervision_unit: str = "",
+    supervision_org: str = "",
+    inspector: str = "",
+) -> list[dict[str, Any]]:
+    """Build the low-priority project/profile context sent into planning."""
+    now = datetime.now().isoformat(timespec="seconds")
+    values = (
+        ("project", project_name, "system_project"),
+        ("construction_unit", construction_unit, "system_project"),
+        ("supervision_unit", supervision_unit, "system_project"),
+        ("supervision_org", supervision_org, "system_project"),
+        ("inspector", inspector, "user_profile"),
+    )
+    return [
+        {
+            "field": field,
+            "value": value,
+            "source": source,
+            "source_ref": "当前项目/登录用户资料",
+            "confidence": 0.8 if source == "system_project" else 0.6,
+            "status": "system_configured" if source == "system_project" else "profile_candidate",
+            "sources": [{
+                "source": source,
+                "source_ref": "当前项目/登录用户资料",
+                "updated_at": now,
+            }],
+            "updated_at": now,
+        }
+        for field, value, source in values
+        if _usable_value(value)
+    ]
+
+
 def facts_to_args(facts: Iterable[dict[str, Any]] | None) -> dict[str, Any]:
     """Return ordinary tool args from trusted user facts only."""
     out: dict[str, Any] = {}
@@ -180,13 +272,7 @@ def _evidence_field_source(item: dict[str, Any], field: str) -> str:
         if source:
             return source
     watermark_fields = item.get("watermark_fields")
-    watermark_keys = {
-        "record_date": ("taken_at", "record_date", "date"),
-        "project": ("project", "project_name"),
-        "location": ("location", "address"),
-        "section": ("section", "work_area"),
-        "weather": ("weather",),
-    }.get(field, ())
+    watermark_keys = _EVIDENCE_FIELD_KEYS.get(field, ())
     if isinstance(watermark_fields, dict) and any(_text(watermark_fields.get(key)) for key in watermark_keys):
         return "watermark"
     return _text(item.get("source")) or "evidence"
@@ -199,22 +285,30 @@ def _objective_source(source: str) -> bool:
 def detect_source_conflicts(
     facts: Iterable[dict[str, Any]] | None,
     evidence: Iterable[dict[str, Any]] | None,
+    system_facts: Iterable[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
-    """Report disagreements and apply priority only to watermark/EXIF fields."""
+    """Report disagreements across user, project/profile and evidence sources.
+
+    Watermark/EXIF remains the preferred objective candidate, but it never
+    becomes an unresolved silent overwrite. Every disagreement is returned as
+    a confirmation item with all candidate values preserved.
+    """
     user_facts = user_fact_map(facts)
+    configured_facts = system_fact_map(system_facts)
     evidence_values: dict[str, list[str]] = {}
     evidence_sources: dict[str, list[str]] = {}
     for item in evidence or []:
         if not isinstance(item, dict):
             continue
-        for field, keys in {
-            "record_date": ("record_date", "observed_date"),
-            "project": ("project",),
-            "location": ("location",),
-            "section": ("section",),
-            "weather": ("weather",),
-        }.items():
+        for field, keys in _EVIDENCE_FIELD_KEYS.items():
+            watermark_fields = item.get("watermark_fields")
             value = next((_text(item.get(key)) for key in keys if _text(item.get(key))), "")
+            if not value and isinstance(watermark_fields, dict):
+                value = next(
+                    (_text(watermark_fields.get(key)) for key in keys
+                     if _text(watermark_fields.get(key))),
+                    "",
+                )
             observed = evidence_values.get(field, [])
             known = {_comparable(v) for v in observed}
             source = _evidence_field_source(item, field)
@@ -232,38 +326,58 @@ def detect_source_conflicts(
                 sources[index] = source
 
     conflicts: list[dict[str, Any]] = []
-    for field, observed in evidence_values.items():
+    fields = list(dict.fromkeys([
+        *evidence_values.keys(), *user_facts.keys(), *configured_facts.keys(),
+    ]))
+    for field in fields:
+        observed = evidence_values.get(field, [])
         fact = user_facts.get(field)
-        if not fact:
-            continue
-        user_value = fact.get("value")
+        configured = configured_facts.get(field)
+        user_value = fact.get("value") if fact else ""
+        system_value = configured.get("value") if configured else ""
         normalized_user = _comparable(user_value)
+        normalized_system = _comparable(system_value)
         normalized_observed = {_comparable(value) for value in observed}
-        if normalized_user and normalized_observed and normalized_user not in normalized_observed:
-            sources = evidence_sources.get(field) or []
-            objective_index = next(
-                (index for index, source in enumerate(sources) if _objective_source(source)),
-                None,
+        values = [value for value in (system_value, user_value, *observed) if _usable_value(value)]
+        distinct = {_comparable(value) for value in values}
+        if len(distinct) < 2:
+            continue
+        sources = evidence_sources.get(field) or []
+        objective_index = next(
+            (index for index, source in enumerate(sources) if _objective_source(source)),
+            None,
+        )
+        if objective_index is not None:
+            preferred_value = observed[objective_index]
+            preferred_source = sources[objective_index] or "watermark_or_exif"
+            resolution = "evidence_value_preferred_pending_confirmation"
+        elif fact:
+            preferred_value = user_value
+            preferred_source = _text(fact.get("source")) or "user_message"
+            resolution = (
+                "user_value_preferred_pending_evidence_confirmation"
+                if observed else "user_value_preferred_pending_confirmation"
             )
-            if objective_index is None:
-                preferred_value = user_value
-                preferred_source = _text(fact.get("source")) or "user_message"
-                resolution = "user_value_preferred_pending_evidence_confirmation"
-            else:
-                preferred_value = observed[objective_index]
-                preferred_source = "watermark_or_exif"
-                resolution = "evidence_value_preferred_pending_confirmation"
-            conflicts.append({
-                "field": field,
-                "user_value": user_value,
-                "evidence_values": observed,
-                "evidence_sources": sources,
-                "preferred_value": preferred_value,
-                "preferred_source": preferred_source,
-                "status": "conflict",
-                "resolution": resolution,
-                "source_ref": fact.get("source_ref") or "",
-            })
+        else:
+            preferred_value = system_value
+            preferred_source = _text(configured.get("source")) if configured else "system"
+            resolution = "system_value_preferred_pending_confirmation"
+        conflicts.append({
+            "field": field,
+            "label": _FACT_FIELD_LABELS.get(field, field),
+            "user_value": user_value,
+            "system_value": system_value,
+            "system_source": _text(configured.get("source")) if configured else "",
+            "evidence_values": observed,
+            "evidence_sources": sources,
+            "preferred_value": preferred_value,
+            "preferred_source": preferred_source,
+            "options": list(dict.fromkeys(str(value) for value in values)),
+            "needs_confirmation": True,
+            "status": "conflict",
+            "resolution": resolution,
+            "source_ref": fact.get("source_ref") if fact else "",
+        })
     return conflicts
 
 

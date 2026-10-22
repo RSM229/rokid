@@ -53,7 +53,7 @@ def test_conflict_detection_ignores_missing_evidence_but_reports_disagreement():
     )
     assert {item["field"] for item in conflicts} == {"record_date", "section"}
     assert all(item["resolution"] == "evidence_value_preferred_pending_confirmation" for item in conflicts)
-    assert all(item["preferred_source"] == "watermark_or_exif" for item in conflicts)
+    assert all(item["preferred_source"] == "watermark" for item in conflicts)
 
 
 def test_generic_vision_observation_does_not_masquerade_as_watermark():
@@ -71,3 +71,28 @@ def test_generic_vision_observation_does_not_masquerade_as_watermark():
     assert conflicts[0]["evidence_sources"] == ["evidence"]
     assert conflicts[0]["preferred_value"] == "3号楼二层"
     assert conflicts[0]["resolution"] == "user_value_preferred_pending_evidence_confirmation"
+
+
+def test_system_project_and_profile_values_are_non_destructive_conflict_candidates():
+    conflicts = agent_fact_model.detect_source_conflicts(
+        [],
+        [{
+            "project": "广东省中西医结合应急救治中心项目",
+            "watermark_fields": {
+                "project_name": "广东省中西医结合应急救治中心项目",
+                "construction_unit": "广州一建建设集团有限公司",
+                "inspector": "陈宇文",
+            },
+        }],
+        [
+            {"field": "project", "value": "111", "source": "system_project"},
+            {"field": "construction_unit", "value": "系统施工单位", "source": "system_project"},
+            {"field": "inspector", "value": "系统登录人", "source": "user_profile"},
+        ],
+    )
+    by_field = {item["field"]: item for item in conflicts}
+    assert by_field["project"]["preferred_value"] == "广东省中西医结合应急救治中心项目"
+    assert set(by_field["project"]["options"]) == {"111", "广东省中西医结合应急救治中心项目"}
+    assert by_field["construction_unit"]["system_value"] == "系统施工单位"
+    assert by_field["inspector"]["preferred_source"] == "watermark"
+    assert all(item["needs_confirmation"] is True for item in conflicts)

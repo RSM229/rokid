@@ -265,6 +265,7 @@ def normalize_candidate(
     attachment_count: int = 0,
     evidence_count: int = 0,
     evidence: list[dict[str, Any]] | None = None,
+    system_facts: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     source = candidate if isinstance(candidate, dict) else {}
     intent = _text(source.get("intent"))
@@ -364,13 +365,15 @@ def normalize_candidate(
     execution_mode = "clarify" if clarifications else (
         "single_tool" if selected_tool else "plan_only"
     )
-    field_conflicts = detect_source_conflicts(facts, evidence_items)
+    configured_facts = [item for item in (system_facts or []) if isinstance(item, dict)]
+    field_conflicts = detect_source_conflicts(facts, evidence_items, configured_facts)
     item_plan = build_item_plan(
         facts=facts,
         evidence=evidence_items,
         record_type=record_type,
         record_type_confidence=record_confidence,
         action_ids=action_ids,
+        system_facts=configured_facts,
     )
 
     return {
@@ -380,7 +383,11 @@ def normalize_candidate(
         "record_type": record_type,
         "record_type_confidence": record_confidence,
         "facts": facts,
-        "field_status": fact_context_fields(facts),
+        "system_facts": configured_facts,
+        "field_status": {
+            **fact_context_fields(configured_facts),
+            **fact_context_fields(facts),
+        },
         "field_conflicts": field_conflicts,
         "item_plan": item_plan,
         "needs_hazard_analysis": (
@@ -466,12 +473,17 @@ def enrich_plan_facts(
     additional_facts: list[dict[str, Any]] | None,
     *,
     evidence: list[dict[str, Any]] | None = None,
+    system_facts: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Merge trusted facts into an existing candidate without changing actions."""
     out = dict(plan)
     facts = merge_fact_candidates(plan.get("facts"), additional_facts)
     evidence_items = [item for item in (evidence or []) if isinstance(item, dict)]
-    conflicts = detect_source_conflicts(facts, evidence_items)
+    configured_facts = [
+        item for item in (system_facts if system_facts is not None else out.get("system_facts") or [])
+        if isinstance(item, dict)
+    ]
+    conflicts = detect_source_conflicts(facts, evidence_items, configured_facts)
     action_ids = {
         str(item.get("id") or "")
         for item in out.get("actions", [])
@@ -483,9 +495,14 @@ def enrich_plan_facts(
         record_type=out.get("record_type"),
         record_type_confidence=float(out.get("record_type_confidence") or 0),
         action_ids=action_ids,
+        system_facts=configured_facts,
     )
     out["facts"] = facts
-    out["field_status"] = fact_context_fields(facts)
+    out["system_facts"] = configured_facts
+    out["field_status"] = {
+        **fact_context_fields(configured_facts),
+        **fact_context_fields(facts),
+    }
     out["field_conflicts"] = conflicts
     out["item_plan"] = item_plan
     trace = dict(out.get("trace") or {})

@@ -10,9 +10,32 @@ from typing import Any, Iterable
 
 
 IDENTITY_FIELDS = ("record_date", "project", "location", "section")
+CONTEXT_FIELDS = (
+    "owner_unit", "construction_unit", "supervision_unit", "inspector",
+    "work_content", "weather",
+)
 RECORD_ACTIONS = {"record_work", "create_hazard"}
 _EMPTY_VALUES = {"", "null", "none", "unknown", "未知", "未识别", "待定", "n/a"}
 _OBJECTIVE_SOURCES = {"watermark", "exif", "watermark_or_exif"}
+_EVIDENCE_CONTEXT_KEYS = {
+    "owner_unit": ("owner_unit",),
+    "construction_unit": ("construction_unit", "contractor"),
+    "supervision_unit": ("supervision_unit",),
+    "inspector": ("inspector", "person"),
+    "weather": ("weather",),
+}
+_FIELD_LABELS = {
+    "record_date": "日期",
+    "project": "项目",
+    "location": "地点",
+    "section": "工程部位",
+    "owner_unit": "建设单位",
+    "construction_unit": "施工单位",
+    "supervision_unit": "监理单位",
+    "inspector": "检查人员",
+    "weather": "天气",
+    "work_content": "工作内容",
+}
 
 
 def _text(value: Any) -> str:
@@ -64,6 +87,27 @@ def _evidence_identity(item: dict[str, Any]) -> tuple[dict[str, str], dict[str, 
     return identity, sources
 
 
+def _evidence_context(item: dict[str, Any]) -> dict[str, str]:
+    """Collect form-relevant evidence fields that are not grouping identities."""
+    watermark_fields = item.get("watermark_fields")
+    watermark = watermark_fields if isinstance(watermark_fields, dict) else {}
+    out: dict[str, str] = {}
+    for field, keys in _EVIDENCE_CONTEXT_KEYS.items():
+        value = next(
+            (_text(item.get(key)) for key in keys if _text(item.get(key))),
+            "",
+        ) or next(
+            (_text(watermark.get(key)) for key in keys if _text(watermark.get(key))),
+            "",
+        )
+        if _usable(value):
+            out[field] = value
+    activity = _text(item.get("activity"))
+    if _usable(activity):
+        out["work_content"] = activity
+    return out
+
+
 def _compatible(group: dict[str, str], incoming: dict[str, str]) -> bool:
     shared = 0
     for field in IDENTITY_FIELDS:
@@ -80,26 +124,69 @@ def _field_views(
     identity: dict[str, str],
     user_fields: dict[str, Any],
     evidence_sources: dict[str, str] | None = None,
+    context_fields: dict[str, dict[str, Any]] | None = None,
+    system_fields: dict[str, Any] | None = None,
 ) -> dict[str, dict[str, Any]]:
     out: dict[str, dict[str, Any]] = {}
     sources = evidence_sources or {}
+    system_fields = system_fields or {}
+
+    def add_view(
+        field: str,
+        preferred_value: Any,
+        preferred_source: str,
+        status: str,
+        *candidates: Any,
+    ) -> None:
+        values = list(dict.fromkeys(
+            _text(value) for value in (preferred_value, *candidates) if _usable(value)
+        ))
+        field_view: dict[str, Any] = {
+            "value": _text(preferred_value),
+            "source": preferred_source,
+            "status": status,
+        }
+        if len({_text(value).lower() for value in values}) > 1:
+            field_view["status"] = "conflict"
+            field_view["candidates"] = values
+        out[field] = field_view
+
     for field in IDENTITY_FIELDS:
         evidence_value = _text(identity.get(field))
         user_value = user_fields.get(field)
+        system_value = system_fields.get(field)
         evidence_source = _text(sources.get(field)) or "evidence"
         objective_evidence = evidence_source in _OBJECTIVE_SOURCES
         if evidence_value and (objective_evidence or not _usable(user_value)):
-            out[field] = {
-                "value": evidence_value,
-                "source": evidence_source,
-                "status": "evidence_extracted" if objective_evidence else "vision_observed",
-            }
+            add_view(
+                field, evidence_value, evidence_source,
+                "evidence_extracted" if objective_evidence else "vision_observed",
+                user_value, system_value,
+            )
         elif _usable(user_value):
-            out[field] = {
-                "value": user_value,
-                "source": "user_message",
-                "status": "user_stated_candidate",
-            }
+            add_view(
+                field, user_value, "user_message", "user_stated_candidate",
+                evidence_value, system_value,
+            )
+        elif _usable(system_value):
+            add_view(field, system_value, "system_project", "system_configured")
+    for field, candidate in (context_fields or {}).items():
+        if field in out:
+            continue
+        values = candidate.get("values") if isinstance(candidate, dict) else None
+        value = _text(candidate.get("value")) if isinstance(candidate, dict) else ""
+        source = _text(candidate.get("source")) if isinstance(candidate, dict) else ""
+        evidence_values = [_text(item) for item in (values or []) if _text(item)]
+        if value or evidence_values:
+            add_view(
+                field, value or evidence_values[0], source or "watermark",
+                "evidence_extracted", *evidence_values[1:],
+                user_fields.get(field), system_fields.get(field),
+            )
+        elif _usable(user_fields.get(field)):
+            add_view(field, user_fields.get(field), "user_message", "user_stated_candidate")
+        elif _usable(system_fields.get(field)):
+            add_view(field, system_fields.get(field), "system_project", "system_configured")
     return out
 
 
@@ -110,9 +197,11 @@ def build_item_plan(
     record_type: str | None = None,
     record_type_confidence: float = 0.0,
     action_ids: Iterable[str] | None = None,
+    system_facts: Iterable[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Build zero, one or many item candidates without writing anything."""
     fact_map = _fact_map(facts)
+    system_map = _fact_map(system_facts)
     actions = {str(item) for item in (action_ids or [])}
     evidence_items = [item for item in (evidence or []) if isinstance(item, dict)]
     wants_record = bool(actions.intersection(RECORD_ACTIONS)) or bool(record_type)
@@ -130,7 +219,7 @@ def build_item_plan(
                 "id": "item_1",
                 "record_type": record_type,
                 "record_type_confidence": record_type_confidence,
-                "fields": _field_views({}, fact_map),
+                "fields": _field_views({}, fact_map, system_fields=system_map),
                 "evidence_indexes": [],
                 "missing_fields": missing,
                 "confidence": 0.75,
@@ -154,7 +243,10 @@ def build_item_plan(
             continue
         target = next((group for group in groups if _compatible(group["identity"], identity)), None)
         if target is None:
-            target = {"identity": {}, "sources": {}, "evidence_indexes": [], "notes": []}
+            target = {
+                "identity": {}, "sources": {}, "evidence_indexes": [], "notes": [],
+                "context": {},
+            }
             groups.append(target)
         target["evidence_indexes"].append(index)
         for field, value in known.items():
@@ -164,20 +256,50 @@ def build_item_plan(
         note = _text(item.get("activity") or item.get("observation") or item.get("note"))
         if note:
             target["notes"].append(note[:500])
+        for field, value in _evidence_context(item).items():
+            bucket = target["context"].setdefault(field, {"values": [], "source": "watermark"})
+            if value not in bucket["values"]:
+                bucket["values"].append(value)
 
     items: list[dict[str, Any]] = []
     for index, group in enumerate(groups, 1):
         identity = group["identity"]
-        fields = _field_views(identity, fact_map, group.get("sources"))
+        context: dict[str, dict[str, Any]] = {}
+        for field, bucket in (group.get("context") or {}).items():
+            values = list(bucket.get("values") or [])
+            context[field] = {
+                "value": values[0] if values else "",
+                "values": values,
+                "source": bucket.get("source") or "watermark",
+            }
+        fields = _field_views(
+            identity, fact_map, group.get("sources"), context, system_map,
+        )
+        for field in CONTEXT_FIELDS:
+            if _usable(fact_map.get(field)) and field not in fields:
+                fields[field] = {
+                    "value": fact_map[field],
+                    "source": "user_message",
+                    "status": "user_stated_candidate",
+                }
+            elif _usable(system_map.get(field)) and field not in fields:
+                fields[field] = {
+                    "value": system_map[field],
+                    "source": "system_project",
+                    "status": "system_configured",
+                }
         missing = [field for field in ("record_date", "location", "section") if field not in fields]
-        issues: list[str] = []
-        for field in IDENTITY_FIELDS:
-            user_value = _text(fact_map.get(field))
-            evidence_value = _text(identity.get(field))
-            if user_value and evidence_value and user_value.lower() != evidence_value.lower():
-                source = _text((group.get("sources") or {}).get(field))
-                preferred = "图片水印/EXIF" if source in _OBJECTIVE_SOURCES else "用户描述"
-                issues.append(f"{field} 存在用户描述与图片证据冲突，候选按{preferred}采用")
+        issues = []
+        for field, value in fields.items():
+            if not isinstance(value, dict) or value.get("status") != "conflict":
+                continue
+            source = _text(value.get("source"))
+            source_label = "图片水印/EXIF" if source in _OBJECTIVE_SOURCES else (
+                "系统项目资料" if source in {"system_project", "user_profile"} else "用户描述"
+            )
+            issues.append(
+                f"{_FIELD_LABELS.get(field, field)}存在多个候选值，当前优先采用{source_label}，需用户确认后才能建档"
+            )
         items.append({
             "id": f"item_{index}",
             "record_type": record_type,
@@ -197,7 +319,7 @@ def build_item_plan(
             "id": "item_1",
             "record_type": record_type,
             "record_type_confidence": record_type_confidence,
-            "fields": _field_views({}, fact_map),
+            "fields": _field_views({}, fact_map, system_fields=system_map),
             "evidence_indexes": unassigned,
             "notes": [],
             "missing_fields": [field for field in ("record_date", "location", "section") if not _usable(fact_map.get(field))],

@@ -29,7 +29,7 @@ CASES = [
     (
         "自有水印样式",
         ["项目:海珠湾隧道工程", "监理:张三", "时间:2026-10-19 09:32:05", "位置:广州市南沙区大岗镇", "部位:东湾2栋10层", "天气:晴 28℃"],
-        {"project": "海珠湾隧道工程", "person": "张三", "location": "广州市南沙区大岗镇", "section": "东湾2栋10层"},
+        {"project_name": "海珠湾隧道工程", "inspector": "张三", "location": "广州市南沙区大岗镇", "section": "东湾2栋10层"},
     ),
     (
         "水印相机样式(无标签)",
@@ -45,21 +45,28 @@ parser_cases = [
     (["经度:113.2956,纬度:23.0974"], {}),
     (["113.2956,23.0974"], {"lat": 23.0974, "lon": 113.2956}),
     (["天气:雷阵雨"], {"weather": "雷阵雨"}),
-    (["记录人:王五"], {"person": "王五"}),
+    (["记录人:王五"], {"inspector": "王五"}),
     (["施工区域：西楼外脚手架搭设"], {"work_area": "西楼外脚手架搭设"}),
     (["危大名称脚手架工程"], {"hazard_name": "脚手架工程"}),
-    (["检查人员：刘幸、陈宇文"], {"person": "刘幸、陈宇文"}),
+    (["检查人员：刘幸、陈宇文"], {"inspector": "刘幸、陈宇文"}),
+    (["监理：刘幸"], {"inspector": "刘幸"}),
     (["拍摄时间：2026.10.0915:48"], {"taken_at": "2026-10-09T15:48:00"}),
-    (["检查人员", "陈宇文"], {"person": "陈宇文"}),
+    (["检查人员", "陈宇文"], {"inspector": "陈宇文"}),
     (["地点:", "广州市南沙区·广东省中医院南沙", "医院(装修中)"], {"location": "广州市南沙区·广东省中医院南沙"}),
     (["施工区域:西楼十一层A区混凝土浇筑旁站"], {"work_area": "西楼十一层A区混凝土浇筑旁站"}),
     (["施工区域:西楼十一层A区混凝土浇筑旁站"], {"location": None}),
+    ([
+        "广东省中西医结合应急救治", "中心项目", "珠江监理", "施工区域：安全巡视",
+        "检查人员：陈宇文", "拍摄时间：2026.10.0915:48",
+        "广州市南沙区·广东省中医院南沙", "建设单位：广州市南沙区建设中心",
+        "监理单位：广州珠江监理咨询集团有限公司", "施工单位：广州一建建设集团有限公司",
+    ], {"project_name": "广东省中西医结合应急救治中心项目", "inspector": "陈宇文"}),
     (["项目名称：海珠湾工程", "施工区域：西楼A区", "危大工程名称：脚手架", "检查人员：张三", "拍摄时间：2026-10-18 09:30", "地点：西楼", "建设单位：甲公司", "监理单位：乙公司", "施工单位：丙公司", "备注：复查东侧", "备注二：补充材料"], {
-        "project": "海珠湾工程", "work_area": "西楼A区", "hazard_name": "脚手架", "person": "张三",
+        "project_name": "海珠湾工程", "work_area": "西楼A区", "hazard_name": "脚手架", "inspector": "张三",
         "taken_at": "2026-10-18T09:30:00", "location": "西楼",
-        "owner_unit": "甲公司", "supervision_unit": "乙公司", "contractor": "丙公司",
+        "owner_unit": "甲公司", "supervision_unit": "乙公司", "construction_unit": "丙公司",
     }),
-    (["现场人员佩戴安全帽", "施工单位名称", "丙公司", "自定义标签：自定义值", "备注：", "备注：第二条备注"], {"contractor": "丙公司"}),
+    (["现场人员佩戴安全帽", "施工单位名称", "丙公司", "自定义标签：自定义值", "备注：", "备注：第二条备注"], {"construction_unit": "丙公司"}),
     (["没有水印的现场杂字", "墙面编号 A:B"], {}),
 ]
 
@@ -71,7 +78,7 @@ for name, expect in [(f"case{i}", c) for i, c in enumerate(parser_cases)]:
         if fields.get(k) != v:
             ok = False
             print(f"[FAIL] parser {name}: {k} 期望 {v!r} 实得 {fields.get(k)!r}")
-    if name == "case15":
+    if lines[-2:] == ["备注：", "备注：第二条备注"]:
         items = fields.get("labeled_items", [])
         if len(items) != 4 or items[-2:] != [{"label": "备注", "value": ""}, {"label": "备注", "value": "第二条备注"}]:
             ok = False
@@ -93,7 +100,7 @@ for name, lines, expect_subset in CASES:
     for k, v in expect_subset.items():
         got = fields.get(k, "")
         if isinstance(v, str) and isinstance(got, str):
-            match = v in got or got in v
+            match = bool(got) and (v in got or got in v)
         else:
             match = got == v
         if not match:

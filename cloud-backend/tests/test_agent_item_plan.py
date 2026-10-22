@@ -67,6 +67,41 @@ def test_text_only_record_uses_user_facts_and_never_writes():
     assert plan["write_allowed"] is False
 
 
+def test_system_profile_and_watermark_units_remain_visible_conflict_candidates():
+    plan = build_item_plan(
+        facts=[],
+        evidence=[{
+            "observed_date": "2026-10-09",
+            "project": "广东省中西医结合应急救治中心项目",
+            "section": "安全巡视",
+            "watermark_fields": {
+                "project_name": "广东省中西医结合应急救治中心项目",
+                "construction_unit": "广州一建建设集团有限公司",
+                "owner_unit": "广州市南沙区建设中心",
+                "supervision_unit": "广州珠江监理咨询集团有限公司",
+                "inspector": "陈宇文",
+            },
+        }],
+        record_type="巡视",
+        action_ids=["record_work"],
+        system_facts=[
+            {"field": "project", "value": "111"},
+            {"field": "construction_unit", "value": "系统施工单位"},
+            {"field": "supervision_unit", "value": "广州珠江监理咨询集团有限公司"},
+            {"field": "inspector", "value": "系统登录人"},
+        ],
+    )
+    fields = plan["items"][0]["fields"]
+    assert fields["project"]["value"] == "广东省中西医结合应急救治中心项目"
+    assert fields["project"]["status"] == "conflict"
+    assert set(fields["project"]["candidates"]) == {"广东省中西医结合应急救治中心项目", "111"}
+    assert fields["construction_unit"]["value"] == "广州一建建设集团有限公司"
+    assert fields["construction_unit"]["status"] == "conflict"
+    assert fields["inspector"]["status"] == "conflict"
+    assert fields["owner_unit"]["value"] == "广州市南沙区建设中心"
+    assert any("项目存在多个候选值" in issue for issue in plan["items"][0]["issues"])
+
+
 def test_watermark_identity_wins_over_user_but_generic_vision_does_not():
     facts = normalize_model_facts({
         "record_date": "2026-10-18", "section": "地下室顶板",

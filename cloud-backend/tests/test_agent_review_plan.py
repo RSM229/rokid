@@ -78,3 +78,14 @@ def test_pending_record_type_must_be_resolved_before_confirmation():
     plan["events"][0]["record_type"] = "待定"
     review_plan.validate_plan(plan)
     assert any("请选择工作记录类型" in issue for issue in review_plan.review_issues(plan))
+
+
+def test_unresolved_entity_conflict_blocks_server_confirmation():
+    plan = base_plan()
+    plan["events"][0]["evidence_ids"].append("p2")
+    plan["unassigned_ids"] = []
+    plan["events"][0]["unresolved_conflicts"] = ["project_name", "construction_unit"]
+    review_plan.validate_plan(plan)
+    issues = review_plan.review_issues(plan)
+    assert any("项目存在多个候选值" in issue for issue in issues)
+    assert any("施工单位存在多个候选值" in issue for issue in issues)

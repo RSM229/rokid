@@ -94,21 +94,24 @@ _ADDR_RE = re.compile(
 # 「概念」别名：这些是跨表单的通用语义，不是某一家水印的字段名。
 # 任意其它标签都不会丢，会原样进入 labeled_items。
 _SEMANTIC_ALIASES = {
-    "项目": "project", "工程": "project", "项目名称": "project",
-    "工程名称": "project", "建设项目": "project", "单位工程": "project",
+    "项目": "project_name", "工程": "project_name", "项目名称": "project_name",
+    "工程名称": "project_name", "建设项目": "project_name", "单位工程": "project_name",
     "位置": "location", "地点": "location", "地址": "location",
     "施工地点": "location", "拍摄地点": "location",
     "拍摄时间": "taken_at", "拍照时间": "taken_at", "时间": "taken_at",
     "日期": "taken_at", "记录时间": "taken_at",
     "天气": "weather", "气温": "weather",
-    "拍摄人": "person", "拍照人": "person", "记录人": "person",
-    "人员": "person", "检查人员": "person", "监理人员": "person",
-    "建设单位": "owner_unit", "施工单位": "contractor", "监理单位": "supervision_unit",
-    "建设单位名称": "owner_unit", "施工单位名称": "contractor", "监理单位名称": "supervision_unit",
+    "拍摄人": "inspector", "拍照人": "inspector", "记录人": "inspector",
+    "人员": "inspector", "检查人员": "inspector", "检查人": "inspector",
+    "监理": "inspector", "监理人员": "inspector", "旁站人员": "inspector",
+    "见证人": "inspector", "验收人员": "inspector",
+    "建设单位": "owner_unit", "施工单位": "construction_unit", "监理单位": "supervision_unit",
+    "建设单位名称": "owner_unit", "施工单位名称": "construction_unit", "监理单位名称": "supervision_unit",
     "施工区域名称": "work_area",
     "部位": "section", "施工部位": "section", "施工区域": "work_area",
     "危大名称": "hazard_name", "危大工程名称": "hazard_name",
     "备注": "remark",
+    "项目简称": "project_name", "工程名称简称": "project_name",
 }
 
 # 无冒号时，靠「标签后缀」判断下一行是否为值。只是排版启发式，不是字段白名单。
@@ -274,6 +277,40 @@ def _weather_text(line: str) -> str:
     return weather.group(1) + (f" {temp.group(1)}℃" if temp else "")
 
 
+def _infer_split_project_name(clean: list[str]) -> tuple[str, set[int]]:
+    """Recover a title that OCR split across two adjacent watermark lines.
+
+    Some watermark cameras render the project title over two lines without a
+    ``项目名称：`` label, for example::
+
+        广东省中西医结合应急救治
+        中心项目
+
+    Treating the second line as a field label would silently attach the next
+    line (often the supervising company) to it. This layout rule only proposes
+    a title when a project/engineering suffix line and its preceding text form
+    one plausible Chinese title; all other watermark fields remain generic.
+    """
+    for index in range(1, len(clean)):
+        current = clean[index].strip()
+        previous = clean[index - 1].strip()
+        if not current.endswith(("项目", "工程")):
+            continue
+        if _SEP_RE.match(current) or _SEP_RE.match(previous):
+            continue
+        if not previous or _DT_RE.search(previous) or _WEATHER_RE.search(previous):
+            continue
+        if _looks_like_bare_label(previous):
+            continue
+        candidate = re.sub(r"\s+", "", previous + current)
+        if not (6 <= len(candidate) <= 60):
+            continue
+        if not re.search(r"[\u4e00-\u9fff]", candidate):
+            continue
+        return candidate, {index - 1, index}
+    return "", set()
+
+
 def parse_watermark_fields(lines: list[str]) -> dict:
     """从 OCR 文本行抽取水印字段（纯函数，可单测）。
 
@@ -289,6 +326,12 @@ def parse_watermark_fields(lines: list[str]) -> dict:
     labeled_items: list[dict[str, str]] = []
     pairs: list[tuple[str, str]] = []
     consumed: set[int] = set()
+
+    inferred_project, project_lines = _infer_split_project_name(clean)
+    if inferred_project:
+        fields["project_name"] = inferred_project
+        labeled_items.append({"label": "项目名称", "value": inferred_project})
+        consumed.update(project_lines)
 
     for index, text in enumerate(clean):
         if index in consumed:
