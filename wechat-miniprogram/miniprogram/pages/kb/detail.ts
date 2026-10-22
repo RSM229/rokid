@@ -33,6 +33,15 @@ interface KbMember {
   username: string
 }
 
+interface KbFolderNode {
+  id: number
+  name: string
+  parent_id: number | null
+  is_preset: boolean
+  count: number
+  children: KbFolderNode[]
+}
+
 const ROLE_LABEL: Record<string, string> = {
   owner: '创建者',
   admin: '管理员',
@@ -67,6 +76,13 @@ Page(themed({
 
     docs: [] as Array<KbDoc & { sizeText: string }>,
     docsLoading: false,
+
+    folders: [] as KbFolderNode[],
+    folderMap: {} as Record<number, KbFolderNode>,
+    currentFolderId: 0,
+    breadcrumb: [] as Array<{ id: number; name: string }>,
+    currentSubfolders: [] as KbFolderNode[],
+
     recording: false,
     recSec: 0,
 
@@ -104,7 +120,7 @@ Page(themed({
     this.setData({ kbId })
     this.attachRecorder()
     this.loadKb()
-    this.loadDocs()
+    this.loadFolders()
     this.loadMembers()
   },
 
@@ -169,7 +185,7 @@ Page(themed({
   },
 
   onPullDownRefresh() {
-    Promise.all([this.loadKb(), this.loadDocs(), this.loadMembers()])
+    Promise.all([this.loadKb(), this.loadFolders(), this.loadMembers()])
       .finally(() => wx.stopPullDownRefresh())
   },
 
@@ -193,10 +209,13 @@ Page(themed({
     }
   },
 
-  async loadDocs() {
+  async loadDocs(folderId: number = 0) {
     this.setData({ docsLoading: true })
     try {
-      const res = await request<{ items: KbDoc[] }>(`/kb/${this.data.kbId}/documents`)
+      const res = await request<{ items: KbDoc[] }>(
+        `/kb/${this.data.kbId}/documents`,
+        { data: { folder_id: folderId } },
+      )
       this.setData({
         docs: (res.items || []).map((d) => ({ ...d, sizeText: formatSize(d.size_bytes || 0) })),
       })
@@ -205,6 +224,58 @@ Page(themed({
     } finally {
       this.setData({ docsLoading: false })
     }
+  },
+
+  async loadFolders() {
+    try {
+      const res = await request<{ items: KbFolderNode[] }>(`/kb/${this.data.kbId}/folders`)
+      const map: Record<number, KbFolderNode> = {}
+      const flatten = (nodes: KbFolderNode[]) => {
+        for (const n of nodes) {
+          map[n.id] = n
+          if (n.children && n.children.length) flatten(n.children)
+        }
+      }
+      flatten(res.items || [])
+      this.setData({ folders: res.items || [], folderMap: map })
+      this.refreshCurrentFolder()
+    } catch (error) {
+      wx.showToast({ title: (error as Error).message, icon: 'none' })
+    }
+  },
+
+  refreshCurrentFolder() {
+    const folderId = this.data.currentFolderId
+    const map = this.data.folderMap
+    // 计算面包屑（从当前文件夹向上回溯到根）
+    const crumb: Array<{ id: number; name: string }> = []
+    let cur: KbFolderNode | undefined = folderId ? map[folderId] : undefined
+    while (cur) {
+      crumb.unshift({ id: cur.id, name: cur.name })
+      cur = cur.parent_id ? map[cur.parent_id] : undefined
+    }
+    // 当前层级的子文件夹
+    let subs: KbFolderNode[] = []
+    if (folderId === 0) {
+      subs = this.data.folders.filter((f) => f.parent_id === null || f.parent_id === 0)
+    } else {
+      const node = map[folderId]
+      subs = node && node.children ? node.children : []
+    }
+    this.setData({ breadcrumb: crumb, currentSubfolders: subs })
+    this.loadDocs(folderId)
+  },
+
+  selectFolder(event: WechatMiniprogram.TouchEvent) {
+    const id = Number(event.currentTarget.dataset.id)
+    this.setData({ currentFolderId: id })
+    this.refreshCurrentFolder()
+  },
+
+  goBreadcrumb(event: WechatMiniprogram.TouchEvent) {
+    const id = Number(event.currentTarget.dataset.id)
+    this.setData({ currentFolderId: id })
+    this.refreshCurrentFolder()
   },
 
   uploadDoc() {
@@ -229,6 +300,8 @@ Page(themed({
 
   async doUpload(paths: string[]) {
     const token = session.getToken()
+    const folderId = this.data.currentFolderId
+    const formData = folderId ? { folder_id: String(folderId) } : {}
     let done = 0
     try {
       for (const path of paths) {
@@ -238,6 +311,7 @@ Page(themed({
             url: `${config.apiBaseUrl}/kb/${this.data.kbId}/documents`,
             filePath: path,
             name: 'file',
+            formData,
             header: token ? { Authorization: `Bearer ${token}` } : {},
             success(res) {
               if (res.statusCode >= 200 && res.statusCode < 300) { resolve(); return }
@@ -255,7 +329,7 @@ Page(themed({
       }
       wx.hideLoading()
       wx.showToast({ title: '上传完成', icon: 'success' })
-      this.loadDocs()
+      this.loadFolders()
       this.loadKb()
     } catch (error) {
       wx.hideLoading()
@@ -265,6 +339,10 @@ Page(themed({
 
   async uploadAudio(path: string, name?: string) {
     const token = session.getToken()
+    const folderId = this.data.currentFolderId
+    const formData: Record<string, string> = {}
+    if (name) formData.name = name
+    if (folderId) formData.folder_id = String(folderId)
     wx.showLoading({ title: '语音转写中...', mask: true })
     try {
       await new Promise<void>((resolve, reject) => {
@@ -272,7 +350,7 @@ Page(themed({
           url: `${config.apiBaseUrl}/kb/${this.data.kbId}/documents/audio`,
           filePath: path,
           name: 'file',
-          formData: name ? { name } : {},
+          formData,
           header: token ? { Authorization: `Bearer ${token}` } : {},
           success(res) {
             if (res.statusCode >= 200 && res.statusCode < 300) { resolve(); return }
@@ -288,7 +366,7 @@ Page(themed({
       })
       wx.hideLoading()
       wx.showToast({ title: '已转写入库', icon: 'success' })
-      this.loadDocs()
+      this.loadFolders()
       this.loadKb()
     } catch (error) {
       wx.hideLoading()
@@ -383,7 +461,7 @@ Page(themed({
         try {
           await request(`/kb/${this.data.kbId}/documents/${docId}`, { method: 'DELETE' })
           wx.showToast({ title: '已删除', icon: 'success' })
-          this.loadDocs()
+          this.loadFolders()
           this.loadKb()
         } catch (error) {
           wx.showToast({ title: (error as Error).message, icon: 'none' })
