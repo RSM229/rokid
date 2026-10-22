@@ -15,23 +15,36 @@
     <!-- 分类树接口未上线时的降级提示 -->
     <view wx:if="{{treeUnavailable}}" class="tree-tip">当前服务端暂未提供分类目录，已按平铺文档显示</view>
 
-    <!-- 子分类卡片 -->
-    <view wx:if="{{currentSubfolders.length}}" class="folder-grid">
-      <view wx:for="{{currentSubfolders}}" wx:key="id" class="fcard" data-id="{{item.id}}" bindtap="selectFolder">
-        <view class="ficon-wrap"><text class="ficon">📁</text></view>
-        <view class="fbody">
-          <view class="fname">{{item.name}}</view>
-          <view class="fcount">{{item.count}} 份</view>
+    <!-- 子分类：竖排列表（文件管理器式），不再用双列小卡 -->
+    <view wx:if="{{currentSubfolders.length}}" class="sec">
+      <view class="sec-head">
+        <text class="sec-title">分类</text>
+        <text wx:if="{{canUpload}}" class="sec-act" bindtap="showNewFolder">+ 新建</text>
+      </view>
+      <view class="folder-list">
+        <view wx:for="{{currentSubfolders}}" wx:key="id" class="frow" data-id="{{item.id}}" bindtap="selectFolder">
+          <view class="fico"><view class="fico-shape" /></view>
+          <view class="fmain">
+            <view class="fname">{{item.name}}</view>
+            <view class="fsub">{{item.count}} 份文档</view>
+          </view>
+          <view class="fchev">›</view>
         </view>
       </view>
     </view>
 
     <!-- 文档 -->
-    <view wx:if="{{docsLoading && !docs.length}}" class="empty">正在加载…</view>
-    <view wx:elif="{{!currentSubfolders.length && !docs.length}}" class="empty">这个分类下还没有文档，点下方按钮上传归档</view>
+    <view class="sec">
+      <view class="sec-head">
+        <text class="sec-title">文档</text>
+        <text class="sec-count">{{docs.length}}</text>
+      </view>
+      <view wx:if="{{docsLoading && !docs.length}}" class="empty-mini">正在加载…</view>
+      <view wx:elif="{{!docs.length}}" class="empty-mini">这里还没有文档。点下方「上传文档」直接归档，或先进分类再上传。</view>
+    </view>
     <view wx:for="{{docs}}" wx:key="id" class="card doc">
       <view class="doc-head">
-        <view class="doc-icon">📄</view>
+        <view class="doc-icon"><view class="doc-shape" /></view>
         <view class="doc-info">
           <view class="doc-name">{{item.name}}</view>
           <view class="doc-meta">{{item.sizeText}} · {{item.uploader_name}}</view>
@@ -45,11 +58,10 @@
     </view>
   </block>
 
-  <!-- 底部操作栏 -->
+  <!-- 底部操作栏：新建分类已移到「分类」分组标题右侧，这里只留两个主操作 -->
   <view class="action-bar">
     <button wx:if="{{canUpload}}" class="btn-primary" size="mini" bindtap="uploadDoc">+ 上传文档</button>
-    <button wx:if="{{canUpload}}" class="btn-green" size="mini" bindtap="chooseAudio">录音转写</button>
-    <button wx:if="{{canUpload}}" class="btn-plain" size="mini" bindtap="showNewFolder">新建分类</button>
+    <button wx:if="{{canUpload}}" class="btn-plain" size="mini" bindtap="chooseAudio">录音转写</button>
   </view>
 
   <!-- 文档内容预览 -->
