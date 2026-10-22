@@ -554,7 +554,7 @@ const entityForm = reactive({ name: '', entity_type: '监理要点', description
 const relationForm = reactive({ source_name: '', target_name: '', relation_type: '关联', description: '' })
 
 const statsCards = ref([
-  { label: '实体总数', value: 0, icon: 'Document', color: '#409EFF' },
+  { label: '实体总数', value: 0, icon: 'Document', color: '#2563EB' },
   { label: '关系总数', value: 0, icon: 'Connection', color: '#67C23A' },
   { label: '实体类型', value: 0, icon: 'Share', color: '#E6A23C' },
   { label: 'AI 抽取', value: '智能', icon: 'MagicStick', color: '#9b59b6' },

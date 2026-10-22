@@ -991,7 +991,7 @@ async function detectImportedImages(files: File[]) {
   left: 50%;
   transform: translate(-50%, -50%);
   text-align: center;
-  color: #409eff;
+  color: var(--el-color-primary);
 }
 
 .voice-status p {

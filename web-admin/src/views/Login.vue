@@ -203,7 +203,7 @@ async function handleSubmit() {
   font-size: 13px;
 }
 .forgot-link span {
-  color: #409eff;
+  color: var(--el-color-primary);
   cursor: pointer;
 }
 .forgot-link span:hover {

@@ -1,19 +1,21 @@
 body {
   margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-  background-color: #f0f2f5;
+  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Hiragino Sans GB',
+    'Microsoft YaHei', 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  background-color: #f5f7fa;
 }
 
 .app-layout {
   min-height: 100vh;
 }
 
+/* 注：.app-header 的实际外观由 MainLayout.vue 的 scoped 样式决定（白底+下边框），
+   这里只保留兜底，避免两处色值不一致造成误解。 */
 .app-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: #001529;
-  color: #fff;
+  background: #fff;
   padding: 0 24px;
   height: 60px;
 }

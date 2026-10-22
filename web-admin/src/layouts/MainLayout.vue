@@ -13,8 +13,8 @@
         router
         :collapse="isCollapse"
         background-color="#001529"
-        text-color="rgba(255,255,255,0.65)"
-        active-text-color="#409EFF"
+        text-color="rgba(255,255,255,0.72)"
+        active-text-color="#ffffff"
       >
         <!-- 一级菜单：按截图结构 -->
         <template v-for="item in menuItems" :key="item.path">
@@ -338,10 +338,10 @@ function handleCommand(cmd: string) {
   display: flex;
   align-items: center;
   justify-content: center;
-  border-bottom: 1px solid rgba(255,255,255,0.1);
+  border-bottom: 1px solid rgba(255,255,255,0.08);
   color: #fff;
-  font-size: 18px;
-  font-weight: 700;
+  font-size: 17px;
+  font-weight: 600;
   letter-spacing: 2px;
   gap: 10px;
 }
@@ -368,9 +368,9 @@ function handleCommand(cmd: string) {
   align-items: center;
   justify-content: space-between;
   padding: 0 20px;
-  border-bottom: 1px solid #e8e8e8;
+  border-bottom: 1px solid var(--el-border-color-lighter);
   background: #fff;
-  box-shadow: 0 1px 4px rgba(0,21,42,0.08);
+  box-shadow: 0 1px 3px rgba(31, 35, 41, 0.05);
 }
 .header-left {
   display: flex;
@@ -398,7 +398,7 @@ function handleCommand(cmd: string) {
   cursor: pointer;
   color: #666;
 }
-.collapse-btn:hover { color: #409EFF; }
+.collapse-btn:hover { color: var(--el-color-primary); }
 .header-right {
   display: flex;
   align-items: center;
@@ -420,9 +420,33 @@ function handleCommand(cmd: string) {
   overflow-y: auto;
 }
 
-/* 深色侧边栏菜单样式覆盖 */
-:deep(.el-menu) { border-right: none; }
+/* 深色侧边栏菜单样式覆盖（A 深蓝精修）：
+   选中项 = 深蓝高亮底 + 左侧 3px 亮蓝指示条 + 白字，比原来只变字色清楚得多 */
+:deep(.el-menu) {
+  border-right: none;
+  --el-menu-item-height: 46px;
+}
+:deep(.el-menu-item),
+:deep(.el-sub-menu__title) {
+  position: relative;
+  border-left: 3px solid transparent;
+  transition: background-color 0.15s, color 0.15s;
+}
 :deep(.el-sub-menu__title:hover),
-:deep(.el-menu-item:hover) { background-color: #1890ff20 !important; }
-:deep(.el-menu-item.is-active) { background-color: #1890ff30 !important; }
+:deep(.el-menu-item:hover) {
+  background-color: rgba(255, 255, 255, 0.06) !important;
+  color: #fff !important;
+}
+:deep(.el-menu-item.is-active) {
+  background-color: rgba(37, 99, 235, 0.24) !important;
+  border-left-color: #3b82f6;
+  font-weight: 600;
+}
+/* 子菜单面板底色与侧栏统一（弹出层默认是白的，在深蓝侧栏里很跳） */
+:deep(.el-menu--inline) {
+  background-color: #000c17 !important;
+}
+:deep(.el-menu--inline .el-menu-item.is-active) {
+  background-color: rgba(37, 99, 235, 0.3) !important;
+}
 </style>

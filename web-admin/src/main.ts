@@ -15,7 +15,9 @@ import {
 import VChart from 'vue-echarts'
 import App from './App.vue'
 import router from './router'
+// 顺序要紧：theme.css 覆盖 element-plus 的 CSS 变量，必须在它之后引入
 import './styles/main.css'
+import './styles/theme.css'
 import { setPermVersionHandler } from './api'
 import { useAuthStore } from './stores/auth'
 

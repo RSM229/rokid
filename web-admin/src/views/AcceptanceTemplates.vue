@@ -374,7 +374,7 @@ onMounted(loadData)
   margin: 18px 0 8px;
   font-size: 14px;
   color: #303133;
-  border-left: 3px solid #409EFF;
+  border-left: 3px solid var(--el-color-primary);
   padding-left: 8px;
 }
 .preview-list {

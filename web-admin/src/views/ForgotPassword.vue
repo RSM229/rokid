@@ -240,7 +240,7 @@ async function resetPassword() {
   font-size: 14px;
   color: #999;
 }
-.switch-mode span { color: #409eff; cursor: pointer; }
+.switch-mode span { color: var(--el-color-primary); cursor: pointer; }
 .switch-mode span:hover { text-decoration: underline; }
 @media (max-width: 768px) {
   .forgot-left { display: none; }

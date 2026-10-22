@@ -191,7 +191,7 @@ const selectedKB = ref('all')
 
 // ===== 工作统计加载（未查看/未处理） =====
 const workStats = ref([
-  { key: 'inspection', label: '巡视记录', desc: '现场巡视检查', icon: markRaw(View), unviewed: 0, pending: 0, bgColor: '#e6f4ff', iconColor: '#1890ff' },
+  { key: 'inspection', label: '巡视记录', desc: '现场巡视检查', icon: markRaw(View), unviewed: 0, pending: 0, bgColor: '#e9effd', iconColor: '#2563EB' },
   { key: 'acceptance', label: '验收记录', desc: '工程质量验收', icon: markRaw(CircleCheck), unviewed: 0, pending: 0, bgColor: '#f6ffed', iconColor: '#52c41a' },
   { key: 'station', label: '旁站记录', desc: '关键工序旁站', icon: markRaw(Monitor), unviewed: 0, pending: 0, bgColor: '#fff7e6', iconColor: '#fa8c16' },
   { key: 'witness', label: '见证记录', desc: '见证取样送检', icon: markRaw(Camera), unviewed: 0, pending: 0, bgColor: '#f9f0ff', iconColor: '#722ed1' },
@@ -600,7 +600,7 @@ onMounted(() => {
 .avatar { width: 32px; height: 32px; border-radius: 50%; background: #f0f0f0; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
 .bubble { max-width: 70%; padding: 6px 10px; border-radius: 6px; background: #fff; line-height: 1.5; font-size: 14px; border: 1px solid #e8e8e8; white-space: pre-wrap; }
 .bubble p { margin: 0; }
-.message-item.user .bubble { background: #409EFF; color: #fff; border-color: #409EFF; }
+.message-item.user .bubble { background: var(--el-color-primary); color: #fff; border-color: var(--el-color-primary); }
 .chat-image { max-width: 200px; max-height: 160px; border-radius: 4px; margin-bottom: 6px; cursor: pointer; display: block; }
 
 /* 输入区域 */
@@ -629,7 +629,7 @@ onMounted(() => {
   margin-bottom: 12px;
 }
 .title-text { font-size: 16px; font-weight: 600; color: #333; }
-.view-all { font-size: 13px; color: #409eff; cursor: pointer; }
+.view-all { font-size: 13px; color: var(--el-color-primary); cursor: pointer; }
 .view-all:hover { text-decoration: underline; }
 .stats-cards { display: flex; gap: 16px; }
 .stat-card-item {

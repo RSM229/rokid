@@ -97,8 +97,8 @@ const statCards = computed(() => [
     title: '总项目数',
     value: stats.value.total_projects ?? 0,
     icon: Folder,
-    color: '#1890ff',
-    bg: '#e6f4ff',
+    color: '#2563EB',
+    bg: '#e9effd',
   },
   {
     title: '在建项目',
@@ -143,7 +143,7 @@ function rateColor(rate: number) {
 
 function progressColor(value: number) {
   if (value >= 100) return '#52c41a'
-  if (value >= 50) return '#1890ff'
+  if (value >= 50) return '#2563EB'
   return '#faad14'
 }
 
