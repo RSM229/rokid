@@ -17,6 +17,23 @@ test('agent uses one chat-native form renderer and normalizes legacy input compo
   assert.doesNotMatch(agentTemplate, /item\.inputComponents/)
 })
 
+test('work-form save confirms and executes an unambiguous review plan', () => {
+  assert.match(agentPage, /form\.kind !== 'work_record'[\s\S]{0,220}confirmAndExecuteInlineReview/)
+  assert.match(agentTemplate, /保存并生成记录/)
+  assert.doesNotMatch(agentTemplate, /disabled="\{\{!item\.reviewCanConfirm/)
+})
+
+test('blocked review plans explain that no formal record was generated', () => {
+  assert.match(agentTemplate, /先处理待确认项/)
+  assert.match(agentPage, /尚未生成正式工作记录/)
+})
+
+test('history restores the latest unfinished review plan instead of orphaning it', () => {
+  assert.match(agentPage, /restorePendingReviewPlan\(detail\.conversation_id\)/)
+  assert.match(agentPage, /listReviewPlans\(conversationId\)/)
+  assert.match(agentPage, /已恢复上次未完成的记录草稿/)
+})
+
 for (const route of app.pages) {
   test(`${route}: page files, components and event handlers exist`, () => {
     const base = path.join(root, route)

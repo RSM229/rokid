@@ -188,7 +188,7 @@
               <text wx:for="{{item.reviewIssues}}" wx:key="*this" class="inline-review-issue">{{item}}</text>
             </view>
             <text wx:if="{{item.reviewResult}}" class="inline-review-result">{{item.reviewResult}}</text>
-            <button wx:if="{{item.reviewPlan.status !== 'executed'}}" class="inline-review-confirm" disabled="{{!item.reviewCanConfirm || item.reviewBusy}}" loading="{{item.reviewBusy}}" bindtap="confirmInlineReview" data-index="{{mi}}">{{item.reviewBusy ? '正在生成' : '确认并生成工作记录'}}</button>
+            <button wx:if="{{item.reviewPlan.status !== 'executed'}}" class="inline-review-confirm" disabled="{{item.reviewBusy}}" loading="{{item.reviewBusy}}" bindtap="confirmInlineReview" data-index="{{mi}}">{{item.reviewBusy ? '正在生成' : (item.reviewIssues && item.reviewIssues.length ? '先处理待确认项' : '确认并生成工作记录')}}</button>
             <text wx:if="{{item.reviewPlan.status === 'executed'}}" class="inline-review-done">已完成建档，正式记录已创建。</text>
           </view>
           <view wx:if="{{item.hazardCandidates && item.hazardCandidates.length}}" class="inline-hazard-candidates">
@@ -283,7 +283,7 @@
             </view>
 
             <view wx:if="{{item.agentForm.kind !== 'attachments_done'}}" class="agent-task-submit-row">
-              <button class="agent-task-submit" loading="{{item.agentForm.busy}}" disabled="{{item.agentForm.busy}}" data-message="{{mi}}" bindtap="submitAgentForm">{{item.agentForm.submit_label || '提交'}}</button>
+              <button class="agent-task-submit" loading="{{item.agentForm.busy}}" disabled="{{item.agentForm.busy}}" data-message="{{mi}}" bindtap="submitAgentForm">{{item.agentForm.busy ? '提交中' : (item.agentForm.submit_label === '保存记录' ? '保存并生成记录' : (item.agentForm.submit_label || '提交'))}}</button>
               <text wx:if="{{item.agentForm.skippable}}" class="agent-task-skip" data-message="{{mi}}" bindtap="skipAgentForm">暂时跳过</text>
             </view>
             <view wx:if="{{item.agentForm.actions && item.agentForm.actions.length}}" class="agent-task-links">
@@ -672,7 +672,7 @@
   <view class="overlay" wx:if="{{showWorkForm}}" catchtouchmove="true">
     <view class="overlay-mask" bindtap="closeOverlay"></view>
     <view class="overlay-panel work-form-panel">
-      <view class="panel-header"><text class="panel-title">现场记录（保存为草稿，补全后提交）</text></view>
+      <view class="panel-header"><text class="panel-title">现场记录（补全后保存）</text></view>
       <scroll-view scroll-y style="max-height:65vh;">
         <view class="form-group" wx:for="{{workFormFields}}" wx:key="key">
           <text class="form-label">{{item.label}}</text>
@@ -680,7 +680,7 @@
           <textarea wx:else class="form-textarea" value="{{workForm[item.key]}}" data-field="{{item.key}}" bindinput="onWorkFormInput" auto-height maxlength="5000" />
         </view>
       </scroll-view>
-      <view class="panel-actions"><button bindtap="closeOverlay">取消</button><button loading="{{workFormSubmitting}}" bindtap="submitWorkForm">保存记录</button></view>
+      <view class="panel-actions"><button bindtap="closeOverlay">取消</button><button loading="{{workFormSubmitting}}" bindtap="submitWorkForm">保存并生成记录</button></view>
     </view>
   </view>
 </view>

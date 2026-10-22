@@ -8,7 +8,7 @@ import { getCached, invalidateCache, invalidateByPrefix, CACHE_KEYS } from '../.
 import { ensurePrivacy } from '../../utils/privacy'
 import { themed } from '../../utils/theme'
 import { cleanMarkdown } from '../../utils/markdown'
-import { createReviewPlan, saveReviewPlan, confirmReviewPlan, executeReviewPlan, editEvent, editEvidenceWatermark, addEvidenceWatermark, confirmPlan, reviewIssues, evidenceTargetConflicts, reviewPlanFromItemPlan, mergeEvents, splitEvidence, releaseEvidence, assignEvidence, addEvent, removeEvent, type ReviewPlan, type RequestPlanItemPlan } from '../../services/work-review'
+import { createReviewPlan, saveReviewPlan, listReviewPlans, confirmReviewPlan, executeReviewPlan, editEvent, editEvidenceWatermark, addEvidenceWatermark, confirmPlan, reviewIssues, evidenceTargetConflicts, reviewPlanFromItemPlan, mergeEvents, splitEvidence, releaseEvidence, assignEvidence, addEvent, removeEvent, type ReviewPlan, type RequestPlanItemPlan } from '../../services/work-review'
 
 const INLINE_RECORD_TYPES = ['巡视', '验收', '见证', '旁站', '待定']
 
@@ -697,6 +697,33 @@ Page(themed({
       messages,
     })
     void this.loadPendingDrafts()
+    void this.restorePendingReviewPlan(detail.conversation_id)
+  },
+
+  async restorePendingReviewPlan(conversationId: string) {
+    try {
+      const plans = await listReviewPlans(conversationId)
+      const saved = plans.find(plan => plan.status === 'draft' || plan.status === 'confirmed')
+      if (!saved?.serverId || this.data.messages.some(message => message.reviewPlan?.serverId === saved.serverId)) return
+      const issueList = reviewIssues(saved)
+      this.addMessage({
+        role: 'assistant',
+        text: issueList.length
+          ? `已恢复上次未完成的记录草稿，尚未生成正式工作记录。请先处理：${issueList.join('；')}。`
+          : '已恢复上次未完成的记录草稿。请核对后生成正式工作记录。',
+        reviewPlan: saved,
+        reviewEvents: this.inlineReviewEvents(saved),
+        reviewUnassignedEvidence: this.inlineReviewUnassignedEvidence(saved),
+        reviewMergeSelection: [],
+        reviewEventOptions: this.inlineReviewEventOptions(saved),
+        reviewIssues: issueList,
+        reviewCanConfirm: issueList.length === 0,
+        reviewResult: issueList.length ? '尚未生成正式记录：请先处理上方待确认项。' : '',
+        reviewProgress: this.reviewProgress(saved),
+      })
+    } catch {
+      // 草稿恢复是增强能力；失败时不影响已加载的聊天历史。
+    }
   },
 
   initRecorder() {
@@ -1048,7 +1075,7 @@ Page(themed({
     observations: string[] = [],
     requestPlan?: AgentRequestPlan,
     manageLoading = true,
-  ) {
+  ): Promise<number | null> {
     try {
       if (!this.currentSessionId) this.currentSessionId = Date.now()
       const conversationId = conversationIdFor(this.currentSessionId)
@@ -1136,16 +1163,20 @@ Page(themed({
         requestPlan ? requestPlan as unknown as Record<string, unknown> : undefined,
       )
       const saved = await createReviewPlan(conversationId, plan)
-      this.addMessage({
+      const issueList = reviewIssues(saved)
+      const messageIndex = this.addMessage({
         role: 'assistant',
-        text: `已整理 ${evidence.length} 张图片${saved.events.length ? `，按服务端事项计划保留为 ${saved.events.length} 个候选事项` : '，还没有确定记录用途'}。事项数量、字段来源和冲突均由统一规划结果提供，可在下面对照照片核对；先整理工作记录，不自动生成表单。`,
+        text: issueList.length
+          ? `已整理 ${evidence.length} 张图片${saved.events.length ? `，形成 ${saved.events.length} 个候选事项` : '，还没有确定记录用途'}。当前已保存为待确认草稿，尚未生成正式工作记录；请先处理：${issueList.join('；')}。`
+          : `已整理 ${evidence.length} 张图片${saved.events.length ? `，形成 ${saved.events.length} 个候选事项` : '，还没有确定记录用途'}。信息已准备好，确认后才会写入正式工作记录。`,
         reviewPlan: saved,
         reviewEvents: this.inlineReviewEvents(saved, []),
         reviewUnassignedEvidence: this.inlineReviewUnassignedEvidence(saved),
         reviewMergeSelection: [],
         reviewEventOptions: this.inlineReviewEventOptions(saved),
-        reviewIssues: reviewIssues(saved),
-        reviewCanConfirm: reviewIssues(saved).length === 0,
+        reviewIssues: issueList,
+        reviewCanConfirm: issueList.length === 0,
+        reviewResult: issueList.length ? '尚未生成正式记录：请先处理上方待确认项。' : '',
         reviewProgress: this.reviewProgress(saved),
         reviewPurposeOptions: saved.events.length ? undefined : (purpose.choices || []).map(choice => ({ value: choice.value, label: choice.label })),
         reviewRecommendation: purpose.recommendation ? { recordType: purpose.recommendation.record_type, confidence: purpose.recommendation.confidence, reason: purpose.recommendation.reason } : undefined,
@@ -1156,8 +1187,10 @@ Page(themed({
           observations.some(value => !value) ? '部分图片内容观察不可用；其余用户文字和水印证据仍保留。' : '已完成通用图片内容观察，未调用隐患专用识别。',
         ].filter(Boolean).join(' '),
       })
+      return messageIndex
     } catch (error) {
       this.addMessage({ role: 'assistant', text: `整理计划创建失败：${(error as Error).message}。已上传的资料不会自动创建业务记录。` })
+      return null
     } finally {
       if (manageLoading) this.setData({ loading: false })
     }
@@ -1684,15 +1717,25 @@ Page(themed({
       .finally(() => this.setData({ loading: false }))
   },
 
-  async confirmInlineReview(event: WechatMiniprogram.TouchEvent) {
+  confirmInlineReview(event: WechatMiniprogram.TouchEvent) {
     const index = Number(event.currentTarget.dataset.index)
+    void this.confirmAndExecuteInlineReview(index)
+  },
+
+  async confirmAndExecuteInlineReview(index: number): Promise<boolean> {
     const message = this.data.messages[index]
     let plan = message?.reviewPlan
-    if (!plan || message.reviewBusy) return
+    if (!plan || message.reviewBusy) return false
     const issues = reviewIssues(plan)
     if (issues.length) {
       wx.showToast({ title: issues[0], icon: 'none' })
-      return
+      const blockedMessages = [...this.data.messages]
+      blockedMessages[index] = {
+        ...blockedMessages[index],
+        reviewResult: `尚未生成正式工作记录：${issues[0]}`,
+      }
+      this.setData({ messages: blockedMessages })
+      return false
     }
     const messages = [...this.data.messages]
     messages[index] = { ...message, reviewBusy: true, reviewResult: '' }
@@ -1712,10 +1755,14 @@ Page(themed({
       const summary = records.map(record => `${record.record_type || '待定'} ${record.record_date || ''}（#${record.record_id}）`).join('、')
       finalMessages[index] = { ...finalMessages[index], reviewPlan: executed, reviewEvents: this.inlineReviewEvents(executed), reviewProgress: this.reviewProgress(executed), reviewResult: `已生成 ${executed.executionResult?.created_count || 0} 条工作记录${summary ? `：${summary}` : ''}。表单可在工作记录详情中按需生成。` }
       this.setData({ messages: finalMessages })
+      invalidateByPrefix('/work-record')
+      invalidateCache(CACHE_KEYS.WORK_RECORD_STATS)
+      return true
     } catch (error) {
       const latest = [...this.data.messages]
       latest[index] = { ...latest[index], reviewResult: `暂未生成：${(error as Error).message}` }
       this.setData({ messages: latest })
+      return false
     } finally {
       const latest = [...this.data.messages]
       if (latest[index]) latest[index] = { ...latest[index], reviewBusy: false }
@@ -2447,7 +2494,12 @@ Page(themed({
       note,
       this.buildPlanEvidence(images, watermarks, observations),
     )
-    await this.createReviewPlanFromAttachments(note, images, watermarks, observations, requestPlan)
+    const reviewMessageIndex = await this.createReviewPlanFromAttachments(note, images, watermarks, observations, requestPlan)
+    if (reviewMessageIndex === null || form.kind !== 'work_record') return
+    const plan = this.data.messages[reviewMessageIndex]?.reviewPlan
+    if (plan && reviewIssues(plan).length === 0) {
+      await this.confirmAndExecuteInlineReview(reviewMessageIndex)
+    }
   },
 
   skipAgentForm(event: WechatMiniprogram.TouchEvent) {
@@ -3378,11 +3430,13 @@ Page(themed({
     })
   },
 
-  addMessage(msg: Message) {
+  addMessage(msg: Message): number {
     if (msg.role === 'assistant' && msg.text) {
       msg = { ...msg, text: cleanMarkdown(msg.text) }
     }
-    this.setData({ messages: [...this.data.messages, msg] })
+    const messages = [...this.data.messages, msg]
+    this.setData({ messages })
+    return messages.length - 1
   },
 
   openWorkForm(type: string) {
