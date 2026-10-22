@@ -1,9 +1,11 @@
 <template>
   <div class="admin-grants">
-    <el-card class="block" shadow="never">
+    <el-card shadow="never">
       <template #header>
-        <span class="block-title">一、授权谁是管理员（项目负责人）</span>
+        <span class="block-title">管理员与项目授权</span>
       </template>
+      <section class="sub-block">
+        <div class="sub-title">一、授权谁是管理员（项目负责人）</div>
       <el-alert
         type="info"
         :closable="false"
@@ -40,12 +42,10 @@
           </template>
         </el-table-column>
       </el-table>
-    </el-card>
-
-    <el-card class="block" shadow="never">
-      <template #header>
-        <span class="block-title">二、授权管理员查看其他管理员的项目</span>
-      </template>
+      </section>
+      <el-divider />
+      <section class="sub-block">
+        <div class="sub-title">二、授权管理员查看其他管理员的项目</div>
       <el-alert
         type="info"
         :closable="false"
@@ -128,6 +128,7 @@
           </template>
         </el-table-column>
       </el-table>
+      </section>
     </el-card>
   </div>
 </template>
@@ -260,6 +261,10 @@ onMounted(loadAll)
 }
 .block-title {
   font-weight: 600;
+}
+.sub-title {
+  font-weight: 600;
+  margin-bottom: 12px;
 }
 .cell-muted {
   color: var(--el-text-color-placeholder);
