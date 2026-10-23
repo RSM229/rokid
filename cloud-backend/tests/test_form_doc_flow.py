@@ -492,3 +492,33 @@ def test_export_docx(ctx):
     assert resp2.headers["content-type"].startswith(
         "application/vnd.openxmlformats"
     )
+
+
+def test_registered_forms_have_explicit_versioned_agent_contract_routes():
+    from app.services import form_registry, provform_schema, record_field_spec
+    from app.services.agent_review_plan import EXECUTABLE_RECORD_FORMS
+    from app.services.form_contracts import contract_for
+
+    codes = [spec.form_code for spec in form_registry.FORMS]
+    assert len(codes) == len(set(codes)), "表式代码必须唯一"
+    for spec in form_registry.FORMS:
+        contract = contract_for(spec.form_code)
+        assert contract["version"], f"{spec.form_code} 缺少版本化字段合同"
+        assert contract["fields"], f"{spec.form_code} 缺少字段定义"
+        assert all(
+            field.get("canonical") and field.get("label")
+            for field in contract["fields"]
+            if field.get("kind") != "signoff"
+        ), f"{spec.form_code} 存在没有标准字段名或标签的字段"
+
+        if spec.form_code in EXECUTABLE_RECORD_FORMS:
+            assert spec.form_code in provform_schema.SCHEMAS or spec.form_code in record_field_spec.FORMS
+            assert spec.agent_work_record_type or spec.agent_record_type or spec.agent_business_route
+        if spec.source == "aggregate":
+            assert spec.form_code in provform_schema.SCHEMAS, f"汇总表 {spec.form_code} 缺字段合同"
+
+    # These tables intentionally do not masquerade as generic record forms:
+    # witness uses its own schema, while GDAQ30309 awaits the approved source template.
+    assert form_registry.FORM_BY_CODE["witness_record"].agent_work_record_type == "见证"
+    assert form_registry.FORM_BY_CODE["gdaq_30309_huifu"].source == "manual"
+    assert form_registry.FORM_BY_CODE["gdaq_30309_huifu"].template is None
