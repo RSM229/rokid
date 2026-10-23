@@ -15,12 +15,6 @@
     <!-- 分类树接口未上线时的降级提示 -->
     <view wx:if="{{treeUnavailable}}" class="tree-tip">当前服务端暂未提供分类目录，已按平铺文档显示</view>
 
-    <!-- 回收站入口：始终可见，点此切换回收站视图 -->
-    <view class="trash-row">
-      <text class="trash-link" bindtap="toggleTrash">{{showTrash ? '← 返回资料库' : '回收站'}}</text>
-    </view>
-
-    <block wx:if="{{!showTrash}}">
     <!-- 搜索：输入即全局搜文档名称（不带文件夹过滤），清空恢复文件夹视图 -->
     <view class="search-bar">
       <input
@@ -49,31 +43,39 @@
       <view wx:if="{{canUpload}}" class="tag-chip tag-manage-entry" bindtap="openTagManage">管理</view>
     </scroll-view>
 
-    <!-- 文件夹操作行：标题 + 「+ ▾」下拉（新建/重命名/删除）。当前目录为根时，重命名/删除禁用 -->
+    <!-- 文件夹操作行：标题 + 「更多 ▾」下拉（选择/新建）；多选模式下右侧显示已选数量 -->
     <view wx:if="{{canUpload}}" class="sec folder-ops">
       <view class="sec-head">
         <text class="sec-title">文件夹</text>
-        <view class="ops-right">
-          <text class="sec-act" bindtap="toggleFolderMenu">+ ▾</text>
+        <view wx:if="{{!selectMode}}" class="ops-right">
+          <text class="sec-act" bindtap="toggleFolderMenu">更多 ▾</text>
           <view wx:if="{{showFolderMenu}}" class="folder-menu">
-            <view class="fmenu-item" bindtap="menuNewFolder">新建文件夹</view>
-            <view class="fmenu-item {{currentFolderId === 0 ? 'fmenu-disabled' : ''}}" bindtap="menuRenameFolder">重命名文件夹</view>
-            <view class="fmenu-item fmenu-danger {{currentFolderId === 0 ? 'fmenu-disabled' : ''}}" bindtap="menuDeleteFolder">删除文件夹</view>
+            <view class="fmenu-item" bindtap="menuSelectFolders">选择</view>
+            <view class="fmenu-item" bindtap="menuNewFolder">新建</view>
           </view>
         </view>
+        <text wx:else class="sec-count">已选 {{selectedFolderIds.length}} 个</text>
       </view>
     </view>
 
-    <!-- 文件夹：竖排列表（文件管理器式）。根目录只列文件夹，文档只在文件夹内部出现；搜索/标签筛选时隐藏 -->
+    <!-- 文件夹：竖排列表（文件管理器式）。根目录只列文件夹，文档只在文件夹内部出现；搜索/标签筛选时隐藏。
+         多选模式下点行只切换勾选不进入，行首显示圆形勾选框 -->
     <view wx:if="{{!searchKeyword && !tagFilterId && currentSubfolders.length}}" class="sec">
       <view class="folder-list">
-        <view wx:for="{{currentSubfolders}}" wx:key="id" class="frow" data-id="{{item.id}}" bindtap="selectFolder">
+        <view
+          wx:for="{{currentSubfolders}}"
+          wx:key="id"
+          class="frow {{selectMode && selectedFolderIds.indexOf(item.id) >= 0 ? 'frow-on' : ''}}"
+          data-id="{{item.id}}"
+          bindtap="selectFolder"
+        >
+          <view wx:if="{{selectMode}}" class="fcheck {{selectedFolderIds.indexOf(item.id) >= 0 ? 'fcheck-on' : ''}}">{{selectedFolderIds.indexOf(item.id) >= 0 ? '✓' : ''}}</view>
           <view class="fico"><view class="fico-shape" /></view>
           <view class="fmain">
             <view class="fname">{{item.name}}</view>
             <view class="fsub">{{item.count}} 份文档</view>
           </view>
-          <view class="fchev">›</view>
+          <view wx:if="{{!selectMode}}" class="fchev">›</view>
         </view>
       </view>
     </view>
@@ -108,34 +110,18 @@
     </view>
   </block>
 
-  <!-- 回收站：软删除文档，可恢复 / 彻底删除 -->
-  <view wx:if="{{showTrash}}" class="trash-view">
-    <view class="sec-head">
-      <text class="sec-title">回收站</text>
-      <text class="sec-count">{{trashDocs.length}}</text>
-    </view>
-    <view wx:if="{{trashLoading && !trashDocs.length}}" class="empty-mini">正在加载…</view>
-    <view wx:elif="{{!trashDocs.length}}" class="empty-mini">回收站是空的。删除的文档会先到这里，可恢复或彻底删除。</view>
-    <view wx:for="{{trashDocs}}" wx:key="id" class="card doc">
-      <view class="doc-head">
-        <view class="doc-icon"><view class="doc-shape" /></view>
-        <view class="doc-info">
-          <view class="doc-name">{{item.name}}</view>
-          <view class="doc-meta">{{item.sizeText}} · {{item.uploader_name}}</view>
-        </view>
-      </view>
-      <view class="doc-btns">
-        <text class="link-green" data-id="{{item.id}}" bindtap="restoreDoc">恢复</text>
-        <text class="link-red" data-id="{{item.id}}" bindtap="purgeDoc">彻底删除</text>
-      </view>
-    </view>
-  </view>
-  </block>
-
-  <!-- 底部操作栏：新建文件夹已移到「文件夹」分组标题右侧，这里只留两个主操作 -->
-  <view class="action-bar">
+  <!-- 底部操作栏：新建文件夹已移到「文件夹」分组标题右侧，这里只留两个主操作；多选模式下让位给多选操作栏 -->
+  <view wx:if="{{!selectMode}}" class="action-bar">
     <button wx:if="{{canUpload}}" class="btn-primary" size="mini" bindtap="uploadDoc">+ 上传文档</button>
     <button wx:if="{{canUpload}}" class="btn-plain" size="mini" bindtap="chooseAudio">录音转写</button>
+  </view>
+
+  <!-- 文件夹多选操作栏：选择模式下替代主操作栏，支持全选 / 重命名 / 删除 / 完成 -->
+  <view wx:if="{{selectMode}}" class="action-bar select-bar">
+    <button class="btn-plain" size="mini" bindtap="toggleSelectAllFolders">全选</button>
+    <button class="btn-plain {{selectedFolderIds.length === 1 ? '' : 'btn-disabled'}}" size="mini" bindtap="renameSelectedFolder">重命名</button>
+    <button class="btn-danger {{selectedFolderIds.length ? '' : 'btn-disabled'}}" size="mini" bindtap="deleteSelectedFolders">删除</button>
+    <button class="btn-primary" size="mini" bindtap="exitSelectMode">完成</button>
   </view>
 
   <!-- 文件夹下拉菜单的透明背板：点页面其他位置关闭（菜单本体 z-index 更高，保持可点） -->

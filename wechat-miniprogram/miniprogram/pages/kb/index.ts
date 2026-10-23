@@ -110,7 +110,11 @@ Page(themed({
     creatingTag: false,
     savingTags: false,
 
-    /** 回收站：软删除文档视图 */
+    /** 文件夹多选模式（更多→选择 进入）：勾选后可重命名 / 删除 */
+    selectMode: false,
+    selectedFolderIds: [] as number[],
+
+    /** 回收站：软删除文档列表（可恢复 / 彻底删除） */
     showTrash: false,
     trashDocs: [] as Array<KbDoc & { sizeText: string }>,
     trashLoading: false,
@@ -334,13 +338,16 @@ Page(themed({
 
   selectFolder(event: WechatMiniprogram.TouchEvent) {
     const id = Number(event.currentTarget.dataset.id)
+    // 多选模式下点文件夹只切换勾选，不进入
+    if (this.data.selectMode) { this.toggleFolderSelect(id); return }
     this.setData({ currentFolderId: id })
     this.refreshCurrentFolder()
   },
 
   goBreadcrumb(event: WechatMiniprogram.TouchEvent) {
     const id = Number(event.currentTarget.dataset.id)
-    this.setData({ currentFolderId: id })
+    // 面包屑切换目录时退出多选，避免勾选状态与新的文件夹列表错位
+    this.setData({ currentFolderId: id, selectMode: false, selectedFolderIds: [] })
     this.refreshCurrentFolder()
   },
 
@@ -620,28 +627,106 @@ Page(themed({
   hideNewFolder() { this.setData({ showNewFolder: false }) },
   onNewFolderInput(event: WechatMiniprogram.Input) { this.setData({ newFolderName: event.detail.value }) },
 
-  /* ===== 文件夹操作下拉菜单（右上角「+ ▾」） ===== */
+  /* ===== 文件夹操作下拉菜单（「更多 ▾」：选择 / 新建） ===== */
   toggleFolderMenu() { this.setData({ showFolderMenu: !this.data.showFolderMenu }) },
   closeFolderMenu() { this.setData({ showFolderMenu: false }) },
   menuNewFolder() {
     this.closeFolderMenu()
     this.setData({ showNewFolder: true, newFolderName: '' })
   },
-  menuRenameFolder() {
-    if (!this.data.currentFolderId) {
-      wx.showToast({ title: '请先进入一个文件夹', icon: 'none' })
+  /* ===== 文件夹多选（更多→选择）：勾选后重命名 / 删除 ===== */
+  menuSelectFolders() {
+    this.closeFolderMenu()
+    if (!this.data.currentSubfolders.length) {
+      wx.showToast({ title: '当前目录下没有文件夹', icon: 'none' })
       return
     }
-    this.closeFolderMenu()
-    this.openRenameFolderById(this.data.currentFolderId)
+    this.setData({ selectMode: true, selectedFolderIds: [] })
   },
-  menuDeleteFolder() {
-    if (!this.data.currentFolderId) {
-      wx.showToast({ title: '请先进入一个文件夹', icon: 'none' })
+  exitSelectMode() {
+    this.setData({ selectMode: false, selectedFolderIds: [] })
+  },
+  toggleFolderSelect(folderId: number) {
+    const cur = this.data.selectedFolderIds
+    this.setData({
+      selectedFolderIds: cur.includes(folderId) ? cur.filter((i) => i !== folderId) : [...cur, folderId],
+    })
+  },
+  toggleSelectAllFolders() {
+    const all = this.data.currentSubfolders.map((f) => f.id)
+    const cur = this.data.selectedFolderIds
+    const allOn = all.length > 0 && all.every((id) => cur.includes(id))
+    this.setData({ selectedFolderIds: allOn ? [] : all })
+  },
+  renameSelectedFolder() {
+    const ids = this.data.selectedFolderIds
+    if (ids.length !== 1) {
+      wx.showToast({ title: '重命名需要且只能选择 1 个文件夹', icon: 'none' })
       return
     }
-    this.closeFolderMenu()
-    this.deleteFolderById(this.data.currentFolderId)
+    this.openRenameFolderById(ids[0])
+  },
+  deleteSelectedFolders() {
+    const ids = this.data.selectedFolderIds
+    if (!ids.length) {
+      wx.showToast({ title: '请先勾选文件夹', icon: 'none' })
+      return
+    }
+    const map = this.data.folderMap
+    let docCount = 0
+    let subCount = 0
+    const walk = (nodes?: KbFolderNode[]) => {
+      for (const n of nodes || []) {
+        subCount += 1
+        walk(n.children)
+      }
+    }
+    for (const id of ids) {
+      const folder = map[id]
+      if (!folder) continue
+      docCount += folder.count || 0
+      walk(folder.children)
+    }
+    const notes: string[] = []
+    if (docCount) notes.push(`${docCount} 份文档将移至各自上层，不会丢失`)
+    if (subCount) notes.push(`${subCount} 个子文件夹会一并删除`)
+    wx.showModal({
+      title: `删除 ${ids.length} 个文件夹`,
+      content: `确定删除已勾选的 ${ids.length} 个文件夹？${notes.length ? '\n' + notes.join('；') : '\n选中的文件夹均为空'}`,
+      confirmText: '删除',
+      confirmColor: '#d9534f',
+      success: async (res) => {
+        if (!res.confirm) return
+        wx.showLoading({ title: '删除中...', mask: true })
+        // 先子后父：删父文件夹时子文件夹会被后端级联移除，倒序可避免对已消失的节点再发请求
+        const sorted = [...ids].sort((a, b) => this.folderDepth(b) - this.folderDepth(a))
+        let failed = 0
+        for (const id of sorted) {
+          try {
+            await request(`/kb/${this.data.kbId}/folders/${id}`, { method: 'DELETE' })
+          } catch {
+            failed += 1
+          }
+        }
+        wx.hideLoading()
+        wx.showToast({ title: failed ? `${failed} 个删除失败` : '已删除', icon: failed ? 'none' : 'success' })
+        // 正停留在被删子树内时回到根，避免浏览一个已不存在的节点
+        const insideDeleted = this.data.currentFolderId !== 0
+          && ids.some((id) => id === this.data.currentFolderId || this.isInsideFolder(this.data.currentFolderId, id))
+        this.setData({ selectMode: false, selectedFolderIds: [], currentFolderId: insideDeleted ? 0 : this.data.currentFolderId })
+        this.loadFolders()
+      },
+    })
+  },
+  /** 文件夹在树中的深度（根下一级为 1），用于批量删除时先子后父排序 */
+  folderDepth(folderId: number): number {
+    let depth = 0
+    let cur: KbFolderNode | undefined = this.data.folderMap[folderId]
+    while (cur && cur.parent_id) {
+      depth += 1
+      cur = this.data.folderMap[cur.parent_id]
+    }
+    return depth
   },
 
   openRenameFolderById(folderId: number) {
@@ -663,7 +748,8 @@ Page(themed({
       })
       wx.hideLoading()
       wx.showToast({ title: '已保存', icon: 'success' })
-      this.setData({ showRenameFolder: false })
+      // 重命名是多选态里的单条操作，保存后退出多选，避免勾选状态与刷新后的列表错位
+      this.setData({ showRenameFolder: false, selectMode: false, selectedFolderIds: [] })
       this.loadFolders()
     } catch (error) {
       wx.hideLoading()
@@ -810,92 +896,4 @@ Page(themed({
     }
   },
 
-  /* ===== 回收站（软删除文档：可恢复 / 彻底删除） ===== */
-  toggleTrash() {
-    const next = !this.data.showTrash
-    this.setData({ showTrash: next })
-    if (next) this.loadTrash()
-  },
-  async loadTrash() {
-    this.setData({ trashLoading: true })
-    try {
-      const res = await request<{ items: KbDoc[] }>(`/kb/${this.data.kbId}/trash`)
-      this.setData({
-        trashDocs: (res.items || []).map((d) => ({ ...d, sizeText: formatSize(d.size_bytes || 0) })),
-      })
-    } catch (error) {
-      wx.showToast({ title: (error as Error).message, icon: 'none' })
-    } finally {
-      this.setData({ trashLoading: false })
-    }
-  },
-  async restoreDoc(event: WechatMiniprogram.TouchEvent) {
-    const docId = Number(event.currentTarget.dataset.id)
-    try {
-      await request(`/kb/${this.data.kbId}/documents/${docId}/restore`, { method: 'POST' })
-      wx.showToast({ title: '已恢复', icon: 'success' })
-      this.loadTrash()
-    } catch (error) {
-      wx.showToast({ title: (error as Error).message, icon: 'none' })
-    }
-  },
-  purgeDoc(event: WechatMiniprogram.TouchEvent) {
-    const docId = Number(event.currentTarget.dataset.id)
-    const doc = this.data.trashDocs.find((d) => d.id === docId)
-    wx.showModal({
-      title: '彻底删除',
-      content: `确定彻底删除「${doc?.name || docId}」？\n此操作不可恢复，磁盘文件将被移除。`,
-      confirmText: '彻底删除',
-      confirmColor: '#d9534f',
-      success: async (res) => {
-        if (!res.confirm) return
-        try {
-          await request(`/kb/${this.data.kbId}/trash/${docId}`, { method: 'DELETE' })
-          wx.showToast({ title: '已彻底删除', icon: 'success' })
-          this.loadTrash()
-        } catch (error) {
-          wx.showToast({ title: (error as Error).message, icon: 'none' })
-        }
-      },
-    })
-  },
-
-  deleteFolderById(folderId: number) {
-    const folder = this.data.folderMap[folderId]
-    if (!folder) return
-    let subCount = 0
-    const walk = (nodes?: KbFolderNode[]) => {
-      for (const n of nodes || []) {
-        subCount += 1
-        walk(n.children)
-      }
-    }
-    walk(folder.children)
-    const parent = folder.parent_id ? this.data.folderMap[folder.parent_id] : undefined
-    const target = parent ? `「${parent.name}」` : '未分类'
-    let content = folder.count
-      ? `其中 ${folder.count} 份文档将移至${target}，不会丢失`
-      : '该文件夹为空'
-    if (subCount) content += `；${subCount} 个子文件夹会一并删除`
-    wx.showModal({
-      title: '删除文件夹',
-      content: `确定删除「${folder.name}」？\n${content}`,
-      confirmText: '删除',
-      confirmColor: '#d9534f',
-      success: async (res) => {
-        if (!res.confirm) return
-        try {
-          await request(`/kb/${this.data.kbId}/folders/${folderId}`, { method: 'DELETE' })
-          wx.showToast({ title: '已删除', icon: 'success' })
-          // 正停留在被删子树内时退回它的上层，避免浏览一个已不存在的节点
-          if (this.data.currentFolderId && this.isInsideFolder(this.data.currentFolderId, folderId)) {
-            this.setData({ currentFolderId: folder.parent_id || 0 })
-          }
-          this.loadFolders()
-        } catch (error) {
-          wx.showToast({ title: (error as Error).message, icon: 'none' })
-        }
-      },
-    })
-  },
 }))

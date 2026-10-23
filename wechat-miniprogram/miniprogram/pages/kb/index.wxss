@@ -3,11 +3,6 @@
 
 /* 搜索栏：输入即搜（300ms 防抖），清空恢复文件夹视图 */
 .search-bar { position: relative; display: flex; align-items: center; margin: 16rpx 0 20rpx; }
-
-/* 回收站入口：始终可见，点此切换回收站视图 */
-.trash-row { display: flex; justify-content: flex-end; margin: 4rpx 4rpx 12rpx; }
-.trash-link { font-size: 24rpx; font-weight: 600; color: #6b7c90; padding: 8rpx 22rpx; border-radius: 999rpx; background: rgba(255,255,255,0.60); border: 2rpx solid rgba(var(--brand-rgb, 22,119,255), 0.14); }
-.trash-link:active { background: rgba(var(--brand-rgb, 22,119,255), 0.12); }
 .search-input { flex: 1; height: 68rpx; padding: 0 64rpx 0 28rpx; background: rgba(255,255,255,0.60); border: 2rpx solid rgba(var(--brand-rgb, 22,119,255), 0.14); border-radius: 34rpx; font-size: 26rpx; color: var(--ink-2, #243b55); }
 .search-clear { position: absolute; right: 20rpx; width: 44rpx; height: 44rpx; line-height: 44rpx; text-align: center; font-size: 24rpx; color: #8a9bb0; }
 
@@ -26,6 +21,10 @@
 .btn-primary { background: linear-gradient(135deg, var(--brand-l, #3b8cff), var(--brand-d, #0b5fd0)); color: #fff; font-size: 24rpx; border-radius: 12rpx; border: none; }
 .btn-green { background: var(--brand-l, #3b8cff); color: #fff; font-size: 24rpx; border-radius: 12rpx; border: none; }
 .btn-plain { background: rgba(255,255,255,0.55); color: var(--brand-d, #0b5fd0); font-size: 24rpx; border-radius: 12rpx; border: 2rpx solid rgba(var(--brand-rgb, 22,119,255), 0.28); }
+/* 多选操作栏：删除（危险）与置灰（未达触发条件）态 */
+.btn-danger { background: rgba(217,83,79,0.10); color: #d9534f; font-size: 24rpx; font-weight: 600; border-radius: 12rpx; border: 2rpx solid rgba(217,83,79,0.30); }
+.btn-danger:active { background: rgba(217,83,79,0.18); }
+.btn-disabled { opacity: 0.45; }
 
 .empty { padding: 90rpx 40rpx; text-align: center; color: #999; font-size: 26rpx; }
 
@@ -58,7 +57,11 @@
 .fname { font-size: 29rpx; font-weight: 600; color: var(--ink-2, #243b55); line-height: 1.35; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fsub { margin-top: 4rpx; font-size: 22rpx; color: #8a9bb0; }
 .fchev { flex: none; color: #c2ccd6; font-size: 34rpx; line-height: 1; }
-/* 文件夹操作行：「+ ▾」下拉菜单（新建/重命名/删除），锚定在触发按钮正下方 */
+/* 多选模式：行首圆形勾选框 + 选中行高亮（点行只切勾选、不进入文件夹） */
+.fcheck { flex: none; width: 36rpx; height: 36rpx; border-radius: 50%; border: 2rpx solid #c2ccd6; box-sizing: border-box; display: flex; align-items: center; justify-content: center; font-size: 22rpx; line-height: 1; color: #fff; }
+.fcheck-on { background: var(--brand-l, #3b8cff); border-color: var(--brand-l, #3b8cff); }
+.frow-on { background: rgba(var(--brand-rgb, 22,119,255), 0.06); }
+/* 文件夹操作行：「更多 ▾」下拉菜单（选择/新建），锚定在触发按钮正下方 */
 .folder-ops .ops-right { position: relative; }
 .folder-menu { position: absolute; top: 54rpx; right: 0; min-width: 230rpx; background: rgba(255,255,255,0.97); backdrop-filter: blur(40rpx) saturate(1.8); -webkit-backdrop-filter: blur(40rpx) saturate(1.8); border: 2rpx solid rgba(var(--brand-rgb, 22,119,255), 0.14); border-radius: 16rpx; box-shadow: 0 8rpx 32rpx rgba(var(--deep-rgb, 10,46,92), 0.14); z-index: 1002; overflow: hidden; }
 .fmenu-item { padding: 22rpx 28rpx; font-size: 26rpx; color: var(--ink-2, #243b55); }
