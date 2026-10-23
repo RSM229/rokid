@@ -25,7 +25,14 @@ export class ApiRequestError extends Error {
 function errorMessage(response: WechatMiniprogram.RequestSuccessCallbackResult): string {
   const data = response.data as { detail?: string; message?: string } | string
   if (typeof data === 'string') return data
-  return data?.detail || data?.message || `请求失败（${response.statusCode}）`
+  const detail = data?.detail || data?.message
+  // 本地联调经典坑：127.0.0.1:8000 被其他项目占用时，请求会命中对方
+  // 应用的 404（FastAPI 默认响应体 {"detail":"Not Found"}）。原样抛出用户
+  // 只看到一句看不懂的英文，这里换成带排查指引的中文提示。
+  if (config.useLocalBackend && response.statusCode === 404 && detail === 'Not Found') {
+    return `本地后端未响应（${config.apiBaseUrl}）。请确认已启动本地后端，且 8000 端口没有被其他项目占用。`
+  }
+  return detail || `请求失败（${response.statusCode}）`
 }
 
 export function request<T>(
