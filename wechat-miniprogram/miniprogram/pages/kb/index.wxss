@@ -121,9 +121,3 @@
 .tag-new-row { display: flex; align-items: center; gap: 14rpx; }
 .tag-new-row .field-input { flex: 1; }
 .tag-new-row .btn-plain { flex: none; height: 64rpx; line-height: 64rpx; margin: 0; }
-
-/* 回收站入口（资料库 / 回收站 切换） */
-.trash-row { display: flex; justify-content: flex-end; padding: 2rpx 4rpx 14rpx; }
-.trash-link { font-size: 24rpx; font-weight: 600; color: var(--brand-l, #3b8cff); padding: 6rpx 18rpx; border-radius: 999rpx; background: rgba(var(--brand-rgb, 22,119,255), 0.08); }
-.trash-link:active { background: rgba(var(--brand-rgb, 22,119,255), 0.16); }
-.trash-view { margin-top: 4rpx; }
