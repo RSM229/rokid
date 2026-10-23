@@ -60,8 +60,12 @@
 .action-bar { position: fixed; left: 0; right: 0; bottom: calc(112rpx + env(safe-area-inset-bottom)); z-index: 4; display: flex; gap: 16rpx; padding: 14rpx 24rpx; background: rgba(255,255,255,0.86); backdrop-filter: blur(30rpx) saturate(1.6); -webkit-backdrop-filter: blur(30rpx) saturate(1.6); border-top: 1rpx solid rgba(var(--brand-rgb, 22,119,255), 0.12); }
 .action-bar button { flex: 1; margin: 0; height: 76rpx; line-height: 76rpx; }
 
-.mask { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(20,40,60, 0.35); z-index: 1000; display: flex; align-items: center; justify-content: center; padding: 40rpx; }
-.modal { width: 100%; background: rgba(255,255,255,0.96); backdrop-filter: blur(40rpx) saturate(1.8); -webkit-backdrop-filter: blur(40rpx) saturate(1.8); border: 2rpx solid rgba(var(--brand-rgb, 22,119,255), 0.14); border-radius: 20rpx; padding: 28rpx; box-sizing: border-box; box-shadow: 0 8rpx 32rpx rgba(var(--deep-rgb, 10,46,92), 0.12); }
+/* 弹窗三层关系：mask=纯背板（点它关闭），modal=平级兄弟节点（自己固定定位+垂直居中）。
+   早期把 modal 嵌在 mask 里、靠 catchtap="" 阻止冒泡，实测点输入框/按钮会冒泡触发
+   mask 的关闭事件，弹窗一闪就没（表现为「无法新建」）。modal 与 mask 平级后，
+   点 modal 内部任何元素都不经过 mask，从结构上杜绝误关；与 work/hazards 等页一致。 */
+.mask { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(20,40,60, 0.35); z-index: 1000; }
+.modal { position: fixed; left: 40rpx; right: 40rpx; top: 50%; transform: translateY(-50%); z-index: 1001; background: rgba(255,255,255,0.96); backdrop-filter: blur(40rpx) saturate(1.8); -webkit-backdrop-filter: blur(40rpx) saturate(1.8); border: 2rpx solid rgba(var(--brand-rgb, 22,119,255), 0.14); border-radius: 20rpx; padding: 28rpx; box-sizing: border-box; box-shadow: 0 8rpx 32rpx rgba(var(--deep-rgb, 10,46,92), 0.12); }
 .modal-title { font-size: 30rpx; font-weight: 700; color: var(--ink-2, #243b55); margin-bottom: 20rpx; }
 .content-box { max-height: 56vh; }
 .content-box text { font-size: 25rpx; color: #334; line-height: 1.7; white-space: pre-wrap; }

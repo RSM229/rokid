@@ -89,36 +89,34 @@
   </block>
 
   <!-- 文档内容 -->
-  <view wx:if="{{showContent}}" class="mask" bindtap="closeContent">
-    <view class="modal content-modal" catchtap="">
-      <view class="modal-title">{{contentTitle}}</view>
-      <scroll-view scroll-y class="content-scroll">
-        <text class="content-text">{{contentText}}</text>
-      </scroll-view>
-      <view class="modal-btns">
-        <button class="btn-cancel" bindtap="closeContent">关闭</button>
-      </view>
+  <view wx:if="{{showContent}}" class="mask" bindtap="closeContent"></view>
+  <view wx:if="{{showContent}}" class="modal content-modal">
+    <view class="modal-title">{{contentTitle}}</view>
+    <scroll-view scroll-y class="content-scroll">
+      <text class="content-text">{{contentText}}</text>
+    </scroll-view>
+    <view class="modal-btns">
+      <button class="btn-cancel" bindtap="closeContent">关闭</button>
     </view>
   </view>
 
   <!-- 添加成员 -->
-  <view wx:if="{{showAddMember}}" class="mask" bindtap="hideAddMember">
-    <view class="modal" catchtap="">
-      <view class="modal-title">添加成员</view>
-      <view class="field-group">
-        <text class="field-label">用户名</text>
-        <input class="field-input" value="{{addUsername}}" placeholder="对方的登录用户名" bindinput="onAddInput" />
-      </view>
-      <view class="field-group">
-        <text class="field-label">角色</text>
-        <picker mode="selector" range="{{addRoleLabels}}" value="{{addRoleIndex}}" bindchange="onAddRole">
-          <view class="field-input picker-val">{{addRoleLabels[addRoleIndex]}} ▾</view>
-        </picker>
-      </view>
-      <view class="modal-btns">
-        <button class="btn-cancel" bindtap="hideAddMember">取消</button>
-        <button class="btn-primary" loading="{{adding}}" bindtap="confirmAddMember">添加</button>
-      </view>
+  <view wx:if="{{showAddMember}}" class="mask" bindtap="hideAddMember"></view>
+  <view wx:if="{{showAddMember}}" class="modal">
+    <view class="modal-title">添加成员</view>
+    <view class="field-group">
+      <text class="field-label">用户名</text>
+      <input class="field-input" value="{{addUsername}}" placeholder="对方的登录用户名" bindinput="onAddInput" />
+    </view>
+    <view class="field-group">
+      <text class="field-label">角色</text>
+      <picker mode="selector" range="{{addRoleLabels}}" value="{{addRoleIndex}}" bindchange="onAddRole">
+        <view class="field-input picker-val">{{addRoleLabels[addRoleIndex]}} ▾</view>
+      </picker>
+    </view>
+    <view class="modal-btns">
+      <button class="btn-cancel" bindtap="hideAddMember">取消</button>
+      <button class="btn-primary" loading="{{adding}}" bindtap="confirmAddMember">添加</button>
     </view>
   </view>
 </view>

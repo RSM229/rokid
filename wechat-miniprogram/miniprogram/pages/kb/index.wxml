@@ -66,50 +66,47 @@
   </view>
 
   <!-- 文档内容预览 -->
-  <view wx:if="{{showContent}}" class="mask" bindtap="closeContent">
-    <view class="modal" catchtap="">
-      <view class="modal-title">{{contentTitle}}</view>
-      <scroll-view scroll-y class="content-box"><text>{{contentText}}</text></scroll-view>
-      <button class="btn-cancel" bindtap="closeContent">关闭</button>
-    </view>
+  <view wx:if="{{showContent}}" class="mask" bindtap="closeContent"></view>
+  <view wx:if="{{showContent}}" class="modal">
+    <view class="modal-title">{{contentTitle}}</view>
+    <scroll-view scroll-y class="content-box"><text>{{contentText}}</text></scroll-view>
+    <button class="btn-cancel" bindtap="closeContent">关闭</button>
   </view>
 
   <!-- 新建文件夹 -->
-  <view wx:if="{{showNewFolder}}" class="mask" bindtap="hideNewFolder">
-    <view class="modal" catchtap="">
-      <view class="modal-title">新建文件夹</view>
-      <view class="field-group">
-        <text class="field-label">文件夹名称</text>
-        <input class="field-input" value="{{newFolderName}}" placeholder="如：合同与资质、巡视记录" bindinput="onNewFolderInput" />
-      </view>
-      <view class="modal-btns">
-        <button class="btn-cancel" bindtap="hideNewFolder">取消</button>
-        <button class="btn-primary" loading="{{creatingFolder}}" bindtap="confirmNewFolder">创建</button>
-      </view>
+  <view wx:if="{{showNewFolder}}" class="mask" bindtap="hideNewFolder"></view>
+  <view wx:if="{{showNewFolder}}" class="modal">
+    <view class="modal-title">新建文件夹</view>
+    <view class="field-group">
+      <text class="field-label">文件夹名称</text>
+      <input class="field-input" value="{{newFolderName}}" placeholder="如：合同与资质、巡视记录" bindinput="onNewFolderInput" />
+    </view>
+    <view class="modal-btns">
+      <button class="btn-cancel" bindtap="hideNewFolder">取消</button>
+      <button class="btn-primary" loading="{{creatingFolder}}" bindtap="confirmNewFolder">创建</button>
     </view>
   </view>
 
   <!-- 文件夹选择器：根目录上传前选目标 / 录音归档 / 文档移动 -->
-  <view wx:if="{{showPicker}}" class="mask" bindtap="hidePicker">
-    <view class="modal" catchtap="">
-      <view class="modal-title">{{pickerTitle}}</view>
-      <scroll-view scroll-y class="picker-list">
-        <view wx:if="{{pickerMode === 'move'}}" class="prow" data-id="0" bindtap="choosePickerFolder">
-          <text class="prow-name prow-muted">未分类（根目录）</text>
-        </view>
-        <view
-          wx:for="{{folderOptions}}"
-          wx:key="id"
-          class="prow"
-          data-id="{{item.id}}"
-          bindtap="choosePickerFolder"
-          style="padding-left: {{24 + item.depth * 30}}rpx"
-        >
-          <text class="prow-name">{{item.name}}</text>
-          <text class="prow-arrow">›</text>
-        </view>
-      </scroll-view>
-      <button class="btn-cancel" bindtap="hidePicker">取消</button>
-    </view>
+  <view wx:if="{{showPicker}}" class="mask" bindtap="hidePicker"></view>
+  <view wx:if="{{showPicker}}" class="modal">
+    <view class="modal-title">{{pickerTitle}}</view>
+    <scroll-view scroll-y class="picker-list">
+      <view wx:if="{{pickerMode === 'move'}}" class="prow" data-id="0" bindtap="choosePickerFolder">
+        <text class="prow-name prow-muted">未分类（根目录）</text>
+      </view>
+      <view
+        wx:for="{{folderOptions}}"
+        wx:key="id"
+        class="prow"
+        data-id="{{item.id}}"
+        bindtap="choosePickerFolder"
+        style="padding-left: {{24 + item.depth * 30}}rpx"
+      >
+        <text class="prow-name">{{item.name}}</text>
+        <text class="prow-arrow">›</text>
+      </view>
+    </scroll-view>
+    <button class="btn-cancel" bindtap="hidePicker">取消</button>
   </view>
 </view>
