@@ -632,11 +632,20 @@ Page(themed({
   async openContent(event: WechatMiniprogram.TouchEvent) {
     const docId = Number(event.currentTarget.dataset.id)
     const doc = this.data.docs.find((d) => d.id === docId)
+    // 二进制文档（pdf/office）不走文本解析（扫描件 PDF 提不出字，只会弹「无法解析」），
+    // 直接下载后用微信原生文档查看器打开
+    const binExts = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx']
+    const ext = ((doc && (doc.filename || doc.name)) || '').split('.').pop()?.toLowerCase() || ''
+    if (binExts.includes(ext)) { this.downloadDoc(event); return }
     wx.showLoading({ title: '解析中...', mask: true })
     try {
       const res = await request<{ name: string; content: string }>(`/kb/${this.data.kbId}/documents/${docId}/content`)
       wx.hideLoading()
-      this.setData({ showContent: true, contentTitle: res.name || doc?.name || '文档', contentText: res.content || '（无法解析该文档内容）' })
+      this.setData({
+        showContent: true,
+        contentTitle: res.name || doc?.name || '文档',
+        contentText: res.content || '该文档没有可提取的文字（可能是扫描件图片）。可点「下载」保存后查看。',
+      })
     } catch (error) {
       wx.hideLoading()
       wx.showToast({ title: (error as Error).message, icon: 'none' })
