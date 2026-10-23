@@ -65,6 +65,7 @@ declare module 'vue' {
     ElTooltip: typeof import('element-plus/es')['ElTooltip']
     ElUpload: typeof import('element-plus/es')['ElUpload']
     LineChart: typeof import('./src/components/charts/LineChart.vue')['default']
+    MemberManageDialog: typeof import('./src/components/MemberManageDialog.vue')['default']
     PieChart: typeof import('./src/components/charts/PieChart.vue')['default']
     ProjectPickDialog: typeof import('./src/components/ProjectPickDialog.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']

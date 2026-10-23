@@ -278,120 +278,15 @@
       </template>
     </el-dialog>
 
-    <!-- Step 2：项目成员管理（项目级归属与岗位的真源在此，不在「所属项目」字段） -->
-    <el-dialog v-model="memberDialogVisible" title="项目成员管理" width="760px">
-      <el-form inline>
-        <el-form-item label="项目">
-          <el-select v-model="memberProjectId" style="width:260px" @change="loadMembers">
-            <el-option
-              v-for="project in projects"
-              :key="project.id"
-              :label="project.name"
-              :value="project.id"
-            />
-          </el-select>
-        </el-form-item>
-        <el-form-item>
-          <el-checkbox v-model="memberIncludeLeft" @change="loadMembers">
-            显示已离场（历史在场区间）
-          </el-checkbox>
-        </el-form-item>
-        <el-form-item>
-          <span class="member-hint">
-            归属真源是成员表；「所属项目」只是当前会话上下文，两者相互独立。
-          </span>
-        </el-form-item>
-      </el-form>
-
-      <el-table :data="members" v-loading="memberLoading" stripe size="small">
-        <el-table-column prop="username" label="用户名" min-width="110" />
-        <el-table-column prop="real_name" label="姓名" min-width="90" />
-        <el-table-column label="主岗" min-width="130">
-          <template #default="{ row }">{{ roleLabel(row.role) }}</template>
-        </el-table-column>
-        <el-table-column label="附加岗" min-width="150">
-          <template #default="{ row }">
-            <el-tag
-              v-for="extra in row.extra_roles || []"
-              :key="extra"
-              size="small"
-              style="margin-right: 4px"
-            >
-              {{ roleLabel(extra) }}
-            </el-tag>
-            <span v-if="!(row.extra_roles || []).length" class="member-hint">—</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="在场区间" min-width="180">
-          <template #default="{ row }">
-            <el-tag v-if="row.is_present" size="small" type="success">在岗</el-tag>
-            <el-tag v-else size="small" type="info">已离场</el-tag>
-            <div class="member-hint">{{ presenceRange(row) }}</div>
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="90" fixed="right">
-          <template #default="{ row }">
-            <el-button
-              v-if="row.is_present"
-              link
-              type="danger"
-              @click="removeMember(row)"
-            >移出</el-button>
-            <el-button
-              v-else
-              link
-              type="primary"
-              @click="restoreMember(row)"
-            >重新加入</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-
-      <el-divider />
-
-      <el-form :model="memberForm" label-width="90px">
-        <el-form-item label="加入用户" required>
-          <el-select v-model="memberForm.user_id" filterable style="width:260px" placeholder="选择用户">
-            <el-option
-              v-for="item in users"
-              :key="item.id"
-              :label="`${item.real_name}（${item.username}）`"
-              :value="item.id"
-            />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="主岗" required>
-          <el-select v-model="memberForm.role" style="width:260px">
-            <el-option
-              v-for="opt in assignableRoleOptions"
-              :key="opt.value"
-              :label="opt.label"
-              :value="opt.value"
-            />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="附加岗">
-          <el-select
-            v-model="memberForm.extra_roles"
-            multiple
-            style="width:380px"
-            placeholder="可多选；总监/总监代表为排他岗位，不可作附加岗"
-          >
-            <el-option
-              v-for="opt in stackableRoleOptions"
-              :key="opt.value"
-              :label="opt.label"
-              :value="opt.value"
-            />
-          </el-select>
-        </el-form-item>
-      </el-form>
-
-      <template #footer>
-        <el-button @click="memberDialogVisible = false">关闭</el-button>
-        <el-button type="primary" :loading="memberSaving" @click="addMember">加入项目</el-button>
-      </template>
-    </el-dialog>
+    <!-- Step 2：项目成员管理（2026-10-23 抽为共享组件 MemberManageDialog，
+         项目管理页「分配人员」同一弹窗双入口；默认项目口径见 defaultProjectId） -->
+    <MemberManageDialog
+      :visible="memberDialogVisible"
+      :projects="projects"
+      :default-project-id="defaultProjectId()"
+      @update:visible="memberDialogVisible = $event"
+      @changed="onMembersChanged"
+    />
 
     <!-- Step 4：批准注册（选项目 + 定岗，一次落定开户与归属） -->
     <el-dialog v-model="approveVisible" title="批准入册" width="560px">
@@ -644,6 +539,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { authApi, projectApi } from '@/api'
 import { PROJECT_ROLE_OPTIONS, ORG_ROLE_OPTIONS, CHIEF_ROLE_KEYS, DEFAULT_ROLE, roleLabel } from '@/constants/role'
 import { useAuthStore } from '@/stores/auth'
+import MemberManageDialog from '@/components/MemberManageDialog.vue'
 
 // S2：后端接口的 role 为英文 key，提交时必须用 key（中文会 400）。
 // 「主岗」只能是项目级岗位 —— 公司级角色由 org_role 单独承载，
@@ -726,6 +622,8 @@ function isApproved(row: any) {
  * 优先级：筛选器选中值 → 顶栏当前项目 → 才回落 projects[0]。
  * 「全部项目」视角下 auth.currentProjectId 仍有值（视角只改读取范围，不动
  * users.project_id），所以照用；真取不到时回落，避免下拉空白无法提交。
+ *
+ * 现调用方：审批 openApprove / 建号 resetForm / 成员弹窗（经 prop 传入，2026-10-23）。
  */
 function defaultProjectId(): number | undefined {
   if (projectFilter.value > 0) return projectFilter.value
@@ -793,19 +691,10 @@ function togglePwd(id?: number) {
   showPwdMap[id] = !showPwdMap[id]
 }
 
-// ---- 项目成员管理（Step 2）----
+// ---- 项目成员管理（Step 2；2026-10-23 起弹窗本体在 components/MemberManageDialog.vue）----
+// 本页只保留入口（打开）与联动（成员变动后刷新筛选缓存）。弹窗打开时自行
+// 拉取账号列表（authApi.users，后端按身份过滤），不消费本页的 users。
 const memberDialogVisible = ref(false)
-const memberLoading = ref(false)
-const memberSaving = ref(false)
-const memberProjectId = ref<number | undefined>(undefined)
-// Step 5：是否显示已离场成员（历史在场区间可追溯）
-const memberIncludeLeft = ref(false)
-const members = ref<any[]>([])
-const memberForm = reactive({
-  user_id: undefined as number | undefined,
-  role: DEFAULT_ROLE,
-  extra_roles: [] as string[],
-})
 const form = reactive({
   username: '',
   real_name: '',
@@ -1151,112 +1040,25 @@ async function unbindWechat(row: any) {
   }
 }
 
-// ---- 项目成员管理（Step 2）----
+// ---- 项目成员管理（Step 2；弹窗本体见 components/MemberManageDialog.vue）----
 function openMembers() {
-  // 🔴 默认项目不能再取 projects[0]（= 最新建的项目），要跟随当前视角，
-  // 否则超管切到 A 项目却看到最新那个项目的成员（2026-10-21 线上实测复现）。
-  // 且**每次打开都重置**：保留旧值会让「切了项目再开弹窗」仍停在上次的项目上。
-  memberProjectId.value = defaultProjectId()
+  // 默认项目由弹窗经 defaultProjectId prop 取值（筛选器选中值 → 顶栏当前项目 →
+  // 回落 projects[0]），每次打开都重置，不停在上次的项目上。
+  // 🔴 不能取 projects[0] 了事：后端 list_projects 是 created_at DESC，
+  // [0] = 最新建的项目，与顶栏选中项目无关（2026-10-21 线上实测复现）。
   memberDialogVisible.value = true
-  if (memberProjectId.value) loadMembers()
 }
 
-async function loadMembers() {
-  if (!memberProjectId.value) return
-  memberLoading.value = true
-  try {
-    const result: any = await projectApi.members(
-      memberProjectId.value,
-      memberIncludeLeft.value,
-    )
-    members.value = result.items || []
-  } catch (error: any) {
-    ElMessage.error(error.response?.data?.detail || '成员列表加载失败')
-  } finally {
-    memberLoading.value = false
-  }
-}
-
-// Step 5：在场区间展示（joined_at ~ left_at）。在岗显示"自 x 起"。
-function fmtMoment(value?: string | null) {
-  if (!value) return ''
-  return value.replace('T', ' ').slice(0, 16)
-}
-
-function presenceRange(row: any) {
-  const from = fmtMoment(row.joined_at) || '—'
-  if (row.is_present) return `自 ${from} 起在岗`
-  return `${from} ~ ${fmtMoment(row.left_at)}`
-}
-
-// Step 5：把已离场成员重新加入（复用 addMember 的复职语义，清 left_at）
-async function restoreMember(row: any) {
-  const extraText = (row.extra_roles || []).length
-    ? ` + ${(row.extra_roles || []).map(roleLabel).join(' / ')}`
-    : ''
-  try {
-    await ElMessageBox.confirm(
-      `确认将「${row.real_name || row.username}」重新加入本项目？将沿用其原岗位：${roleLabel(row.role)}${extraText}`,
-      '重新加入项目',
-      { type: 'info', confirmButtonText: '确认加入', cancelButtonText: '取消' },
-    )
-  } catch {
-    return
-  }
-  try {
-    await projectApi.addMember(memberProjectId.value!, {
-      user_id: row.user_id,
-      role: row.role,
-      extra_roles: row.extra_roles || [],
-    })
-    ElMessage.success('已重新加入项目')
-    await loadMembers()
-  } catch (error: any) {
-    ElMessage.error(error.response?.data?.detail || '重新加入失败')
-  }
-}
-
-async function addMember() {
-  if (!memberProjectId.value) return ElMessage.warning('请先选择项目')
-  if (!memberForm.user_id) return ElMessage.warning('请选择要加入的用户')
-  if (!memberForm.role) return ElMessage.warning('请选择主岗')
-  memberSaving.value = true
-  try {
-    const result: any = await projectApi.addMember(memberProjectId.value, {
-      user_id: memberForm.user_id,
-      role: memberForm.role,
-      extra_roles: memberForm.extra_roles,
-    })
-    ElMessage.success(result?.detail || '已加入项目')
-    memberForm.user_id = undefined
-    memberForm.extra_roles = []
-    await loadMembers()
-  } catch (error: any) {
-    // 后端会因「排他岗位已存在」「不能把自己加入项目」等返回 4xx，原文透出
-    ElMessage.error(error.response?.data?.detail || '加入项目失败')
-  } finally {
-    memberSaving.value = false
-  }
-}
-
-async function removeMember(row: any) {
-  try {
-    await ElMessageBox.confirm(
-      `确认将「${row.real_name || row.username}」移出本项目？\n`
-        + '其在本项目的岗位一并失效；成员与在场记录会保留（软删除），之后可重新加入。',
-      '移出项目',
-      { type: 'warning', confirmButtonText: '确认移出', cancelButtonText: '取消' },
-    )
-  } catch {
-    return
-  }
-  try {
-    await projectApi.removeMember(memberProjectId.value!, row.user_id)
-    ElMessage.success('已移出项目（历史记录保留）')
-    await loadMembers()
-  } catch (error: any) {
-    ElMessage.error(error.response?.data?.detail || '移出失败')
-  }
+/**
+ * 成员变动（加入/移出/复职）后的页面联动。
+ *
+ * 账号列表的项目筛选用的是 memberScope 缓存（该项目成员 user_id 集合），
+ * 成员一变缓存即过期；清掉后按当前筛选重取，再顺带刷新账号列表本身。
+ */
+async function onMembersChanged() {
+  memberScope.value = {}
+  if (projectFilter.value > 0) await ensureMemberScope(projectFilter.value)
+  await loadData()
 }
 
 // ---- 批量导入 / 导出（2026-10-20）----
@@ -1430,7 +1232,6 @@ onMounted(async () => {
 .page-header p { margin: 0; color: #7a8580; }
 .header-actions { display: flex; gap: 8px; align-items: center; }
 .header-actions .caret { margin-left: 4px; font-size: 12px; opacity: 0.65; }
-.member-hint { color: #7a8580; font-size: 12px; }
 .muted { color: #9aa4a0; }
 .list-toolbar {
   display: flex;
