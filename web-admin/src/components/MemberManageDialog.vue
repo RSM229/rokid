@@ -33,7 +33,9 @@
       </el-form-item>
     </el-form>
 
-    <el-table :data="members" v-loading="loading" stripe size="small">
+    <!-- max-height：成员多的项目（实测 9+ 人）不设限会把「加入用户」表单和页脚顶出弹窗；
+         设限后表头固定、tbody 内部滚动，下方表单与按钮始终可见。 -->
+    <el-table :data="members" v-loading="loading" stripe size="small" max-height="320">
       <el-table-column prop="username" label="用户名" min-width="110" />
       <el-table-column prop="real_name" label="姓名" min-width="90" />
       <el-table-column label="主岗" min-width="130">
