@@ -28,12 +28,23 @@
       <text wx:if="{{searchKeyword}}" class="search-clear" bindtap="clearSearch">✕</text>
     </view>
 
-    <!-- 文件夹：竖排列表（文件管理器式）。根目录只列文件夹，文档只在文件夹内部出现 -->
-    <view wx:if="{{!searchKeyword && currentSubfolders.length}}" class="sec">
+    <!-- 文件夹操作行：标题 + 「+ ▾」下拉（新建/重命名/删除）。当前目录为根时，重命名/删除禁用 -->
+    <view wx:if="{{canUpload}}" class="sec folder-ops">
       <view class="sec-head">
         <text class="sec-title">文件夹</text>
-        <text wx:if="{{canUpload}}" class="sec-act" bindtap="showNewFolder">+ 新建</text>
+        <view class="ops-right">
+          <text class="sec-act" bindtap="toggleFolderMenu">+ ▾</text>
+          <view wx:if="{{showFolderMenu}}" class="folder-menu">
+            <view class="fmenu-item" bindtap="menuNewFolder">新建文件夹</view>
+            <view class="fmenu-item {{currentFolderId === 0 ? 'fmenu-disabled' : ''}}" bindtap="menuRenameFolder">重命名文件夹</view>
+            <view class="fmenu-item fmenu-danger {{currentFolderId === 0 ? 'fmenu-disabled' : ''}}" bindtap="menuDeleteFolder">删除文件夹</view>
+          </view>
+        </view>
       </view>
+    </view>
+
+    <!-- 文件夹：竖排列表（文件管理器式）。根目录只列文件夹，文档只在文件夹内部出现 -->
+    <view wx:if="{{!searchKeyword && currentSubfolders.length}}" class="sec">
       <view class="folder-list">
         <view wx:for="{{currentSubfolders}}" wx:key="id" class="frow" data-id="{{item.id}}" bindtap="selectFolder">
           <view class="fico"><view class="fico-shape" /></view>
@@ -41,8 +52,6 @@
             <view class="fname">{{item.name}}</view>
             <view class="fsub">{{item.count}} 份文档</view>
           </view>
-          <text wx:if="{{canUpload}}" class="frename" data-id="{{item.id}}" catchtap="openRenameFolder">重命名</text>
-          <text wx:if="{{canUpload}}" class="fdel" data-id="{{item.id}}" catchtap="deleteFolder">删除</text>
           <view class="fchev">›</view>
         </view>
       </view>
@@ -79,6 +88,9 @@
     <button wx:if="{{canUpload}}" class="btn-primary" size="mini" bindtap="uploadDoc">+ 上传文档</button>
     <button wx:if="{{canUpload}}" class="btn-plain" size="mini" bindtap="chooseAudio">录音转写</button>
   </view>
+
+  <!-- 文件夹下拉菜单的透明背板：点页面其他位置关闭（菜单本体 z-index 更高，保持可点） -->
+  <view wx:if="{{showFolderMenu}}" class="menu-mask" bindtap="closeFolderMenu"></view>
 
   <!-- 文档内容预览 -->
   <view wx:if="{{showContent}}" class="mask" bindtap="closeContent"></view>

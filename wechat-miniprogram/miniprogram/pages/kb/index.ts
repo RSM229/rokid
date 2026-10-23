@@ -86,6 +86,9 @@ Page(themed({
     renameFolderId: 0,
     renameFolderName: '',
     renamingFolder: false,
+
+    /** 文件夹操作下拉菜单（新建/重命名/删除） */
+    showFolderMenu: false,
   },
 
   onShow() {
@@ -588,8 +591,31 @@ Page(themed({
   hideNewFolder() { this.setData({ showNewFolder: false }) },
   onNewFolderInput(event: WechatMiniprogram.Input) { this.setData({ newFolderName: event.detail.value }) },
 
-  openRenameFolder(event: WechatMiniprogram.TouchEvent) {
-    const folderId = Number(event.currentTarget.dataset.id)
+  /* ===== 文件夹操作下拉菜单（右上角「+ ▾」） ===== */
+  toggleFolderMenu() { this.setData({ showFolderMenu: !this.data.showFolderMenu }) },
+  closeFolderMenu() { this.setData({ showFolderMenu: false }) },
+  menuNewFolder() {
+    this.closeFolderMenu()
+    this.setData({ showNewFolder: true, newFolderName: '' })
+  },
+  menuRenameFolder() {
+    if (!this.data.currentFolderId) {
+      wx.showToast({ title: '请先进入一个文件夹', icon: 'none' })
+      return
+    }
+    this.closeFolderMenu()
+    this.openRenameFolderById(this.data.currentFolderId)
+  },
+  menuDeleteFolder() {
+    if (!this.data.currentFolderId) {
+      wx.showToast({ title: '请先进入一个文件夹', icon: 'none' })
+      return
+    }
+    this.closeFolderMenu()
+    this.deleteFolderById(this.data.currentFolderId)
+  },
+
+  openRenameFolderById(folderId: number) {
     const folder = this.data.folderMap[folderId]
     if (!folder) return
     this.setData({ showRenameFolder: true, renameFolderId: folderId, renameFolderName: folder.name })
@@ -649,8 +675,7 @@ Page(themed({
     return false
   },
 
-  deleteFolder(event: WechatMiniprogram.TouchEvent) {
-    const folderId = Number(event.currentTarget.dataset.id)
+  deleteFolderById(folderId: number) {
     const folder = this.data.folderMap[folderId]
     if (!folder) return
     let subCount = 0

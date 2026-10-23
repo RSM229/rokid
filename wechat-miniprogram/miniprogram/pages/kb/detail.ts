@@ -114,6 +114,13 @@ Page(themed({
     renameFolderId: 0,
     renameFolderName: '',
     renamingFolder: false,
+
+    showNewFolder: false,
+    newFolderName: '',
+    creatingFolder: false,
+
+    /** 文件夹操作下拉菜单（新建/重命名/删除） */
+    showFolderMenu: false,
   },
 
   onLoad(options: Record<string, string>) {
@@ -346,8 +353,7 @@ Page(themed({
     return false
   },
 
-  openRenameFolder(event: WechatMiniprogram.TouchEvent) {
-    const folderId = Number(event.currentTarget.dataset.id)
+  openRenameFolderById(folderId: number) {
     const folder = this.data.folderMap[folderId]
     if (!folder) return
     this.setData({ showRenameFolder: true, renameFolderId: folderId, renameFolderName: folder.name })
@@ -376,8 +382,55 @@ Page(themed({
     }
   },
 
-  deleteFolder(event: WechatMiniprogram.TouchEvent) {
-    const folderId = Number(event.currentTarget.dataset.id)
+  /* ===== 文件夹操作下拉菜单（右上角「+ ▾」） ===== */
+  toggleFolderMenu() { this.setData({ showFolderMenu: !this.data.showFolderMenu }) },
+  closeFolderMenu() { this.setData({ showFolderMenu: false }) },
+  menuNewFolder() {
+    this.closeFolderMenu()
+    this.setData({ showNewFolder: true, newFolderName: '' })
+  },
+  menuRenameFolder() {
+    if (!this.data.currentFolderId) {
+      wx.showToast({ title: '请先进入一个文件夹', icon: 'none' })
+      return
+    }
+    this.closeFolderMenu()
+    this.openRenameFolderById(this.data.currentFolderId)
+  },
+  menuDeleteFolder() {
+    if (!this.data.currentFolderId) {
+      wx.showToast({ title: '请先进入一个文件夹', icon: 'none' })
+      return
+    }
+    this.closeFolderMenu()
+    this.deleteFolderById(this.data.currentFolderId)
+  },
+
+  hideNewFolder() { this.setData({ showNewFolder: false }) },
+  onNewFolderInput(event: WechatMiniprogram.Input) { this.setData({ newFolderName: event.detail.value }) },
+  async confirmNewFolder() {
+    const name = this.data.newFolderName.trim()
+    if (!name) { wx.showToast({ title: '请输入文件夹名称', icon: 'none' }); return }
+    this.setData({ creatingFolder: true })
+    wx.showLoading({ title: '创建中...', mask: true })
+    try {
+      await request(`/kb/${this.data.kbId}/folders`, {
+        method: 'POST',
+        data: { name, parent_id: this.data.currentFolderId || null },
+      })
+      wx.hideLoading()
+      wx.showToast({ title: '已创建', icon: 'success' })
+      this.setData({ showNewFolder: false })
+      this.loadFolders()
+    } catch (error) {
+      wx.hideLoading()
+      wx.showToast({ title: (error as Error).message, icon: 'none' })
+    } finally {
+      this.setData({ creatingFolder: false })
+    }
+  },
+
+  deleteFolderById(folderId: number) {
     const folder = this.data.folderMap[folderId]
     if (!folder) return
     let subCount = 0

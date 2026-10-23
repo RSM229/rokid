@@ -32,6 +32,19 @@
       <text wx:for="{{breadcrumb}}" wx:key="id" class="crumb {{item.id === currentFolderId ? 'on' : ''}}" data-id="{{item.id}}" bindtap="goBreadcrumb"> › {{item.name}}</text>
     </view>
 
+    <!-- 文件夹操作行：「+ ▾」下拉（新建/重命名/删除）。当前目录为根时，重命名/删除禁用 -->
+    <view wx:if="{{canUpload}}" class="folder-ops">
+      <text class="ops-title">文件夹</text>
+      <view class="ops-right">
+        <text class="sec-act" bindtap="toggleFolderMenu">+ ▾</text>
+        <view wx:if="{{showFolderMenu}}" class="folder-menu">
+          <view class="fmenu-item" bindtap="menuNewFolder">新建文件夹</view>
+          <view class="fmenu-item {{currentFolderId === 0 ? 'fmenu-disabled' : ''}}" bindtap="menuRenameFolder">重命名文件夹</view>
+          <view class="fmenu-item fmenu-danger {{currentFolderId === 0 ? 'fmenu-disabled' : ''}}" bindtap="menuDeleteFolder">删除文件夹</view>
+        </view>
+      </view>
+    </view>
+
     <!-- 搜索：输入即全局搜文档名称（不带文件夹过滤），清空恢复文件夹视图 -->
     <view class="search-bar">
       <input
@@ -51,8 +64,6 @@
         <text class="folder-ico">📁</text>
         <text class="folder-name">{{item.name}}</text>
         <text class="folder-count">{{item.count}} 份</text>
-        <text wx:if="{{canUpload}}" class="folder-rename" data-id="{{item.id}}" catchtap="openRenameFolder">重命名</text>
-        <text wx:if="{{canUpload}}" class="folder-del" data-id="{{item.id}}" catchtap="deleteFolder">删除</text>
       </view>
     </view>
 
@@ -104,6 +115,9 @@
     </view>
   </block>
 
+  <!-- 文件夹下拉菜单的透明背板：点页面其他位置关闭（菜单本体 z-index 更高，保持可点） -->
+  <view wx:if="{{showFolderMenu}}" class="menu-mask" bindtap="closeFolderMenu"></view>
+
   <!-- 文档内容 -->
   <view wx:if="{{showContent}}" class="mask" bindtap="closeContent"></view>
   <view wx:if="{{showContent}}" class="modal content-modal">
@@ -147,6 +161,20 @@
     <view class="modal-btns">
       <button class="btn-cancel" bindtap="hideRenameFolder">取消</button>
       <button class="btn-primary" loading="{{renamingFolder}}" bindtap="confirmRenameFolder">保存</button>
+    </view>
+  </view>
+
+  <!-- 新建文件夹 -->
+  <view wx:if="{{showNewFolder}}" class="mask" bindtap="hideNewFolder"></view>
+  <view wx:if="{{showNewFolder}}" class="modal">
+    <view class="modal-title">新建文件夹</view>
+    <view class="field-group">
+      <text class="field-label">文件夹名称</text>
+      <input class="field-input" value="{{newFolderName}}" placeholder="如：合同与资质、巡视记录" bindinput="onNewFolderInput" />
+    </view>
+    <view class="modal-btns">
+      <button class="btn-cancel" bindtap="hideNewFolder">取消</button>
+      <button class="btn-primary" loading="{{creatingFolder}}" bindtap="confirmNewFolder">创建</button>
     </view>
   </view>
 </view>

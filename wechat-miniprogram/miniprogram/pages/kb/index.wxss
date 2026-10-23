@@ -53,11 +53,16 @@
 .fname { font-size: 29rpx; font-weight: 600; color: var(--ink-2, #243b55); line-height: 1.35; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fsub { margin-top: 4rpx; font-size: 22rpx; color: #8a9bb0; }
 .fchev { flex: none; color: #c2ccd6; font-size: 34rpx; line-height: 1; }
-/* 文件夹行内的删除入口（catchtap 挂真实处理器，阻止冒泡触发整行进入文件夹） */
-.fdel { flex: none; font-size: 24rpx; font-weight: 600; color: #d9534f; padding: 10rpx 6rpx; }
-/* 文件夹行内的重命名入口 */
-.frename { flex: none; font-size: 24rpx; font-weight: 600; color: #6b7c90; padding: 10rpx 6rpx; }
-
+/* 文件夹操作行：「+ ▾」下拉菜单（新建/重命名/删除），锚定在触发按钮正下方 */
+.folder-ops .ops-right { position: relative; }
+.folder-menu { position: absolute; top: 54rpx; right: 0; min-width: 230rpx; background: rgba(255,255,255,0.97); backdrop-filter: blur(40rpx) saturate(1.8); -webkit-backdrop-filter: blur(40rpx) saturate(1.8); border: 2rpx solid rgba(var(--brand-rgb, 22,119,255), 0.14); border-radius: 16rpx; box-shadow: 0 8rpx 32rpx rgba(var(--deep-rgb, 10,46,92), 0.14); z-index: 1002; overflow: hidden; }
+.fmenu-item { padding: 22rpx 28rpx; font-size: 26rpx; color: var(--ink-2, #243b55); }
+.fmenu-item:not(:last-child) { border-bottom: 1rpx solid rgba(var(--brand-rgb, 22,119,255), 0.08); }
+.fmenu-item:active { background: rgba(var(--brand-rgb, 22,119,255), 0.06); }
+.fmenu-danger { color: #d9534f; font-weight: 600; }
+.fmenu-disabled { color: #b8c2cc; }
+/* 下拉菜单透明背板：只捕获外部点击关闭菜单，不做视觉遮挡 */
+.menu-mask { position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 1000; background: transparent; }
 /* 空状态：把「什么都没有」说清楚，而不是留一片白 */
 .empty-mini { padding: 36rpx 28rpx; background: rgba(255, 255, 255, 0.60); border: 1rpx dashed rgba(var(--brand-rgb, 22,119,255), 0.22); border-radius: 20rpx; color: #8a9bb0; font-size: 24rpx; line-height: 1.7; text-align: center; }
 
