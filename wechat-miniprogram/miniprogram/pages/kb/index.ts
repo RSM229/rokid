@@ -113,6 +113,8 @@ Page(themed({
     /** 文件夹多选模式（更多→选择 进入）：勾选后可重命名 / 删除 */
     selectMode: false,
     selectedFolderIds: [] as number[],
+    // WXML 表达式不支持方法调用（indexOf 不可用），用对象映射做勾选态绑定
+    selectedMap: {} as Record<string, boolean>,
 
     /** 回收站：软删除文档列表（可恢复 / 彻底删除） */
     showTrash: false,
@@ -347,7 +349,8 @@ Page(themed({
   goBreadcrumb(event: WechatMiniprogram.TouchEvent) {
     const id = Number(event.currentTarget.dataset.id)
     // 面包屑切换目录时退出多选，避免勾选状态与新的文件夹列表错位
-    this.setData({ currentFolderId: id, selectMode: false, selectedFolderIds: [] })
+    this.setData({ currentFolderId: id, selectMode: false })
+    this.applySelection([])
     this.refreshCurrentFolder()
   },
 
@@ -641,22 +644,28 @@ Page(themed({
       wx.showToast({ title: '当前目录下没有文件夹', icon: 'none' })
       return
     }
-    this.setData({ selectMode: true, selectedFolderIds: [] })
+    this.setData({ selectMode: true })
+    this.applySelection([])
   },
   exitSelectMode() {
-    this.setData({ selectMode: false, selectedFolderIds: [] })
+    this.setData({ selectMode: false })
+    this.applySelection([])
+  },
+  /** 同步选中 id 数组与 WXML 可用的勾选映射对象（WXML 不支持 indexOf 方法调用） */
+  applySelection(ids: number[]) {
+    const map: Record<string, boolean> = {}
+    for (const id of ids) map[String(id)] = true
+    this.setData({ selectedFolderIds: ids, selectedMap: map })
   },
   toggleFolderSelect(folderId: number) {
     const cur = this.data.selectedFolderIds
-    this.setData({
-      selectedFolderIds: cur.includes(folderId) ? cur.filter((i) => i !== folderId) : [...cur, folderId],
-    })
+    this.applySelection(cur.includes(folderId) ? cur.filter((i) => i !== folderId) : [...cur, folderId])
   },
   toggleSelectAllFolders() {
     const all = this.data.currentSubfolders.map((f) => f.id)
     const cur = this.data.selectedFolderIds
     const allOn = all.length > 0 && all.every((id) => cur.includes(id))
-    this.setData({ selectedFolderIds: allOn ? [] : all })
+    this.applySelection(allOn ? [] : all)
   },
   renameSelectedFolder() {
     const ids = this.data.selectedFolderIds
@@ -713,7 +722,8 @@ Page(themed({
         // 正停留在被删子树内时回到根，避免浏览一个已不存在的节点
         const insideDeleted = this.data.currentFolderId !== 0
           && ids.some((id) => id === this.data.currentFolderId || this.isInsideFolder(this.data.currentFolderId, id))
-        this.setData({ selectMode: false, selectedFolderIds: [], currentFolderId: insideDeleted ? 0 : this.data.currentFolderId })
+        this.setData({ selectMode: false, currentFolderId: insideDeleted ? 0 : this.data.currentFolderId })
+        this.applySelection([])
         this.loadFolders()
       },
     })
@@ -749,7 +759,8 @@ Page(themed({
       wx.hideLoading()
       wx.showToast({ title: '已保存', icon: 'success' })
       // 重命名是多选态里的单条操作，保存后退出多选，避免勾选状态与刷新后的列表错位
-      this.setData({ showRenameFolder: false, selectMode: false, selectedFolderIds: [] })
+      this.setData({ showRenameFolder: false, selectMode: false })
+      this.applySelection([])
       this.loadFolders()
     } catch (error) {
       wx.hideLoading()

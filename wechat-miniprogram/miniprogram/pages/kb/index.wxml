@@ -65,11 +65,11 @@
         <view
           wx:for="{{currentSubfolders}}"
           wx:key="id"
-          class="frow {{selectMode && selectedFolderIds.indexOf(item.id) >= 0 ? 'frow-on' : ''}}"
+          class="frow {{selectMode && selectedMap[item.id] ? 'frow-on' : ''}}"
           data-id="{{item.id}}"
           bindtap="selectFolder"
         >
-          <view wx:if="{{selectMode}}" class="fcheck {{selectedFolderIds.indexOf(item.id) >= 0 ? 'fcheck-on' : ''}}">{{selectedFolderIds.indexOf(item.id) >= 0 ? '✓' : ''}}</view>
+          <view wx:if="{{selectMode}}" class="fcheck {{selectedMap[item.id] ? 'fcheck-on' : ''}}">{{selectedMap[item.id] ? '✓' : ''}}</view>
           <view class="fico"><view class="fico-shape" /></view>
           <view class="fmain">
             <view class="fname">{{item.name}}</view>
