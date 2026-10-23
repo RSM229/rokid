@@ -26,7 +26,7 @@ from fastapi import (
 )
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -819,6 +819,56 @@ async def create_folder(
     await db.commit()
     await db.refresh(folder)
     return {"id": folder.id, "name": folder.name, "parent_id": folder.parent_id}
+
+
+@router.delete("/{kb_id}/folders/{folder_id}")
+async def delete_folder(
+    kb_id: int,
+    folder_id: int,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """删除文件夹（连同全部子文件夹）；其中的文档移到上层文件夹，不会丢失。"""
+    kb = await _get_kb(db, kb_id)
+    await _require_role(db, kb, user, "editor")
+    _reject_builtin(kb, "删除文件夹")
+    folder = await _get_folder(db, kb_id, folder_id)
+
+    # 收集该文件夹及其全部后代节点
+    all_folders = (
+        await db.execute(select(KbFolder).where(KbFolder.kb_id == kb_id))
+    ).scalars().all()
+    by_parent: dict[int | None, list[KbFolder]] = {}
+    for f in all_folders:
+        by_parent.setdefault(f.parent_id, []).append(f)
+    doomed: list[int] = []
+
+    def collect(fid: int) -> None:
+        doomed.append(fid)
+        for child in by_parent.get(fid, []):
+            collect(child.id)
+
+    collect(folder_id)
+
+    # 工程资料不因删文件夹丢失：先移到被删文件夹的父级（根目录则为未分类）
+    parent_id = folder.parent_id
+    moved = (
+        await db.execute(
+            update(KnowledgeDocument)
+            .where(
+                KnowledgeDocument.kb_id == kb_id,
+                KnowledgeDocument.folder_id.in_(doomed),
+            )
+            .values(folder_id=parent_id)
+        )
+    ).rowcount or 0
+    await db.execute(delete(KbFolder).where(KbFolder.id.in_(doomed)))
+    await db.commit()
+    return {
+        "deleted_folders": len(doomed),
+        "moved_documents": moved,
+        "parent_id": parent_id,
+    }
 
 
 # ============ 文档 ============

@@ -37,6 +37,7 @@
         <text class="folder-ico">📁</text>
         <text class="folder-name">{{item.name}}</text>
         <text class="folder-count">{{item.count}} 份</text>
+        <text wx:if="{{canUpload}}" class="folder-del" data-id="{{item.id}}" catchtap="deleteFolder">删除</text>
       </view>
     </view>
 

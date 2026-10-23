@@ -48,6 +48,8 @@
 .fname { font-size: 29rpx; font-weight: 600; color: var(--ink-2, #243b55); line-height: 1.35; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fsub { margin-top: 4rpx; font-size: 22rpx; color: #8a9bb0; }
 .fchev { flex: none; color: #c2ccd6; font-size: 34rpx; line-height: 1; }
+/* 文件夹行内的删除入口（catchtap 挂真实处理器，阻止冒泡触发整行进入文件夹） */
+.fdel { flex: none; font-size: 24rpx; font-weight: 600; color: #d9534f; padding: 10rpx 6rpx; }
 
 /* 空状态：把「什么都没有」说清楚，而不是留一片白 */
 .empty-mini { padding: 36rpx 28rpx; background: rgba(255, 255, 255, 0.60); border: 1rpx dashed rgba(var(--brand-rgb, 22,119,255), 0.22); border-radius: 20rpx; color: #8a9bb0; font-size: 24rpx; line-height: 1.7; text-align: center; }

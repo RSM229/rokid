@@ -278,6 +278,56 @@ Page(themed({
     this.refreshCurrentFolder()
   },
 
+  /** 判断 folderId 是否位于（或就是）ancestorId 的子树内 */
+  isInsideFolder(folderId: number, ancestorId: number): boolean {
+    let cur: KbFolderNode | undefined = this.data.folderMap[folderId]
+    while (cur) {
+      if (cur.id === ancestorId) return true
+      cur = cur.parent_id ? this.data.folderMap[cur.parent_id] : undefined
+    }
+    return false
+  },
+
+  deleteFolder(event: WechatMiniprogram.TouchEvent) {
+    const folderId = Number(event.currentTarget.dataset.id)
+    const folder = this.data.folderMap[folderId]
+    if (!folder) return
+    let subCount = 0
+    const walk = (nodes?: KbFolderNode[]) => {
+      for (const n of nodes || []) {
+        subCount += 1
+        walk(n.children)
+      }
+    }
+    walk(folder.children)
+    const parent = folder.parent_id ? this.data.folderMap[folder.parent_id] : undefined
+    const target = parent ? `「${parent.name}」` : '未分类'
+    let content = folder.count
+      ? `其中 ${folder.count} 份文档将移至${target}，不会丢失`
+      : '该文件夹为空'
+    if (subCount) content += `；${subCount} 个子文件夹会一并删除`
+    wx.showModal({
+      title: '删除文件夹',
+      content: `确定删除「${folder.name}」？\n${content}`,
+      confirmText: '删除',
+      confirmColor: '#d9534f',
+      success: async (res) => {
+        if (!res.confirm) return
+        try {
+          await request(`/kb/${this.data.kbId}/folders/${folderId}`, { method: 'DELETE' })
+          wx.showToast({ title: '已删除', icon: 'success' })
+          // 正停留在被删子树内时退回它的上层，避免浏览一个已不存在的节点
+          if (this.data.currentFolderId && this.isInsideFolder(this.data.currentFolderId, folderId)) {
+            this.setData({ currentFolderId: folder.parent_id || 0 })
+          }
+          this.loadFolders()
+        } catch (error) {
+          wx.showToast({ title: (error as Error).message, icon: 'none' })
+        }
+      },
+    })
+  },
+
   uploadDoc() {
     wx.chooseMessageFile({
       count: 9,

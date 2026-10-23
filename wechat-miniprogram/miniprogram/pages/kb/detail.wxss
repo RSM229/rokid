@@ -53,6 +53,8 @@
 .folder-ico { font-size: 40rpx; line-height: 1; }
 .folder-name { margin-top: 10rpx; font-size: 24rpx; font-weight: 600; color: var(--ink-2, #243b55); text-align: center; }
 .folder-count { margin-top: 6rpx; font-size: 20rpx; color: #999; }
+/* 文件夹卡片内的删除入口（catchtap 挂真实处理器，阻止冒泡触发整卡进入文件夹） */
+.folder-del { margin-top: 8rpx; font-size: 20rpx; font-weight: 600; color: #d9534f; }
 
 /* 弹窗三层关系：mask=纯背板（点它关闭），modal=平级兄弟节点（自己固定定位+垂直居中）。
    早期把 modal 嵌在 mask 里、靠 catchtap="" 阻止冒泡，实测点输入框/按钮会冒泡触发
