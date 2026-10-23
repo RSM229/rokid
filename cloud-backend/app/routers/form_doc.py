@@ -48,14 +48,18 @@ RECORD_TYPE_TO_FORM = {
     "巡视": "gd_b_214_xunshi",
     "旁站": "gd_b_212_pangzhan",
     "验收": "acceptance_record",   # 独立业务验收记录
-    "见证": "gd_b_219_cailiao",    # 见证取样记录：材料台账版式（无独立见证模板时）
+    "见证": "witness_record",      # 见证取样记录：独立业务 schema，不借用材料台账
+    "起重机械安拆检查": "gdaq_30305_qizhong",
 }
 # 见证类缺少独立模板 → 允许指定其他表式；默认给出可选项
 RECORD_TYPE_EXTRA_FORMS = {
     "巡视": ["gd_b_214_xunshi", "gdaq_30306_weida", "gd_b_215_tongzhi"],
     "验收": ["acceptance_record"],
-    "见证": ["gd_b_219_cailiao", "gd_b_213_pingxing"],
-    "旁站": ["gd_b_212_pangzhan", "gdaq_30305_qizhong"],
+    "见证": ["witness_record"],
+    # GDAQ30305 has a dedicated equipment-inspection contract and must not be
+    # generated from a generic station WorkRecord until its business route is wired.
+    "旁站": ["gd_b_212_pangzhan"],
+    "起重机械安拆检查": ["gdaq_30305_qizhong"],
 }
 
 
@@ -164,9 +168,12 @@ def _record_extracted_fields(record: WorkRecord) -> dict:
         cj.get("form_context") if isinstance(cj.get("form_context"), dict) else {},
         cj.get("form_field_candidates") if isinstance(cj.get("form_field_candidates"), dict) else {},
         cj.get("field_resolutions") if isinstance(cj.get("field_resolutions"), dict) else {},
+        cj.get("confirmed_fields") if isinstance(cj.get("confirmed_fields"), dict) else {},
     )
     for source in sources:
         for key, value in source.items():
+            if isinstance(value, dict) and "value" in value:
+                value = value.get("value")
             if value not in (None, "") and not isinstance(value, (dict, list)):
                 out[str(key)] = value
     for legacy, canonical in {
@@ -238,11 +245,21 @@ def _legacy_watermark_fields(content: dict) -> dict[str, str]:
     return recovered
 
 
-def _content_from_record(record: WorkRecord, user: User) -> dict:
+def _content_from_record(
+    record: WorkRecord,
+    user: User,
+    project: Project | None = None,
+) -> dict:
     """工作记录 → 表单内容字段。"""
-    from app.services.record_fields import business_date, is_instruction_only, problem_text
+    from app.services.record_fields import (
+        business_date,
+        business_record_fields,
+        is_instruction_only,
+        problem_text,
+    )
     now = record.created_at or datetime.now()
     extracted = _record_extracted_fields(record)
+    business = business_record_fields(record, project)
     explicit_problems = problem_text(record)
     legacy_remark = str(record.inspection_remark or "").strip()
     if not explicit_problems and legacy_remark and not is_instruction_only(legacy_remark):
@@ -260,28 +277,42 @@ def _content_from_record(record: WorkRecord, user: User) -> dict:
         "doc_number": "",
         "date": business_date(record).isoformat(),
         "time": now.strftime("%Y-%m-%d %H:%M"),
-        "supervisor": user.real_name,
+        # Creator identity is not proof of signing. Signature slots are handled
+        # by the document signoff workflow, not populated from the account name.
+        "supervisor": "",
         "section": record.section or "",
         "location": record.location or "",
         "weather": record.weather or "",
         "remark": record.remark or "",
-        "construction_unit": "",
+        "construction_unit": str(business.get("construction_unit") or ""),
         "problems": problem_text(record),
         "handling": record.treatment or "",
         "treatment": record.treatment or "",
-        "owner_unit": str(extracted.get("owner_unit") or ""),
-        "construction_unit": str(extracted.get("construction_unit") or ""),
-        "supervision_unit": str(extracted.get("supervision_unit") or ""),
-        "supervision_org": str(extracted.get("supervision_org") or extracted.get("supervision_unit") or ""),
-        "inspector": str(extracted.get("inspector") or record.acceptance_participants or user.real_name or ""),
+        "owner_unit": str(business.get("owner_unit") or extracted.get("owner_unit") or ""),
+        "construction_unit": str(business.get("construction_unit") or extracted.get("construction_unit") or ""),
+        "supervision_unit": str(business.get("supervision_unit") or extracted.get("supervision_unit") or ""),
+        "supervision_org": str(
+            business.get("supervision_org")
+            or business.get("supervision_unit")
+            or extracted.get("supervision_org")
+            or extracted.get("supervision_unit")
+            or ""
+        ),
+        "inspector": str(
+            business.get("inspector")
+            or extracted.get("inspector")
+            or record.acceptance_participants
+            or ""
+        ),
     }
     rtype = record.record_type
     if rtype == "巡视":
         base.update({
             "section": record.section or "",
             "content": work_content or extracted_content or f"{record.section or '现场'}巡视检查",
-            # 问题栏只接受业务问题；指令、工作描述和水印活动不得冒充问题。
-            "problems": explicit_problems or str(extracted.get("problems") or "") or "符合要求",
+            # 问题栏只接受业务问题。没有记录问题时保持空白，不能把“记录”
+            # 指令或系统推断伪装成“符合要求”的现场结论。
+            "problems": explicit_problems or str(extracted.get("problems") or ""),
             "worker_count": record.worker_count,
             "start_time": record.inspection_start_time.isoformat(sep=" ", timespec="minutes") if record.inspection_start_time else "",
             "end_time": record.inspection_end_time.isoformat(sep=" ", timespec="minutes") if record.inspection_end_time else "",
@@ -353,10 +384,13 @@ def _content_from_record(record: WorkRecord, user: User) -> dict:
             continue
         if not str(base.get(key) or "").strip():
             base[key] = text
-    base["project_name"] = str(extracted.get("project_name") or "").strip()
-    base["supervisor"] = str(
-        extracted.get("inspector") or base.get("supervisor") or user.real_name or ""
+    base["project_name"] = str(
+        business.get("business_project_name") or business.get("project_name") or ""
     ).strip()
+    base["supervisor"] = ""
+    base["system_project_name"] = str(business.get("system_project_name") or "")
+    base["project_mismatch"] = bool(business.get("project_mismatch"))
+    base["business_field_conflicts"] = business.get("field_conflicts") or {}
     # 字段表追问收集到的栏目（content_json.prov_fields，键=字段表 canonical）
     # 文书模板有对应栏位就带出来；已有值的以记录本体为准，不覆盖
     prov = (record.content_json or {}).get("prov_fields")
@@ -397,13 +431,49 @@ async def generate_form_from_record(
         if spec is None:
             raise HTTPException(400, f"未知表式 {form_code}")
     else:
-        code = RECORD_TYPE_TO_FORM.get(record.record_type)
+        saved_code = (record.content_json or {}).get("form_code") if isinstance(record.content_json, dict) else None
+        code = saved_code or RECORD_TYPE_TO_FORM.get(record.record_type)
         spec = FORM_BY_CODE.get(code) if code else None
         if spec is None:
             raise HTTPException(400, f"{record.record_type}记录暂无可用的默认表式，请指定 form_code")
 
+    # The Agent and the direct "record -> form" button must share one required-
+    # field gate.  Without this, an old or partially filled record can silently
+    # produce a polished Word/PDF with blank mandatory cells.
+    from app.services.agent_form_requirements import resolve_record_form
+
+    requirements = resolve_record_form(record, project, spec.form_code)
+    if (
+        requirements.get("missing_labels")
+        or requirements.get("conflict_labels")
+        or requirements.get("invalid_fields")
+    ):
+        blockers = (
+            list(requirements.get("missing_labels") or [])
+            + list(requirements.get("conflict_labels") or [])
+            + [
+                f"{item.get('label') or item.get('canonical')}（{item.get('message') or '格式无效'}）"
+                for item in requirements.get("invalid_fields") or []
+            ]
+        )
+        raise HTTPException(
+            422,
+            "记录尚未满足表式必填项，请回到 Agent 工作记录草稿补充："
+            + "、".join(dict.fromkeys(blockers)),
+        )
+
+    record_content = record.content_json if isinstance(record.content_json, dict) else {}
+    saved_contract = record_content.get("form_contract_version")
+    if record_content.get("source") == "agent_review_plan" and saved_contract:
+        if record_content.get("form_code") == spec.form_code and saved_contract != requirements.get("contract_version"):
+            raise HTTPException(
+                409,
+                "该记录依据的表式规则已更新，请回到 Agent 重新核对字段后再生成文书",
+            )
+
     author = await db.get(User, record.creator_id) or user
-    content = _content_from_record(record, author)
+    content = _content_from_record(record, author, project)
+    content["form_contract_version"] = requirements.get("contract_version", "")
     from app.services.record_fields import project_fields
     for key, value in project_fields(project).items():
         if not str(content.get(key) or "").strip():
@@ -416,11 +486,11 @@ async def generate_form_from_record(
     if spec.form_code == "gdaq_30306_weida":
         cj = record.content_json or {}
         content.update({
-            "hazard_type": cj.get("hazard_type") or cj.get("hazard_name") or "",
-            "wind": cj.get("wind") or cj.get("wind_force") or "",
-            "subcontract_unit": cj.get("subcontract_unit") or "",
-            "chief_supervisor": cj.get("chief_supervisor") or "",
-            "checklist_results": cj.get("checklist_results") or {},
+            "hazard_type": cj.get("hazard_type") or cj.get("hazard_name") or content.get("hazard_type") or "",
+            "wind": cj.get("wind") or cj.get("wind_force") or content.get("wind") or "",
+            "subcontract_unit": cj.get("subcontract_unit") or content.get("subcontract_unit") or "",
+            "chief_supervisor": cj.get("chief_supervisor") or content.get("chief_supervisor") or "",
+            "checklist_results": cj.get("checklist_results") or content.get("checklist_results") or {},
             "start_time": record.inspection_start_time.isoformat(sep=" ", timespec="minutes")
             if record.inspection_start_time else content.get("start_time", ""),
             "end_time": record.inspection_end_time.isoformat(sep=" ", timespec="minutes")
@@ -453,6 +523,9 @@ async def generate_form_from_record(
         existing.content = content
         existing.attached_images = attached_photos
         existing.docx_path = f"/exports/{docx_file.name}"
+        # A PDF is always a conversion of the current DOCX. Never keep a PDF
+        # generated from the previous revision of the same document.
+        existing.pdf_path = None
         await db.flush()
         return existing, spec, content
     doc = Document(
@@ -563,22 +636,30 @@ async def export_form_doc(
     doc = result.scalar_one_or_none()
     if not doc:
         raise HTTPException(404, "文书不存在")
-    file_url = doc.docx_path if fmt == "docx" else doc.pdf_path
-    if not file_url:
+    if fmt == "pdf":
+        if doc.pdf_path:
+            cached_pdf = settings.export_dir / doc.pdf_path.replace("/exports/", "")
+            if cached_pdf.exists():
+                return FileResponse(
+                    str(cached_pdf), media_type="application/pdf",
+                    filename=f"{doc.title}.pdf",
+                )
         if not doc.docx_path:
             raise HTTPException(400, "文书尚未生成 docx")
-        file_url = doc.docx_path
-    rel = file_url.replace("/exports/", "")
-    path = settings.export_dir / rel
-    if not path.exists():
-        raise HTTPException(404, "文件不存在")
-    if fmt == "pdf" and not doc.pdf_path:
+        docx_path = settings.export_dir / doc.docx_path.replace("/exports/", "")
+        if not docx_path.exists():
+            raise HTTPException(404, "Word 文件不存在")
         from app.services.form_renderer import docx_to_pdf
-        pdf = docx_to_pdf(path)
+        pdf = docx_to_pdf(docx_path)
         if pdf is None:
             raise HTTPException(501, "服务器未安装 Word/LibreOffice，暂不支持 docx→pdf")
         doc.pdf_path = f"/exports/{pdf.name}"
         await db.commit()
         return FileResponse(str(pdf), media_type="application/pdf", filename=f"{doc.title}.pdf")
+    if not doc.docx_path:
+        raise HTTPException(400, "文书尚未生成 docx")
+    path = settings.export_dir / doc.docx_path.replace("/exports/", "")
+    if not path.exists():
+        raise HTTPException(404, "Word 文件不存在")
     media = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     return FileResponse(str(path), media_type=media, filename=f"{doc.title}.docx")

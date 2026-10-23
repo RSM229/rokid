@@ -22,8 +22,8 @@ def configure_local() -> None:
     if not database_url:
         raise ValueError("Local dev database is not configured; run start-local-dev.ps1 first")
     parsed = make_url(database_url)
-    if parsed.get_backend_name() != "mysql" or parsed.database != "gdjl":
-        raise ValueError("LOCAL_DATABASE_URL must target the shared server MySQL database gdjl")
+    if parsed.get_backend_name() != "mysql" or not parsed.database:
+        raise ValueError("LOCAL_DATABASE_URL must target the live application MySQL database")
     if parsed.host not in {"127.0.0.1", "localhost"} or parsed.port != 13308:
         raise ValueError("Local MySQL must use the SSH-forwarded endpoint 127.0.0.1:13308")
 

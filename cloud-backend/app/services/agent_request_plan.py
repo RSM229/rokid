@@ -37,9 +37,19 @@ RECORD_TYPES: dict[str, dict[str, Any]] = {
         "description": "隐蔽工程、检验批、分项分部或材料进场验收",
     },
     "见证": {
-        "form": "gd_b_219_cailiao",
+        "form": "witness_record",
         "aliases": ("见证取样", "材料见证", "见证记录"),
         "description": "材料、构配件、设备见证取样和进场管理",
+    },
+    "平行检验": {
+        "form": "gd_b_213_pingxing",
+        "aliases": ("平行检查", "平行检查记录", "平行检验记录"),
+        "description": "监理机构独立开展的平行检验及结果记录",
+    },
+    "起重机械安拆检查": {
+        "form": "gdaq_30305_qizhong",
+        "aliases": ("起重机械检查", "塔吊安拆检查", "起重机械安装拆卸检查", "起重机械安拆记录"),
+        "description": "建筑施工起重机械安装、拆卸、顶升/加节过程的监理检查",
     },
 }
 
@@ -56,6 +66,18 @@ ACTIONS: dict[str, dict[str, Any]] = {
     "create_hazard": {
         "label": "创建隐患记录", "tool": "create_hazard", "kind": "write",
         "requires_confirmation": True, "attachment_purpose": "hazard_evidence",
+    },
+    "create_hazard_rectification_doc": {
+        "label": "从隐患生成整改通知", "tool": "create_hazard_rectification_doc", "kind": "write",
+        "requires_confirmation": True, "attachment_purpose": None,
+    },
+    "create_hazard_reply_doc": {
+        "label": "从整改提交生成回复单", "tool": "create_hazard_reply_doc", "kind": "write",
+        "requires_confirmation": True, "attachment_purpose": None,
+    },
+    "recheck_hazard": {
+        "label": "复查隐患整改", "tool": "recheck_hazard", "kind": "write",
+        "requires_confirmation": True, "attachment_purpose": None,
     },
     "archive_evidence": {
         "label": "仅整理归档资料", "tool": None, "kind": "draft",
@@ -180,7 +202,7 @@ def build_prompt(
         "{\"intent\":\"create_record|archive|analyze_hazard|query|generate_document|"
         "navigate|undo|chat|clarify\","
         "\"actions\":[{\"id\":\"动作 id\",\"confidence\":0到1,\"reason\":\"简短依据\"}],"
-        "\"record_type\":\"巡视|旁站|验收|见证|null\","
+        "\"record_type\":\"巡视|旁站|验收|见证|平行检验|起重机械安拆检查|null\","
         "\"record_type_confidence\":0到1,"
         "\"facts\":[{\"field\":\"工具参数名\",\"value\":\"用户明确提供的值\","
         "\"source_span\":\"用户原话片段\",\"confidence\":0到1}],"

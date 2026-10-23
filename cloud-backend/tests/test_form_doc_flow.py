@@ -35,6 +35,32 @@ from app.models.user import Project, User  # noqa: E402
 from app.models.work_record import WorkRecord, WorkRecordType, WorkRecordStatus  # noqa: E402
 
 
+def _complete_form_fields(form_code: str, overrides: dict | None = None) -> dict[str, str]:
+    """Give renderer-flow fixtures a complete reviewed contract, not fake legacy blanks."""
+    from app.services.record_field_spec import fields_of, options_for
+
+    values: dict[str, str] = {}
+    for field in fields_of(form_code):
+        if not field.get("required") or field.get("kind") == "signoff":
+            continue
+        canonical = field["canonical"]
+        table_type = field.get("table_type") or ""
+        options = options_for(field)
+        if options:
+            value = str(options[0])
+        elif "日期时间" in table_type:
+            value = "2025-01-02 09:00"
+        elif "日期" in table_type:
+            value = "2025-01-02"
+        elif "数字" in table_type or "序号" in table_type:
+            value = "1"
+        else:
+            value = f"测试{field.get('label') or canonical}"
+        values[canonical] = value
+    values.update(overrides or {})
+    return values
+
+
 async def _seed() -> dict:
     await init_db()
     async with async_session() as db:
@@ -60,6 +86,11 @@ async def _seed() -> dict:
             location="3#楼",
             work_content="梁板钢筋绑扎检查，间距符合要求。",
             inspection_remark="发现一处垫块缺失，已要求整改。",
+            content_json={"prov_fields": _complete_form_fields("gd_b_214_xunshi", {
+                "project_name": "测试工程A", "construction_unit": "测试施工单位",
+                "section": "3#楼二层", "content": "梁板钢筋绑扎检查，间距符合要求。",
+                "problems": "发现一处垫块缺失，已要求整改。",
+            })},
         )
         db.add(record)
         await db.commit()
@@ -83,6 +114,12 @@ async def _seed_agent_record(ids: dict, user_id: int) -> int:
             # 防止测试数据混入 test_aggregate_day 的当日统计。
             created_at=datetime(2025, 1, 2, 9, 0),
             content_json={
+                "prov_fields": _complete_form_fields("gd_b_214_xunshi", {
+                    "project_name": "广东省中西医结合应急救治中心项目",
+                    "construction_unit": "广州一建建设集团有限公司",
+                    "inspector": "陈宇文", "section": "安全巡视",
+                    "content": "临边防护检查符合要求。", "problems": "符合要求",
+                }),
                 "source": "agent_review_plan",
                 "media_ids": [],
                 "form_context": {
@@ -118,6 +155,12 @@ async def _seed_legacy_agent_record(ids: dict, user_id: int) -> int:
             inspection_remark="记录这个工作",
             created_at=datetime(2025, 1, 2, 9, 0),
             content_json={
+                "prov_fields": _complete_form_fields("gd_b_214_xunshi", {
+                    "project_name": "广东省中西医结合应急救治中心项目",
+                    "construction_unit": "广州一建建设集团有限公司",
+                    "inspector": "陈宇文", "section": "安全巡视",
+                    "content": "临边防护检查符合要求。", "problems": "符合要求",
+                }),
                 "source": "agent_review_plan",
                 "media_ids": [],
                 "evidence_notes": [
@@ -188,6 +231,13 @@ async def _seed_typed_agent_record(ids: dict, user_id: int, record_type: str) ->
                 witness_accept_result="合格",
                 content_json={
                     **common_json,
+                    "prov_fields": _complete_form_fields("witness_record", {
+                        "project_name": "广东省中西医结合应急救治中心项目",
+                        "construction_unit": "广州一建建设集团有限公司",
+                        "inspector": "陈宇文", "material_name": "热轧带肋钢筋",
+                        "material_spec": "HRB400E φ20", "quantity": "3", "unit": "组",
+                        "cert_no": "CERT-2025-001", "acceptance_result": "合格",
+                    }),
                     "form_field_candidates": {
                         **common_json["form_field_candidates"],
                         "witness_quantity": "3",
@@ -197,6 +247,17 @@ async def _seed_typed_agent_record(ids: dict, user_id: int, record_type: str) ->
                     },
                 },
             )
+        if record_type == WorkRecordType.STATION.value:
+            record.content_json = {
+                **common_json,
+                "prov_fields": _complete_form_fields("gd_b_212_pangzhan", {
+                    "project_name": "广东省中西医结合应急救治中心项目",
+                    "construction_unit": "广州一建建设集团有限公司",
+                    "inspector": "陈宇文", "section": "西楼A区十层墙柱",
+                    "station_process": "混凝土浇筑", "content": "现场按专项方案连续浇筑，人员机械到位。",
+                    "conclusion": "符合要求",
+                }),
+            }
         db.add(record)
         await db.commit()
         return record.id
@@ -249,6 +310,35 @@ def test_sheng_tong_biao_templates_are_blank_source_documents():
     assert checked >= 20
 
 
+def test_crane_safety_form_fields_fill_the_matching_word_cells(tmp_path):
+    from docx import Document as ReadDocx
+    from app.services.form_renderer import render_form
+
+    output = render_form("gdaq_30305_qizhong", {
+        "machine_name": "MACHINE-A",
+        "machine_number": "SERIAL-B",
+        "machine_model": "MODEL-C",
+        "location": "LOCATION-D",
+        "work_type": "安装",
+        "construction_unit": "CONTRACTOR-E",
+        "user_unit": "USER-F",
+        "install_unit": "INSTALLER-G",
+        "filing_status": "有",
+        "general_contractor_staff": "STAFF-H",
+        "operator_qualification": "OPERATOR-I",
+        "warning_measures": "WARNING-J",
+        "plan_execution": "PLAN-K",
+        "other_checks": "OTHER-L",
+    }, tmp_path)
+    doc = ReadDocx(str(output))
+    rendered = "\n".join(paragraph.text for paragraph in doc.paragraphs)
+    rendered += "\n" + "\n".join(cell.text for table in doc.tables for row in table.rows for cell in row.cells)
+    for value in ("MACHINE-A", "SERIAL-B", "MODEL-C", "LOCATION-D", "CONTRACTOR-E",
+                  "USER-F", "INSTALLER-G", "STAFF-H", "OPERATOR-I", "WARNING-J",
+                  "PLAN-K", "OTHER-L"):
+        assert value in rendered, value
+
+
 def test_record_forms(ctx):
     resp = ctx["client"].get(
         f"/api/form-docs/record/{ctx['record_id']}/forms",
@@ -299,13 +389,14 @@ def test_generate_agent_record_keeps_watermark_identity_and_ignores_instruction_
     text += "\n" + " ".join(c.text for t in document.tables for r in t.rows for c in r.cells)
     assert "广东省中西医结合应急救治中心项目" in text
     assert "广州一建建设集团有限公司" in text
-    assert "陈宇文" in text
+    assert "陈宇文" not in text
     assert "符合要求" in text
     assert "记录这个工作" not in text
     assert "111" not in text
     tail_text = document.tables[0].cell(3, 0).text
     assert "巡视发现的问题及处理情况：符合要求" in tail_text
-    assert "巡视监理人员（签名）：陈宇文" in tail_text
+    assert "巡视监理人员（签名）" in tail_text
+    assert "陈宇文" not in tail_text
     import zipfile
     with zipfile.ZipFile(export) as archive:
         embedded = [name for name in archive.namelist() if name.startswith("word/media/")]
@@ -327,7 +418,7 @@ def test_generate_legacy_agent_record_recovers_split_watermark_project_title(ctx
     text += "\n" + " ".join(c.text for t in document.tables for r in t.rows for c in r.cells)
     assert "广东省中西医结合应急救治中心项目" in text
     assert "广州一建建设集团有限公司" in text
-    assert "陈宇文" in text
+    assert "陈宇文" not in text
     assert "111" not in text
     assert "记录这个工作" not in text
 
@@ -347,7 +438,7 @@ def test_generate_pangzhan_keeps_units_inspector_and_conclusion(ctx):
     text += "\n" + " ".join(c.text for t in document.tables for r in t.rows for c in r.cells)
     for expected in (
         "广东省中西医结合应急救治中心项目", "广州一建建设集团有限公司",
-        "西楼A区十层墙柱", "混凝土浇筑", "符合要求", "陈宇文",
+            "西楼A区十层墙柱", "混凝土浇筑", "符合要求",
     ):
         assert expected in text
 
@@ -366,7 +457,7 @@ def test_generate_witness_keeps_material_quantity_certificate_and_acceptance(ctx
     text = "\n".join(p.text for p in document.paragraphs)
     text += "\n" + " ".join(c.text for t in document.tables for r in t.rows for c in r.cells)
     for expected in (
-        "热轧带肋钢筋", "HRB400E φ20", "3组", "合格", "陈宇文",
+        "热轧带肋钢筋", "HRB400E φ20", "取样数量：3", "计量单位：组", "合格",
         "广东省中西医结合应急救治中心项目",
     ):
         assert expected in text

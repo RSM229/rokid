@@ -140,9 +140,11 @@ def _schema_index() -> dict[str, str]:
     """省统表字段表的「标签 → canonical」索引（数据驱动，不手写字段名）。"""
     global _SCHEMA_INDEX
     if _SCHEMA_INDEX is None:
+        from app.services import form_contracts, form_registry
+
         index: dict[str, str] = {}
-        for form in record_field_spec.FORMS.values():
-            for field in form.get("fields") or []:
+        for form in form_registry.FORMS:
+            for field in form_contracts.fields_of(form.form_code):
                 canonical = str(field.get("canonical") or "")
                 if not canonical:
                     continue
@@ -202,7 +204,9 @@ def match_form_field(label: str, form_code: str | None = None) -> str | None:
         return semantic
     if form_code:
         local: dict[str, str] = {}
-        for field in record_field_spec.fields_of(form_code):
+        from app.services.form_contracts import fields_of
+
+        for field in fields_of(form_code):
             canonical = str(field.get("canonical") or "")
             if not canonical:
                 continue

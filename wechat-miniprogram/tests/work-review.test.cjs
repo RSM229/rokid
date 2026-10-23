@@ -22,7 +22,7 @@ const model = loaded.exports
 
 function chooseRecordTypes(plan, recordType = '巡视') {
   return plan.events.reduce((current, event) => model.editEvent(current, event.id, {
-    recordType, recordTypeConfidence: 1, recordTypeReason: '测试中由用户确认',
+    recordType, recordTypeConfirmed: true, recordTypeConfidence: 1, recordTypeReason: '测试中由用户确认',
   }), plan)
 }
 
@@ -140,7 +140,10 @@ test('form-specific values survive edits and compatible event merges', () => {
   plan = model.editFormField(plan, 'event-2', 'gd_b_213_pingxing', 'basis', 'GB 50204')
   plan = model.mergeEvents(plan, ['event-1', 'event-2'], 'merged-fields')
   assert.deepEqual(plan.events.find(event => event.id === 'merged-fields').fields, {
-    gd_b_213_pingxing: { conclusion: '合格', basis: 'GB 50204' },
+    gd_b_213_pingxing: {
+      conclusion: { value: '合格', source: 'user_message', status: 'user_confirmed' },
+      basis: { value: 'GB 50204', source: 'user_message', status: 'user_confirmed' },
+    },
   })
 })
 
@@ -173,6 +176,29 @@ test('confirm does not require a form or manual date; any later edit invalidates
   assert.equal(plan.confirmedRevision, plan.revision)
   plan = model.editRequest(plan, '改过的工作要求')
   assert.equal(plan.confirmedRevision, null)
+})
+
+test('Agent type recommendation cannot be confirmed until the user selects a record type', () => {
+  let plan = model.createExample(4)
+  plan = model.editEvent(plan, plan.events[0].id, { recordType: '巡视', recordTypeConfidence: 0.96 })
+  assert.match(model.reviewIssues(plan)[0], /请由你确认或修改/)
+  plan = chooseRecordTypes(plan)
+  assert.equal(model.reviewIssues(plan).length, 0)
+})
+
+test('changing the selected record type resets stale form binding to that type default', () => {
+  const plan = model.createExample()
+  const event = plan.events[0]
+  event.recordType = '巡视'
+  event.recordTypeConfirmed = true
+  event.forms = ['旁站记录']
+  const selectedCode = model.FORM_CODE_BY_LABEL[event.forms[0]]
+  const next = model.editEvent(plan, event.id, {
+    recordType: '验收', recordTypeConfirmed: true,
+    forms: ['验收记录'],
+  })
+  assert.equal(selectedCode, 'gd_b_212_pangzhan')
+  assert.deepEqual(next.events[0].forms, ['验收记录'])
 })
 
 test('restored drafts reject duplicated or lost evidence assignments', () => {
@@ -221,6 +247,8 @@ test('server item plan is adapted without re-grouping and keeps every evidence i
   assert.deepEqual(plan.events[0].evidenceIds, ['p1', 'p2'])
   assert.equal(plan.events[0].dateSource, 'watermark')
   assert.deepEqual(plan.events[0].missingFields, ['location'])
+  assert.equal(plan.events[0].fields.gd_b_214_xunshi.section.value, '3号楼二层')
+  assert.equal(plan.events[0].fields.gd_b_214_xunshi.section.status, 'evidence_extracted')
   assert.deepEqual(plan.unassignedIds, ['p3'])
   assert.ok(plan.notices.some(notice => notice.includes('合并或拆分')))
   assert.equal(plan.evidence.length, 3)

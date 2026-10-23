@@ -38,10 +38,11 @@ from app.models.agent_draft import (
 )
 from app.models.document import Document, DocStatus
 from app.models.hazard import Hazard, HazardStatus
+from app.models.parallel import ParallelInspection
 from app.models.security_audit import SecurityAudit
 from app.models.user import Project, User
 from app.models.work_record import WorkRecord, WorkRecordStatus
-from app.services import agent_request_plan, model_gateway, provform_schema, record_field_spec
+from app.services import agent_request_plan, form_contracts, model_gateway, provform_schema, record_field_spec
 from app.services.agent_context import (
     append_context_message,
     extract_explicit_message_facts,
@@ -63,7 +64,6 @@ PROVFORM_CHOICES = (
     ("gd_b_213_pingxing", "平行检验记录"),
     ("gd_b_214_xunshi", "巡视检查记录"),
     ("gd_b_215_tongzhi", "监理工程师通知单"),
-    ("gdaq_30308_yinhuan", "安全隐患整改通知"),
     ("acceptance_record", "验收记录"),
     ("gd_b_220_rizhi", "监理日志"),
     ("gd_b_221_yuebao", "监理月报"),
@@ -857,7 +857,7 @@ async def _create_work_record(ctx: ToolContext, args: dict) -> dict:
     if not content and not section and not location:
         return _need_more(["记录内容或施工区域"], "请说明记录内容与位置，例如「3号楼二层，钢筋绑扎，天气晴」。")
 
-    # 记录类型必须明确（巡视/旁站/验收/见证）：识别不出就追问，不静默建「待定」。
+    # 记录类型必须明确：识别不出就追问，不静默建「待定」。
     # 仅当用户原话里明确说了「待定/不确定」才允许落为待定。
     raw_type = str(args.get("record_type") or "").strip()
     record_type = _norm_record_type(raw_type)
@@ -867,10 +867,82 @@ async def _create_work_record(ctx: ToolContext, args: dict) -> dict:
         else:
             return _need_more(
                 ["记录类型"],
-                "这条要记成哪一类？点下面选一个，或直接回复（巡视/旁站/验收/见证）。",
-                options={"记录类型": ["巡视", "旁站", "验收", "见证"]},
+                "这条要记成哪一类？点下面选一个，或直接回复记录类型。",
+                options={"记录类型": ["巡视", "旁站", "验收", "见证", "平行检验", "起重机械安拆检查"]},
             )
+    if record_type == "待定":
+        return _need_more(
+            ["记录类型"],
+            "记录类型还不能是“待定”。请确认是巡视、旁站、验收、见证、平行检验还是起重机械安拆检查。",
+            options={"记录类型": ["巡视", "旁站", "验收", "见证", "平行检验", "起重机械安拆检查"]},
+        )
     record_date = _parse_date(args.get("record_date")) or datetime.now().date()
+
+    if record_type == "平行检验":
+        from app.services.agent_form_requirements import resolve_event_form
+
+        fields = {key: value for key, value in args.items() if value not in (None, "")}
+        resolved = resolve_event_form({"evidence": []}, {
+            "record_type": "平行检验",
+            "record_type_confirmed": True,
+            "date": record_date.isoformat(),
+            "section": section,
+            "location": location,
+            "content": content,
+            "forms": ["gd_b_213_pingxing"],
+            "entity_fields": project_fields(ctx.project),
+            "fields": {"gd_b_213_pingxing": fields},
+        })
+        if resolved["missing_fields"] or resolved["invalid_fields"] or resolved["conflicts"]:
+            conflict = next(iter(resolved["conflicts"]), None)
+            if conflict:
+                candidates = list(dict.fromkeys(
+                    str(item.get("value") or "").strip()
+                    for item in conflict.get("candidates", []) if str(item.get("value") or "").strip()
+                ))
+                return _need_more(
+                    [conflict["label"]],
+                    f"{conflict['label']}识别到多个候选值，请选择正确内容或直接输入：",
+                    options={conflict["label"]: candidates} if candidates else None,
+                )
+            field = next((item for item in resolved["fields"] if item.get("missing") or item.get("validation_error")), None)
+            if field:
+                options = {field["label"]: field["options"]} if field.get("options") else None
+                return _need_more(
+                    [field["label"]],
+                    field.get("validation_error") or field.get("question") or f"请补充{field['label']}：",
+                    options=options,
+                )
+        values = resolved["values"]
+        permission = "inspection"
+        if not ctx.user.has_permission(permission):
+            return _ok(f"当前角色无权创建{permission}类记录", ok=False)
+        parallel = ParallelInspection(
+            user_id=ctx.user.id,
+            project_id=ctx.project_id,
+            inspect_date=record_date.isoformat(),
+            part=str(values.get("section") or section).strip(),
+            item=str(values.get("acceptance_content") or "").strip(),
+            method=str(values.get("method") or "").strip(),
+            basis=str(values.get("basis") or "").strip(),
+            result_detail=str(values.get("record") or values.get("measure_data") or content).strip(),
+            conclusion=str(values.get("conclusion") or "").strip(),
+            treatment=str(values.get("handling") or "").strip(),
+        )
+        ctx.db.add(parallel)
+        await ctx.db.flush()
+        await _audit(ctx.db, ctx.user, "agent_write", {
+            "tool": "create_work_record", "entity": "parallel_inspection", "id": parallel.id,
+        })
+        await ctx.db.commit()
+        return _ok(
+            f"已创建平行检验记录 #{parallel.id}｜{parallel.part}｜{parallel.item}",
+            card={"kind": "parallel_inspection", "id": parallel.id, "title": "平行检验记录", "sub": parallel.part, "time": parallel.inspect_date},
+            cards=[{"kind": "parallel_inspection", "id": parallel.id, "title": "平行检验记录", "sub": parallel.part, "time": parallel.inspect_date}],
+            actions=[{"type": "navigate", "label": "查看平行检验", "url": "/pages/parallel/index"}],
+            undo={"tool": "create_work_record", "entity": "parallel_inspection", "id": parallel.id},
+            data={"parallel_inspection_id": parallel.id, "record_type": "平行检验"},
+        )
 
     # 危大工程巡视（GDAQ30306）：表上多「危大工程名称/类型」「风力」「专业分包单位」，
     # 用户提到「危大/危险性较大」时改按危大表追问
@@ -908,8 +980,8 @@ async def _create_work_record(ctx: ToolContext, args: dict) -> dict:
                 if direct:
                     args = _set_field_value(args, acc_field, str(direct["points"]))
 
-    # 字段表驱动的追问：表上「由系统生成=否」且用户还没说的字段，按栏目顺序**一次只问一栏**
-    # （逐项交互，用户可随时「跳过」直接落库）
+    # 字段表驱动的追问：表上「由系统生成=否」且用户还没说的字段，按栏目顺序**一次只问一栏**。
+    # “跳过”只允许跳过非必填栏；合同声明的必填字段、冲突和格式错误不能被跳过。
     assist = assist_fields(record_type, is_weida)
     missing = [
         f for f in assist
@@ -917,7 +989,8 @@ async def _create_work_record(ctx: ToolContext, args: dict) -> dict:
                 if f.get("canonical") in ("start_time", "end_time")
                 else _field_value(args, f))
     ]
-    if missing and not _wants_skip(ctx.message):
+    required_missing = [f for f in missing if bool(f.get("required"))]
+    if missing and (required_missing or not _wants_skip(ctx.message)):
         field = missing[0]
         label = str(field.get("label") or field.get("canonical") or "")
         options: dict[str, list[str]] = {}
@@ -944,6 +1017,70 @@ async def _create_work_record(ctx: ToolContext, args: dict) -> dict:
             options[label] = enum
         options["可跳过"] = ["跳过，直接创建"]
         return _need_more([label], record_field_spec.question_for(field), options=options)
+
+    # 旧聊天入口也必须经过同一份版本化合同。这里不让可选栏阻断旧有
+    # “跳过”体验，但必填、冲突、格式错误与新整理计划保持完全相同的门槛。
+    from app.services.agent_form_requirements import resolve_event_form
+    project_values = project_fields(ctx.project)
+    resolved_form = resolve_event_form({"evidence": [], "system_project": project_values}, {
+        "record_type": record_type,
+        "record_type_confirmed": True,
+        "date": record_date.isoformat(),
+        "section": section,
+        "location": location,
+        "content": content,
+        "forms": [_form] if _form else [],
+        "entity_fields": project_values,
+        "fields": {_form: args} if _form else args,
+    }) if _form else None
+    contract_snapshot: dict[str, Any] = {}
+    if resolved_form:
+        blocked = (
+            resolved_form.get("missing_fields")
+            or resolved_form.get("conflicts")
+            or resolved_form.get("invalid_fields")
+            or resolved_form.get("materialization_error")
+        )
+        if blocked:
+            conflict = next(iter(resolved_form.get("conflicts") or []), None)
+            if conflict:
+                candidates = list(dict.fromkeys(
+                    str(item.get("value") or "").strip()
+                    for item in conflict.get("candidates", []) if str(item.get("value") or "").strip()
+                ))
+                return _need_more(
+                    [conflict.get("label") or conflict.get("canonical")],
+                    f"{conflict.get('label') or conflict.get('canonical')}识别到多个候选值，请选择正确内容或直接输入：",
+                    options={conflict.get("label") or conflict.get("canonical"): candidates} if candidates else None,
+                )
+            invalid = next(iter(resolved_form.get("invalid_fields") or []), None)
+            field = next((item for item in resolved_form.get("fields") or [] if item.get("missing") or item.get("validation_error")), None)
+            if invalid or field:
+                item = invalid or field or {}
+                label = item.get("label") or item.get("canonical") or "必填项"
+                options = {label: item.get("options")} if item.get("options") else None
+                return _need_more([label], item.get("message") or item.get("validation_error") or item.get("question") or f"请补充{label}：", options=options)
+            return _need_more(["表式字段"], str(resolved_form.get("materialization_error") or "请补全该表式字段"))
+        # 合同归一后的值优先于模型参数，确保记录列、快照和后续文书看到同一份数据。
+        for key, value in (resolved_form.get("values") or {}).items():
+            if value not in (None, ""):
+                args[key] = value
+        contract_snapshot = {
+            "form_code": _form,
+            "form_contract_version": resolved_form.get("contract_version") or "",
+            "confirmed_fields": dict(resolved_form.get("values") or {}),
+            "field_sources": dict(resolved_form.get("sources") or {}),
+            "form_requirements": resolved_form,
+        }
+
+    # 普通聊天入口也必须先停在“待最终确认”状态；路由层会在首次尝试时注入
+    # _require_confirmation。直接调用工具的旧接口/测试不带该标记，保持兼容。
+    if args.get("_require_confirmation") and not args.get("_execution_confirmed"):
+        return _need_more(
+            ["最终确认"],
+            "字段已按当前表式合同补齐。请核对下面内容后回复“确认生成”，或继续修改任意字段；现在尚未写入正式工作记录。",
+            options={"最终确认": ["确认生成", "继续修改"]},
+        )
 
     worker_count = args.get("worker_count")
     try:
@@ -1012,6 +1149,7 @@ async def _create_work_record(ctx: ToolContext, args: dict) -> dict:
         content_json={
             "source": "agent",
             "voice_text": content,
+            **contract_snapshot,
             **({"prov_fields": extra_values(args)} if extra_values(args) else {}),
             **({"hazard_type": hazard_type} if (is_weida and hazard_type) else {}),
             **({"wind": str(args.get("wind"))[:16]} if args.get("wind") else {}),
@@ -1139,8 +1277,85 @@ async def _create_hazard(ctx: ToolContext, args: dict) -> dict:
     )
 
 
+async def _create_hazard_rectification_doc(ctx: ToolContext, args: dict) -> dict:
+    """Create GDAQ30308 only through its owning Hazard business record."""
+    try:
+        hazard_id = int(args.get("hazard_id"))
+    except (TypeError, ValueError):
+        return _need_more(["隐患编号"], "请提供要生成整改通知的隐患编号；先查询隐患列表也可以。")
+    if hazard_id <= 0:
+        return _need_more(["隐患编号"], "隐患编号必须是正整数，请重新提供。")
+
+    from app.routers.hazard import create_rectification_doc
+
+    result = await create_rectification_doc(
+        hazard_id,
+        deadline=str(args.get("deadline") or "").strip() or None,
+        user=ctx.user,
+        db=ctx.db,
+    )
+    doc_id = int(result["doc_id"])
+    hazard = await ctx.db.get(Hazard, hazard_id)
+    title = f"安全隐患整改通知单_{hazard.top1_risk if hazard else hazard_id}"
+    return _ok(
+        f"已从隐患 #{hazard_id} 生成并关联 GDAQ30308 整改通知单 #{doc_id}。文书保持草稿状态，签发/签收信息需按实际业务完成。",
+        card={"kind": "document", "id": doc_id, "title": title,
+              "sub": "GDAQ30308 安全隐患整改通知", "status": result.get("doc_status", "草稿")},
+        cards=[{"kind": "document", "id": doc_id, "title": title,
+                "sub": "GDAQ30308 安全隐患整改通知", "status": result.get("doc_status", "草稿")}],
+        actions=[{"type": "navigate", "label": "查看整改通知", "url": "/pages/documents/index"},
+                 {"type": "navigate", "label": "查看隐患闭环", "url": f"/pages/hazards/index?id={hazard_id}"}],
+        data={"doc_id": doc_id, "hazard_id": hazard_id,
+              "form_code": "gdaq_30308_yinhuan", "hazard_status": result.get("hazard_status")},
+    )
+
+
+async def _create_hazard_reply_doc(ctx: ToolContext, args: dict) -> dict:
+    """Generate GDAQ2030309 only after an actual rectification submission."""
+    try:
+        hazard_id = int(args.get("hazard_id"))
+    except (TypeError, ValueError):
+        return _need_more(["隐患编号"], "请提供要生成整改回复单的隐患编号。")
+    from app.routers.hazard import create_reply_doc
+    result = await create_reply_doc(
+        hazard_id,
+        req=__import__("app.routers.hazard", fromlist=["HazardReplyDocRequest"]).HazardReplyDocRequest(
+            rectify_desc=str(args.get("rectify_desc") or "").strip() or None,
+            rechecker=str(args.get("rechecker") or "").strip() or None,
+        ),
+        user=ctx.user,
+        db=ctx.db,
+    )
+    return _ok(
+        f"已生成并关联隐患 #{hazard_id} 的 GDAQ20309 整改回复单 #{result['doc_id']}；复查尚未发生时不会填入复查人。",
+        card={"kind": "document", "id": result["doc_id"], "title": "安全隐患整改回复单", "status": result.get("doc_status", "草稿")},
+        data={"doc_id": result["doc_id"], "hazard_id": hazard_id, "form_code": "gdaq_30309_huifu", "hazard_status": result.get("hazard_status")},
+    )
+
+
+async def _recheck_hazard(ctx: ToolContext, args: dict) -> dict:
+    try:
+        hazard_id = int(args.get("hazard_id"))
+    except (TypeError, ValueError):
+        return _need_more(["隐患编号"], "请提供要复查的隐患编号。")
+    from app.routers.hazard import recheck_hazard, RecheckRequest
+    result = await recheck_hazard(
+        hazard_id, RecheckRequest(passed=bool(args.get("passed")), remark=str(args.get("remark") or "").strip() or None),
+        user=ctx.user, db=ctx.db,
+    )
+    return _ok(
+        f"隐患 #{hazard_id} 已完成复查：{('合格，已闭环' if result.get('passed') else '不合格，已驳回整改')}。",
+        data=result,
+    )
+
+
 async def _create_provform_doc(ctx: ToolContext, args: dict) -> dict:
     form_code = str(args.get("form_code") or "").strip()
+    if "30308" in form_code or "安全隐患整改通知" in form_code:
+        return _ok(
+            "安全隐患整改通知必须关联真实隐患记录，不能独立新建。请先创建/查询隐患，再要求我从该隐患生成 GDAQ30308。",
+            ok=False,
+        )
     code_map = {code: name for code, name in PROVFORM_CHOICES}
     if not form_code:
         names = "、".join(name for _c, name in PROVFORM_CHOICES[:6])
@@ -1289,7 +1504,7 @@ async def undo_entity(ctx: ToolContext, entity: str, obj_id: int) -> dict:
     与 ``undo_last_action`` 共用同一套删除规则，避免两条路径漂移。
     """
     entity = (entity or "").strip()
-    label = {"work_record": "工作记录", "hazard": "隐患记录", "document": "文书"}.get(entity, entity)
+    label = {"work_record": "工作记录", "parallel_inspection": "平行检验记录", "hazard": "隐患记录", "document": "文书"}.get(entity, entity)
 
     if entity == "work_record":
         obj = await ctx.db.get(WorkRecord, obj_id)
@@ -1300,6 +1515,21 @@ async def undo_entity(ctx: ToolContext, entity: str, obj_id: int) -> dict:
         await ctx.db.execute(sql_text(
             "UPDATE task_assignments SET work_record_id = NULL WHERE work_record_id = :rid"
         ), {"rid": obj_id})
+        await ctx.db.delete(obj)
+    elif entity == "parallel_inspection":
+        obj = await ctx.db.get(ParallelInspection, obj_id)
+        if obj is None or obj.user_id != ctx.user.id:
+            return _ok("这条平行检验记录已不存在或不属于你，无需撤销。")
+        if obj.created_at and datetime.now() - obj.created_at > timedelta(hours=24):
+            return _ok("这条记录创建已超过 24 小时，为安全起见不再自动撤销，请到页面手动处理。")
+        if obj.generated_doc_id:
+            doc = await ctx.db.get(Document, obj.generated_doc_id)
+            if doc and doc.status != DocStatus.DRAFT.value:
+                return _ok("这条记录已进入文书流程，不能撤销。")
+            if doc:
+                obj.generated_doc_id = None
+                await ctx.db.flush()
+                await ctx.db.delete(doc)
         await ctx.db.delete(obj)
         await _audit(ctx.db, ctx.user, "agent_undo", {"tool": "undo_entity", "entity": entity, "id": obj_id})
         await ctx.db.commit()
@@ -1369,7 +1599,7 @@ async def _undo_last_action(ctx: ToolContext, args: dict) -> dict:
         return _ok("没有找到可撤销的聊天创建记录（只支持撤销 24 小时内由聊天新建的记录/隐患/文书）。")
 
     entity, obj_id = target["entity"], int(target["id"])
-    label = {"work_record": "工作记录", "hazard": "隐患记录", "document": "文书"}.get(entity, entity)
+    label = {"work_record": "工作记录", "parallel_inspection": "平行检验记录", "hazard": "隐患记录", "document": "文书"}.get(entity, entity)
     if entity == "work_record":
         obj = await ctx.db.get(WorkRecord, obj_id)
         if obj is None or obj.creator_id != ctx.user.id:
@@ -1378,6 +1608,21 @@ async def _undo_last_action(ctx: ToolContext, args: dict) -> dict:
         await ctx.db.execute(sql_text(
             "UPDATE task_assignments SET work_record_id = NULL WHERE work_record_id = :rid"
         ), {"rid": obj_id})
+        await ctx.db.delete(obj)
+    elif entity == "parallel_inspection":
+        obj = await ctx.db.get(ParallelInspection, obj_id)
+        if obj is None or obj.user_id != ctx.user.id:
+            return _ok(f"这条{label}已不存在或不属于你，无需撤销。")
+        if obj.created_at and datetime.now() - obj.created_at > timedelta(hours=24):
+            return _ok(f"这条{label}创建已超过 24 小时，为安全起见不再自动撤销，请到页面手动处理。")
+        if obj.generated_doc_id:
+            doc = await ctx.db.get(Document, obj.generated_doc_id)
+            if doc and doc.status != DocStatus.DRAFT.value:
+                return _ok(f"这条{label}已进入文书流程，不能撤销。")
+            if doc:
+                obj.generated_doc_id = None
+                await ctx.db.flush()
+                await ctx.db.delete(doc)
         await ctx.db.delete(obj)
     elif entity == "hazard":
         obj = await ctx.db.get(Hazard, obj_id)
@@ -1454,7 +1699,7 @@ async def _query_hazards(ctx: ToolContext, args: dict) -> dict:
         return _ok("当前项目没有符合条件的隐患记录。")
     lines = [f"共 {total} 条隐患，最近 {len(rows)} 条："]
     for h in rows:
-        lines.append(f"{h.id}. {h.risk_status or ''}｜{(h.top1_risk or '')[:40]}｜{h.section or ''} {h.location or ''}｜{h.status}")
+        lines.append(f"{h.id}. {h.risk_status or ''}｜{(h.top1_risk or '')[:40]}｜{h.section or ''} {h.location or ''}｜{h.status}｜闭环阶段：{('已回复' if h.reply_doc_id else '已发整改通知' if (h.rectification_doc_id or h.rectify_doc_id) else '未发整改通知')}")
     return _ok("\n".join(lines), cards=[{
         "kind": "hazard", "id": h.id, "title": h.top1_risk or "隐患",
         "sub": " ".join(x for x in (h.section, h.location) if x) or "未填写位置",
@@ -1630,13 +1875,13 @@ async def list_conversation_summaries(db: AsyncSession, user_id: Any,
     latest_rows = (await db.execute(select(AgentConversationMessage).join(
         latest_ids, AgentConversationMessage.id == latest_ids.c.max_id,
     ).order_by(AgentConversationMessage.created_at.desc()).limit(capped_limit))).scalars().all()
-    if not latest_rows:
-        return []
     conversation_ids = [row.conversation_id for row in latest_rows]
-    rows = (await db.execute(select(AgentConversationMessage).where(
-        AgentConversationMessage.user_id == int(user_id),
-        AgentConversationMessage.conversation_id.in_(conversation_ids),
-    ).order_by(AgentConversationMessage.id.asc()))).scalars().all()
+    rows = []
+    if conversation_ids:
+        rows = (await db.execute(select(AgentConversationMessage).where(
+            AgentConversationMessage.user_id == int(user_id),
+            AgentConversationMessage.conversation_id.in_(conversation_ids),
+        ).order_by(AgentConversationMessage.id.asc()))).scalars().all()
     buckets: dict[str, list[AgentConversationMessage]] = {}
     for row in rows:
         buckets.setdefault(row.conversation_id, []).append(row)
@@ -1882,6 +2127,7 @@ async def clear_pending(db: AsyncSession, user_id: Any, tool: str | None = None,
 _TOOL_LABELS = {
     "create_work_record": "工作记录",
     "create_hazard": "安全隐患",
+    "create_hazard_rectification_doc": "隐患整改通知",
     "create_provform_doc": "省统表文书",
     "generate_document": "文书",
     "undo_last_action": "撤销操作",
@@ -1969,9 +2215,9 @@ async def list_pending(db: AsyncSession, user_id: Any,
 TOOLS: tuple[ToolSpec, ...] = (
     ToolSpec(
         "create_work_record",
-        "新建工作记录（巡视/旁站/验收/见证/待定）。用户描述现场情况、要求「记录一下/记一条」时用。"
+        "新建工作记录或平行检验记录（巡视/旁站/验收/见证/平行检验/起重机械安拆检查/待定）。用户描述现场情况、要求「记录一下/记一条」时用。"
         "record_type 必须优先使用用户明确说出的类型；图片/水印素材本身不能推断记录类型，类型不明时先澄清。",
-        {"record_type": "记录类型：巡视/旁站/验收/见证（用户未明确时必须先追问，不能因有图片默认巡视）",
+        {"record_type": "记录类型：巡视/旁站/验收/见证/平行检验/起重机械安拆检查（用户未明确时必须先追问，不能因有图片默认巡视）",
          "*work_content": "施工内容或现场情况",
          "section": "施工区域，如 3号楼二层", "location": "具体位置", "weather": "天气",
          "problems": "巡视发现的问题及处理情况原文；用户说「符合要求/无异常」时也必须原样传入（如 problems=符合要求），不要省略",
@@ -2006,8 +2252,29 @@ TOOLS: tuple[ToolSpec, ...] = (
         ("楼面积水还有碎石，有滑倒风险",),
     ),
     ToolSpec(
+        "create_hazard_rectification_doc",
+        "从当前项目已有的隐患主记录生成并关联 GDAQ30308 安全隐患整改通知；绝不能独立创建孤立通知单。",
+        {"*hazard_id": "当前项目的隐患记录编号", "deadline": "整改期限 YYYY-MM-DD（可省略）"},
+        "hazard_ai", "write", _create_hazard_rectification_doc,
+        ("给隐患 123 生成安全整改通知",),
+    ),
+    ToolSpec(
+        "create_hazard_reply_doc",
+        "从已有隐患整改提交生成 GDAQ20309 整改回复单；必须已有整改通知和真实整改影像/完成时间。",
+        {"*hazard_id": "当前项目的隐患记录编号", "rectify_desc": "整改完成情况（可省略，按真实整改记录生成）", "rechecker": "实际复查人（只有已完成复查时填写）"},
+        "hazard_ai", "write", _create_hazard_reply_doc,
+        ("给隐患 123 生成整改回复单",),
+    ),
+    ToolSpec(
+        "recheck_hazard",
+        "对已提交整改影像的隐患执行复查；必须处于待复查状态，结果合格才闭环。",
+        {"*hazard_id": "当前项目的隐患记录编号", "*passed": "是否合格 true/false", "remark": "复查意见"},
+        "hazard_ai", "write", _recheck_hazard,
+        ("复查隐患 123，合格",),
+    ),
+    ToolSpec(
         "create_provform_doc",
-        "新建省统表文书（11 类记录表：旁站/平行检验/巡视/监理通知单/安全隐患整改/验收/监理日志/监理月报/材料台账/危大巡视/安全监理日志）。",
+        "新建普通省统表文书（旁站/平行检验/巡视/监理通知单/验收/监理日志/监理月报/材料台账/危大巡视/安全监理日志）。安全隐患整改通知 GDAQ30308 必须通过 create_hazard_rectification_doc 从隐患主记录生成。",
         {"*form_code": "表式代码或表名，如 gd_b_215_tongzhi 或「监理工程师通知单」",
          "fields": "字段对象，键用表式字段 key（如 1_01/1_15）", "title": "文书标题（可省略）"},
         "work_record", "write", _create_provform_doc,

@@ -1,18 +1,27 @@
-"""Provision shared server DB access and copy service settings over SSH."""
+"""Copy live service settings and tunnel the live database URL over SSH."""
 from __future__ import annotations
 
 import json
-import secrets
 import subprocess
 import sys
 from pathlib import Path
 
 from dotenv import set_key
-from sqlalchemy.engine import URL
+from sqlalchemy.engine import make_url
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 LOCAL_DIR = BACKEND_DIR / ".local"
 MODEL_DIR = LOCAL_DIR / "models" / "bge-small-zh-v1.5"
+
+
+def forwarded_database_url(database_url: str) -> str:
+    """Route the live application's MySQL credentials through the SSH tunnel."""
+    production_url = make_url(database_url)
+    if production_url.get_backend_name() != "mysql" or not production_url.database:
+        raise RuntimeError("线上 DATABASE_URL 不是有效的 MySQL 数据库地址")
+    return production_url.set(
+        drivername="mysql+aiomysql", host="127.0.0.1", port=13308,
+    ).render_as_string(hide_password=False)
 
 # Values are captured directly into a private local file, never printed to logs.
 REMOTE_SETTINGS = '''
@@ -24,26 +33,10 @@ allowed = (
 )
 names = {"rtc_provider", "model_config_encryption_key", "allow_wechat_registration",
          "allow_public_registration", "public_registration_roles"}
-print(json.dumps({key.upper(): value for key, value in settings.model_dump().items()
-                  if key.startswith(allowed) or key in names}, default=str))
-'''
-
-REMOTE_PROVISION = '''
-import json
-import sys
-import pymysql
-from sqlalchemy.engine import make_url
-from app.config import settings
-password = json.load(sys.stdin)["password"]
-url = make_url(settings.database_url)
-connection = pymysql.connect(host=url.host, port=url.port or 3306,
-    user=url.username, password=url.password, charset="utf8mb4", autocommit=True)
-with connection.cursor() as cursor:
-    cursor.execute("CREATE USER IF NOT EXISTS 'rokid_local_dev'@'%%' IDENTIFIED BY %s", (password,))
-    cursor.execute("ALTER USER 'rokid_local_dev'@'%%' IDENTIFIED BY %s", (password,))
-    cursor.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON gdjl.* TO 'rokid_local_dev'@'%'")
-connection.close()
-print("Shared gdjl database access is ready through the R640 SSH tunnel.")
+values = {key.upper(): value for key, value in settings.model_dump().items()
+          if key.startswith(allowed) or key in names}
+values["PRODUCTION_DATABASE_URL"] = settings.database_url
+print(json.dumps(values, default=str))
 '''
 
 
@@ -100,16 +93,10 @@ def main() -> None:
     missing = [name for name in required if not values.get(name)]
     if missing:
         raise RuntimeError("Server service settings missing: " + ", ".join(missing))
-    password_file = LOCAL_DIR / "db-password.key"
-    if not password_file.exists():
-        password_file.write_text(secrets.token_urlsafe(36), encoding="utf-8")
-    password = password_file.read_text(encoding="utf-8").strip()
-    ssh_python(REMOTE_PROVISION, json.dumps({"password": password}))
-    values["LOCAL_DATABASE_URL"] = URL.create(
-        "mysql+aiomysql", username="rokid_local_dev", password=password,
-        host="127.0.0.1", port=13308, database="gdjl",
-        query={"charset": "utf8mb4"},
-    ).render_as_string(hide_password=False)
+    production_database_url = str(values.pop("PRODUCTION_DATABASE_URL", "")).strip()
+    if not production_database_url:
+        raise RuntimeError("线上服务未提供 DATABASE_URL，不能配置本地共享数据库")
+    values["LOCAL_DATABASE_URL"] = forwarded_database_url(production_database_url)
     # Preserve any other developer overrides; never import production DATABASE_URL/JWT keys.
     env_file = LOCAL_DIR / "backend.env"
     for name, value in values.items():
@@ -118,7 +105,7 @@ def main() -> None:
         text_value = str(value).lower() if isinstance(value, bool) else str(value)
         set_key(str(env_file), name, text_value)
     print("Real WeChat/AI settings synchronized to ignored .local/backend.env (values hidden).")
-    print("Database: shared server gdjl via the R640 SSH tunnel on localhost:13308.")
+    print("Database: live application MySQL via the R640 SSH tunnel on localhost:13308 (credentials hidden).")
     sync_embedding_model()
 
 

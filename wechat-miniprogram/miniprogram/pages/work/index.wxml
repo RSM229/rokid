@@ -41,6 +41,7 @@
           <view class="type">{{item.record_type}}记录 #{{item.id}}</view>
           <view class="status">{{item.status}}</view>
         </view>
+        <view wx:if="{{item.project_name}}" class="muted">{{item.project_name}}<text wx:if="{{item.project_mismatch}}"> · 水印项目与系统项目不一致</text></view>
         <view class="muted">{{item.section || '未填写区域'}} · {{item.location || '未填写位置'}}</view>
         <view wx:if="{{item.work_content}}" class="record-desc">{{item.work_content}}</view>
         <view class="muted">{{item.created_at}}</view>
@@ -106,6 +107,7 @@
           <view class="type">{{item.record_type}}记录 #{{item.id}}</view>
           <view class="status">{{item.status}}</view>
         </view>
+        <view wx:if="{{item.project_name}}" class="muted">{{item.project_name}}<text wx:if="{{item.project_mismatch}}"> · 水印项目与系统项目不一致</text></view>
         <view class="muted">{{item.section || '未填写区域'}} · {{item.location || '未填写位置'}}</view>
         <view wx:if="{{item.work_content}}" class="record-desc">{{item.work_content}}</view>
         <view class="muted">{{item.created_at}}</view>
@@ -155,6 +157,9 @@
       <!-- 基本信息 -->
       <view class="detail-section">
         <view class="detail-row"><text class="detail-label">状态</text><text class="detail-value status-tag {{detail.status === '已提交' ? 'ok' : ''}}">{{detail.status}}</text></view>
+        <view class="detail-row"><text class="detail-label">业务项目</text><text class="detail-value">{{detail.project_name || detail.station_project_name || '未填写'}}</text></view>
+        <view wx:if="{{detail.project_mismatch}}" class="detail-row"><text class="detail-label">水印项目</text><text class="detail-value">{{detail.watermark_project_name || '-'}}</text></view>
+        <view wx:if="{{detail.project_mismatch}}" class="form-choice-hint">记录归属当前选择的项目；水印项目仅作为证据保留。新建记录时需先在 Agent 内确认采用哪一组项目信息。</view>
         <view class="detail-row"><text class="detail-label">区域</text><text class="detail-value">{{detail.section || '未填写'}}</text></view>
         <view class="detail-row"><text class="detail-label">位置</text><text class="detail-value {{detail.location ? '' : 'detail-empty'}}">{{detail.location || '未填写（可在编辑记录中补充）'}}</text></view>
         <view class="detail-row"><text class="detail-label">创建时间</text><text class="detail-value">{{detail.created_at || '-'}}</text></view>
@@ -167,7 +172,7 @@
         <view class="detail-row"><text class="detail-label">巡视的工程部位</text><text class="detail-value">{{detail.section || '未填写'}}</text></view>
         <view class="detail-row"><text class="detail-label">施工单位</text><text class="detail-value">{{detail.construction_unit || '-'}}</text></view>
         <view class="detail-row"><text class="detail-label">巡视时间</text><text class="detail-value">{{detail.inspection_time_text || '-'}}</text></view>
-        <view class="detail-row"><text class="detail-label">巡视监理人员</text><text class="detail-value">{{detail.supervisor || '-'}}</text></view>
+        <view class="detail-row"><text class="detail-label">巡视监理人员</text><text class="detail-value">{{detail.inspector || '-'}}</text></view>
         <view class="detail-row"><text class="detail-label">问题及处理情况</text><text class="detail-value">{{detail.problem_text || '-'}}</text></view>
       </view>
 
@@ -183,6 +188,9 @@
       <view wx:if="{{detail.record_type === '旁站'}}" class="detail-section">
         <view class="detail-title">旁站信息</view>
         <view class="detail-row"><text class="detail-label">工程名称</text><text class="detail-value">{{detail.station_project_name || '-'}}</text></view>
+        <view class="detail-row"><text class="detail-label">施工单位</text><text class="detail-value">{{detail.construction_unit || '-'}}</text></view>
+        <view class="detail-row"><text class="detail-label">旁站部位</text><text class="detail-value">{{detail.prov_fields.section || detail.section || '-'}}</text></view>
+        <view class="detail-row"><text class="detail-label">关键工序</text><text class="detail-value">{{detail.prov_fields.station_process || '-'}}</text></view>
         <view class="detail-row"><text class="detail-label">旁站内容</text><text class="detail-value">{{detail.station_content || detail.work_content || '-'}}</text></view>
         <view class="detail-row"><text class="detail-label">旁站结论</text><text class="detail-value">{{detail.station_conclusion || '-'}}</text></view>
         <view class="detail-row"><text class="detail-label">开始时间</text><text class="detail-value">{{detail.station_start_time || '-'}}</text></view>
@@ -192,8 +200,16 @@
       <!-- 见证信息 -->
       <view wx:if="{{detail.record_type === '见证'}}" class="detail-section">
         <view class="detail-title">见证信息</view>
+        <view class="detail-row"><text class="detail-label">工程项目</text><text class="detail-value">{{detail.project_name || '-'}}</text></view>
+        <view class="detail-row"><text class="detail-label">施工单位</text><text class="detail-value">{{detail.construction_unit || '-'}}</text></view>
         <view class="detail-row"><text class="detail-label">材料名称</text><text class="detail-value">{{detail.witness_material_name || '-'}}</text></view>
         <view class="detail-row"><text class="detail-label">规格型号</text><text class="detail-value">{{detail.witness_material_spec || '-'}}</text></view>
+        <view class="detail-row"><text class="detail-label">取样数量</text><text class="detail-value">{{detail.prov_fields.quantity || detail.witness_quantity || '-'}} {{detail.prov_fields.unit || detail.witness_unit || ''}}</text></view>
+        <view class="detail-row"><text class="detail-label">取样部位</text><text class="detail-value">{{detail.prov_fields.section || detail.section || '-'}}</text></view>
+        <view class="detail-row"><text class="detail-label">生产厂家</text><text class="detail-value">{{detail.prov_fields.manufacturer || '-'}}</text></view>
+        <view class="detail-row"><text class="detail-label">取样人</text><text class="detail-value">{{detail.prov_fields.sampler || detail.supervisor || '-'}}</text></view>
+        <view class="detail-row"><text class="detail-label">合格证/报告编号</text><text class="detail-value">{{detail.prov_fields.cert_no || detail.witness_cert_no || '-'}}</text></view>
+        <view class="detail-row"><text class="detail-label">见证结论</text><text class="detail-value">{{detail.prov_fields.acceptance_result || detail.witness_accept_result || '-'}}</text></view>
         <view class="detail-row"><text class="detail-label">工作内容</text><text class="detail-value">{{detail.work_content || '-'}}</text></view>
       </view>
 

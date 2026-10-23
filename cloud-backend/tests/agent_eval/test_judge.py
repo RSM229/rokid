@@ -323,11 +323,11 @@ def test_catalog_shape_matches_production():
     assert "（无参数）" in catalog             # undo_last_action 无参数
 
 
-def test_all_11_tools_extracted():
+def test_all_agent_tools_extracted():
     tools = extract_tools()
-    assert len(tools) == 11, f"应提取到 11 个工具，实际 {len(tools)}"
+    assert len(tools) == 12, f"应提取到 12 个工具，实际 {len(tools)}"
     names = {t["name"] for t in tools}
-    assert names == {"create_work_record", "create_hazard", "create_provform_doc",
+    assert names == {"create_work_record", "create_hazard", "create_hazard_rectification_doc", "create_provform_doc",
                      "generate_document", "undo_last_action", "query_work_records",
                      "query_hazards", "query_documents", "query_regulation",
                      "query_weather", "navigate"}

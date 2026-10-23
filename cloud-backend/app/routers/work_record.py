@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Q
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_, update
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Any, Optional
 from datetime import datetime, date
 
 from app.db import get_db
@@ -54,7 +54,8 @@ async def auto_create_record_document(
     - 「待定」记录不生成（类型未定）；旁站未结束（无结束时间）也不生成，
       待 `/station/{id}` 结束时补；
     - 优先走 `form_doc.generate_form_from_record`（渲染省统表 docx 模板并落库）；
-      渲染失败自动**降级**为普通文书（无模板也仍能在文书列表/台账中看到并导出 PDF）；
+      表式必填项不足时**不生成残缺文书**，交由 Agent 继续补录；
+      技术性渲染失败才降级为普通文书；
     - 任何异常都只记日志，**绝不让工作记录的创建/提交失败**。
     """
     # 工作记录与正式表单解耦：业务入口默认只创建记录。保留该函数供
@@ -85,13 +86,16 @@ async def auto_create_record_document(
             doc.attached_images = photos
         return doc
     except Exception as exc:  # noqa: BLE001
+        if isinstance(exc, HTTPException) and exc.status_code == 422:
+            logger.info("工作记录尚未满足表式必填项，暂不生成文书：%s", exc.detail)
+            return None
         logger.warning("省统表文书生成失败，降级为普通文书：%s", exc)
 
     # 降级：不套模板，仍生成一份可归档文书
     try:
         from app.routers.form_doc import _content_from_record
 
-        content = _content_from_record(record, user)
+        content = _content_from_record(record, user, project)
     except Exception:  # noqa: BLE001
         content = {"section": record.section or "", "location": record.location or ""}
     from app.services.record_fields import project_fields
@@ -1305,32 +1309,46 @@ async def list_work_records(
     query = query.order_by(WorkRecord.created_at.desc())
     result = await db.execute(query)
     records = result.scalars().all()
+    project_ids = {item.project_id for item in records if item.project_id is not None}
+    project_rows = (await db.execute(
+        select(Project).where(Project.id.in_(project_ids))
+    )).scalars().all() if project_ids else []
+    projects_by_id = {item.id: item for item in project_rows}
+    from app.services.record_fields import business_record_fields
+
+    items = []
+    for r in records:
+        business = business_record_fields(r, projects_by_id.get(r.project_id))
+        items.append({
+            "id": r.id,
+            "record_type": r.record_type,
+            "status": r.status,
+            "project_id": r.project_id,
+            "project_name": business.get("business_project_name") or "",
+            "system_project_name": business.get("system_project_name") or "",
+            "project_mismatch": bool(business.get("project_mismatch")),
+            "construction_unit": business.get("construction_unit") or "",
+            "section": r.section,
+            "location": r.location,
+            "work_content": r.work_content,
+            "weather": r.weather,
+            "inspection_remark": r.inspection_remark,
+            "acceptance_guide_ref": r.acceptance_guide_ref,
+            "acceptance_result": r.acceptance_result,
+            "generated_doc_id": r.generated_doc_id,
+            "content_json": r.content_json,
+            "witness_material_name": r.witness_material_name,
+            "witness_material_spec": r.witness_material_spec,
+            "witness_report_path": r.witness_report_path,
+            "station_project_name": business.get("business_project_name") or r.station_project_name,
+            "station_process": r.station_process,
+            "station_start_time": r.station_start_time.isoformat() if r.station_start_time else None,
+            "station_end_time": r.station_end_time.isoformat() if r.station_end_time else None,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        })
     return {
         "total": len(records),
-        "records": [
-            {
-                "id": r.id,
-                "record_type": r.record_type,
-                "status": r.status,
-                "section": r.section,
-                "location": r.location,
-                "work_content": r.work_content,
-                "weather": r.weather,
-                "inspection_remark": r.inspection_remark,
-                "acceptance_guide_ref": r.acceptance_guide_ref,
-                "acceptance_result": r.acceptance_result,
-                "generated_doc_id": r.generated_doc_id,
-                "content_json": r.content_json,
-                "witness_material_name": r.witness_material_name,
-                "witness_material_spec": r.witness_material_spec,
-                "witness_report_path": r.witness_report_path,
-                "station_project_name": r.station_project_name,
-                "station_start_time": r.station_start_time.isoformat() if r.station_start_time else None,
-                "station_end_time": r.station_end_time.isoformat() if r.station_end_time else None,
-                "created_at": r.created_at.isoformat() if r.created_at else None,
-            }
-            for r in records
-        ],
+        "records": items,
     }
 
 
@@ -1532,11 +1550,21 @@ async def get_work_record(
         select(User.real_name).where(User.id == record.creator_id)
     )).scalar_one_or_none()
     # 系统栏（工程项目名称/施工单位）：按统表表头口径回填，详情页与导出文书一致
-    from app.services.record_fields import project_fields
+    from app.services.record_fields import business_record_fields, project_fields
     project = (await db.execute(
         select(Project).where(Project.id == record.project_id)
     )).scalar_one_or_none()
     pj = project_fields(project)
+    business = business_record_fields(record, project)
+    confirmed = (record.content_json or {}).get("confirmed_fields") or (record.content_json or {}).get("field_resolutions") or {}
+    prov = (record.content_json or {}).get("prov_fields") or {}
+    def confirmed_value(key: str, fallback: Any = None) -> Any:
+        value = confirmed.get(key) if isinstance(confirmed, dict) else None
+        if isinstance(value, dict):
+            value = value.get("value")
+        if value in (None, "") and isinstance(prov, dict):
+            value = prov.get(key)
+        return fallback if value in (None, "") else value
     # 兜底：从统一媒体表取关联到本记录的图片，防止旧数据或同步遗漏导致详情页看不到照片。
     media_result = await db.execute(
         select(MediaRecord).where(
@@ -1571,8 +1599,20 @@ async def get_work_record(
         "record_type": record.record_type,
         "status": record.status,
         "supervisor": creator_name or None,
-        "project_name": pj.get("project_name") or None,
-        "construction_unit": pj.get("construction_unit") or None,
+        "project_name": confirmed_value("project_name", business.get("business_project_name") or pj.get("project_name")) or None,
+        "business_project_name": business.get("business_project_name") or None,
+        "system_project_name": business.get("system_project_name") or pj.get("project_name") or None,
+        "watermark_project_name": business.get("watermark_project_name") or None,
+        "project_mismatch": bool(business.get("project_mismatch")),
+        "business_field_conflicts": business.get("field_conflicts") or {},
+        "business_field_candidates": business.get("field_candidates") or {},
+        "construction_unit": confirmed_value("construction_unit", business.get("construction_unit") or pj.get("construction_unit")) or None,
+        "owner_unit": business.get("owner_unit") or None,
+        "supervision_unit": business.get("supervision_unit") or pj.get("supervision_unit") or None,
+        "supervision_org": business.get("supervision_org") or pj.get("supervision_org") or None,
+        # The record creator is an audit actor, not the inspector identified by
+        # the watermark or confirmed in the Agent flow.
+        "inspector": business.get("inspector") or None,
         "section": record.section,
         "location": record.location,
         "weather": record.weather,
@@ -1595,7 +1635,9 @@ async def get_work_record(
         "witness_accept_result": record.witness_accept_result,
         "witness_photos": witness_photos,
         "witness_report_path": record.witness_report_path,
-        "station_project_name": record.station_project_name,
+        "station_project_name": business.get("business_project_name") or record.station_project_name,
+        "prov_fields": prov,
+        "form_fields": ((record.content_json or {}).get("form_requirements") or {}).get("fields") or [],
         "record_date": business_date(record).isoformat(),
         "worker_count": record.worker_count,
         "inspection_start_time": record.inspection_start_time.isoformat() if record.inspection_start_time else None,
@@ -1708,8 +1750,11 @@ async def update_work_record(
     if linked_doc:
         from app.routers.form_doc import _content_from_record, _record_attach_photos
         from app.services.record_fields import project_fields
-        content = _content_from_record(record, await db.get(User, record.creator_id))
-        for key, value in project_fields(await db.get(Project, record.project_id)).items():
+        project = await db.get(Project, record.project_id)
+        content = _content_from_record(
+            record, await db.get(User, record.creator_id), project
+        )
+        for key, value in project_fields(project).items():
             if not str(content.get(key) or "").strip():
                 content[key] = value
         content["doc_number"] = (linked_doc.content or {}).get("doc_number", "")

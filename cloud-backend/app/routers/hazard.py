@@ -17,6 +17,7 @@ from app.models.hazard import Hazard, HazardStatus
 from app.models.image import ImageRecord
 from app.models.rectification import RectificationRecord
 from app.models.document import Document, DocType, DocStatus
+from app.models.security_audit import SecurityAudit
 from app.models.miniprogram import MediaRecord, MediaType
 from app.routers.auth import (
     get_current_user,
@@ -30,6 +31,7 @@ from app.services.media_validation import assert_valid_image
 from app.services.watermark_service import apply_watermark_to_image
 from app.services.form_registry import FORM_BY_CODE
 from app.services.form_renderer import render_form
+from app.services.form_contracts import contract_for
 
 router = APIRouter()
 
@@ -878,20 +880,23 @@ async def recheck_hazard(
     if hazard.status != HazardStatus.RECHECK_PENDING.value:
         raise HTTPException(status_code=409, detail="仅待复查隐患可以执行复查")
 
+    # 复查只能针对真实整改提交，不能仅凭状态或口头参数闭环。
+    rect_result = await db.execute(
+        select(RectificationRecord).where(RectificationRecord.hazard_id == hazard_id)
+    )
+    rect = rect_result.scalars().first()
+    if not rect or not rect.rectified_at or not (rect.rectification_image_path or hazard.rectification_image_path):
+        raise HTTPException(status_code=409, detail="尚未提交整改完成时间和整改影像，不能复查")
+
     if req.passed:
         hazard.status = HazardStatus.CLOSED.value
     else:
         hazard.status = HazardStatus.REJECTED.value
 
     # 更新整改记录
-    rect_result = await db.execute(
-        select(RectificationRecord).where(RectificationRecord.hazard_id == hazard_id)
-    )
-    rect = rect_result.scalars().first()
-    if rect:
-        rect.recheck_passed = req.passed
-        rect.recheck_remark = req.remark
-        rect.recheck_at = datetime.now()
+    rect.recheck_passed = req.passed
+    rect.recheck_remark = req.remark
+    rect.recheck_at = datetime.now()
 
     await db.commit()
 
@@ -1035,6 +1040,8 @@ async def attach_rectification_media(
     hazard = hazard_result.scalar_one_or_none()
     if not hazard:
         raise HTTPException(status_code=404, detail="隐患记录不存在")
+    if not (hazard.rectification_doc_id or hazard.rectify_doc_id):
+        raise HTTPException(status_code=409, detail="请先生成整改通知单，再提交整改影像")
 
     media_result = await db.execute(
         select(MediaRecord).where(
@@ -1129,16 +1136,42 @@ async def create_rectification_doc(
 
     # 自动填充真实项目资料
     project = await db.get(Project, hazard.project_id)
+    form_code = "gdaq_30308_yinhuan"
+    from app.services.form_contracts import contract_for
+
+    project_name = project.name if project else ""
+    construction_unit = getattr(project, "construction_unit", None) or "" if project else ""
+    supervision_org = getattr(project, "supervision_org", None) or "" if project else ""
+    problem_text = "；".join(x for x in [hazard.top1_risk or "", "；".join(hazard.evidence or [])] if x)
+    requirement = "；".join(hazard.recheck_suggestion or []) or "请立即组织整改，并在完成后提交整改回复申请复查"
     content = {
         "project_name": project.name if project else "",
         "construction_unit": getattr(project, "construction_unit", None) or "",
         "supervision_org": getattr(project, "supervision_org", None) or "",
-        "doc_number": f"GD-B-{hazard_id:06d}",
+        "doc_number": f"GDAQ30308-{hazard_id:06d}",
         "date": datetime.now().strftime("%Y-%m-%d"),
         "hazard_id": hazard_id,
+        "form_code": form_code,
+        "form_contract_version": contract_for(form_code)["version"],
+        "field_sources": {
+            "project_name": "project", "construction_unit": "project",
+            "supervision_org": "project", "date": "system_date",
+            "to_unit": "project", "subject": "hazard", "part": "hazard",
+            "problems": "hazard", "requirement": "hazard_recheck_suggestion",
+            "deadline": "user_or_unset", "reply_requirement": "workflow_default",
+            "receipt_date": "pending_actual_receipt",
+        },
         "hazard_description": hazard.top1_risk or "",
         "content": hazard.top1_risk or "",
-        "problems": hazard.top1_risk or "",
+        "subject": f"安全隐患整改（{hazard.top1_risk or hazard_id}）",
+        "to_unit": construction_unit,
+        "cc_unit": "",
+        "part": f"{hazard.section or ''} {hazard.location or ''}".strip(),
+        "problems": problem_text,
+        "requirement": requirement,
+        "reply_requirement": "整改完成后提交整改回复，并申请监理复查",
+        "penalty_basis": "",
+        "receipt_date": "",
         "evidence": hazard.evidence or [],
         "recheck_suggestion": hazard.recheck_suggestion or [],
         "section": hazard.section or "",
@@ -1161,6 +1194,7 @@ async def create_rectification_doc(
         creator_id=user.id,
         status=DocStatus.DRAFT.value,
         attached_images=[hazard.image_path] if hazard.image_path else [],
+        form_code=form_code,
     )
     db.add(doc)
     await db.flush()
@@ -1177,6 +1211,12 @@ async def create_rectification_doc(
         deadline=parsed_deadline,
     )
     db.add(rect)
+    db.add(SecurityAudit(
+        user_id=user.id,
+        username=user.username,
+        action="hazard_rectification_doc_create",
+        detail=json.dumps({"hazard_id": hazard_id, "doc_id": doc.id, "form_code": form_code}, ensure_ascii=False),
+    ))
     await db.commit()
     await db.refresh(doc)
 
@@ -1316,24 +1356,29 @@ async def create_reply_doc(
                 "idempotent_replay": True,
             }
 
+    # 回复单代表施工单位已提交整改，必须有通知单、整改时间和真实整改影像。
+    # 没有这些证据时只能继续补充，不能生成一张看似完成的回复单。
+    if not (hazard.rectification_doc_id or hazard.rectify_doc_id):
+        raise HTTPException(status_code=409, detail="请先生成安全隐患整改通知单")
+
     project = await db.get(Project, project_id)
     rect_result = await db.execute(
         select(RectificationRecord).where(RectificationRecord.hazard_id == hazard_id)
     )
     rect = rect_result.scalars().first()
+    if not rect or not rect.rectified_at or not (rect.rectification_image_path or hazard.rectification_image_path):
+        raise HTTPException(status_code=409, detail="请先提交整改完成时间和整改影像，再生成整改回复单")
 
     # 整改完成情况：优先 body 传入，其次按整改记录推导
     rectify_desc = req.rectify_desc or ""
     if not rectify_desc:
-        if rect and rect.rectified_at:
-            rectify_desc = f"施工单位已于 {rect.rectified_at:%Y年%m月%d日} 完成整改并提交整改影像"
-        else:
-            rectify_desc = "已完成整改，详见整改后影像"
+        rectify_desc = f"施工单位已于 {rect.rectified_at:%Y年%m月%d日} 完成整改并提交整改影像"
     recheck_conclusion = ""
     if rect and rect.recheck_passed is not None:
         recheck_conclusion = "合格" if rect.recheck_passed else "不合格"
     recheck_date = rect.recheck_at.strftime("%Y-%m-%d") if rect and rect.recheck_at else ""
-    rechecker = req.rechecker or user.real_name
+    # 未发生复查时不得把当前操作人冒充复查人；只有明确传入且已有复查结果才写入。
+    rechecker = (req.rechecker or "") if rect and rect.recheck_at else ""
 
     content_text = (
         f"隐患描述：{hazard.top1_risk or ''}\n"
@@ -1345,15 +1390,27 @@ async def create_reply_doc(
         "project_name": project.name if project else "",
         "doc_number": f"GDAQ2030309-{hazard_id:05d}",
         "date": datetime.now().strftime("%Y-%m-%d"),
+        "reply_date": datetime.now().strftime("%Y-%m-%d"),
         "hazard_id": hazard_id,
+        "to_unit": getattr(project, "supervision_org", None) or "",
         "part": f"{hazard.section or ''} {hazard.location or ''}".strip(),
         "hazard_desc": hazard.top1_risk or "",
         "rectify_desc": rectify_desc,
         "rectify_image": hazard.rectification_image_path or "",
+        "finish_date": rect.rectified_at.strftime("%Y-%m-%d") if rect and rect.rectified_at else "",
         "recheck_date": recheck_date,
         "recheck_conclusion": recheck_conclusion,
         "recheck_remark": rect.recheck_remark if rect else "",
         "rechecker": rechecker,
+        "form_contract_version": contract_for("gdaq_30309_huifu")["version"],
+        "field_sources": {
+            "reply_date": "system_date", "to_unit": "project",
+            "part": "hazard", "hazard_desc": "hazard",
+            "rectify_desc": "rectification_record_or_user",
+            "rectify_image": "rectification_record", "recheck_date": "rectification_record",
+            "recheck_conclusion": "rectification_record", "recheck_remark": "rectification_record",
+            "rechecker": "actual_recheck_user_or_unset",
+        },
         "content": content_text,
         "problems": hazard.top1_risk or "",
     }

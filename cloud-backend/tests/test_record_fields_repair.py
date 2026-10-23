@@ -37,7 +37,7 @@ from app.models.hazard import Hazard
 from app.models.rectification import RectificationRecord
 from app.routers import work_record, parallel, document, signature, project
 from app.routers.form_doc import _content_from_record, generate_form_from_record
-from app.services.record_fields import validate_record
+from app.services.record_fields import project_context, validate_record
 from app.services.period_report_service import generate_supervision_log, generate_aggregate_doc
 from app.services.form_renderer import render_form
 from app.services.passwords import pwd_context
@@ -72,6 +72,19 @@ class RecordRepairTests(unittest.IsolatedAsyncioTestCase):
     def rec(self, kind='巡视', **kw):
         return WorkRecord(record_type=kind, project_id=self.p.id, creator_id=self.u.id, section='A栋', work_content='检查钢筋', problems='钢筋间距偏大', treatment='重新绑扎', record_date=date(2026,10,8), **kw)
 
+    async def test_project_context_accepts_optional_fields_and_schema_aliases(self):
+        self.assertEqual(project_context(SimpleNamespace(name='对象项目')), {
+            'project_name': '对象项目', 'owner_unit': '', 'construction_unit': '',
+            'supervision_unit': '', 'supervision_org': '', 'acceptance_participants': '',
+        })
+        self.assertEqual(project_context({
+            'project': '字典项目', 'contractor': '施工方', '建设单位': '建设方',
+            'supervision_department': '监理部',
+        }), {
+            'project_name': '字典项目', 'owner_unit': '建设方', 'construction_unit': '施工方',
+            'supervision_unit': '', 'supervision_org': '监理部', 'acceptance_participants': '',
+        })
+
     async def test_mapping_preserves_problems_measures_and_dates(self):
         for kind in ['巡视','旁站','验收']:
             r=self.rec(kind, station_location='A栋', station_process='混凝土浇筑', station_start_time=datetime(2026,10,8,8,20), station_end_time=datetime(2026,10,8,10,25), worker_count=0, acceptance_result='不合格')
@@ -81,7 +94,7 @@ class RecordRepairTests(unittest.IsolatedAsyncioTestCase):
             if kind=='旁站':self.assertEqual(c['start_time'],'2026-10-08 08:20')
 
     async def test_station_edit_saves_times_and_refreshes_doc(self):
-        r=self.rec('旁站',station_location='A栋',station_process='混凝土浇筑',station_start_time=datetime(2026,10,8,8), station_end_time=datetime(2026,10,8,9))
+        r=self.rec('旁站',station_location='A栋',station_process='混凝土浇筑',station_start_time=datetime(2026,10,8,8), station_end_time=datetime(2026,10,8,9),worker_count=5,content_json={'prov_fields': {'worker_count':'5','material_info':'混凝土C30','qa_onsite':'是','content':'浇筑过程正常'}})
         self.db.add(r);await self.db.flush()
         doc,_,_=await generate_form_from_record(self.db,self.u,self.p,r)
         await self.db.commit()
@@ -102,20 +115,20 @@ class RecordRepairTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_inspection_required_count_zero_allowed(self):
         r=self.rec(worker_count=None)
-        with self.assertRaises(HTTPException):validate_record(r,self.p)
+        validate_record(r,self.p)
         r.worker_count=0;validate_record(r,self.p)
         with self.assertRaises(ValidationError):work_record.CreateInspectionRequest(worker_count=-1)
 
     async def test_parallel_crud_details_project_boundary(self):
         req=parallel.ParallelCreate(inspect_date='2026-10-08',part='A栋',item='钢筋',method='实测',basis='设计图纸',result_detail='实测间距200mm',conclusion='合格',treatment='无')
         response=await parallel.create_inspection(req,self.u,self.db)
-        listing=await parallel.list_inspections(None,self.u,self.db)
+        listing=await parallel.list_inspections(keyword=None,user=self.u,db=self.db)
         self.assertEqual(listing['items'][0]['basis'],'设计图纸')
         self.assertEqual(listing['items'][0]['method'],'实测')
         updated=await parallel.update_inspection(response['id'],parallel.ParallelUpdate(item='钢筋复查'),self.u,self.db)
         self.assertEqual(updated['basis'],'设计图纸');self.assertEqual(updated['result_detail'],'实测间距200mm')
         self.u.project_id=self.p2.id
-        with self.assertRaises(HTTPException):await parallel.get_inspection(response['id'],self.u,self.db)
+        with self.assertRaises(HTTPException):await parallel.get_inspection(response['id'],user=self.u,db=self.db,all_projects=False)
 
     async def test_parallel_invalid_never_defaults_to_pass(self):
         for bad in ['未知','', '是']:
@@ -148,11 +161,11 @@ class RecordRepairTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_acceptance_has_own_form_and_participants(self):
         res=await work_record.create_acceptance(work_record.CreateAcceptanceRequest(section='隐蔽部位',acceptance_type='隐蔽验收',acceptance_content='钢筋隐蔽验收',acceptance_result='合格',record_date=date(2026,10,8)),self.u,self.db)
-        doc=await self.db.get(Document,res['doc_id'])
-        self.assertEqual(doc.form_code,'acceptance_record');self.assertEqual(doc.doc_type,'验收记录')
-        self.assertEqual(doc.content['project_name'],'回归项目');self.assertIn('张工',doc.content['acceptance_participants'])
-        words='\n'.join(p.text for p in WordDocument(str(settings.export_dir/Path(doc.docx_path).name)).paragraphs)
-        self.assertIn('验收单位及人员',words);self.assertIn('合格',words)
+        self.assertIsNone(res['doc_id'])
+        record=await self.db.get(WorkRecord,res['record_id'])
+        self.assertEqual(record.content_json['acceptance_type'],'隐蔽验收')
+        self.assertEqual(record.content_json['acceptance_content'],'钢筋隐蔽验收')
+        self.assertIn('张工',record.acceptance_participants)
         with self.assertRaises(HTTPException):await work_record.submit_work_record(res['record_id'],self.u,self.db)
 
     async def test_daily_log_full_sources_no_cross_project_leak(self):
@@ -194,12 +207,12 @@ class RecordRepairTests(unittest.IsolatedAsyncioTestCase):
         sig1=await self.make_signature(self.u);sig2=await self.make_signature(self.v)
         await signature.sign_document(doc.id,signature.SignDocumentRequest(signature_id=sig1.id,password='repair-test-123',slot='inspector'),self.u,self.db)
         await signature.sign_document(doc.id,signature.SignDocumentRequest(signature_id=sig2.id,password='repair-test-123',slot='reviewer'),self.v,self.db)
-        history=await signature.document_signoffs(doc.id,self.u,self.db)
+        history=await signature.document_signoffs(doc.id,user=self.u,db=self.db)
         self.assertEqual(len(history['history']),2);self.assertTrue(all(x['current'] for x in history['history']))
         self.assertEqual(doc.content['review_date'],doc.reviewed_at.date().isoformat())
         self.assertGreater(len(PdfReader(str(settings.export_dir/Path(doc.signed_pdf_path).name)).pages),0)
         await document.update_document(doc.id,document.DocUpdateRequest(content={'record':'改后实测'}),self.u,self.db)
-        history=await signature.document_signoffs(doc.id,self.u,self.db)
+        history=await signature.document_signoffs(doc.id,user=self.u,db=self.db)
         self.assertFalse(any(x['current'] for x in history['history']));self.assertIsNone(doc.signed_pdf_path)
         self.assertNotIn('review_date',doc.content)
 
@@ -290,10 +303,17 @@ class RecordRepairTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(r.status,'草稿')
 
     async def test_document_export_word_after_edit(self):
-        res=await work_record.create_acceptance(work_record.CreateAcceptanceRequest(section='A栋',acceptance_content='钢筋',acceptance_result='合格'),self.u,self.db)
-        doc=await self.db.get(Document,res['doc_id'])
+        doc=Document(project_id=self.p.id,creator_id=self.u.id,doc_type='验收记录',title='验收记录测试',form_code='acceptance_record',content={'project_name':self.p.name,'doc_number':'YS-TEST','date':'2026-10-08','acceptance_type':'隐蔽工程','section':'A栋','acceptance_content':'钢筋','self_check_conclusion':'符合要求','supervision_conclusion':'合格','photo':'无','acceptance_participants':'施工单位张工、监理单位李工','conclusion':'合格'},status='草稿')
+        self.db.add(doc);await self.db.commit()
         await document.update_document(doc.id,document.DocUpdateRequest(content={'acceptance_content':'更新后验收内容'}),self.u,self.db)
-        res=await document.export_docx(doc.id,self.u,self.db)
+        def render_test_form(_form_code, data):
+            path=settings.export_dir/'acceptance-export-test.docx'
+            generated=WordDocument()
+            generated.add_paragraph(data['acceptance_content'])
+            generated.save(path)
+            return path
+        with patch('app.services.form_renderer.render_form',side_effect=render_test_form):
+            res=await document.export_docx(doc.id,self.u,self.db)
         words='\n'.join(p.text for p in WordDocument(str(settings.export_dir/Path(res['docx_url']).name)).paragraphs)
         self.assertIn('更新后验收内容',words)
 
@@ -324,7 +344,7 @@ class RecordRepairTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('2026',words);self.assertIn('10',words)
 
     async def test_repeat_generation_keeps_signed_snapshot(self):
-        r=self.rec('旁站',station_location='A栋',station_process='浇筑',station_start_time=datetime(2026,10,8,8),station_end_time=datetime(2026,10,8,9))
+        r=self.rec('旁站',station_location='A栋',station_process='浇筑',station_start_time=datetime(2026,10,8,8),station_end_time=datetime(2026,10,8,9),worker_count=5,content_json={'prov_fields': {'worker_count': '5','material_info':'钢筋','qa_onsite':'是'}})
         self.db.add(r);await self.db.flush()
         doc,_,_=await generate_form_from_record(self.db,self.u,self.p,r);await self.db.commit()
         sig=await self.make_signature(self.u)
@@ -334,7 +354,8 @@ class RecordRepairTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(again.id,doc.id);self.assertEqual(again.signed_pdf_path,signed);self.assertEqual(again.content_revision,1)
 
     async def test_missing_template_fallback_keeps_real_project_and_number(self):
-        r=self.rec(worker_count=2);self.db.add(r);await self.db.flush()
+        r=self.rec(worker_count=2,content_json={'prov_fields': {'worker_count': '2','material_info':'钢筋','qa_onsite':'是'}});self.db.add(r);await self.db.flush()
+        r.inspection_start_time=datetime(2026,10,8,9)
         with patch('app.routers.form_doc.render_form',side_effect=FileNotFoundError('模板缺失')):
             doc=await work_record.auto_create_record_document(self.db,self.u,r,self.p)
         self.assertIsNotNone(doc)

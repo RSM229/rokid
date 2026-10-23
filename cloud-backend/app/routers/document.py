@@ -594,8 +594,7 @@ async def export_pdf(
             except Exception:
                 pass
 
-    # 生成 PDF：优先与 Word 同源（省统表模板渲染 docx → 转换 PDF），失败回退自绘
-    # （监理日志 GD-B-220 也统一走模板版式，不再使用自绘日报版式）
+    # Generate the PDF from the exact DOCX exposed by the Word download path.
     pdf_filename = f"doc_{doc.id}_{doc.doc_type}.pdf"
     pdf_path = settings.export_dir / pdf_filename
     rendered = False
@@ -610,9 +609,15 @@ async def export_pdf(
         try:
             from app.services.docx2pdf import convert_docx_to_pdf
             from app.services.form_renderer import render_form
-            docx_out = render_form(code, _merge_doc_images(doc))
+            docx_out = None
+            if doc.docx_path:
+                candidate = settings.export_dir / doc.docx_path.replace("/exports/", "")
+                if candidate.exists():
+                    docx_out = candidate
+            if docx_out is None:
+                docx_out = render_form(code, _merge_doc_images(doc))
+                doc.docx_path = f"/exports/{docx_out.name}"
             convert_docx_to_pdf(str(docx_out), str(pdf_path))
-            docx_out.unlink(missing_ok=True)
             rendered = True
         except Exception:
             import logging
@@ -620,6 +625,14 @@ async def export_pdf(
                 "省统表 docx→PDF 转换失败，回退自绘 PDF（doc_id=%s, form=%s）", doc.id, code
             )
     if not rendered:
+        # A known Word form must never silently fall back to a different
+        # hand-drawn PDF layout. The caller can retry once Office/LibreOffice
+        # is available, and the DOCX remains downloadable meanwhile.
+        if code:
+            raise HTTPException(
+                status_code=501,
+                detail="该 Word 表式暂时无法转换为同版式 PDF，请安装/启动 Microsoft Word 或 LibreOffice 后重试",
+            )
         generate_pdf(doc, str(pdf_path))
 
     # 更新文书 PDF 路径
@@ -651,6 +664,7 @@ async def export_docx(
         raise HTTPException(400, "该文书暂无Word表式，请使用PDF导出")
     output = render_form(code, _merge_doc_images(doc))
     doc.docx_path = f"/exports/{output.name}"
+    doc.pdf_path = None
     await db.commit()
     return {"doc_id": doc.id, "docx_url": doc.docx_path}
 

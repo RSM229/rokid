@@ -688,17 +688,44 @@ SCHEMAS: dict[str, dict] = {
         "version": SCHEMA_VERSION,
         "sections": [
             _sec("基本信息",
-                 _f("check_date", "检查日期", "date", True),
-                 _f("machine_name", "起重机械名称及型号", "text", True),
-                 _f("work_type", "作业类别", "select", True, ["安装", "拆卸", "顶升/加节"]),
-                 _f("install_unit", "安装拆卸单位", "text", True)),
-            _sec("检查内容",
-                 _f("notice_status", "安拆告知及方案审批情况", "textarea", True),
-                 _f("worker_cert", "作业人员持证上岗情况", "textarea", True),
-                 _f("site_check", "现场检查情况", "textarea", True),
+                 _f("project_name", "工程名称", "text", True),
+                 _f("check_date", "作业日期", "date", True),
+                 _f("weather", "天气", "text"),
+                 _f("wind", "风力", "text"),
+                 _f("machine_name", "起重机械名称", "text", True),
+                 _f("machine_number", "自编号", "text", True),
+                 _f("machine_model", "型号", "text", True),
+                 _f("installation_location", "安装位置", "text", True),
+                 _f("work_type", "安装类别", "select", True, ["安装", "顶升/加节/附墙", "拆卸"]),
+                 _f("general_contractor", "施工总承包单位", "text", True),
+                 _f("user_unit", "使用单位", "text", True),
+                 _f("install_unit", "安装/拆卸单位", "text", True),
+                 _f("inspection_time", "监理检查时间", "datetime", True)),
+                 _sec("安拆前条件核查",
+                 _f("review_submission_status", "安装/拆卸前是否已履行监理报审手续", "select", True, ["有", "没有"]),
+                 _f("filing_status", "安装/拆卸前是否已办理告知手续", "select", True, ["有", "没有"]),
+                 _f("general_contractor_staff", "施工总承包单位专职安全生产管理人员到位情况", "textarea", True),
+                 _f("user_unit_staff", "使用单位专职设备管理人员、专职安全生产管理人员到位情况", "textarea", True),
+                 _f("install_unit_staff", "安装/拆卸单位专业技术人员、专职安全生产管理人员到位情况", "textarea", True),
+                 _f("safety_technical_disclosure", "安装/拆卸单位安全技术交底情况", "textarea", True)),
+                 _sec("作业过程检查",
+                 _f("operator_qualification", "安装/拆卸特种作业人员到位情况：是否与方案相符", "textarea", True),
+                 _f("certificate_match", "证书与人员是否相符", "select", True, ["符合", "不符合"]),
+                 _f("special_plan", "安装/拆卸准备情况是否符合专项方案要求", "textarea", True),
+                 _f("emergency_preparation", "安装/拆卸应急救援准备情况", "textarea", True),
+                 _f("warning_measures", "安装/拆卸作业警戒区的设置与警戒人员到位情况", "textarea", True),
+                 _f("plan_execution", "安装/拆卸作业执行专项方案情况", "textarea", True),
+                 _f("other_checks", "其他", "textarea")),
+                 _sec("问题处理",
                  _f("problems", "发现的问题及处理意见", "textarea")),
         ],
-        "signoffs": [{'role': '专业监理工程师', 'required': True}, {'role': '总监理工程师', 'required': False}],
+        "signoffs": [
+            {'role': '施工总承包单位专职安全员', 'required': False},
+            {'role': '使用单位专职安全员', 'required': False},
+            {'role': '安装/拆卸单位项目负责人', 'required': False},
+            {'role': '监理检查人员', 'required': False},
+            {'role': '总监理工程师', 'required': False},
+        ],
     }
 }
 
@@ -775,6 +802,20 @@ CONTENT_MAP: dict[str, dict[str, str]] = {
         "11_05": "construction_progress", "11_06": "supervision_section", "11_07": "handling",
         "11_08": "problems_section", "11_09": "hazard_status", "11_10": "other_section", "11_11": "review_date",
     },
+    "gdaq_30305_qizhong": {
+        "project_name": "project_name", "check_date": "date", "machine_name": "machine_name",
+        "machine_number": "machine_number", "machine_model": "machine_model", "weather": "weather", "wind": "wind",
+        "installation_location": "location", "work_type": "work_type",
+        "inspection_time": "inspection_time", "general_contractor": "construction_unit",
+        "user_unit": "user_unit", "install_unit": "install_unit",
+        "review_submission_status": "review_submission_status", "filing_status": "filing_status",
+        "general_contractor_staff": "general_contractor_staff", "user_unit_staff": "user_unit_staff",
+        "install_unit_staff": "install_unit_staff", "safety_technical_disclosure": "safety_technical_disclosure",
+        "operator_qualification": "operator_qualification", "certificate_match": "certificate_match",
+        "special_plan": "special_plan", "emergency_preparation": "emergency_preparation",
+        "warning_measures": "warning_measures", "plan_execution": "plan_execution",
+        "other_checks": "other_checks", "problems": "problems",
+    },
 }
 
 #: system 字段的 canonical key 集合——只有这些才由后端用项目上下文覆盖、
@@ -834,21 +875,77 @@ def get_schema(form_code: str) -> Optional[dict]:
     天气/日期等用户字段也误设为只读。
     """
     schema = SCHEMAS.get(form_code)
+    if schema is None and form_code == "witness_record":
+        schema = _witness_record_schema()
     if schema is None:
         return None
     import copy
     schema = copy.deepcopy(schema)
     for sec in schema.get("sections", []):
         for f in sec.get("fields", []):
-            f["system"] = is_system_field(form_code, f)
+            if form_code == "witness_record":
+                f["system"] = bool(f.get("system"))
+            else:
+                f["system"] = is_system_field(form_code, f)
     return schema
 
 
+def _witness_record_schema() -> dict:
+    """Project the witness field contract into the common editable-form shape."""
+    from app.services import record_field_spec
+
+    fields = record_field_spec.fields_of("witness_record")
+    sections: list[dict] = []
+    by_title: dict[str, dict] = {}
+    for item in fields:
+        if item.get("kind") == "signoff" or not item.get("key"):
+            continue
+        title = str(item.get("section") or "其他")
+        section = by_title.get(title)
+        if section is None:
+            section = {"title": title, "fields": []}
+            by_title[title] = section
+            sections.append(section)
+        table_type = str(item.get("table_type") or "")
+        if "枚举" in table_type:
+            field_type = "select"
+        elif "日期时间" in table_type:
+            field_type = "datetime"
+        elif "日期" in table_type:
+            field_type = "date"
+        elif "数字" in table_type:
+            field_type = "number"
+        elif item.get("canonical") in {"remark", "acceptance_result"}:
+            field_type = "textarea" if item.get("canonical") == "remark" else "text"
+        else:
+            field_type = "text"
+        field = {
+            "key": str(item["key"]),
+            "label": str(item.get("label") or item["key"]),
+            "type": field_type,
+            "required": bool(item.get("required")),
+            "system": item.get("kind") == "auto",
+        }
+        options = record_field_spec.options_for(item)
+        if options:
+            field["options"] = options
+        section["fields"].append(field)
+    contract = record_field_spec.FORMS["witness_record"]
+    return {
+        "form_code": "witness_record",
+        "form_number": contract.get("form_number", "JL-JZ"),
+        "name": contract.get("name", "见证取样记录"),
+        "version": SCHEMA_VERSION,
+        "sections": sections,
+        "signoffs": contract.get("signoffs", []),
+    }
+
+
 def schema_catalog() -> list[dict]:
-    """全量目录：registry 里 29 类文书都列出，标出哪些已有字段级 schema。"""
+    """List every registered form and indicate whether it has a field schema."""
     items = []
     for spec in FORMS:
-        schema = SCHEMAS.get(spec.form_code)
+        schema = get_schema(spec.form_code)
         items.append({
             "form_code": spec.form_code,
             "form_number": spec.form_number,
@@ -867,7 +964,7 @@ def validate_values(form_code: str, values: dict) -> dict:
     校验规则：必填非空 / select 取值合法 / number 可解析 /
     date=YYYY-MM-DD / time=HH:MM / maxlen 超长。
     """
-    schema = SCHEMAS.get(form_code)
+    schema = get_schema(form_code)
     if schema is None:
         return {"ok": False, "errors": [{"key": "", "label": "",
                 "message": f"表单 {form_code} 尚无字段级 schema"}]}
@@ -876,7 +973,7 @@ def validate_values(form_code: str, values: dict) -> dict:
         for field in section["fields"]:
             key = field["key"]
             # 项目派生 system 字段由后端自填，跳过其必填/格式校验
-            if is_system_field(form_code, field):
+            if (form_code == "witness_record" and field.get("system")) or is_system_field(form_code, field):
                 continue
             raw = values.get(key)
             value = "" if raw is None else str(raw).strip()

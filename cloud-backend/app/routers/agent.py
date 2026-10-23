@@ -27,6 +27,7 @@ from app.models.miniprogram import MediaRecord, MediaType
 from app.routers.auth import get_current_user
 from app.routers.local_ai import _PLAINTEXT_SUFFIX
 from app.services import agent_fact_model, agent_request_plan, agent_runtime, agent_tools, model_gateway
+from app.services.record_fields import project_context
 from app.services.agent_context import (
     extract_explicit_message_facts,
     render_context_summary,
@@ -201,6 +202,28 @@ def _agent_form(
             ],
         }
 
+    if tool == "create_work_record" and "最终确认" in missing and form_code:
+        fields = [
+            agent_tools.field_view(field, agent_tools._field_value(args, field))
+            for field in agent_tools.record_field_spec.ask_fields(form_code)
+        ]
+        record_type = agent_tools._norm_record_type(str(args.get("record_type") or "")) or "工作"
+        return {
+            "id": f"work_record_confirm:{form_code}",
+            "kind": "work_record",
+            "schema_version": 1,
+            "field_schema": "record_field_spec.v1",
+            "form_code": form_code,
+            "title": f"{record_type}记录 · 最终核对",
+            "hint": "请逐项核对；可直接修改字段。点击确认后，服务端会再次校验合同并创建记录。",
+            "fields": fields,
+            "filled": [],
+            "attachments": _attachment_block(),
+            "submit_label": "确认并生成记录",
+            "skippable": False,
+            "actions": [],
+        }
+
     if result.get("need_more"):
         fields = agent_tools.missing_field_views(args, form_code) if form_code else []
         if not fields:
@@ -320,7 +343,7 @@ _AGENT_SYSTEM = """你是「白泽」，广东建筑工程监理智能助手，�
 只输出一个 JSON 对象，不要输出任何其它文字、不要加代码块标记：
 {{"intent": "create_record|archive|analyze_hazard|query|generate_document|navigate|undo|chat|clarify",
  "actions": [{{"id": "动作 id", "confidence": 0.0, "reason": "简短依据"}}],
- "record_type": "巡视|旁站|验收|见证|null", "record_type_confidence": 0.0,
+ "record_type": "巡视|旁站|验收|见证|平行检验|null", "record_type_confidence": 0.0,
  "facts": [{{"field": "参数名", "value": "用户明确提供的值", "source_span": "用户原话片段", "confidence": 0.0}}],
  "args": {{"参数名": "值"}}, "answer": "给用户看的纯文本回答"}}
 
@@ -331,7 +354,7 @@ args 可以放你已确认的工具参数，但服务端仍会重新抽取、校
 
 🔴 最高优先级：办事必须输出受控动作，缺字段交给服务端追问
 ----------------------------------------------------
-**唯一需要你直接追问的情况**：用户要新建工作记录，但没说清是 巡视 / 旁站 / 验收 / 见证 哪一类。
+**唯一需要你直接追问的情况**：用户要新建工作记录，但没说清是 巡视 / 旁站 / 验收 / 见证 / 平行检验 哪一类。
 此时仍返回 record_work 动作，record_type 传 null，在 answer 里只问这一个问题；服务端会保留证据。
 
 **除此之外，任何字段缺失都不要追问、不要退回普通聊天**——返回对应动作，把你已经听到的填进 facts/args，
@@ -379,7 +402,7 @@ station_start_time=9:00、station_end_time=12:00、worker_count=10，结论留�
 「记录今天工作情况」这类模糊请求
 --------------------------------
 - 「记录今天工作情况 / 今天干了什么 / 记一下今天」= 要留痕。
-- **图片/水印素材不等于巡视，也不等于任何固定表式**。如果用户没有明确说巡视、旁站、验收、见证、材料、日志等目标，返回 record_work + record_type=null，只问一个决定性问题：「你想把这些内容整理成巡视、旁站、验收、见证，还是只整理图片？」
+- **图片/水印素材不等于巡视，也不等于任何固定表式**。如果用户没有明确说巡视、旁站、验收、见证、平行检验、材料、日志等目标，返回 record_work + record_type=null，只问一个决定性问题：「你想把这些内容整理成巡视、旁站、验收、见证、平行检验，还是只整理图片？」
 - 用户明确说了记录类型时才填写 record_type 并进入记录候选。用户已经在前文说过日期、地点、时间、工作内容的，必须沿用，不得因图片没有识别到而说成缺失。
 - 错误示范（严禁）：直接回一段「今日工作情况结论与建议」，甚至还写「经图片识别」。这是答非所问。
 - 用户明确说「生成今天的监理日志 / 月报」时，才返回 generate_document 动作（args.period=day / month）。"""
@@ -646,11 +669,12 @@ async def request_plan(
     )
     try:
         project = await db.get(Project, user.project_id) if getattr(user, "project_id", None) else None
+        project_facts = project_context(project)
         system_facts = agent_fact_model.build_system_facts(
-            project_name=project.name if project else "",
-            construction_unit=(project.construction_unit if project else "") or "",
-            supervision_unit=(project.supervision_unit if project else "") or "",
-            supervision_org=(project.supervision_org if project else "") or "",
+            project_name=project_facts["project_name"],
+            construction_unit=project_facts["construction_unit"],
+            supervision_unit=project_facts["supervision_unit"],
+            supervision_org=project_facts["supervision_org"],
             inspector=user.real_name or "",
         )
         plan, model_id = await _generate_request_plan(
@@ -721,11 +745,12 @@ async def _agent_chat_impl(
 
     project_id = getattr(user, "project_id", None)
     project = await db.get(Project, project_id) if project_id else None
+    project_facts = project_context(project)
     system_facts = agent_fact_model.build_system_facts(
-        project_name=project.name if project else "",
-        construction_unit=(project.construction_unit if project else "") or "",
-        supervision_unit=(project.supervision_unit if project else "") or "",
-        supervision_org=(project.supervision_org if project else "") or "",
+        project_name=project_facts["project_name"],
+        construction_unit=project_facts["construction_unit"],
+        supervision_unit=project_facts["supervision_unit"],
+        supervision_org=project_facts["supervision_org"],
         inspector=user.real_name or "",
     )
     prefill = req.prefill if isinstance(req.prefill, dict) else {}
@@ -774,7 +799,16 @@ async def _agent_chat_impl(
     incoming_plan = external_plan
 
     form_values = req.form_values if isinstance(req.form_values, dict) else {}
+    pending_args_for_submit = (pend_for_context[1].get("args") or {}) if pend_for_context else {}
     structured_submit = bool(form_values) and bool(pend_for_context)
+    # 表单在字段全部齐全时可能没有新增值；点击“保存并生成记录”仍是一次
+    # 明确确认，因此把该无字段提交视为确认动作，而不是重新追问。
+    if (
+        pend_for_context
+        and pending_args_for_submit.get("_awaiting_confirmation")
+        and message.strip() in {"按表单补充信息", "确认生成", "确认保存", "保存并生成记录"}
+    ):
+        structured_submit = True
     model_id = req.model or ""
     parsed: dict | None = None
     raw = ""
@@ -1009,6 +1043,17 @@ async def _agent_chat_impl(
             await agent_tools.clear_pending(db, user.id, pending_tool, conversation_id)
         # _prefill is durable context only; it is never a business field.
         args.pop("_prefill", None)
+        # 普通聊天创建记录与整理计划统一采用“字段齐全 → 用户确认 → 正式写入”。
+        # 首次执行只做合同校验并保存待确认草稿；用户确认后才放行工具写入。
+        if tool == "create_work_record":
+            awaiting = bool((draft.get("args") or {}).get("_awaiting_confirmation"))
+            confirmed = awaiting and (
+                structured_submit
+                or any(token in message for token in ("确认生成", "确认保存", "保存并生成", "确认建档"))
+            )
+            args["_require_confirmation"] = not confirmed
+            if confirmed:
+                args["_execution_confirmed"] = True
         ctx = agent_tools.ToolContext(db=db, user=user, project_id=project_id, project=project, message=message)
         result = await agent_tools.dispatch(ctx, tool, args)
         if result.get("need_more") and tool == pending_tool:
@@ -1021,6 +1066,8 @@ async def _agent_chat_impl(
                 args = refilled
                 result = await agent_tools.dispatch(ctx, tool, args)
         if result.get("need_more"):
+            if tool == "create_work_record" and "最终确认" in [str(x) for x in (result.get("need_more") or [])]:
+                args["_awaiting_confirmation"] = True
             await agent_tools.stash_pending(
                 db, user.id, tool,
                 {**args, "_prefill": prefill}
@@ -1334,6 +1381,9 @@ def _review_plan_payload(row: AgentReviewPlan) -> dict[str, Any]:
         plan.get("request_id") or request_plan.get("request_id")
         or f"legacy-review-plan-{row.id}",
     )
+    from app.services.agent_form_requirements import enrich_plan
+
+    view_plan = enrich_plan(plan)
     return {
         "id": row.id, "conversation_id": row.conversation_id,
         "request_id": request_id,
@@ -1344,7 +1394,7 @@ def _review_plan_payload(row: AgentReviewPlan) -> dict[str, Any]:
         "confirmed_revision": row.confirmed_revision,
         "executed_revision": row.executed_revision,
         "execution_result": execution_result,
-        "plan": plan, "issues": agent_review_plan.review_issues(plan),
+        "plan": view_plan, "issues": agent_review_plan.review_issues(plan),
         "updated_at": row.updated_at.isoformat(),
     }
 
@@ -1363,7 +1413,10 @@ async def create_review_plan(
     request_id = agent_runtime.normalize_request_id(
         req.request_id or req.plan.get("request_id") or request_plan.get("request_id"),
     )
-    stored_plan = {**req.plan, "request_id": request_id}
+    stored_plan = agent_review_plan.pin_form_contracts({**req.plan, "request_id": request_id})
+    project = await db.get(Project, user.project_id) if user.project_id else None
+    if project:
+        stored_plan["system_project"] = project_context(project)
     await agent_runtime.start_request(
         request_id=request_id,
         user_id=user.id,
@@ -1488,7 +1541,12 @@ async def update_review_plan(
         request_id = agent_runtime.normalize_request_id(
             req.request_id or req.plan.get("request_id") or current_plan.get("request_id"),
         )
-        stored_plan = {**req.plan, "request_id": request_id}
+        stored_plan = agent_review_plan.pin_form_contracts(
+            {**req.plan, "request_id": request_id}, preserve_existing=True,
+        )
+        project = await db.get(Project, row.project_id) if row.project_id else None
+        if project:
+            stored_plan["system_project"] = project_context(project)
         agent_review_plan.validate_plan(stored_plan)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc

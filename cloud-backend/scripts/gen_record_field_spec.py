@@ -169,7 +169,8 @@ RECORD_TYPE_TO_FORM = {
     '巡视': 'gd_b_214_xunshi',
     '旁站': 'gd_b_212_pangzhan',
     '验收': 'acceptance_record',
-    '见证': 'gd_b_219_cailiao',
+    '见证': 'witness_record',
+    '起重机械安拆检查': 'gdaq_30305_qizhong',
 }
 
 # 追问话术（覆盖通用模板；其余走「请补充{label}：」兜底）
@@ -404,6 +405,36 @@ def build() -> dict:
             'signoffs': schema.get('signoffs', []),
             'fields': fields,
         }
+
+    # 见证取样没有独立省统表模板。保留独立业务 schema，禁止借用材料台账。
+    forms['witness_record'] = {
+        'form_code': 'witness_record',
+        'form_number': 'JL-JZ',
+        'name': '见证取样记录',
+        'sections': ['基本信息', '取样信息', '取样与送检', '检测结果', '其他'],
+        'signoffs': [
+            {'role': '见证取样人签名', 'required': True},
+            {'role': '施工单位现场人员签名', 'required': False},
+        ],
+        'fields': [
+            {'key': 'project_name', 'canonical': 'project_name', 'label': '工程项目名称', 'raw_label': '工程项目名称', 'section': '基本信息', 'table_type': '文本', 'auto': True, 'required': True, 'kind': 'auto', 'arg': None},
+            {'key': 'date', 'canonical': 'date', 'label': '见证日期', 'raw_label': '见证日期', 'section': '基本信息', 'table_type': '日期', 'auto': True, 'required': True, 'kind': 'auto', 'arg': 'record_date'},
+            {'key': 'construction_unit', 'canonical': 'construction_unit', 'label': '施工单位', 'raw_label': '施工单位', 'section': '基本信息', 'table_type': '文本', 'auto': True, 'required': True, 'kind': 'auto', 'arg': None},
+            {'key': 'material_name', 'canonical': 'material_name', 'label': '材料名称', 'raw_label': '材料名称', 'section': '取样信息', 'table_type': '文本', 'auto': False, 'required': True, 'kind': 'ask', 'arg': 'witness_material_name'},
+            {'key': 'material_spec', 'canonical': 'material_spec', 'label': '规格/型号', 'raw_label': '规格/型号', 'section': '取样信息', 'table_type': '文本', 'auto': False, 'required': True, 'kind': 'ask', 'arg': 'witness_material_spec'},
+            {'key': 'manufacturer', 'canonical': 'manufacturer', 'label': '生产厂家/品牌', 'raw_label': '生产厂家/品牌', 'section': '取样信息', 'table_type': '文本', 'auto': False, 'required': False, 'kind': 'ask', 'arg': None},
+            {'key': 'batch_no', 'canonical': 'batch_no', 'label': '批号/炉号', 'raw_label': '批号/炉号', 'section': '取样信息', 'table_type': '文本', 'auto': False, 'required': False, 'kind': 'ask', 'arg': None},
+            {'key': 'quantity', 'canonical': 'quantity', 'label': '取样数量', 'raw_label': '取样数量', 'section': '取样信息', 'table_type': '数字', 'auto': False, 'required': True, 'kind': 'ask', 'arg': 'witness_quantity'},
+            {'key': 'unit', 'canonical': 'unit', 'label': '计量单位', 'raw_label': '计量单位', 'section': '取样信息', 'table_type': '文本', 'auto': False, 'required': True, 'kind': 'ask', 'arg': 'witness_unit'},
+            {'key': 'section', 'canonical': 'section', 'label': '使用部位/取样部位', 'raw_label': '使用部位/取样部位', 'section': '取样信息', 'table_type': '文本', 'auto': False, 'required': True, 'kind': 'ask', 'arg': 'section'},
+            {'key': 'sample_date', 'canonical': 'sample_date', 'label': '取样日期', 'raw_label': '取样日期', 'section': '取样与送检', 'table_type': '日期', 'auto': False, 'required': True, 'kind': 'ask', 'arg': 'record_date'},
+            {'key': 'sampler', 'canonical': 'sampler', 'label': '取样人', 'raw_label': '取样人', 'section': '取样与送检', 'table_type': '文本', 'auto': False, 'required': True, 'kind': 'ask', 'arg': 'inspector'},
+            {'key': 'cert_no', 'canonical': 'cert_no', 'label': '合格证/报告编号', 'raw_label': '合格证/报告编号', 'section': '取样与送检', 'table_type': '文本', 'auto': False, 'required': False, 'kind': 'ask', 'arg': 'witness_cert_no'},
+            {'key': 'test_result', 'canonical': 'test_result', 'label': '检测结果', 'raw_label': '检测结果', 'section': '检测结果', 'table_type': '枚举', 'auto': False, 'required': False, 'kind': 'ask', 'arg': None},
+            {'key': 'acceptance_result', 'canonical': 'acceptance_result', 'label': '见证结论', 'raw_label': '见证结论', 'section': '检测结果', 'table_type': '枚举', 'auto': False, 'required': True, 'kind': 'ask', 'arg': 'acceptance_result'},
+            {'key': 'remark', 'canonical': 'remark', 'label': '备注', 'raw_label': '备注', 'section': '其他', 'table_type': '文本', 'auto': False, 'required': False, 'kind': 'ask', 'arg': None},
+        ],
+    }
 
     return {'forms': forms, 'report': report}
 

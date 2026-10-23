@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from scripts import run_local
+from scripts import configure_local_services
 
 
 class LocalRuntimeTests(unittest.TestCase):
@@ -43,9 +44,16 @@ class LocalRuntimeTests(unittest.TestCase):
                 run_local.configure_local()
                 self.assertEqual(os.environ["DATABASE_URL"], database_url)
 
-    def test_refuses_other_database_or_non_forwarded_mysql(self):
+    def test_allows_live_database_name_and_refuses_non_forwarded_mysql(self):
+        with tempfile.TemporaryDirectory() as directory:
+            database_url = "mysql+aiomysql://production:secret@127.0.0.1:13308/live_database"
+            with patch.object(run_local, "LOCAL_DIR", Path(directory)), patch.dict(
+                os.environ, {"LOCAL_DATABASE_URL": database_url}, clear=False
+            ):
+                run_local.configure_local()
+                self.assertEqual(os.environ["DATABASE_URL"], database_url)
+
         for database_url in (
-            "mysql+aiomysql://local:secret@127.0.0.1:13308/other",
             "mysql+aiomysql://local:secret@server.example:3306/gdjl",
             "sqlite+aiosqlite:///local.sqlite3",
         ):
@@ -55,6 +63,19 @@ class LocalRuntimeTests(unittest.TestCase):
                 ):
                     with self.assertRaises(ValueError):
                         run_local.configure_local()
+
+    def test_live_database_url_keeps_production_credentials_and_database(self):
+        forwarded = configure_local_services.forwarded_database_url(
+            "mysql://production_user:p%40ss@mysql.internal:3306/live_gdjl?charset=utf8mb4"
+        )
+        self.assertEqual(
+            forwarded,
+            "mysql+aiomysql://production_user:p%40ss@127.0.0.1:13308/live_gdjl?charset=utf8mb4",
+        )
+
+    def test_live_database_forwarding_rejects_non_mysql_url(self):
+        with self.assertRaisesRegex(RuntimeError, "有效的 MySQL"):
+            configure_local_services.forwarded_database_url("sqlite:///local.db")
 
 
 if __name__ == "__main__":

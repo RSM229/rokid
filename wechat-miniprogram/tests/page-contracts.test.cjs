@@ -7,6 +7,7 @@ const root = path.join(__dirname, '../miniprogram')
 const app = JSON.parse(fs.readFileSync(path.join(root, 'app.json'), 'utf8'))
 const agentPage = fs.readFileSync(path.join(root, 'pages/agent/index.ts'), 'utf8')
 const agentTemplate = fs.readFileSync(path.join(root, 'pages/agent/index.wxml'), 'utf8')
+const workTemplate = fs.readFileSync(path.join(root, 'pages/work/index.wxml'), 'utf8')
 
 test('agent select controls store the selected label instead of the picker index', () => {
   assert.match(agentPage, /field\.control === 'select'[\s\S]{0,160}field\.options\[Number\(value\)\]/)
@@ -32,6 +33,15 @@ test('history restores the latest unfinished review plan instead of orphaning it
   assert.match(agentPage, /restorePendingReviewPlan\(detail\.conversation_id\)/)
   assert.match(agentPage, /listReviewPlans\(conversationId\)/)
   assert.match(agentPage, /已恢复上次未完成的记录草稿/)
+})
+
+test('inspection details show the saved inspector, not the record creator', () => {
+  assert.match(workTemplate, /巡视监理人员[\s\S]{0,180}detail\.inspector/)
+})
+
+test('agent cards identify and navigate to parallel inspection records', () => {
+  assert.match(agentTemplate, /cd\.kind === 'parallel_inspection' \? '平行检验记录'/)
+  assert.match(agentPage, /kind === 'parallel_inspection'[\s\S]{0,120}pages\/parallel\/index/)
 })
 
 for (const route of app.pages) {

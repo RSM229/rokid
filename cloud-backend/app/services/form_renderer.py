@@ -510,11 +510,11 @@ def _table0(doc: DocxDocument) -> Table:
     return doc.tables[0]
 
 
-def _append_missing_fields(doc, data, fields):
+def _append_missing_fields(doc, data, fields, heading: str = "记录字段补充"):
     # 模板原本无独立栏位时附字段补充，保证数据不被吞掉。
     values = [(label, data.get(key)) for key, label in fields if data.get(key) not in (None, "")]
     if values:
-        doc.add_paragraph("记录字段补充")
+        doc.add_paragraph(heading)
         for label, value in values:
             doc.add_paragraph(f"{label}：{value}")
 
@@ -595,7 +595,7 @@ def fill_xunshi(doc: DocxDocument, data: dict) -> None:
             ):
                 if _insert_after_text(tail.paragraphs, marker, str(problems)):
                     break
-        name = str(data.get("supervisor") or data.get("creator_name") or "")
+        name = str(data.get("inspector_signature") or "")
         if name:
             for marker in ("（签字）：", "（签名）：", "（签名）", "（签字）"):
                 if _fill_signature_inline(tail, marker, name):
@@ -682,7 +682,7 @@ def fill_pangzhan(doc: DocxDocument, data: dict) -> None:
         problems = str(data.get("problems") or data.get("conclusion") or "").strip()
         if problems:
             _append_after_label(tail, "旁站发现的问题及处理情况", problems)
-        sig = data.get("supervisor") or data.get("creator_name") or ""
+        sig = data.get("station_inspector_signature") or ""
         if not _fill_signature_inline(tail, "（签名）：", sig):
             _fill_signature_inline(tail, "（签字）：", sig)
     except IndexError:
@@ -780,7 +780,7 @@ def fill_pingxing(doc: DocxDocument, data: dict) -> None:
         rec_parts.append(f"实测数据：{measure}")
     if rec_parts:
         _append_after_label(rec_cell, "检查记录", "\n".join(rec_parts))
-    _fill_signature_inline(rec_cell, "（签名）：", data.get("inspector") or data.get("supervisor") or "")
+    _fill_signature_inline(rec_cell, "（签名）：", data.get("inspector_signature") or "")
     # r4 检查结论（含 □是/□否 勾选）
     con_cell = cell_of(4, 0)
     result = str(data.get("acceptance_result") or data.get("conclusion") or "").strip()
@@ -1489,7 +1489,7 @@ def fill_weida(doc: DocxDocument, data: dict) -> None:
             pass
 
     # 签名行：施工/分包单位专职安全员（左侧）、监理检查人员、总监理工程师
-    supervisor = data.get("supervisor") or data.get("creator_name")
+    supervisor = data.get("supervisor") or ""
     chief = data.get("chief_supervisor") or data.get("chief")
     try:
         _fill_signature_inline(_Cell(tcs_of(8)[1], table), "（签名）：", supervisor)
@@ -1544,7 +1544,7 @@ def fill_acceptance(doc: DocxDocument, data: dict) -> None:
 
     try:
         _fill_signature_inline(cell_of(7, 0), "（签名）：",
-                               data.get("inspector") or data.get("supervisor") or "")
+                               data.get("inspector_signature") or "")
         _fill_signature_inline(cell_of(7, 2), "（签名）：",
                                data.get("quality_inspector") or "")
     except IndexError:
@@ -1622,7 +1622,7 @@ def _resolve_media_path(url: str):
     return None
 
 
-def _append_images(doc: DocxDocument, data: dict, max_images: int = 4) -> None:
+def _append_images(doc: DocxDocument, data: dict, max_images: int = 12) -> None:
     """把记录关联影像以「附：现场影像」追加到文书末尾（每张居中，宽 15cm 与官方样例一致；失败静默跳过单张）"""
     from docx.enum.text import WD_ALIGN_PARAGRAPH
     from docx.shared import Cm
@@ -1634,8 +1634,13 @@ def _append_images(doc: DocxDocument, data: dict, max_images: int = 4) -> None:
             paths.append(p)
     if not paths:
         return
+    # Photos are evidence, not part of the form body. Starting them on a fresh
+    # page prevents image height/width from reflowing the first form page in PDF.
+    doc.add_page_break()
     doc.add_paragraph("附：现场影像：")
-    for p in paths:
+    for index, p in enumerate(paths):
+        if index and index % 2 == 0:
+            doc.add_page_break()
         try:
             doc.add_picture(str(p), width=Cm(15))
             doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -2058,7 +2063,8 @@ def fill_generic(doc: DocxDocument, data: dict) -> None:
     for table in doc.tables:
         for row in table.rows:
             seen: set[int] = set()
-            for cell in row.cells:
+            cells = row.cells
+            for index, cell in enumerate(cells):
                 key = id(cell._tc)
                 if key in seen:
                     continue
@@ -2088,7 +2094,7 @@ def fill_generic(doc: DocxDocument, data: dict) -> None:
 def _fill_by_schema_labels(doc: DocxDocument, form_code: str, data: dict) -> None:
     """按省统表 schema 的字段中文标签回填模板单元格（兜底，不丢字段）。
 
-    仅对登记在 CONTENT_MAP 的 11 类记录表式生效。遍历每个字段，把其值填到
+    仅对登记在 CONTENT_MAP 的记录表式生效。遍历每个字段，把其值填到
     模板里「标签文字以该字段标签开头/结尾」的空白目标单元格；按标签长度降序优先
     匹配更具体的字段，避免泛化标签（如「内容」）误吞多个字段。
     """
@@ -2112,7 +2118,8 @@ def _fill_by_schema_labels(doc: DocxDocument, form_code: str, data: dict) -> Non
     for table in doc.tables:
         for row in table.rows:
             seen: set[int] = set()
-            for cell in row.cells:
+            cells = row.cells
+            for index, cell in enumerate(cells):
                 key = id(cell._tc)
                 if key in seen:
                     continue
@@ -2120,14 +2127,22 @@ def _fill_by_schema_labels(doc: DocxDocument, form_code: str, data: dict) -> Non
                 txt = _cell_text(cell)
                 if not txt:
                     continue
-                compact = re.sub(r"[\s：:，。]+", "", txt)
+                compact = re.sub(r"[\s：:，。；;]+", "", txt)
+                compact = re.sub(r"^\d+[、.．]", "", compact)
                 for label, val in ordered:
-                    lc = re.sub(r"[\s：:，。]+", "", label)
+                    lc = re.sub(r"[\s：:，。；;]+", "", label)
                     if not lc:
                         continue
                     if lc.startswith(compact) or compact.startswith(lc):
-                        target = _right_neighbor(table, cell)
-                        if target is not None and not _cell_text(target):
+                        target = None
+                        for candidate in cells[index + 1:]:
+                            if _same_cell(candidate, cell):
+                                continue
+                            target_text = _cell_text(candidate).strip()
+                            if not target_text:
+                                target = candidate
+                                break
+                        if target is not None and not _cell_text(target).strip():
                             _set_cell_text(target, val)
                         break
 
@@ -2203,6 +2218,21 @@ def render_form(form_code: str, data: dict, output_dir: Path | None = None) -> P
         from app.services import provform_schema
         if form_code in provform_schema.CONTENT_MAP:
             _fill_by_schema_labels(doc, form_code, data)
+            if form_code == "gdaq_30305_qizhong":
+                rendered = "\n".join(
+                    paragraph.text for paragraph in doc.paragraphs
+                ) + "\n" + "\n".join(
+                    cell.text for table in doc.tables for row in table.rows for cell in row.cells
+                )
+                mapping = provform_schema.CONTENT_MAP[form_code]
+                missing = []
+                for section in provform_schema.SCHEMAS[form_code]["sections"]:
+                    for field in section["fields"]:
+                        canonical = mapping.get(field["key"], field["key"])
+                        value = str(data.get(canonical) or "").strip()
+                        if value and value not in rendered and field.get("type") not in {"date", "datetime", "time"}:
+                            missing.append((canonical, field["label"]))
+                _append_missing_fields(doc, data, missing, "未定位到模板栏位的已确认字段")
     except Exception:  # noqa: BLE001
         logger.exception("schema 标签兜底回填失败（不影响主流程）")
     _fill_business_footer(doc, data)
@@ -2240,11 +2270,23 @@ def _render_plain_docx(spec, data: dict, output_dir: Path | None) -> Path:
     run.font.size = Pt(18)
     labels = {"project_name": "工程项目名称", "doc_number": "编号", "date": "业务日期",
               "construction_unit": "施工单位", "supervision_org": "项目监理机构", "section": "部位",
+              "material_name": "材料名称", "material_spec": "规格/型号", "manufacturer": "生产厂家/品牌",
+              "batch_no": "批号/炉号", "quantity": "取样数量", "unit": "计量单位",
+              "sample_date": "取样日期", "sampler": "取样人", "cert_no": "合格证/报告编号",
+              "test_result": "检测结果", "acceptance_result": "见证结论", "remark": "备注",
               "acceptance_type": "验收类型", "acceptance_content": "验收内容", "acceptance_participants": "验收单位及人员",
-              "acceptance_result": "人工确认的验收结论", "basis": "检查依据", "handling": "处理情况",
+              "basis": "检查依据", "handling": "处理情况",
               "summary": "内容", "content": "记录内容", "problems": "发现问题及处理情况", "review_date": "审阅日期"}
+    aliases = {
+        "quantity": ("quantity", "witness_quantity"),
+        "unit": ("unit", "witness_unit"),
+        "cert_no": ("cert_no", "witness_cert_no"),
+        "acceptance_result": ("acceptance_result", "witness_accept_result"),
+        "sample_date": ("sample_date", "date"),
+        "sampler": ("sampler", "inspector"),
+    }
     for key in labels:
-        val = data.get(key)
+        val = next((data.get(candidate) for candidate in aliases.get(key, (key,)) if data.get(candidate)), None)
         if val:
             p = doc.add_paragraph()
             label = {
@@ -2255,11 +2297,16 @@ def _render_plain_docx(spec, data: dict, output_dir: Path | None) -> Path:
                 "content": "内容",
                 "problems": "问题及处理",
             }.get(key, labels.get(key, key))
+            if key == "acceptance_result":
+                label = "人工确认的验收结论" if spec.form_code == "acceptance_record" else "见证结论"
             run = p.add_run(f"{label}：")
             run.bold = True
             p.add_run(str(val))
     if spec.form_code == "acceptance_record":
         doc.add_paragraph("验收人（本人签认）：________________    签认日期：________________")
+    elif spec.form_code == "witness_record":
+        doc.add_paragraph("见证取样人（签名）：________________    日期：________________")
+    _append_images(doc, data)
     out_dir = (output_dir or settings.export_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     import uuid
@@ -2274,31 +2321,40 @@ def docx_to_pdf(docx_path: Path) -> Path | None:
 
     返回生成的 pdf 路径；环境不支持时返回 None。
     """
+    pdf_path = docx_path.with_suffix(".pdf")
+    pdf_path.unlink(missing_ok=True)
     soffice = shutil.which("soffice") or shutil.which("libreoffice")
     if soffice:
         import subprocess
-        pdf_path = docx_path.with_suffix(".pdf")
         result = subprocess.run(
             [soffice, "--headless", "--convert-to", "pdf", "--outdir", str(docx_path.parent), str(docx_path)],
             capture_output=True, timeout=120,
         )
         if result.returncode == 0 and pdf_path.exists():
             return pdf_path
+    word = None
+    document = None
     try:
         import win32com.client  # type: ignore
         import pythoncom  # type: ignore
         pythoncom.CoInitialize()
         word = win32com.client.DispatchEx("Word.Application")
         word.Visible = False
-        pdf_path = docx_path.with_suffix(".pdf")
-        doc = word.Documents.Open(str(docx_path.resolve()))
-        doc.SaveAs(str(pdf_path.resolve()), FileFormat=17)  # wdFormatPDF
-        doc.Close(False)
-        word.Quit()
+        word.DisplayAlerts = 0
+        document = word.Documents.Open(str(docx_path.resolve()), ReadOnly=True)
+        document.SaveAs(str(pdf_path.resolve()), FileFormat=17)  # wdFormatPDF
         return pdf_path if pdf_path.exists() else None
     except Exception as exc:  # noqa: BLE001
         logger.warning("docx 转 PDF 失败（不影响 docx 导出）：%s", exc)
         return None
+    finally:
+        try:
+            if document is not None:
+                document.Close(False)
+            if word is not None:
+                word.Quit()
+        except Exception:  # noqa: BLE001
+            logger.debug("清理 Word COM 实例失败", exc_info=True)
 
 
 def list_available_template_files() -> list[dict]:

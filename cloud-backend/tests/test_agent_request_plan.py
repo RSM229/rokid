@@ -80,6 +80,14 @@ def test_every_executable_tool_has_a_controlled_action():
     assert set(agent_tools.TOOL_BY_NAME) <= set(planner.ACTION_BY_TOOL)
 
 
+def test_hazard_rectification_action_is_bound_to_dedicated_tool():
+    plan = planner.normalize_candidate({
+        "actions": ["create_hazard_rectification_doc"],
+    })
+    assert plan["selected_tool"] == "create_hazard_rectification_doc"
+    assert plan["requires_confirmation"] is True
+
+
 def test_evidence_dates_become_multiple_item_candidates_without_writing():
     plan = planner.normalize_candidate({
         "intent": "create_record",

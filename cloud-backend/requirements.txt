@@ -19,6 +19,8 @@ PyMuPDF==1.28.2
 openpyxl==3.1.5
 numpy==2.5.1
 python-docx==1.2.0
+# Windows DOCX→PDF uses the installed Microsoft Word renderer via COM.
+pywin32==311; sys_platform == "win32"
 # ---- RAG 检索（本地嵌入，无需 GPU / 无需外部 API）----
 onnxruntime==1.30.0
 tokenizers==0.23.2

@@ -25,6 +25,7 @@ from reportlab.lib.units import mm
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import Image as RLImage
+from reportlab.platypus import PageBreak
 from reportlab.platypus import Paragraph as RLParagraph
 from reportlab.platypus import SimpleDocTemplate, Spacer
 from reportlab.platypus import Table as RLTable
@@ -360,12 +361,41 @@ def _build_pdf_table(docx_table: DocxTable, cell_base: ParagraphStyle, seq: list
     return RLTable(data, colWidths=col_widths, style=TableStyle(style_cmds), hAlign="CENTER")
 
 
-def convert_docx_to_pdf(docx_path: str, pdf_path: str) -> None:
+def convert_docx_to_pdf(
+    docx_path: str,
+    pdf_path: str,
+    *,
+    allow_reportlab_fallback: bool = False,
+) -> None:
     """把（省统表模板渲染出的）docx 转成版式一致的 PDF。
 
     Raises:
         RuntimeError: 中文字体缺失等致命错误（调用方应回退 generate_pdf）。
     """
+    # Prefer the real office renderer so nested tables, headers, page breaks and
+    # pagination are identical to the Word file.  The ReportLab path below is a
+    # last-resort renderer for servers without Word/LibreOffice.
+    try:
+        from app.services.form_renderer import docx_to_pdf
+
+        source = Path(docx_path)
+        target = Path(pdf_path)
+        native = docx_to_pdf(source)
+        if native is not None and native.exists():
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if native.resolve() != target.resolve():
+                import shutil
+                shutil.copyfile(native, target)
+                native.unlink(missing_ok=True)
+            return
+    except Exception:  # noqa: BLE001
+        logger.warning("Office/LibreOffice PDF 转换不可用", exc_info=True)
+
+    if not allow_reportlab_fallback:
+        raise RuntimeError(
+            "未安装或无法启动 Microsoft Word/LibreOffice；为保持 PDF 与 Word 版式一致，已取消近似重绘"
+        )
+
     _register_fonts()
     doc = DocxDocument(docx_path)
     seq = [0]
@@ -378,6 +408,9 @@ def convert_docx_to_pdf(docx_path: str, pdf_path: str) -> None:
             p = Paragraph(child, doc)
             imgs = _images_in_paragraph(child, doc)
             text = (p.text or "").strip()
+            if any(br.get(qn("w:type")) == "page" for br in child.iter(qn("w:br"))):
+                story.append(PageBreak())
+                continue
             if not text and not imgs:
                 story.append(Spacer(1, 1.5 * mm))
                 continue

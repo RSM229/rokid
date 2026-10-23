@@ -54,6 +54,21 @@ class AgentConversationHistoryTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNone(await agent_tools.get_conversation_detail(db, 11, "wx-100"))
             self.assertIsNotNone(await agent_tools.get_conversation_detail(db, 22, "wx-200"))
 
+    async def test_legacy_memory_is_visible_when_message_table_is_empty(self):
+        async with self.session_factory() as db:
+            db.add(AgentConversationMemory(
+                user_id=11, conversation_id="wx-legacy-only",
+                messages_json='[{"text":"旧版本对话仍在服务器","at":"2026-10-21T09:00:00"}]',
+                updated_at=datetime.now(),
+            ))
+            await db.commit()
+
+            summaries = await agent_tools.list_conversation_summaries(db, 11)
+            self.assertEqual([item["conversation_id"] for item in summaries], ["wx-legacy-only"])
+            detail = await agent_tools.get_conversation_detail(db, 11, "wx-legacy-only")
+            self.assertIsNotNone(detail)
+            self.assertEqual(detail["messages"][0]["text"], "旧版本对话仍在服务器")
+
 
 if __name__ == "__main__":
     unittest.main()

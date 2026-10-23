@@ -8,9 +8,9 @@ import { getCached, invalidateCache, invalidateByPrefix, CACHE_KEYS } from '../.
 import { ensurePrivacy } from '../../utils/privacy'
 import { themed } from '../../utils/theme'
 import { cleanMarkdown } from '../../utils/markdown'
-import { createReviewPlan, saveReviewPlan, listReviewPlans, confirmReviewPlan, executeReviewPlan, editEvent, editEvidenceWatermark, addEvidenceWatermark, confirmPlan, reviewIssues, evidenceTargetConflicts, reviewPlanFromItemPlan, mergeEvents, splitEvidence, releaseEvidence, assignEvidence, addEvent, removeEvent, type ReviewPlan, type RequestPlanItemPlan } from '../../services/work-review'
+import { FORM_CODE_BY_LABEL, createReviewPlan, saveReviewPlan, listReviewPlans, confirmReviewPlan, executeReviewPlan, editEvent, editFormField, editEvidenceWatermark, addEvidenceWatermark, confirmPlan, reviewIssues, evidenceTargetConflicts, reviewPlanFromItemPlan, mergeEvents, splitEvidence, releaseEvidence, assignEvidence, addEvent, removeEvent, type ReviewPlan, type RequestPlanItemPlan } from '../../services/work-review'
 
-const INLINE_RECORD_TYPES = ['巡视', '验收', '见证', '旁站', '待定']
+const INLINE_RECORD_TYPES = ['巡视', '验收', '见证', '旁站', '平行检验', '起重机械安拆检查', '待定']
 
 const recorder = wx.getRecorderManager()
 const player = wx.createInnerAudioContext()
@@ -1167,7 +1167,7 @@ Page(themed({
       const messageIndex = this.addMessage({
         role: 'assistant',
         text: issueList.length
-          ? `已整理 ${evidence.length} 张图片${saved.events.length ? `，形成 ${saved.events.length} 个候选事项` : '，还没有确定记录用途'}。当前已保存为待确认草稿，尚未生成正式工作记录；请先处理：${issueList.join('；')}。`
+          ? `已整理 ${evidence.length} 张图片${saved.events.length ? `，形成 ${saved.events.length} 个候选事项` : '，还没有确定记录用途'}。当前已保存为待确认草稿，尚未生成正式工作记录。${this.reviewFollowupText(saved)}`
           : `已整理 ${evidence.length} 张图片${saved.events.length ? `，形成 ${saved.events.length} 个候选事项` : '，还没有确定记录用途'}。信息已准备好，确认后才会写入正式工作记录。`,
         reviewPlan: saved,
         reviewEvents: this.inlineReviewEvents(saved, []),
@@ -1294,8 +1294,10 @@ Page(themed({
         choice: [
           { value: 'record_type:巡视', label: '巡视记录', kind: 'record', record_type: '巡视' },
           { value: 'record_type:旁站', label: '旁站记录', kind: 'record', record_type: '旁站' },
+          { value: 'record_type:平行检验', label: '平行检验记录', kind: 'record', record_type: '平行检验' },
           { value: 'record_type:验收', label: '验收记录', kind: 'record', record_type: '验收' },
           { value: 'record_type:见证', label: '见证记录', kind: 'record', record_type: '见证' },
+          { value: 'record_type:起重机械安拆检查', label: '起重机械安拆检查记录', kind: 'record', record_type: '起重机械安拆检查' },
           { value: 'archive_only', label: '仅整理归档', kind: 'archive' },
         ],
         selected_tool: null,
@@ -1358,9 +1360,25 @@ Page(themed({
       locationSource: event.fieldSources?.location || '',
       section: event.section || '',
       sectionSource: event.fieldSources?.section || '',
-      missingFields: (event.missingFields || []).map(field => ({
-        record_date: '业务日期', project: '项目', location: '地点', section: '施工部位', title: '工作名称', content: '工作描述',
-      } as Record<string, string>)[field] || field),
+      formCode: event.formCode || '',
+      draftStatus: event.recordDraft?.status || 'needs_record_type',
+      draftStatusLabel: event.recordDraft?.status === 'ready_for_confirmation'
+        ? '字段已齐，待最终确认'
+        : event.recordDraft?.status === 'needs_resolution'
+          ? '待补充或处理冲突'
+          : event.recordDraft?.status === 'needs_user_confirmation'
+            ? '待用户确认记录类型'
+            : '待确定记录类型',
+      contractVersion: event.recordDraft?.contractVersion || '',
+      generationAllowed: event.recordDraft?.generationAllowed === true,
+      formFields: (event.formFields || []).map(field => ({ ...field, options: field.options || [] })),
+      missingFields: (event.missingFields || []).map(field => (
+        event.formFields?.find(item => item.canonical === field)?.label
+        || ({
+          record_date: '业务日期', project: '项目', location: '地点', section: '施工部位', title: '工作名称', content: '工作描述',
+        } as Record<string, string>)[field]
+        || field
+      )),
       issues: event.issues || [],
       entityFieldRows: [
         ['project_name', '项目名称'], ['owner_unit', '建设单位'], ['construction_unit', '施工单位'],
@@ -1385,6 +1403,31 @@ Page(themed({
       sourceLabels: [...new Set(event.evidenceIds.map(id => plan.evidence.find(item => item.id === id)?.observedDateSource || '').filter(Boolean).map(source => source === 'watermark' ? '照片水印' : source === 'exif' ? 'EXIF' : source))],
       sourceText: [...new Set(event.evidenceIds.map(id => plan.evidence.find(item => item.id === id)?.observedDateSource || '').filter(Boolean).map(source => source === 'watermark' ? '照片水印' : source === 'exif' ? 'EXIF' : source))].join('、'),
     }))
+  },
+
+  reviewFollowupText(plan: ReviewPlan): string {
+    const needs: string[] = []
+    if (!plan.events.length) needs.push('还没有确定要创建的工作事项，请补充工作内容或选择“记录工作”用途')
+    for (const [index, event] of plan.events.entries()) {
+      if (!event.recordType || event.recordType === '待定') needs.push(`事项${index + 1}：请先确认记录类型`)
+      for (const field of event.formFields || []) {
+        if (field.conflict) {
+          const choices = [...new Set((field.candidates || []).map(item => item.value).filter(Boolean))]
+          needs.push(`${field.label}有冲突${choices.length ? `（${choices.join(' / ')}）` : ''}，请选一个或填写正确值`)
+        } else if (field.required && field.missing) {
+          needs.push(`${field.label}${field.question ? `：${field.question}` : ''}`)
+        }
+      }
+      for (const conflict of event.unresolvedConflicts || []) {
+        if (!(event.formFields || []).some(field => field.canonical === conflict && field.conflict)) {
+          needs.push(`${conflict}存在候选冲突，请确认采用哪个值`)
+        }
+      }
+    }
+    if (plan.unassignedIds.length) needs.push(`${plan.unassignedIds.length} 张图片还未分配到事项`)
+    return needs.length
+      ? `目前还不能生成正式记录。请先补充或确认：${[...new Set(needs)].slice(0, 8).join('；')}${needs.length > 8 ? '；其他字段也请在草稿中检查' : ''}。你可以直接回复，也可以在表单字段里修改；我会重新核对。`
+      : '当前表单字段已通过检查。请核对事项和字段内容，再点击“确认并生成工作记录”。'
   },
 
   inlineReviewEventOptions(plan: ReviewPlan) {
@@ -1461,15 +1504,28 @@ Page(themed({
       revisedPlan.events = generated.events.map(event => {
         const previous = current.events.find(item => item.evidenceIds.length === event.evidenceIds.length
           && item.evidenceIds.every((id, evidenceIndex) => id === event.evidenceIds[evidenceIndex]))
+        const mergedFields: Record<string, Record<string, unknown>> = { ...(previous?.fields || {}) }
+        for (const [formCode, fields] of Object.entries(event.fields || {})) {
+          mergedFields[formCode] = { ...(mergedFields[formCode] || {}), ...(fields || {}) }
+        }
+        const mergedEntityFields = { ...(previous?.entityFields || {}), ...(event.entityFields || {}) }
+        const mergedFieldSources = { ...(previous?.fieldSources || {}), ...(event.fieldSources || {}) }
         const preserveType = type.type === '待定' && previous?.recordType && previous.recordType !== '待定'
         return {
           ...event,
+          location: event.location || previous?.location || '',
+          section: event.section || previous?.section || '',
+          date: event.date || previous?.date || '',
+          dateConfirmed: event.dateConfirmed || previous?.dateConfirmed === true,
+          content: event.content || previous?.content || '',
           recordType: type.type !== '待定' ? type.type : (preserveType ? previous!.recordType! : event.recordType),
+          recordTypeConfirmed: type.type !== '待定' ? true : (preserveType ? previous!.recordTypeConfirmed === true : event.recordTypeConfirmed === true),
           recordTypeConfidence: type.type !== '待定' ? type.confidence : (preserveType ? previous!.recordTypeConfidence || 0 : event.recordTypeConfidence),
           recordTypeReason: type.type !== '待定' ? '用户已选择记录类型' : (preserveType ? previous!.recordTypeReason || '' : event.recordTypeReason),
           forms: previous?.forms?.length ? previous.forms : event.forms,
-          fields: previous?.fields && Object.keys(previous.fields).length ? previous.fields : event.fields,
-          entityFields: { ...event.entityFields, ...(previous?.entityFields || {}) },
+          fields: mergedFields,
+          fieldSources: mergedFieldSources,
+          entityFields: mergedEntityFields,
           fieldCandidates: { ...event.fieldCandidates, ...(previous?.fieldCandidates || {}) },
           unresolvedConflicts: [...new Set([
             ...(event.unresolvedConflicts || []),
@@ -1492,7 +1548,7 @@ Page(themed({
       this.setData({ messages })
       this.addMessage({ role: 'assistant', text: archiveOnly
         ? '已保留图片及识别到的证据，不创建工作记录。之后也可以继续补充文字、语音或图片。'
-        : `已把“${reply}”补充到当前草稿。${saved.events.length ? `由服务端事项计划生成 ${saved.events.length} 个工作事项，` : ''}请核对事项和照片证据；这里只生成工作记录，不会自动生成表单。`, reviewFollowupPlanId: saved.serverId })
+        : `已把“${reply}”并入当前草稿。${saved.events.length ? `由服务端重新核对 ${saved.events.length} 个工作事项。` : ''}${this.reviewFollowupText(saved)}`, reviewFollowupPlanId: saved.serverId })
     } catch (error) {
       this.addMessage({ role: 'assistant', text: `当前草稿更新失败：${(error as Error).message}` })
     }
@@ -1585,8 +1641,31 @@ Page(themed({
     const plan = this.data.messages[index]?.reviewPlan
     const target = plan?.events.find(item => item.id === id)
     if (!plan || !target) return
+    const compatibleForms = ({
+      '巡视': ['gd_b_214_xunshi', 'gdaq_30306_weida'],
+      '旁站': ['gd_b_212_pangzhan'],
+      '平行检验': ['gd_b_213_pingxing'],
+      '起重机械安拆检查': ['gdaq_30305_qizhong'],
+      '验收': ['acceptance_record'],
+      '见证': ['witness_record'],
+    } as Record<string, string[]>)[recordType] || []
+    const defaultForm = ({
+      '巡视': '巡视记录',
+      '旁站': '旁站记录',
+      '平行检验': '平行检验记录',
+      '验收': '验收记录',
+      '见证': '见证取样记录',
+      '起重机械安拆检查': '起重机械安拆检查',
+    } as Record<string, string>)[recordType]
+    const currentFormCodes = target.forms.map(form => FORM_CODE_BY_LABEL[form] || form)
+    const keepForm = target.recordType === recordType
+      && currentFormCodes.length === 1
+      && compatibleForms.includes(currentFormCodes[0])
     const candidate = editEvent(plan, id, {
-      recordType, recordTypeConfidence: 1, recordTypeReason: '用户在对话中确认记录类型',
+      recordType, recordTypeConfirmed: true, recordTypeConfidence: 1, recordTypeReason: '用户在对话中确认记录类型',
+      forms: keepForm
+        ? target.forms
+        : (defaultForm ? [defaultForm] : []),
       missingFields: (target.missingFields || []).filter(field => field !== 'record_type'),
     })
     void this.updateInlineReview(index, candidate).catch(error => wx.showToast({ title: `记录类型保存失败：${(error as Error).message}`, icon: 'none' }))
@@ -1630,6 +1709,33 @@ Page(themed({
       fieldSources: { ...(target.fieldSources || {}), [field]: 'user_message' },
     })
     void this.updateInlineReview(index, candidate).catch(error => wx.showToast({ title: `事项字段保存失败：${(error as Error).message}`, icon: 'none' }))
+  },
+
+  changeInlineReviewFormField(event: WechatMiniprogram.Input) {
+    const index = Number(event.currentTarget.dataset.index)
+    const id = String(event.currentTarget.dataset.id)
+    const formCode = String(event.currentTarget.dataset.formCode || '')
+    const field = String(event.currentTarget.dataset.field || '')
+    if (!formCode || !field) return
+    const plan = this.data.messages[index]?.reviewPlan
+    if (!plan) return
+    const candidate = editFormField(plan, id, formCode, field, String(event.detail.value || '').trim())
+    void this.updateInlineReview(index, candidate)
+      .catch(error => wx.showToast({ title: `表单字段保存失败：${(error as Error).message}`, icon: 'none' }))
+  },
+
+  chooseInlineReviewFormOption(event: WechatMiniprogram.TouchEvent) {
+    const index = Number(event.currentTarget.dataset.index)
+    const id = String(event.currentTarget.dataset.id)
+    const formCode = String(event.currentTarget.dataset.formCode || '')
+    const field = String(event.currentTarget.dataset.field || '')
+    const value = String(event.currentTarget.dataset.value || '')
+    if (!formCode || !field) return
+    const plan = this.data.messages[index]?.reviewPlan
+    if (!plan) return
+    const candidate = editFormField(plan, id, formCode, field, value)
+    void this.updateInlineReview(index, candidate)
+      .catch(error => wx.showToast({ title: `表单字段保存失败：${(error as Error).message}`, icon: 'none' }))
   },
 
   toggleInlineMerge(event: WechatMiniprogram.TouchEvent) {
@@ -1753,9 +1859,16 @@ Page(themed({
       const finalMessages = [...this.data.messages]
       const records = executed.executionResult?.records || []
       const summary = records.map(record => `${record.record_type || '待定'} ${record.record_date || ''}（#${record.record_id}）`).join('、')
-      finalMessages[index] = { ...finalMessages[index], reviewPlan: executed, reviewEvents: this.inlineReviewEvents(executed), reviewProgress: this.reviewProgress(executed), reviewResult: `已生成 ${executed.executionResult?.created_count || 0} 条工作记录${summary ? `：${summary}` : ''}。表单可在工作记录详情中按需生成。` }
+      const hasParallel = records.some(record => record.business_type === 'parallel_inspection')
+      const hasWorkRecord = records.some(record => record.business_type !== 'parallel_inspection')
+      const nextStep = [
+        hasWorkRecord ? '工作记录可在工作台查看并生成表单' : '',
+        hasParallel ? '平行检验记录可在平行检验页面查看并生成文书' : '',
+      ].filter(Boolean).join('；')
+      finalMessages[index] = { ...finalMessages[index], reviewPlan: executed, reviewEvents: this.inlineReviewEvents(executed), reviewProgress: this.reviewProgress(executed), reviewResult: `已生成 ${executed.executionResult?.created_count || 0} 条记录${summary ? `：${summary}` : ''}${nextStep ? `。${nextStep}。` : '。'}` }
       this.setData({ messages: finalMessages })
       invalidateByPrefix('/work-record')
+      invalidateByPrefix('/parallel')
       invalidateCache(CACHE_KEYS.WORK_RECORD_STATS)
       return true
     } catch (error) {
@@ -2675,6 +2788,8 @@ Page(themed({
       wx.navigateTo({ url: `/pages/hazards/index?focus=${id}` })
     } else if (kind === 'document') {
       wx.navigateTo({ url: `/pages/documents/detail?id=${id}` })
+    } else if (kind === 'parallel_inspection') {
+      wx.navigateTo({ url: '/pages/parallel/index' })
     }
   },
 

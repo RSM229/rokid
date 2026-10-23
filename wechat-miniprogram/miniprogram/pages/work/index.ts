@@ -31,6 +31,9 @@ interface WorkRecordItem {
   id: number
   record_type: string
   status: string
+  project_name?: string
+  system_project_name?: string
+  project_mismatch?: boolean
   section?: string
   location?: string
   work_content?: string
@@ -63,6 +66,10 @@ interface DetailItem {
   status?: string
   supervisor?: string
   project_name?: string
+  business_project_name?: string
+  system_project_name?: string
+  watermark_project_name?: string
+  project_mismatch?: boolean
   construction_unit?: string
   inspection_time_text?: string
   problem_text?: string
@@ -93,6 +100,7 @@ interface DetailItem {
   witness_unit?: string
   witness_cert_no?: string
   witness_accept_result?: string
+  prov_fields?: Record<string, string>
   inspection_photos?: string[]
   witness_photos?: string[]
   top1_risk?: string

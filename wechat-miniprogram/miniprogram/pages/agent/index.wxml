@@ -64,7 +64,7 @@
             <view class="agent-card" wx:for="{{item.cards}}" wx:for-item="cd" wx:for-index="ci" wx:key="ci"
                   data-kind="{{cd.kind}}" data-id="{{cd.id}}" bindtap="openAgentCard">
               <view class="agent-card-top">
-                <text class="agent-card-kind">{{cd.kind === 'work_record' ? '工作记录' : (cd.kind === 'hazard' ? '隐患' : '文书')}}</text>
+                <text class="agent-card-kind">{{cd.kind === 'work_record' ? '工作记录' : (cd.kind === 'parallel_inspection' ? '平行检验记录' : (cd.kind === 'hazard' ? '隐患' : '文书'))}}</text>
                 <text wx:if="{{cd.status}}" class="agent-card-status">{{cd.status}}</text>
               </view>
               <text class="agent-card-title">{{cd.title}}</text>
@@ -142,6 +142,31 @@
                   <view wx:for="{{entityField.values}}" wx:for-item="choice" wx:for-index="choiceIndex" wx:key="choiceIndex" class="inline-review-chip {{entityField.value === choice ? 'selected' : ''}}" data-index="{{mi}}" data-id="{{event.id}}" data-field="{{entityField.field}}" data-value="{{choice}}" bindtap="changeInlineReviewEntityField">采用 {{choice}}</view>
                 </view>
               </view>
+              <view wx:if="{{event.formFields && event.formFields.length}}" class="inline-form-schema">
+                <view class="inline-form-schema-head">
+                  <text class="inline-form-schema-title">待定工作记录草稿 · {{event.draftStatusLabel}}</text>
+                  <text class="inline-review-source-tag">{{event.formCode}} · {{event.contractVersion}}</text>
+                </view>
+                <view wx:for="{{event.formFields}}" wx:for-item="formField" wx:key="canonical" class="inline-review-field form-schema-field {{formField.missing || formField.conflict || formField.validationError ? 'required-missing' : ''}}">
+                  <view class="inline-review-entity-head">
+                    <text>{{formField.label}}{{formField.required ? ' *' : ''}}</text>
+                    <text wx:if="{{formField.conflict}}" class="inline-review-conflict">待确认</text>
+                    <text wx:elif="{{formField.missing}}" class="inline-review-conflict">待补</text>
+                    <text wx:elif="{{formField.validationError}}" class="inline-review-conflict">格式待修正</text>
+                    <text wx:elif="{{formField.source === 'watermark'}}" class="inline-review-source-tag">水印识别</text>
+                    <text wx:elif="{{formField.value}}" class="inline-review-source-tag">已填写</text>
+                  </view>
+                  <text wx:if="{{formField.validationError}}" class="inline-review-source">{{formField.validationError}}</text>
+                  <view wx:if="{{formField.conflict && formField.candidates.length}}" class="inline-review-chip-row form-option-row">
+                    <view wx:for="{{formField.candidates}}" wx:for-item="candidate" wx:for-index="candidateIndex" wx:key="candidateIndex" class="inline-review-chip {{formField.value === candidate.value ? 'selected' : ''}}" data-index="{{mi}}" data-id="{{event.id}}" data-form-code="{{event.formCode}}" data-field="{{formField.canonical}}" data-value="{{candidate.value}}" bindtap="chooseInlineReviewFormOption">采用 {{candidate.value}}</view>
+                  </view>
+                  <textarea wx:if="{{formField.control === 'textarea'}}" value="{{formField.value}}" disabled="{{formField.readonly}}" auto-height maxlength="-1" placeholder="{{formField.question || '请填写'}}" data-index="{{mi}}" data-id="{{event.id}}" data-form-code="{{event.formCode}}" data-field="{{formField.canonical}}" bindblur="changeInlineReviewFormField" />
+                  <view wx:elif="{{formField.control === 'select' && formField.options.length}}" class="inline-review-chip-row form-option-row">
+                    <view wx:for="{{formField.options}}" wx:for-item="option" wx:for-index="optionIndex" wx:key="optionIndex" class="inline-review-chip {{formField.value === option ? 'selected' : ''}}" data-index="{{mi}}" data-id="{{event.id}}" data-form-code="{{event.formCode}}" data-field="{{formField.canonical}}" data-value="{{option}}" bindtap="chooseInlineReviewFormOption">{{option}}</view>
+                  </view>
+                  <input wx:else value="{{formField.value}}" disabled="{{formField.readonly}}" type="{{formField.control === 'number' ? 'number' : 'text'}}" placeholder="{{formField.question || (formField.readonly ? '由系统带出' : '请填写')}}" data-index="{{mi}}" data-id="{{event.id}}" data-form-code="{{event.formCode}}" data-field="{{formField.canonical}}" bindblur="changeInlineReviewFormField" />
+                </view>
+              </view>
               <view class="inline-review-field"><text>工作描述</text><textarea value="{{event.content}}" auto-height maxlength="-1" placeholder="补充现场工作情况" data-index="{{mi}}" data-id="{{event.id}}" data-field="content" bindblur="changeInlineReviewField" /></view>
               <view class="inline-review-date-row">
                 <text class="inline-review-label">业务日期</text>
@@ -175,7 +200,7 @@
               </picker>
               <view class="inline-review-form-row">
                 <text class="inline-review-label">工作记录类型</text>
-                <text class="inline-review-date-status {{event.recordType === '待定' ? 'pending' : 'confirmed'}}">{{event.recordType}} · {{event.recordTypeConfidenceText}}</text>
+                <text class="inline-review-date-status {{event.recordType === '待定' ? 'pending' : 'confirmed'}}">{{event.recordType}} · {{event.draftStatusLabel}}</text>
               </view>
               <view class="inline-review-chip-row">
                 <view wx:for="{{event.recordTypeOptions}}" wx:for-item="type" wx:key="label" class="inline-review-chip form-chip {{type.checked ? 'selected' : ''}}" data-index="{{mi}}" data-id="{{event.id}}" data-type="{{type.label}}" bindtap="changeInlineReviewType">{{type.label}}</view>

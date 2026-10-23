@@ -3,7 +3,8 @@ import { request } from './request'
 import { absoluteMediaUrl } from '../config'
 import { isExecutionRecoverable, waitForAgentExecution } from './agent-execution'
 export const FORM_TYPES = [
-  '巡视记录', '危大工程巡视记录', '旁站记录', '平行检验记录', '验收记录',
+  '巡视记录', '危大工程巡视记录', '旁站记录', '平行检验记录', '验收记录', '见证取样记录',
+  '起重机械安拆检查',
   '材料台账', '监理通知单', '安全隐患整改通知单', '监理日志', '监理月报', '安全监理日志',
 ]
 export const SCENARIOS = ['混合日期与缺失水印', '九张图片 / 九个日期', '同一历史日期 / 多项工作', '资料不足 / 用途不明', '纯文字 / 无图片']
@@ -13,6 +14,8 @@ export const FORM_CODE_BY_LABEL: Record<string, string> = {
   '安全隐患整改通知单': 'gdaq_30308_yinhuan', '验收记录': 'acceptance_record',
   '监理日志': 'gd_b_220_rizhi', '监理月报': 'gd_b_221_yuebao',
   '材料台账': 'gd_b_219_cailiao', '危大工程巡视记录': 'gdaq_30306_weida',
+  '见证取样记录': 'witness_record',
+  '起重机械安拆检查': 'gdaq_30305_qizhong',
   '安全监理日志': 'anquan_jianli_rizhi',
 }
 const FORM_LABEL_BY_CODE = Object.fromEntries(Object.entries(FORM_CODE_BY_LABEL).map(([label, code]) => [code, label]))
@@ -44,7 +47,8 @@ export interface WorkEvent {
   evidenceIds: string[]
   /** Legacy form selections are retained for old saved plans, but are not required. */
   forms: string[]
-  recordType?: '巡视' | '验收' | '见证' | '旁站' | '待定' | string
+  recordType?: '巡视' | '验收' | '见证' | '旁站' | '平行检验' | '起重机械安拆检查' | '待定' | string
+  recordTypeConfirmed?: boolean
   recordTypeConfidence?: number
   recordTypeReason?: string
   fieldSources?: Record<string, string>
@@ -61,6 +65,45 @@ export interface WorkEvent {
   fieldCandidates?: Record<string, string[]>
   /** Candidate fields with more than one known value that are not yet confirmed. */
   unresolvedConflicts?: string[]
+  /** Canonical form fields resolved by the backend. */
+  formCode?: string
+  formFields?: ReviewFormFieldState[]
+  formMissingFields?: string[]
+  recordDraft?: RecordDraftPreview
+}
+
+export interface ReviewFormFieldState {
+  key: string
+  canonical: string
+  label: string
+  section?: string
+  control: 'text' | 'textarea' | 'number' | 'date' | 'datetime-local' | 'select' | string
+  options?: string[]
+  question?: string
+  required: boolean
+  readonly: boolean
+  value: string
+  source?: string
+  status?: string
+  missing: boolean
+  conflict?: boolean
+  validationError?: string
+  candidates?: Array<{ value: string; label?: string; evidence_id?: string }>
+}
+export interface RecordDraftPreview {
+  status: string
+  recordType: string
+  recordTypeConfirmed: boolean
+  formCode: string
+  formName: string
+  contractVersion: string
+  recordDate: string
+  section: string
+  location: string
+  content: string
+  fields: Record<string, string>
+  blockers: Array<{ kind: string; canonical: string; label: string; message?: string }>
+  generationAllowed: boolean
 }
 export interface ReviewPlan {
   schemaVersion: 1
@@ -81,6 +124,8 @@ export interface ReviewPlan {
   notices?: string[]
   /** Immutable request-plan snapshot used to create this draft. */
   requestPlan?: Record<string, unknown>
+  /** Form-schema fingerprints retained across edits to detect contract drift. */
+  formContracts?: Record<string, string>
   /** Trace/operation id propagated through planning, confirmation and execution. */
   requestId?: string
 }
@@ -158,6 +203,7 @@ export interface ReviewExecutionRecord {
   record_type?: string
   record_date?: string
   media_ids: number[]
+  business_type?: 'work_record' | 'parallel_inspection' | string
   /** Legacy response fields kept for the standalone review page. */
   form_code?: string
   form_name?: string
@@ -214,6 +260,7 @@ function fromServerPlan(result: ReviewPlanResponse): ReviewPlan {
       evidenceIds: Array.isArray(item.evidence_ids) ? item.evidence_ids.map(String) : [],
       forms: Array.isArray(item.forms) ? item.forms.map(value => FORM_LABEL_BY_CODE[String(value)] || String(value)) : [],
       recordType: String(item.record_type || '待定'),
+      recordTypeConfirmed: item.record_type_confirmed === true,
       recordTypeConfidence: typeof item.record_type_confidence === 'number' ? item.record_type_confidence : 0,
       recordTypeReason: String(item.record_type_reason || ''),
       fieldSources: item.field_sources && typeof item.field_sources === 'object' ? item.field_sources as Record<string, string> : {},
@@ -230,6 +277,57 @@ function fromServerPlan(result: ReviewPlanResponse): ReviewPlan {
         ]))
         : {},
       unresolvedConflicts: Array.isArray(item.unresolved_conflicts) ? item.unresolved_conflicts.map(String) : [],
+      formCode: String(item.form_code || ''),
+      formFields: Array.isArray(item.form_fields)
+        ? item.form_fields.map((field: any) => ({
+          key: String(field?.key || ''),
+          canonical: String(field?.canonical || ''),
+          label: String(field?.label || ''),
+          section: String(field?.section || ''),
+          control: String(field?.control || 'text'),
+          options: Array.isArray(field?.options) ? field.options.map(String) : [],
+          question: String(field?.question || ''),
+          required: field?.required === true,
+          readonly: field?.readonly === true,
+          value: String(field?.value || ''),
+          source: String(field?.source || ''),
+          status: String(field?.status || ''),
+          missing: field?.missing === true,
+          conflict: field?.conflict === true,
+          validationError: String(field?.validation_error || ''),
+          candidates: Array.isArray(field?.candidates) ? field.candidates.map((candidate: any) => ({
+            value: String(candidate?.value || ''),
+            label: String(candidate?.label || ''),
+            evidence_id: String(candidate?.evidence_id || ''),
+          })) : [],
+        }))
+        : [],
+      formMissingFields: Array.isArray(item.form_missing_fields) ? item.form_missing_fields.map(String) : [],
+      recordDraft: item.record_draft && typeof item.record_draft === 'object' ? (() => {
+        const draft = item.record_draft as Record<string, any>
+        return {
+        status: String(draft.status || 'needs_record_type'),
+        recordType: String(draft.record_type || '待定'),
+        recordTypeConfirmed: draft.record_type_confirmed === true,
+        formCode: String(draft.form_code || ''),
+        formName: String(draft.form_name || ''),
+        contractVersion: String(draft.contract_version || ''),
+        recordDate: String(draft.record_date || ''),
+        section: String(draft.section || ''),
+        location: String(draft.location || ''),
+        content: String(draft.content || ''),
+        fields: draft.fields && typeof draft.fields === 'object'
+          ? Object.fromEntries(Object.entries(draft.fields).map(([key, value]) => [key, String(value)]))
+          : {},
+        blockers: Array.isArray(draft.blockers) ? draft.blockers.map((blocker: any) => ({
+          kind: String(blocker?.kind || ''),
+          canonical: String(blocker?.canonical || ''),
+          label: String(blocker?.label || ''),
+          message: String(blocker?.message || ''),
+        })) : [],
+        generationAllowed: draft.generation_allowed === true,
+        }
+      })() : undefined,
     })),
     unassignedIds: Array.isArray(raw.unassigned_ids) ? raw.unassigned_ids.map(String) : [],
     confirmedRevision: result.confirmed_revision,
@@ -241,6 +339,9 @@ function fromServerPlan(result: ReviewPlanResponse): ReviewPlan {
     executionResult: result.execution_result || null,
     notices: Array.isArray(raw.notices) ? raw.notices.map(String) : [],
     requestPlan: raw.request_plan && typeof raw.request_plan === 'object' ? raw.request_plan as Record<string, unknown> : undefined,
+    formContracts: raw.form_contracts && typeof raw.form_contracts === 'object'
+      ? Object.fromEntries(Object.entries(raw.form_contracts as Record<string, unknown>).map(([key, value]) => [key, String(value)]))
+      : {},
     requestId: String(result.request_id || raw.request_id || ''),
   }
   validatePlan(plan)
@@ -264,6 +365,7 @@ function toServerPlan(plan: ReviewPlan): Record<string, unknown> {
       date_source: item.dateSource || '',
       evidence_ids: item.evidenceIds, forms: item.forms.map(value => FORM_CODE_BY_LABEL[value] || value),
       record_type: item.recordType || '待定',
+      record_type_confirmed: item.recordTypeConfirmed === true,
       record_type_confidence: item.recordTypeConfidence || 0,
       record_type_reason: item.recordTypeReason || '',
       field_sources: item.fieldSources || {},
@@ -278,6 +380,7 @@ function toServerPlan(plan: ReviewPlan): Record<string, unknown> {
     unassigned_ids: plan.unassignedIds,
     notices: plan.notices || [],
     request_plan: plan.requestPlan || {},
+    form_contracts: plan.formContracts || {},
   }
 }
 
@@ -380,7 +483,7 @@ export async function executeReviewPlan(plan: ReviewPlan, revision = plan.server
 }
 
 export function newEvent(id: string, evidenceIds: string[] = [], date = ''): WorkEvent {
-  return { id, title: '现场事项（待核对）', location: '', date, dateConfirmed: Boolean(date), dateSource: date ? 'watermark' : '', evidenceIds, forms: [], recordType: '待定', recordTypeConfidence: 0, recordTypeReason: '', fieldSources: {}, content: '' }
+  return { id, title: '现场事项（待核对）', location: '', date, dateConfirmed: Boolean(date), dateSource: date ? 'watermark' : '', evidenceIds, forms: [], recordType: '待定', recordTypeConfirmed: false, recordTypeConfidence: 0, recordTypeReason: '', fieldSources: {}, content: '' }
 }
 
 export function createExample(scenario = 0): ReviewPlan {
@@ -519,13 +622,14 @@ export function reviewPlanFromItemPlan(
     const project = requestFieldValue(item, 'project')
     const location = requestFieldValue(item, 'location')
     const section = requestFieldValue(item, 'section')
-    const recordType = ['巡视', '验收', '见证', '旁站', '待定'].includes(String(item.record_type || ''))
+    const recordType = ['巡视', '验收', '见证', '旁站', '平行检验', '起重机械安拆检查', '待定'].includes(String(item.record_type || ''))
       ? String(item.record_type)
       : '待定'
     const dateField = item.fields?.record_date
     const locationField = item.fields?.location
     const sectionField = item.fields?.section
     const entityFields: Record<string, string> = {}
+    const plannedFields: Record<string, unknown> = {}
     const fieldCandidates: Record<string, string[]> = {}
     const unresolvedConflicts: string[] = []
     const canonicalEntityKeys: Record<string, string> = {
@@ -534,11 +638,28 @@ export function reviewPlanFromItemPlan(
       supervision_unit: 'supervision_unit', supervision_org: 'supervision_org',
       inspector: 'inspector', weather: 'weather', work_content: 'work_content',
       problems: 'problems', treatment: 'treatment', handling: 'handling', remark: 'remark',
+      worker_count: 'worker_count', start_time: 'start_time', end_time: 'end_time',
+      station_process: 'station_process', acceptance_type: 'acceptance_type',
+      acceptance_content: 'acceptance_content', self_check_conclusion: 'self_check_conclusion',
+      supervision_conclusion: 'supervision_conclusion', photo: 'photo',
+      material_name: 'material_name', material_spec: 'material_spec', quantity: 'quantity',
+      unit: 'unit', manufacturer: 'manufacturer', batch_no: 'batch_no',
+      sample_date: 'sample_date', sampler: 'sampler', cert_no: 'cert_no',
+      test_result: 'test_result', equipment: 'equipment', material_info: 'material_info',
+      qa_onsite: 'qa_onsite', self_check: 'self_check',
     }
     for (const [sourceKey, field] of Object.entries(item.fields || {})) {
+      const value = String(field?.value ?? '').trim()
+      if (value) {
+        plannedFields[sourceKey] = {
+          value,
+          source: String(field?.source || 'candidate'),
+          status: String(field?.status || 'candidate'),
+          candidates: [...new Set((field?.candidates || []).map(String).map(candidate => candidate.trim()).filter(Boolean))],
+        }
+      }
       const key = canonicalEntityKeys[sourceKey]
       if (!key) continue
-      const value = String(field?.value ?? '').trim()
       if (value) entityFields[key] = value
       const candidates = [...new Set((field?.candidates || []).map(String).map(value => value.trim()).filter(Boolean))]
       if (value && !candidates.includes(value)) candidates.unshift(value)
@@ -546,6 +667,14 @@ export function reviewPlanFromItemPlan(
       if (field?.status === 'conflict') unresolvedConflicts.push(key)
     }
     const notes = (item.notes || []).map(String).filter(Boolean)
+    const formCodeByType: Record<string, string> = {
+      '巡视': 'gd_b_214_xunshi', '旁站': 'gd_b_212_pangzhan',
+      '验收': 'acceptance_record', '见证': 'witness_record', '平行检验': 'gd_b_213_pingxing',
+      '起重机械安拆检查': 'gdaq_30305_qizhong',
+    }
+    const requestedForm = ((item as RequestPlanItem & { forms?: string[] }).forms || [])
+      .find(form => Object.values(FORM_CODE_BY_LABEL).includes(String(form)))
+    const formCode = requestedForm || formCodeByType[recordType] || '__general__'
     const place = [project, section, location].filter(Boolean).join(' / ')
     const title = notes[0]?.slice(0, 80) || (place ? `${recordType === '待定' ? '现场工作' : recordType} · ${place}` : '')
     events.push({
@@ -559,20 +688,23 @@ export function reviewPlanFromItemPlan(
       evidenceIds,
       forms: [],
       recordType,
+      recordTypeConfirmed: false,
       recordTypeConfidence: typeof item.record_type_confidence === 'number' ? item.record_type_confidence : 0,
       recordTypeReason: recordType === '待定' ? '尚未确定记录类型，请从下方选择' : '由服务端受控动作和语义候选归一化',
       fieldSources: {
         ...(date ? { date: dateField?.source || 'candidate' } : {}),
         ...(location ? { location: locationField?.source || 'candidate' } : {}),
         ...(section ? { section: sectionField?.source || 'candidate' } : {}),
+        ...Object.fromEntries(Object.entries(item.fields || {}).map(([key, field]) => [key, String(field?.source || 'candidate')])),
       },
-      content: entityFields.work_content || requestText.trim(),
+      content: entityFields.work_content || notes[0] || '',
       missingFields: [...new Set((item.missing_fields || []).map(String))],
       issues: [...new Set((item.issues || []).map(String))],
       itemStatus: item.status || '',
       entityFields,
       fieldCandidates,
       unresolvedConflicts: [...new Set(unresolvedConflicts)],
+      fields: Object.keys(plannedFields).length ? { [formCode]: plannedFields } : {},
     })
   }
 
@@ -645,7 +777,7 @@ export function validatePlan(plan: ReviewPlan): void {
   for (const event of plan.events) {
     if (typeof event.id !== 'string' || typeof event.title !== 'string' || typeof event.location !== 'string' || typeof event.content !== 'string' || typeof event.dateConfirmed !== 'boolean') throw new Error('事项数据无效')
     if (!validDateOrEmpty(event.date) || (event.dateConfirmed && !event.date)) throw new Error('日期无效')
-    if (event.recordType && !['巡视', '验收', '见证', '旁站', '待定'].includes(event.recordType)) throw new Error('记录类型无效')
+    if (event.recordType && !['巡视', '验收', '见证', '旁站', '平行检验', '起重机械安拆检查', '待定'].includes(event.recordType)) throw new Error('记录类型无效')
     if (event.recordTypeConfidence != null && (typeof event.recordTypeConfidence !== 'number' || event.recordTypeConfidence < 0 || event.recordTypeConfidence > 1)) throw new Error('记录类型置信度无效')
     if (new Set(event.forms).size !== event.forms.length || event.forms.some(form => !FORM_TYPES.includes(form))) throw new Error('表式无效')
     if (event.missingFields && (!Array.isArray(event.missingFields) || event.missingFields.some(field => typeof field !== 'string'))) throw new Error('缺项信息无效')
@@ -670,15 +802,34 @@ function revised(plan: ReviewPlan, patch: Partial<ReviewPlan>): ReviewPlan {
 export function editRequest(plan: ReviewPlan, requestText: string): ReviewPlan {
   return revised(plan, { requestText })
 }
-export function editEvent(plan: ReviewPlan, id: string, patch: Partial<Pick<WorkEvent, 'title' | 'location' | 'section' | 'date' | 'dateConfirmed' | 'dateSource' | 'forms' | 'content' | 'recordType' | 'recordTypeConfidence' | 'recordTypeReason' | 'fieldSources' | 'missingFields' | 'issues' | 'entityFields' | 'fieldCandidates' | 'unresolvedConflicts'>>): ReviewPlan {
+export function editEvent(plan: ReviewPlan, id: string, patch: Partial<Pick<WorkEvent, 'title' | 'location' | 'section' | 'date' | 'dateConfirmed' | 'dateSource' | 'forms' | 'content' | 'recordType' | 'recordTypeConfirmed' | 'recordTypeConfidence' | 'recordTypeReason' | 'fieldSources' | 'missingFields' | 'issues' | 'entityFields' | 'fieldCandidates' | 'unresolvedConflicts'>>): ReviewPlan {
   if (!plan.events.some(event => event.id === id)) throw new Error('事项不存在')
   return revised(plan, { events: plan.events.map(event => event.id === id ? { ...event, ...patch } : event) })
 }
 export function editFormField(plan: ReviewPlan, id: string, formCode: string, key: string, value: unknown): ReviewPlan {
   const event = plan.events.find(item => item.id === id)
   if (!event) throw new Error('事项不存在')
-  const fields = { ...(event.fields || {}), [formCode]: { ...(event.fields?.[formCode] || {}), [key]: value } }
-  return revised(plan, { events: plan.events.map(item => item.id === id ? { ...item, fields } : item) })
+  const fields = {
+    ...(event.fields || {}),
+    [formCode]: {
+      ...(event.fields?.[formCode] || {}),
+      [key]: { value, source: 'user_message', status: 'user_confirmed' },
+    },
+  }
+  return revised(plan, { events: plan.events.map(item => item.id === id ? {
+    ...item,
+    fields,
+    fieldSources: { ...(item.fieldSources || {}), [key]: 'user_message' },
+    unresolvedConflicts: (item.unresolvedConflicts || []).filter(field => field !== key),
+    formFields: (item.formFields || []).map(field => field.canonical === key ? {
+      ...field,
+      value: String(value ?? ''),
+      source: 'user_message',
+      status: 'user_confirmed',
+      missing: false,
+      readonly: false,
+    } : field),
+  } : item) })
 }
 export function editEvidenceWatermark(plan: ReviewPlan, id: string, itemIndex: number, key: 'label' | 'value', value: string): ReviewPlan {
   const evidence = plan.evidence.find(item => item.id === id)
@@ -790,6 +941,7 @@ export function reviewIssues(plan: ReviewPlan): string[] {
     if (!event.title.trim()) issues.push(`事项 ${i + 1} 缺少名称`)
     if (!event.evidenceIds.length && !event.content.trim()) issues.push(`事项 ${i + 1} 缺少工作描述或资料`)
     if (!event.recordType || event.recordType === '待定') issues.push(`事项 ${i + 1} 请选择工作记录类型`)
+    else if (event.recordTypeConfirmed !== true) issues.push(`事项 ${i + 1} 的记录类型“${event.recordType}”是 Agent 建议，请由你确认或修改`)
     for (const field of event.unresolvedConflicts || []) {
       const label = ({
         project_name: '项目', owner_unit: '建设单位', construction_unit: '施工单位',
@@ -797,6 +949,18 @@ export function reviewIssues(plan: ReviewPlan): string[] {
         location: '地点', section: '施工部位',
       } as Record<string, string>)[field] || field
       issues.push(`事项 ${i + 1} 的${label}存在多个候选值，请先选择`)
+    }
+    const missingLabels = (event.formFields || [])
+      .filter(field => field.required && field.missing)
+      .map(field => field.label)
+    if (missingLabels.length) {
+      issues.push(`事项 ${i + 1} 还需补充：${[...new Set(missingLabels)].join('、')}`)
+    }
+    const conflictLabels = (event.formFields || [])
+      .filter(field => field.conflict)
+      .map(field => field.label)
+    if (conflictLabels.length) {
+      issues.push(`事项 ${i + 1} 的${[...new Set(conflictLabels)].join('、')}存在多个水印候选值，请先选择`)
     }
   })
   return issues

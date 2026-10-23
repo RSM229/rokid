@@ -12,11 +12,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.agent_draft import AgentReviewPlan
 from app.models.miniprogram import MediaRecord, MediaType
 from app.models.user import Project, User
+from app.models.parallel import ParallelInspection
 from app.models.work_record import WorkRecord, WorkRecordStatus
-from app.services import agent_review_plan, record_field_spec, record_fields
+from app.services import agent_form_requirements, agent_review_plan, form_registry, record_field_spec, record_fields
 from app.services.watermark_ocr import match_form_field
 
-RECORD_PERMISSIONS = {"巡视": "inspection", "验收": "acceptance", "见证": "witness", "旁站": "station"}
+RECORD_PERMISSIONS = {
+    "巡视": "inspection", "验收": "acceptance", "见证": "witness",
+    "旁站": "station", "平行检验": "inspection",
+    "起重机械安拆检查": "inspection",
+}
 WATERMARK_FIELD_ALIASES = {
     "项目": "project_name", "项目名称": "project_name", "工程名称": "project_name", "建设项目": "project_name",
     "建设单位名称": "owner_unit", "施工单位名称": "construction_unit", "监理单位名称": "supervision_unit",
@@ -65,6 +70,14 @@ def _flatten_event_fields(raw: Any, form_code: str | None) -> dict[str, Any]:
         canonical = FIELD_ALIASES.get(str(key), str(key))
         out[canonical] = value
     return out
+
+
+def _selected_event_fields(event: dict[str, Any], form_code: str | None) -> dict[str, Any]:
+    """Merge candidates so form-specific user decisions override entity defaults."""
+    return {
+        **_flatten_event_fields(event.get("entity_fields"), form_code),
+        **_flatten_event_fields(event.get("fields"), form_code),
+    }
 
 
 def _business_content(value: Any, form_fields: dict[str, Any], record_type: str) -> str:
@@ -159,11 +172,23 @@ async def execute_confirmed_plan(
         urls = [media_by_id[mid].processed_path or media_by_id[mid].original_path for mid in event_media_ids]
         record_date = date.fromisoformat(event["date"]) if event.get("date") else None
         record_date_text = record_date.isoformat() if record_date else ""
-        form_code = record_field_spec.form_for_record_type(record_type)
-        selected_fields = {
-            **_flatten_event_fields(event.get("fields"), form_code),
-            **_flatten_event_fields(event.get("entity_fields"), form_code),
-        }
+        form_requirements = agent_form_requirements.resolve_event_form(plan, event)
+        form_code = form_requirements.get("form_code") or record_field_spec.form_for_record_type(record_type)
+        if (
+            form_requirements.get("missing_fields")
+            or form_requirements.get("conflict_labels")
+            or form_requirements.get("invalid_fields")
+        ):
+            labels = "、".join(dict.fromkeys(
+                list(form_requirements.get("missing_labels") or form_requirements["missing_fields"])
+                + list(form_requirements.get("conflict_labels") or [])
+                + [
+                    f"{item.get('label') or item.get('canonical')}（{item.get('message') or '格式无效'}）"
+                    for item in form_requirements.get("invalid_fields") or []
+                ]
+            ))
+            raise HTTPException(422, f"事项“{event.get('title') or event['id']}”尚未补全：{labels}")
+        selected_fields = _selected_event_fields(event, form_code)
         event_evidence = [
             item for item in plan.get("evidence", [])
             if item.get("id") in event["evidence_ids"]
@@ -196,7 +221,10 @@ async def execute_confirmed_plan(
             for key, value in (item.get("watermark_fields") or {}).items():
                 if value not in (None, ""):
                     watermark_fields.setdefault(key, value)
-        form_fields = {**watermark_fields, **selected_fields}
+        # This is the single authoritative snapshot used by record details and
+        # every downstream form renderer. Keep raw watermark values separately
+        # for audit; they must never override the user's confirmed selection.
+        form_fields = {**selected_fields, **form_requirements.get("values", {})}
         for legacy, canonical in FIELD_ALIASES.items():
             if form_fields.get(legacy) not in (None, "") and form_fields.get(canonical) in (None, ""):
                 form_fields[canonical] = form_fields[legacy]
@@ -207,7 +235,42 @@ async def execute_confirmed_plan(
             or event.get("section") or event.get("location") or None
         )
         resolved_location = user_location or form_fields.get("location") or event.get("location") or None
-        resolved_content = _business_content(event.get("content"), form_fields, record_type)
+        resolved_content = str(
+            form_fields.get("content") or form_fields.get("work_content") or ""
+        ).strip()
+        if record_fields.is_instruction_only(resolved_content):
+            resolved_content = ""
+        form_spec = form_registry.FORM_BY_CODE.get(form_code)
+        if form_spec and form_spec.agent_business_route == "parallel_inspection":
+            parallel = ParallelInspection(
+                user_id=user.id,
+                project_id=project_id,
+                inspect_date=record_date_text,
+                part=str(form_fields.get("section") or form_fields.get("part") or "").strip(),
+                item=str(form_fields.get("acceptance_content") or form_fields.get("item") or "").strip(),
+                method=str(form_fields.get("method") or "").strip(),
+                basis=str(form_fields.get("basis") or "").strip(),
+                result_detail=str(form_fields.get("record") or form_fields.get("measure_data") or resolved_content).strip(),
+                conclusion=str(form_fields.get("conclusion") or "").strip(),
+                treatment=str(form_fields.get("handling") or form_fields.get("treatment") or "").strip(),
+                form_code=form_code,
+            )
+            db.add(parallel)
+            await db.flush()
+            for media_id in event_media_ids:
+                media = media_by_id[media_id]
+                media.business_type = "parallel_inspection"
+                media.business_id = parallel.id
+            results.append({
+                "event_id": event["id"],
+                "record_id": parallel.id,
+                "record_type": record_type,
+                "record_date": parallel.inspect_date or None,
+                "media_ids": event_media_ids,
+                "business_type": "parallel_inspection",
+                "form_code": form_code,
+            })
+            continue
         problem_text = _business_problem(form_fields)
         project_name = str(form_fields.get("project_name") or form_fields.get("project") or "").strip()
         construction_unit = str(form_fields.get("construction_unit") or "").strip()
@@ -242,9 +305,26 @@ async def execute_confirmed_plan(
                 for item in event_evidence
             ],
             "extracted_watermark_fields": watermark_fields,
-            "form_field_candidates": form_fields,
+            "form_field_candidates": {
+                **watermark_fields,
+                **selected_fields,
+            },
             "extracted_fields": selected_fields,
-            "field_resolutions": selected_fields,
+            "field_resolutions": form_fields,
+            "confirmed_fields": form_fields,
+            "confirmed_field_metadata": {
+                key: {
+                    "value": value,
+                    "source": form_requirements.get("sources", {}).get(key, "user_confirmed"),
+                    "status": "user_confirmed",
+                }
+                for key, value in form_fields.items()
+                if value not in (None, "")
+            },
+            "prov_fields": form_requirements.get("values", {}),
+            "form_requirements": form_requirements,
+            "form_code": form_code,
+            "form_contract_version": form_requirements.get("contract_version", ""),
             "form_context": {
                 "project_name": project_name,
                 "owner_unit": owner_unit,
@@ -267,9 +347,10 @@ async def execute_confirmed_plan(
             inspection_start_time=_event_datetime(form_fields.get("start_time") or form_fields.get("taken_at"), record_date_text),
             inspection_end_time=_event_datetime(form_fields.get("end_time"), record_date_text),
             inspection_remark=problem_text[:2000] or None if record_type == "巡视" else None,
+            station_project_name=project_name[:128] or None if record_type == "旁站" else None,
             station_content=resolved_content[:2000] or None if record_type == "旁站" else None,
-            station_location=str(form_fields.get("station_part") or resolved_section or resolved_location or "")[:256] or None,
-            station_process=str(form_fields.get("station_process") or form_fields.get("work_content") or "")[:256] or None,
+            station_location=str(form_fields.get("section") or form_fields.get("station_part") or resolved_section or resolved_location or "")[:256] or None,
+            station_process=str(form_fields.get("station_process") or "")[:256] or None,
             station_start_time=_event_datetime(form_fields.get("start_time") or form_fields.get("taken_at"), record_date_text),
             station_end_time=_event_datetime(form_fields.get("end_time"), record_date_text),
             station_conclusion=str(
@@ -278,13 +359,13 @@ async def execute_confirmed_plan(
             acceptance_result=str(form_fields.get("acceptance_result") or form_fields.get("supervision_conclusion") or form_fields.get("conclusion") or "")[:32] or None,
             acceptance_participants=str(form_fields.get("acceptance_participants") or form_fields.get("person") or "") or None,
             acceptance_basis=str(form_fields.get("basis") or ""),
-            witness_material_name=str(form_fields.get("witness_material_name") or form_fields.get("material_name") or "")[:128] or None,
-            witness_material_spec=str(form_fields.get("witness_material_spec") or form_fields.get("material_spec") or form_fields.get("spec") or "")[:256] or None,
-            witness_quantity=str(form_fields.get("witness_quantity") or form_fields.get("quantity") or "")[:32],
-            witness_unit=str(form_fields.get("witness_unit") or form_fields.get("unit") or "")[:16],
-            witness_cert_no=str(form_fields.get("witness_cert_no") or form_fields.get("cert_no") or "")[:64],
+            witness_material_name=str(form_fields.get("material_name") or form_fields.get("witness_material_name") or "")[:128] or None,
+            witness_material_spec=str(form_fields.get("material_spec") or form_fields.get("witness_material_spec") or form_fields.get("spec") or "")[:256] or None,
+            witness_quantity=str(form_fields.get("quantity") or form_fields.get("witness_quantity") or "")[:32],
+            witness_unit=str(form_fields.get("unit") or form_fields.get("witness_unit") or "")[:16],
+            witness_cert_no=str(form_fields.get("cert_no") or form_fields.get("witness_cert_no") or "")[:64],
             witness_accept_result=str(
-                form_fields.get("witness_accept_result") or form_fields.get("acceptance_result") or form_fields.get("accept_result") or ""
+                form_fields.get("acceptance_result") or form_fields.get("witness_accept_result") or form_fields.get("accept_result") or ""
             )[:16],
             problems=problem_text,
             treatment=str(form_fields.get("treatment") or form_fields.get("handling") or ""),
