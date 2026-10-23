@@ -147,7 +147,7 @@ class RecordRepairTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_existing_required_signoffs_are_preserved(self):
         from app.services.document_signoffs import required_slots_for, assert_required_signoffs
-        expected = {"旁站记录": {"inspector"}, "巡视记录": {"inspector"}, "平行检查记录": {"reviewer"}, "监理日志": {"supervisor"}, "监理通知单": {"supervisor", "chief"}, "验收记录": {"acceptor"}}
+        expected = {"旁站记录": {"inspector"}, "巡视记录": {"inspector"}, "平行检查记录": {"inspector"}, "监理日志": {"inspector"}, "验收记录": {"acceptor"}}
         for kind, slots in expected.items():
             doc = Document(project_id=self.p.id, creator_id=self.u.id, doc_type=kind, title=kind, content={})
             self.db.add(doc); await self.db.flush()
@@ -158,6 +158,31 @@ class RecordRepairTests(unittest.IsolatedAsyncioTestCase):
                 self.db.add(DocumentSignoff(document_id=doc.id, revision=1, slot=slot, signer_id=self.u.id, signer_name=self.u.real_name, signature_id=1, signature_hash='test', content_hash='test', signed_pdf_path='test'))
             await self.db.flush()
             await assert_required_signoffs(self.db, doc)
+
+        notice = Document(project_id=self.p.id, creator_id=self.u.id, doc_type="监理通知单",
+                          form_code="gd_b_215_tongzhi", title="监理通知单", content={})
+        self.db.add(notice); await self.db.flush()
+        self.assertEqual(required_slots_for(notice), {"project_seal"})
+        with self.assertRaises(HTTPException):
+            await assert_required_signoffs(self.db, notice)
+        self.db.add(DocumentSignoff(document_id=notice.id, revision=1, slot="project_seal", signer_id=self.u.id, signer_name=self.u.real_name, signature_id=1, signature_hash='test', content_hash='test', signed_pdf_path='test'))
+        await self.db.flush()
+        with self.assertRaises(HTTPException):
+            await assert_required_signoffs(self.db, notice)
+        self.db.add(DocumentSignoff(document_id=notice.id, revision=1, slot="supervisor", signer_id=self.u.id, signer_name=self.u.real_name, signature_id=1, signature_hash='test', content_hash='test', signed_pdf_path='test'))
+        await self.db.flush()
+        await assert_required_signoffs(self.db, notice)
+
+        monthly = Document(project_id=self.p.id, creator_id=self.u.id, doc_type="监理月报",
+                           form_code="gd_b_221_yuebao", title="监理月报", content={})
+        self.db.add(monthly); await self.db.flush()
+        self.assertEqual(required_slots_for(monthly), {"chief", "project_seal"})
+        with self.assertRaises(HTTPException):
+            await assert_required_signoffs(self.db, monthly)
+        for slot in ("chief", "project_seal"):
+            self.db.add(DocumentSignoff(document_id=monthly.id, revision=1, slot=slot, signer_id=self.u.id, signer_name=self.u.real_name, signature_id=1, signature_hash='test', content_hash='test', signed_pdf_path='test'))
+        await self.db.flush()
+        await assert_required_signoffs(self.db, monthly)
 
     async def test_acceptance_has_own_form_and_participants(self):
         res=await work_record.create_acceptance(work_record.CreateAcceptanceRequest(section='隐蔽部位',acceptance_type='隐蔽验收',acceptance_content='钢筋隐蔽验收',acceptance_result='合格',record_date=date(2026,10,8)),self.u,self.db)
@@ -403,6 +428,52 @@ class RecordRepairTests(unittest.IsolatedAsyncioTestCase):
         rendered = WordDocument(str(copied))
         self.assertTrue(any('word/media/' in name for name in __import__('zipfile').ZipFile(copied).namelist()))
         self.assertFalse(embed_signoff_image(copied, 'chief', f'/uploads/{sig_path.relative_to(settings.upload_dir).as_posix()}', 'witness_record'))
+
+    async def test_log_and_monthly_report_signatures_have_real_template_anchors(self):
+        from zipfile import ZipFile
+        from app.services.form_renderer import embed_signoff_image, render_form
+        sig_path = settings.upload_dir / 'signature-template-roles.png'
+        Image.new('RGBA', (80, 40), (0, 0, 0, 180)).save(sig_path)
+        sig_url = f'/uploads/{sig_path.relative_to(settings.upload_dir).as_posix()}'
+
+        for form_code, data, slot, extra_slots in (
+            ('gd_b_220_rizhi', {
+                'project_name': self.p.name, 'doc_number': 'LOG-SIGN', 'date': '2026-10-23',
+                'weekday': '五', 'weather': '晴', 'construction_progress': '主体施工',
+                'supervision_section': '巡视检查', 'problems_section': '无',
+            }, 'inspector', ('chief',)),
+            ('gd_b_221_yuebao', {
+                'project_name': self.p.name, 'doc_number': 'REPORT-SIGN',
+                'report_period': '2026年10月', 'submit_date': '2026-10-23',
+                'supervision_org': '项目监理部', 'chief_supervisor': '',
+            }, 'chief', ('project_seal',)),
+        ):
+            output = render_form(form_code, data, settings.export_dir)
+            for current_slot in (slot, *extra_slots):
+                self.assertTrue(embed_signoff_image(output, current_slot, sig_url, form_code))
+            with ZipFile(output) as archive:
+                self.assertTrue(any(name.startswith('word/media/') for name in archive.namelist()))
+
+    async def test_notice_signatures_have_real_template_anchors(self):
+        from zipfile import ZipFile
+        from app.services.form_renderer import embed_signoff_image, render_form
+        sig_path = settings.upload_dir / 'signature-notice-roles.png'
+        Image.new('RGBA', (80, 40), (0, 0, 0, 180)).save(sig_path)
+        sig_url = f'/uploads/{sig_path.relative_to(settings.upload_dir).as_posix()}'
+        cases = (
+            ('gd_b_215_tongzhi', {'project_name': self.p.name, 'doc_number': 'NOTICE-SIGN',
+             'date': '2026-10-23', 'to_unit': '施工项目部', 'subject': '整改通知',
+             'content': '现场问题', 'supervision_org': '项目监理机构'}),
+            ('gdaq_30308_yinhuan', {'project_name': self.p.name, 'doc_number': 'HAZARD-SIGN',
+             'date': '2026-10-23', 'construction_unit': '施工项目部', 'problems': ['现场问题'],
+             'requirement': '限期整改'}),
+        )
+        for form_code, data in cases:
+            output = render_form(form_code, data, settings.export_dir)
+            self.assertTrue(embed_signoff_image(output, 'project_seal', sig_url, form_code))
+            self.assertTrue(embed_signoff_image(output, 'chief', sig_url, form_code))
+            with ZipFile(output) as archive:
+                self.assertTrue(any(name.startswith('word/media/') for name in archive.namelist()))
 
     async def test_template_signing_updates_word_pdf_and_linked_record_together(self):
         from app.services.form_renderer import render_form

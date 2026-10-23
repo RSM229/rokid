@@ -913,10 +913,21 @@ async def _create_work_record(ctx: ToolContext, args: dict) -> dict:
                     field.get("validation_error") or field.get("question") or f"请补充{field['label']}：",
                     options=options,
                 )
+        if args.get("_require_confirmation") and not args.get("_execution_confirmed"):
+            return _need_more(
+                ["最终确认"],
+                "平行检验字段已按当前表式合同补齐。请核对后回复“确认生成”；现在尚未写入正式记录。",
+                options={"最终确认": ["确认生成", "继续修改"]},
+            )
         values = resolved["values"]
         permission = "inspection"
         if not ctx.user.has_permission(permission):
             return _ok(f"当前角色无权创建{permission}类记录", ok=False)
+        detail_parts = [
+            str(values.get("record") or "").strip(),
+            f"使用仪器设备名称及编号：{values['instrument']}" if values.get("instrument") else "",
+            f"实测数据明细：{values['measure_data']}" if values.get("measure_data") else "",
+        ]
         parallel = ParallelInspection(
             user_id=ctx.user.id,
             project_id=ctx.project_id,
@@ -925,7 +936,7 @@ async def _create_work_record(ctx: ToolContext, args: dict) -> dict:
             item=str(values.get("acceptance_content") or "").strip(),
             method=str(values.get("method") or "").strip(),
             basis=str(values.get("basis") or "").strip(),
-            result_detail=str(values.get("record") or values.get("measure_data") or content).strip(),
+            result_detail="\n".join(part for part in detail_parts if part),
             conclusion=str(values.get("conclusion") or "").strip(),
             treatment=str(values.get("handling") or "").strip(),
         )
@@ -1311,7 +1322,7 @@ async def _create_hazard_rectification_doc(ctx: ToolContext, args: dict) -> dict
 
 
 async def _create_hazard_reply_doc(ctx: ToolContext, args: dict) -> dict:
-    """Generate GDAQ2030309 only after an actual rectification submission."""
+    """Generate GDAQ30309 only after an actual rectification submission."""
     try:
         hazard_id = int(args.get("hazard_id"))
     except (TypeError, ValueError):

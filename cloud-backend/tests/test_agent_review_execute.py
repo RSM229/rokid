@@ -279,6 +279,53 @@ def test_legacy_chat_complete_record_waits_for_explicit_confirmation():
     assert any(isinstance(row, WorkRecord) for row in db.rows)
 
 
+def test_legacy_chat_parallel_record_waits_for_confirmation_and_keeps_all_required_values():
+    import asyncio
+    from types import SimpleNamespace
+    from app.services import agent_tools
+    from app.models.parallel import ParallelInspection
+
+    class FakeDb:
+        def __init__(self):
+            self.rows = []
+
+        def add(self, row):
+            row.id = len(self.rows) + 1
+            self.rows.append(row)
+
+        async def flush(self):
+            return None
+
+        async def commit(self):
+            return None
+
+    args = {
+        "record_type": "平行检验", "section": "3号楼二层", "record_date": "2026-10-23",
+        "acceptance_content": "钢筋间距", "basis": "施工图纸", "method": "尺量",
+        "instrument": "钢卷尺-01", "measure_data": "实测 200mm", "record": "抽测 5 处均符合",
+        "conclusion": "合格", "_require_confirmation": True,
+    }
+    db = FakeDb()
+    context = agent_tools.ToolContext(
+        db=db,
+        user=SimpleNamespace(id=4, username="tester", has_permission=lambda _p: True),
+        project_id=7,
+        project=SimpleNamespace(name="项目A", construction_unit="总包A", supervision_org="项目监理部"),
+        message="整理平行检验记录",
+    )
+    preview = asyncio.run(agent_tools._create_work_record(context, args))
+    assert preview["need_more"] == ["最终确认"]
+    assert not db.rows
+
+    args["_execution_confirmed"] = True
+    result = asyncio.run(agent_tools._create_work_record(context, args))
+    row = next(item for item in db.rows if isinstance(item, ParallelInspection))
+    assert result["ok"]
+    assert "钢卷尺-01" in row.result_detail
+    assert "实测 200mm" in row.result_detail
+    assert "抽测 5 处均符合" in row.result_detail
+
+
 def test_gdaq30308_cannot_be_created_as_an_unlinked_generic_document():
     import asyncio
     from types import SimpleNamespace

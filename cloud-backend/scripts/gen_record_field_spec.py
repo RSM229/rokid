@@ -28,9 +28,14 @@ import os
 import re
 import sys
 
-XLSX = r'D:/rokid/监理通各记录关键字（草稿）(1).xlsx'
 HERE = os.path.dirname(os.path.abspath(__file__))
 API_ROOT = os.path.dirname(HERE)
+WORKSPACE_ROOT = os.path.dirname(API_ROOT)
+XLSX_NAME = '监理通各记录关键字（草稿）(1).xlsx'
+XLSX = next((path for path in (
+    os.path.join(WORKSPACE_ROOT, '文档', XLSX_NAME),
+    os.path.join('D:/rokid', XLSX_NAME),
+) if os.path.isfile(path)), os.path.join(WORKSPACE_ROOT, '文档', XLSX_NAME))
 OUT = os.path.join(API_ROOT, 'app', 'services', 'record_field_spec.py')
 
 # ---------------------------------------------------------------------------

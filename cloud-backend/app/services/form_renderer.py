@@ -205,7 +205,8 @@ def _fill_units_across_row(row_cells: list, value: Any) -> None:
         units = {"年": value.year, "月": value.month, "日": value.day}
     else:
         return
-    seen: set[int] = set()
+    # 保留 XML 节点引用；只存 id 会因代理对象回收后 id 复用而误跳过后续签章行。
+    seen_tcs: list = []
     for cell in row_cells:
         key = id(cell._tc)
         if key in seen:
@@ -1112,10 +1113,9 @@ def _fill_rizhi_shengtong(doc: DocxDocument, data: dict) -> None:
             # 行0：年/月/日 各自独立网格格（同 tc 分段）
             seen: set[int] = set()
             for cell in table.rows[0].cells:
-                key = id(cell._tc)
-                if key in seen:
+                if any(cell._tc is tc for tc in seen_tcs):
                     continue
-                seen.add(key)
+                seen_tcs.append(cell._tc)
                 for p in cell.paragraphs:
                     ptxt = p.text.strip()
                     for unit, key_name in (("年", "year"), ("月", "month"), ("日", "day")):
@@ -1380,6 +1380,25 @@ def embed_signoff_image(docx_path: Path, slot: str, image_url: str, form_code: s
         raise FileNotFoundError("签名图片不存在")
     doc = DocxDocument(str(docx_path))
     role_labels = {
+        "gd_b_220_rizhi": {
+            "inspector": ("记录人", "专业监理工程师"),
+            "supervisor": "专业监理工程师",
+            "chief": ("总监理工程师/总监理工程师代表", "总监理工程师"),
+        },
+        "gd_b_221_yuebao": {
+            "chief": "总监理工程师（签名）",
+            "project_seal": "盖项目章",
+        },
+        "gd_b_215_tongzhi": {
+            "supervisor": "专业监理工程师（签名）",
+            "chief": "总监理工程师（代表）",
+            "project_seal": "项目监理机构",
+        },
+        "gdaq_30308_yinhuan": {
+            "supervisor": "总监理工程师/总监代表（签名）",
+            "chief": "总监理工程师/总监代表（签名）",
+            "project_seal": "项目监理机构",
+        },
         "gd_b_214_xunshi": "巡视监理人员",
         "gd_b_212_pangzhan": "旁站监理人员",
         "gd_b_213_pingxing": "复核人员" if slot in {"reviewer", "chief"} else "检查人员",
@@ -1388,8 +1407,11 @@ def embed_signoff_image(docx_path: Path, slot: str, image_url: str, form_code: s
         "gdaq_30305_qizhong": "总监理工程师" if slot in {"chief", "reviewer"} else "监理检查人员",
         "witness_record": "见证取样人",
     }
-    role = role_labels.get(form_code or "")
-    if not role:
+    role_spec = role_labels.get(form_code or "")
+    if isinstance(role_spec, dict):
+        role_spec = role_spec.get(slot)
+    roles = (role_spec,) if isinstance(role_spec, str) else tuple(role_spec or ())
+    if not roles:
         return False
     preferred_row = None
     if form_code == "gd_b_214_xunshi" and doc.tables:
@@ -1400,24 +1422,26 @@ def embed_signoff_image(docx_path: Path, slot: str, image_url: str, form_code: s
         preferred_row = 5 if slot in {"reviewer", "chief"} else 3
     elif form_code == "acceptance_record":
         preferred_row = 7
-    seen: set[int] = set()
+    elif form_code == "gd_b_220_rizhi":
+        preferred_row = 9 if slot == "inspector" else 10 if slot == "chief" else 9
     for table_index, table in enumerate(doc.tables):
         for row_index, row in enumerate(table.rows):
             if preferred_row is not None and table_index == 0 and row_index != preferred_row:
                 continue
             for cell in row.cells:
-                key = id(cell._tc)
-                if key in seen:
-                    continue
-                seen.add(key)
-                para = next((p for p in cell.paragraphs if role in p.text and ("签名" in p.text or "签字" in p.text)), None)
+                para = next((p for p in cell.paragraphs if any(role in p.text for role in roles)
+                             and ("签名" in p.text or "签字" in p.text or
+                                  (form_code == "gd_b_220_rizhi" and slot == "chief") or
+                                  (slot == "project_seal" and "章" in p.text))), None)
                 if para:
                     para.add_run(" ").add_picture(str(image_path), width=Inches(0.9))
                     doc.save(str(docx_path))
                     return True
-    if form_code == "witness_record":
+    if form_code in {"witness_record", "gd_b_221_yuebao"}:
         for para in doc.paragraphs:
-            if "见证取样人" in para.text and "签名" in para.text:
+            if (any(role in para.text for role in roles)
+                    and ("签名" in para.text or "签字" in para.text or
+                         (form_code == "gd_b_221_yuebao" and slot == "project_seal"))):
                 para.add_run(" ").add_picture(str(image_path), width=Inches(0.9))
                 doc.save(str(docx_path))
                 return True
@@ -2246,6 +2270,10 @@ def render_form(form_code: str, data: dict, output_dir: Path | None = None) -> P
     if spec is None:
         raise ValueError(f"未知表式：{form_code}")
     if not spec.template:
+        if form_code == "gdaq_30309_huifu":
+            raise ValueError(
+                "GDAQ30309 官方可编辑模板尚未取得授权文件；为避免把自制版误认为官方原表，暂不生成该表。"
+            )
         # 无模板的表式：降级输出简单 docx（标题 + 字段表）
         return _render_plain_docx(spec, data, output_dir)
 
@@ -2336,6 +2364,10 @@ def _render_plain_docx(spec, data: dict, output_dir: Path | None) -> Path:
     run.font.size = Pt(18)
     labels = {"project_name": "工程项目名称", "doc_number": "编号", "date": "业务日期",
               "construction_unit": "施工单位", "supervision_org": "项目监理机构", "section": "部位",
+              "notice_number": "安全隐患整改通知编号", "notice_date": "安全隐患整改通知日期",
+              "rectify_desc": "整改情况", "rectify_image": "整改影像",
+              "contractor_manager": "项目负责人（签名）", "supervision_opinion": "专业监理工程师审查意见",
+              "supervision_engineer": "专业监理工程师（签名）", "supervision_seal_label": "项目监理机构（章）",
               "material_name": "材料名称", "material_spec": "规格/型号", "manufacturer": "生产厂家/品牌",
               "batch_no": "批号/炉号", "quantity": "取样数量", "unit": "计量单位",
               "sample_date": "取样日期", "sampler": "取样人", "cert_no": "合格证/报告编号",
@@ -2368,6 +2400,11 @@ def _render_plain_docx(spec, data: dict, output_dir: Path | None) -> Path:
             run = p.add_run(f"{label}：")
             run.bold = True
             p.add_run(str(val))
+    if spec.form_code == "gdaq_30309_huifu":
+        doc.add_paragraph("施工单位（项目部）项目负责人（签名）：________________    回复日期：________________")
+        doc.add_paragraph("专业监理工程师审查意见：")
+        doc.add_paragraph("项目监理机构（章）：________________    专业监理工程师（签名）：________________")
+        doc.add_paragraph("监理审查日期：________________")
     if spec.form_code == "acceptance_record":
         doc.add_paragraph("验收人（本人签认）：________________    签认日期：________________")
     elif spec.form_code == "witness_record":

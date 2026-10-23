@@ -87,7 +87,7 @@ FORMS: list[FormSpec] = [
     _spec("gdaq_30306_weida", "危险性较大的分部分项工程监理巡视检查记录表", "危险性较大的分部分项工程监理巡视检查记录表.docx", "safety", "GDAQ30306", "现场记录", "record", ("inspection",), "危大工程监理巡视检查记录", "巡视"),
     _spec("gdaq_30307_lianxi", "安全监理工作联系单", "安全监理工作联系单.docx", "safety", "GDAQ30307", "通知类", "manual"),
     _spec("gdaq_30308_yinhuan", "安全隐患整改通知（监理对施工单位项目部）", "安全隐患整改通知.docx", "safety", "GDAQ30308", "通知类", "record", (), "安全隐患整改通知"),
-    _spec("gdaq_30309_huifu", "安全隐患整改回复单", None, "none", "GDAQ2030309", "通知类", "manual"),
+    _spec("gdaq_30309_huifu", "安全隐患整改通知回复（施工单位项目部报监理）", None, "none", "GDAQ30309", "通知类", "manual"),
     _spec("gdaq_30305_qizhong", "建筑施工起重机械安装拆卸监理检查记录表", "建筑施工起重机械安装拆卸监理检查记录表.docx", "safety", "GDAQ30305", "现场记录", "record", ("crane_safety",), "起重机械安拆监理检查记录", "起重机械安拆检查"),
 ]
 

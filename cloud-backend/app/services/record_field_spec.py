@@ -10,7 +10,6 @@ kind 语义：
 """
 from __future__ import annotations
 
-
 TABLE_SOURCE = '监理通各记录关键字（草稿）(1).xlsx'
 
 ASK_ANYWAY = ['weather', 'wind']
@@ -134,7 +133,7 @@ FORMS: dict[str, dict] = {
     'gd_b_220_rizhi': {
         "form_number": 'GD-B-220',
         "name": '监理日志',
-        "signoffs": [{'role': '专业监理工程师', 'required': True}, {'role': '总监理工程师/总监理工程师代表', 'required': False}],
+        "signoffs": [{'role': '当日值班监理人员', 'required': True}, {'role': '专业监理工程师', 'required': False}, {'role': '总监理工程师/总监理工程师代表', 'required': False}],
         "fields": [
             {'key': '7_01', 'canonical': 'project_name', 'label': '工程项目名称', 'raw_label': '工程项目名称', 'section': '基本信息', 'table_type': '文本', 'auto': True, 'required': True, 'kind': 'auto', 'arg': None},
             {'key': '7_02', 'canonical': 'doc_number', 'label': '编号', 'raw_label': '编号', 'section': '基本信息', 'table_type': '文本', 'auto': True, 'required': True, 'kind': 'auto', 'arg': None},
@@ -150,9 +149,9 @@ FORMS: dict[str, dict] = {
             {'key': '7_11', 'canonical': 'problems_section', 'label': '当日存在问题及处理情况', 'raw_label': '当日存在问题及处理情况', 'section': '基本信息', 'table_type': '文本（由每日问题记录生成，可修改）', 'auto': True, 'required': True, 'kind': 'auto', 'arg': None},
             {'key': '7_12', 'canonical': 'supervision_check', 'label': '上级/质监站检查情况', 'raw_label': '上级/质监站检查情况', 'section': '基本信息', 'table_type': '文本', 'auto': False, 'required': False, 'kind': 'ask', 'arg': None},
             {'key': '7_13', 'canonical': 'other_section', 'label': '其他有关事项（会议/发文/停水停电/变更洽商）', 'raw_label': '其他有关事项', 'section': '基本信息', 'table_type': '文本', 'auto': False, 'required': False, 'kind': 'ask', 'arg': None},
-            {'key': None, 'canonical': None, 'label': '当日值班监理人员（签名）', 'raw_label': '当日值班监理人员（签名）', 'section': '基本信息', 'table_type': '文本（签章控件）', 'kind': 'signoff', 'auto': False, 'required': True, 'arg': None},
-            {'key': None, 'canonical': None, 'label': '专业监理工程师（审阅签名）', 'raw_label': '专业监理工程师（审阅签名）', 'section': '基本信息', 'table_type': '文本（签章控件）', 'kind': 'signoff', 'auto': False, 'required': False, 'arg': None},
-            {'key': None, 'canonical': None, 'label': '总监理工程师/代表（审阅签名）', 'raw_label': '总监理工程师/代表（审阅签名）', 'section': '基本信息', 'table_type': '文本（签章控件）', 'kind': 'signoff', 'auto': False, 'required': False, 'arg': None},
+            {'key': 'duty_supervisor', 'canonical': 'duty_supervisor', 'label': '当日值班监理人员（签名）', 'raw_label': '当日值班监理人员（签名）', 'section': '基本信息', 'table_type': '文本（签章控件）', 'auto': False, 'required': True, 'kind': 'signoff', 'arg': None},
+            {'key': 'professional_supervisor', 'canonical': 'professional_supervisor', 'label': '专业监理工程师（审阅签名）', 'raw_label': '专业监理工程师（审阅签名）', 'section': '基本信息', 'table_type': '文本（签章控件）', 'auto': False, 'required': False, 'kind': 'signoff', 'arg': None},
+            {'key': 'chief_supervisor', 'canonical': 'chief_supervisor', 'label': '总监理工程师/代表（审阅签名）', 'raw_label': '总监理工程师/代表（审阅签名）', 'section': '基本信息', 'table_type': '文本（签章控件）', 'auto': False, 'required': False, 'kind': 'signoff', 'arg': None},
         ],
     },
     # GD-B-221  监理月报
@@ -178,7 +177,7 @@ FORMS: dict[str, dict] = {
             {'key': '8_15', 'canonical': 'contract_mgmt', 'label': '合同管理：变更/索赔/延期/争议处理', 'raw_label': '合同管理：变更/索赔/延期/争议处理', 'section': '基本信息', 'table_type': '文本', 'auto': False, 'required': False, 'kind': 'ask', 'arg': None},
             {'key': '8_16', 'canonical': 'work_stats', 'label': '监理工作统计汇总（通知单/联系单/会议次数）', 'raw_label': '监理工作统计汇总（通知单/联系单/会议次数）', 'section': '基本信息', 'table_type': '文本', 'auto': False, 'required': True, 'kind': 'ask', 'arg': None},
             {'key': '8_17', 'canonical': 'next_focus', 'label': '下月监理工作重点', 'raw_label': '下月监理工作重点', 'section': '基本信息', 'table_type': '文本', 'auto': False, 'required': True, 'kind': 'ask', 'arg': None},
-            {'key': None, 'canonical': None, 'label': '总监理工程师（签名）', 'raw_label': '总监理工程师（签名）', 'section': '基本信息', 'table_type': '文本（签章控件）', 'kind': 'signoff', 'auto': False, 'required': True, 'arg': None},
+            {'key': 'chief_supervisor', 'canonical': 'chief_supervisor', 'label': '总监理工程师（签名）', 'raw_label': '总监理工程师（签名）', 'section': '基本信息', 'table_type': '文本（签章控件）', 'auto': False, 'required': True, 'kind': 'signoff', 'arg': None},
             {'key': '8_18', 'canonical': 'supervision_org', 'label': '监理单位（盖章）', 'raw_label': '监理单位（盖章）', 'section': '基本信息', 'table_type': '文本（签章控件）', 'auto': True, 'required': True, 'kind': 'signoff', 'arg': None},
             {'key': '8_19', 'canonical': 'submit_date', 'label': '报送日期', 'raw_label': '报送日期', 'section': '基本信息', 'table_type': '日期', 'auto': True, 'required': True, 'kind': 'auto', 'arg': None},
         ],
@@ -253,8 +252,7 @@ FORMS: dict[str, dict] = {
             {'key': '9_12', 'canonical': 'acceptance_date', 'label': '验收日期', 'raw_label': '验收日期', 'section': '验收', 'table_type': '日期', 'auto': False, 'required': False, 'kind': 'ask', 'arg': None},
         ],
     },
-    # 见证取样没有独立省统表模板，使用内部记录 schema。
-    # 该 schema 只描述业务字段，不再借用 GD-B-219 材料进场台账。
+    # JL-JZ  见证取样记录
     'witness_record': {
         "form_number": 'JL-JZ',
         "name": '见证取样记录',

@@ -540,7 +540,14 @@ def test_registered_forms_have_explicit_versioned_agent_contract_routes():
             assert spec.form_code in provform_schema.SCHEMAS, f"汇总表 {spec.form_code} 缺字段合同"
 
     # These tables intentionally do not masquerade as generic record forms:
-    # witness uses its own schema, while GDAQ30309 awaits the approved source template.
+    # Witness uses its own schema; GDAQ30309 currently has no licensed editable source template.
     assert form_registry.FORM_BY_CODE["witness_record"].agent_work_record_type == "见证"
     assert form_registry.FORM_BY_CODE["gdaq_30309_huifu"].source == "manual"
     assert form_registry.FORM_BY_CODE["gdaq_30309_huifu"].template is None
+    assert form_registry.FORM_BY_CODE["gdaq_30309_huifu"].form_number == "GDAQ30309"
+    schema = provform_schema.SCHEMAS["gdaq_30309_huifu"]
+    assert schema["form_number"] == "GDAQ30309"
+    assert {field["key"] for section in schema["sections"] for field in section["fields"]} >= {
+        "notice_number", "notice_date", "rectify_desc", "contractor_manager",
+        "supervision_opinion", "supervision_engineer", "review_date",
+    }

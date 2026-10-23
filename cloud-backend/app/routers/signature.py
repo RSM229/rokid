@@ -262,6 +262,9 @@ async def document_signoffs(doc_id: int, all_projects: bool = Query(False, descr
         ("chief", "gdaq_30305_qizhong"): "总监理工程师",
         ("supervisor", "巡视记录"): "巡视监理人员",
         ("inspector", "见证取样记录"): "见证取样人",
+        ("inspector", "gd_b_220_rizhi"): "当日值班监理人员",
+        ("supervisor", "gd_b_220_rizhi"): "专业监理工程师",
+        ("project_seal", "gd_b_221_yuebao"): "监理单位（盖章）",
     }
     return {
         "revision": doc.content_revision or 1,

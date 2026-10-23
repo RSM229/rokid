@@ -1335,7 +1335,7 @@ async def create_reply_doc(
     user: User = Depends(require_permission("hazard_ai")),
     db: AsyncSession = Depends(get_db),
 ):
-    """由隐患生成安全隐患整改回复单 GDAQ2030309（三表联动第三步）"""
+    """由隐患生成安全隐患整改通知回复 GDAQ30309（三表联动第三步）"""
     req = req or HazardReplyDocRequest()
     project_id = require_project_id(user)
     result = await db.execute(
@@ -1380,6 +1380,8 @@ async def create_reply_doc(
     # 未发生复查时不得把当前操作人冒充复查人；只有明确传入且已有复查结果才写入。
     rechecker = (req.rechecker or "") if rect and rect.recheck_at else ""
 
+    notice_doc = await db.get(Document, hazard.rectification_doc_id or hazard.rectify_doc_id)
+    notice_content = notice_doc.content if notice_doc and isinstance(notice_doc.content, dict) else {}
     content_text = (
         f"隐患描述：{hazard.top1_risk or ''}\n"
         f"整改完成情况：{rectify_desc}\n"
@@ -1388,16 +1390,24 @@ async def create_reply_doc(
     )
     content = {
         "project_name": project.name if project else "",
-        "doc_number": f"GDAQ2030309-{hazard_id:05d}",
+        "doc_number": f"GDAQ30309-{hazard_id:05d}",
         "date": datetime.now().strftime("%Y-%m-%d"),
         "reply_date": datetime.now().strftime("%Y-%m-%d"),
         "hazard_id": hazard_id,
         "to_unit": getattr(project, "supervision_org", None) or "",
+        "notice_number": notice_content.get("doc_number") or notice_content.get("document_number") or notice_content.get("notice_number") or "",
+        "notice_date": notice_content.get("date") or notice_content.get("notice_date") or "",
         "part": f"{hazard.section or ''} {hazard.location or ''}".strip(),
         "hazard_desc": hazard.top1_risk or "",
         "rectify_desc": rectify_desc,
         "rectify_image": hazard.rectification_image_path or "",
         "finish_date": rect.rectified_at.strftime("%Y-%m-%d") if rect and rect.rectified_at else "",
+        "construction_unit": getattr(project, "construction_unit", None) or "",
+        "contractor_manager": "",
+        "supervision_opinion": "",
+        "supervision_org": getattr(project, "supervision_org", None) or "",
+        "supervision_engineer": "",
+        "review_date": "",
         "recheck_date": recheck_date,
         "recheck_conclusion": recheck_conclusion,
         "recheck_remark": rect.recheck_remark if rect else "",
@@ -1405,15 +1415,27 @@ async def create_reply_doc(
         "form_contract_version": contract_for("gdaq_30309_huifu")["version"],
         "field_sources": {
             "reply_date": "system_date", "to_unit": "project",
+            "notice_number": "rectification_notice_or_unset", "notice_date": "rectification_notice_or_unset",
             "part": "hazard", "hazard_desc": "hazard",
             "rectify_desc": "rectification_record_or_user",
             "rectify_image": "rectification_record", "recheck_date": "rectification_record",
             "recheck_conclusion": "rectification_record", "recheck_remark": "rectification_record",
             "rechecker": "actual_recheck_user_or_unset",
+            "contractor_manager": "user_confirmation_required",
+            "supervision_opinion": "user_confirmation_required",
+            "supervision_engineer": "user_confirmation_required",
+            "review_date": "user_confirmation_required",
         },
         "content": content_text,
         "problems": hazard.top1_risk or "",
     }
+
+    missing = [name for key, name in (
+        ("notice_number", "整改通知编号"), ("notice_date", "整改通知日期"),
+        ("construction_unit", "施工单位（项目部）"),
+    ) if not content.get(key)]
+    if missing:
+        raise HTTPException(status_code=409, detail="生成整改回复单前还需补充：" + "、".join(missing))
 
     spec = FORM_BY_CODE["gdaq_30309_huifu"]
     doc = Document(

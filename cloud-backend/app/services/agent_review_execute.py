@@ -242,6 +242,11 @@ async def execute_confirmed_plan(
             resolved_content = ""
         form_spec = form_registry.FORM_BY_CODE.get(form_code)
         if form_spec and form_spec.agent_business_route == "parallel_inspection":
+            detail_parts = [
+                str(form_fields.get("record") or "").strip(),
+                f"使用仪器设备名称及编号：{form_fields['instrument']}" if form_fields.get("instrument") else "",
+                f"实测数据明细：{form_fields['measure_data']}" if form_fields.get("measure_data") else "",
+            ]
             parallel = ParallelInspection(
                 user_id=user.id,
                 project_id=project_id,
@@ -250,7 +255,7 @@ async def execute_confirmed_plan(
                 item=str(form_fields.get("acceptance_content") or form_fields.get("item") or "").strip(),
                 method=str(form_fields.get("method") or "").strip(),
                 basis=str(form_fields.get("basis") or "").strip(),
-                result_detail=str(form_fields.get("record") or form_fields.get("measure_data") or resolved_content).strip(),
+                result_detail="\n".join(part for part in detail_parts if part),
                 conclusion=str(form_fields.get("conclusion") or "").strip(),
                 treatment=str(form_fields.get("handling") or form_fields.get("treatment") or "").strip(),
                 form_code=form_code,

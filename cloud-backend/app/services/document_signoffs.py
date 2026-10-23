@@ -23,15 +23,28 @@ def required_slots_for(doc):
         return {"inspector"}
     if doc.doc_type == "验收记录":
         return {"acceptor"}
+    if form_code == "gd_b_220_rizhi":
+        return {"inspector"}
+    if form_code == "gd_b_221_yuebao":
+        return {"chief", "project_seal"}
     if doc.doc_type in ("旁站记录", "巡视记录"):
         return {"inspector"}
     if doc.doc_type == "平行检查记录":
-        return {"reviewer"}  # 既有专业监理工程师签认，落到复核位。
+        return {"inspector"}
     if doc.doc_type == "监理日志":
-        return {"supervisor"}  # 原表式记录人必签，总监仍可选。
-    if "通知单" in doc.doc_type:
-        return {"supervisor", "chief"}
+        return {"inspector"}
+    if form_code in {"gd_b_215_tongzhi", "gdaq_30308_yinhuan"} or "通知单" in doc.doc_type:
+        # 通知单的项目章必签；人员签名按表式为“总监（代表）/专业监理工程师”任选其一。
+        return {"project_seal"}
     return set()
+
+
+def required_any_slot_groups_for(doc):
+    """返回每组至少完成一个的签认槽位。"""
+    form_code = getattr(doc, "form_code", None)
+    if form_code in {"gd_b_215_tongzhi", "gdaq_30308_yinhuan"} or "通知单" in doc.doc_type:
+        return ({"supervisor", "chief"},)
+    return ()
 
 
 def slots_for(doc):
@@ -43,12 +56,16 @@ def slots_for(doc):
         return ["inspector"]
     if kind == "验收记录":
         return ["acceptor"]
+    if form_code == "gd_b_220_rizhi":
+        return ["inspector", "supervisor", "chief"]
+    if form_code == "gd_b_221_yuebao":
+        return ["chief", "project_seal"]
     if kind == "平行检查记录":
         return ["inspector", "reviewer"]
     if kind in ("巡视记录", "旁站记录"):
         return ["inspector"]
     if kind == "监理日志":
-        return ["supervisor", "chief"]
+        return ["inspector", "supervisor", "chief"]
     if "通知单" in kind:
         return ["supervisor", "chief", "project_seal"]
     return ["supervisor", "chief"]
@@ -64,8 +81,12 @@ async def current_signoffs(db, doc):
 async def assert_required_signoffs(db, doc):
     signed = {s.slot for s in await current_signoffs(db, doc)}
     missing = required_slots_for(doc) - signed
-    if missing:
-        raise HTTPException(400, "请先完成必签项：" + "、".join(SLOTS[s][0] for s in sorted(missing)))
+    missing_groups = [group for group in required_any_slot_groups_for(doc) if not signed.intersection(group)]
+    if missing or missing_groups:
+        labels = [SLOTS[s][0] for s in sorted(missing)]
+        labels.extend("/".join(SLOTS[s][0] for s in sorted(group)) + "（任选一人）"
+                      for group in missing_groups)
+        raise HTTPException(400, "请先完成必签项：" + "、".join(labels))
 
 
 async def assert_slot_authorized(db, doc, user, slot):
