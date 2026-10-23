@@ -80,14 +80,14 @@
       </view>
     </view>
 
-    <!-- 文档：在文件夹内 / 根目录有未分类 / 搜索中 / 标签筛选中时出现，避免和文件夹并列成同级 -->
-    <view wx:if="{{searchKeyword || tagFilterId || currentFolderId !== 0 || docs.length}}" class="sec">
+    <!-- 文档：有文档 / 搜索中 / 标签筛选中才出现；空文件夹整块隐藏，不占屏 -->
+    <view wx:if="{{docs.length || searchKeyword || tagFilterId}}" class="sec">
       <view class="sec-head">
         <text class="sec-title">{{searchKeyword ? '搜索「' + searchKeyword + '」' : (tagFilterId ? '标签「' + tagFilterName + '」' : (currentFolderId !== 0 ? '文档' : '未分类文档'))}}</text>
         <text class="sec-count">{{docs.length}}</text>
       </view>
       <view wx:if="{{docsLoading && !docs.length}}" class="empty-mini">正在加载…</view>
-      <view wx:elif="{{!docs.length}}" class="empty-mini">{{tagFilterId ? '没有文档带这个标签' : '这个文件夹下还没有文档。点下方「上传文档」会直接归档到这里。'}}</view>
+      <view wx:elif="{{!docs.length}}" class="empty-mini">{{tagFilterId ? '没有文档带这个标签' : '没有找到相关文档'}}</view>
     </view>
     <view wx:for="{{docs}}" wx:key="id" class="card doc">
       <view class="doc-head">
