@@ -4,7 +4,7 @@
     <div class="page-head">
       <div class="page-head-text">
         <h2 class="page-title">项目管理</h2>
-        <p class="page-sub">立项后需在「用户管理 → 项目成员管理」中分配人员</p>
+        <p class="page-sub">立项后在本页「分配人员」中任命项目成员与岗位</p>
       </div>
       <el-button v-if="canCreate" type="primary" @click="openCreate">
         <el-icon class="btn-icon"><Plus /></el-icon>
@@ -209,18 +209,28 @@
         >确认删除</el-button>
       </template>
     </el-dialog>
+
+    <!-- 项目成员管理（2026-10-23）：与「用户管理 → 项目成员管理」同一共享弹窗，
+         本页「分配人员」直接打开，默认选中行上的项目。传 items（全量项目）而非
+         visibleItems，免得弹窗内的项目下拉被页面的筛选/搜索裁剪得只剩一项。 -->
+    <MemberManageDialog
+      :visible="memberDialogVisible"
+      :projects="items"
+      :default-project-id="memberTargetId"
+      @update:visible="memberDialogVisible = $event"
+      @changed="load"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowDown, Plus, Refresh, Search } from '@element-plus/icons-vue'
 import { projectApi, signatureApi } from '@/api'
 import { useAuthStore } from '@/stores/auth'
+import MemberManageDialog from '@/components/MemberManageDialog.vue'
 
-const router = useRouter()
 const auth = useAuthStore()
 
 const items = ref<any[]>([])
@@ -447,9 +457,10 @@ async function switchTo(row: any) {
 }
 
 function goMembers(row: any) {
-  // 成员管理在「用户管理」页；直接带上项目 id 跳转，落地即锁定该项目的账号筛选，
-  // 免得超管在全量账号里自己找（2026-10-21 改：不再弹提示框）。
-  router.push({ path: '/user-manage', query: { project_id: String(row.id) } })
+  // 2026-10-23：成员弹窗抽为共享组件 MemberManageDialog，本页直接开弹窗，
+  // 不再 router.push 跳「用户管理」页带 project_id（跨页指路本身就是 IA 断裂点）。
+  memberTargetId.value = row.id
+  memberDialogVisible.value = true
 }
 
 // ---- Step 5：项目生命周期（结项 / 恢复）----
@@ -522,6 +533,10 @@ const deleteVisible = ref(false)
 const deleteSaving = ref(false)
 const deleting = ref<any | null>(null)
 const deleteCode = ref('')
+
+// ---- 项目成员管理（2026-10-23）：共享弹窗的目标项目与可见性 ----
+const memberDialogVisible = ref(false)
+const memberTargetId = ref<number | null>(null)
 
 function openDelete(row: any) {
   deleting.value = row
