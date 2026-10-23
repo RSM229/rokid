@@ -294,7 +294,7 @@ onMounted(loadData)
   overflow: hidden;
   transition: border-color 0.2s;
 }
-.signature-uploader :deep(.el-upload):hover { border-color: #409EFF; }
+.signature-uploader :deep(.el-upload):hover { border-color: var(--el-color-primary); }
 .signature-preview {
   width: 100%;
   height: 100%;

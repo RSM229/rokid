@@ -1,28 +1,69 @@
 <template>
   <div class="admin-grants">
-    <el-card class="block" shadow="never">
+    <el-card shadow="never">
       <template #header>
-        <span class="block-title">一、授权谁是管理员（项目负责人）</span>
+        <div class="card-head">
+          <span class="block-title">管理员与项目授权</span>
+          <el-switch v-model="onlyAdmin" size="small" active-text="只看管理员" />
+        </div>
       </template>
       <el-alert
         type="info"
         :closable="false"
         show-icon
-        title="管理员 = 项目负责人，默认只能查看自己的项目；此处决定谁拥有管理员身份（公司级 org_role）。"
+        title="管理员 = 项目负责人，默认只能查看自己的项目；「可查看的其他管理员项目」为该管理员额外开放的项目，选择即保存，与项目成员关系相互独立。"
         style="margin-bottom: 12px"
       />
-      <el-table :data="users" v-loading="loading" stripe size="small">
-        <el-table-column prop="id" label="ID" width="70" />
+      <el-table :data="tableRows" v-loading="loading" stripe size="small" row-key="id">
         <el-table-column prop="real_name" label="姓名" min-width="100" />
-        <el-table-column prop="username" label="用户名" min-width="110" />
-        <el-table-column label="当前身份" min-width="130">
+        <el-table-column prop="username" label="用户名" min-width="120" />
+        <el-table-column label="身份" width="110">
           <template #default="{ row }">
             <el-tag v-if="row.org_role === 'super_admin'" type="danger" size="small">超级管理员</el-tag>
             <el-tag v-else-if="row.org_role === 'admin'" type="warning" size="small">管理员</el-tag>
             <el-tag v-else size="small" type="info">普通成员</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="140" fixed="right">
+        <el-table-column label="可查看的其他管理员项目" min-width="320">
+          <template #default="{ row }">
+            <span v-if="row.org_role === 'super_admin'" class="cell-muted">超级管理员可查看全部项目</span>
+            <span v-else-if="row.org_role !== 'admin'" class="cell-muted">设为管理员后可授权</span>
+            <el-select
+              v-else
+              v-model="projectSelection[row.id]"
+              multiple
+              filterable
+              collapse-tags
+              collapse-tags-tooltip
+              size="small"
+              placeholder="未授权其他项目"
+              style="width: 100%"
+              :loading="savingRow === row.id"
+              @change="(val: number[]) => onProjectsChange(row, val)"
+            >
+              <el-option
+                v-for="p in projects"
+                :key="p.id"
+                :label="`${p.name}（${p.status === 'active' ? '进行中' : p.status}）`"
+                :value="p.id"
+              />
+            </el-select>
+          </template>
+        </el-table-column>
+        <el-table-column label="授权记录" min-width="170">
+          <template #default="{ row }">
+            <el-tooltip v-if="grantsOf(row.id).length" placement="top">
+              <template #content>
+                <div v-for="(g, i) in grantsOf(row.id)" :key="i" class="tip-line">
+                  {{ projectName(g.project_id) }} · {{ userName(g.grantor_user_id) || '—' }} · {{ fmtTime(g.created_at) }}
+                </div>
+              </template>
+              <span class="cell-link">{{ grantsOf(row.id).length }} 条授权</span>
+            </el-tooltip>
+            <span v-else class="cell-muted">—</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="130" fixed="right">
           <template #default="{ row }">
             <el-button
               v-if="row.org_role !== 'admin'"
@@ -41,64 +82,6 @@
         </el-table-column>
       </el-table>
     </el-card>
-
-    <el-card class="block" shadow="never">
-      <template #header>
-        <span class="block-title">二、授权管理员查看其他管理员的项目</span>
-      </template>
-      <el-alert
-        type="info"
-        :closable="false"
-        show-icon
-        title="被授权的管理员会出现在对方项目的切换列表中，可查看该项目数据。授权即录入一条跨项目查看记录，与项目成员关系相互独立。"
-        style="margin-bottom: 12px"
-      />
-      <el-form :inline="true" class="grant-form">
-        <el-form-item label="被授权管理员" required>
-          <el-select v-model="grantForm.grantee" filterable style="width: 220px" placeholder="选择管理员">
-            <el-option
-              v-for="a in adminUsers"
-              :key="a.id"
-              :label="`${a.real_name}（${a.username}）`"
-              :value="a.id"
-            />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="可查看的项目" required>
-          <el-select v-model="grantForm.projects" multiple filterable style="width: 380px" placeholder="可多选">
-            <el-option
-              v-for="p in projects"
-              :key="p.id"
-              :label="`${p.name}（${p.status === 'active' ? '进行中' : p.status}）`"
-              :value="p.id"
-            />
-          </el-select>
-        </el-form-item>
-        <el-form-item>
-          <el-button type="primary" :loading="grantSaving" @click="doGrant">授权</el-button>
-        </el-form-item>
-      </el-form>
-
-      <el-table :data="grantRows" v-loading="loading" stripe size="small">
-        <el-table-column label="管理员" min-width="140">
-          <template #default="{ row }">{{ userName(row.grantee_user_id) }}</template>
-        </el-table-column>
-        <el-table-column label="可查看的项目" min-width="220">
-          <template #default="{ row }">{{ projectName(row.project_id) }}</template>
-        </el-table-column>
-        <el-table-column label="授权人" min-width="120">
-          <template #default="{ row }">{{ userName(row.grantor_user_id) || '—' }}</template>
-        </el-table-column>
-        <el-table-column label="授权时间" min-width="170">
-          <template #default="{ row }">{{ row.created_at ? row.created_at.replace('T', ' ').slice(0, 16) : '—' }}</template>
-        </el-table-column>
-        <el-table-column label="操作" width="90" fixed="right">
-          <template #default="{ row }">
-            <el-button link type="danger" @click="revokeGrant(row)">撤销</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-    </el-card>
   </div>
 </template>
 
@@ -108,14 +91,16 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { adminGrantsApi } from '@/api'
 
 const loading = ref(false)
-const grantSaving = ref(false)
+const onlyAdmin = ref(false)
+const savingRow = ref<number | null>(null)
 const users = ref<any[]>([])
 const projects = ref<any[]>([])
 const grants = ref<any[]>([])
-const grantForm = ref<{ grantee: number | null; projects: number[] }>({ grantee: null, projects: [] })
+// 每行管理员已勾选的项目；savedSelection 为服务端快照，用于算增量
+const projectSelection = ref<Record<number, number[]>>({})
+const savedSelection = ref<Record<number, number[]>>({})
 
-const adminUsers = computed(() => users.value.filter((u) => u.org_role === 'admin'))
-const grantRows = computed(() => grants.value)
+const tableRows = computed(() => (onlyAdmin.value ? users.value.filter((u) => u.org_role === 'admin') : users.value))
 
 const userName = (id?: number) => {
   const u = users.value.find((x) => x.id === id)
@@ -125,6 +110,19 @@ const projectName = (id?: number) => {
   const p = projects.value.find((x) => x.id === id)
   return p ? p.name : ''
 }
+const fmtTime = (t?: string) => (t ? t.replace('T', ' ').slice(0, 16) : '—')
+const grantsOf = (granteeId: number) => grants.value.filter((g) => g.grantee_user_id === granteeId)
+
+function buildSelection() {
+  const map: Record<number, number[]> = {}
+  for (const u of users.value) map[u.id] = []
+  for (const g of grants.value) {
+    if (!map[g.grantee_user_id]) map[g.grantee_user_id] = []
+    map[g.grantee_user_id].push(g.project_id)
+  }
+  projectSelection.value = JSON.parse(JSON.stringify(map))
+  savedSelection.value = JSON.parse(JSON.stringify(map))
+}
 
 async function loadAll() {
   loading.value = true
@@ -133,10 +131,32 @@ async function loadAll() {
     users.value = data.admins || []
     projects.value = data.projects || []
     grants.value = data.grants || []
+    buildSelection()
   } catch (e: any) {
     ElMessage.error(e?.response?.data?.detail || '加载失败')
   } finally {
     loading.value = false
+  }
+}
+
+async function onProjectsChange(row: any, val: number[]) {
+  const before = savedSelection.value[row.id] || []
+  const added = val.filter((id) => !before.includes(id))
+  const removed = before.filter((id) => !val.includes(id))
+  if (!added.length && !removed.length) return
+  savingRow.value = row.id
+  try {
+    for (const pid of added) await adminGrantsApi.grant(row.id, pid)
+    for (const pid of removed) await adminGrantsApi.revoke(row.id, pid)
+    const parts: string[] = []
+    if (added.length) parts.push(`新增 ${added.length} 个`)
+    if (removed.length) parts.push(`撤销 ${removed.length} 个`)
+    ElMessage.success(`「${row.real_name}」的项目授权已更新（${parts.join('，')}）`)
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || '授权更新失败')
+  } finally {
+    savingRow.value = null
+    await loadAll()
   }
 }
 
@@ -178,45 +198,6 @@ async function clearAdmin(row: any) {
   }
 }
 
-async function doGrant() {
-  if (!grantForm.value.grantee || !grantForm.value.projects.length) {
-    ElMessage.warning('请选择管理员和至少一个项目')
-    return
-  }
-  grantSaving.value = true
-  try {
-    for (const pid of grantForm.value.projects) {
-      await adminGrantsApi.grant(grantForm.value.grantee!, pid)
-    }
-    ElMessage.success('授权成功')
-    grantForm.value = { grantee: null, projects: [] }
-    await loadAll()
-  } catch (e: any) {
-    ElMessage.error(e?.response?.data?.detail || '授权失败')
-  } finally {
-    grantSaving.value = false
-  }
-}
-
-async function revokeGrant(row: any) {
-  try {
-    await ElMessageBox.confirm('确认撤销该跨项目查看授权？', '撤销授权', {
-      type: 'warning',
-      confirmButtonText: '确认撤销',
-      cancelButtonText: '取消',
-    })
-  } catch {
-    return
-  }
-  try {
-    await adminGrantsApi.revoke(row.grantee_user_id, row.project_id)
-    ElMessage.success('已撤销')
-    await loadAll()
-  } catch (e: any) {
-    ElMessage.error(e?.response?.data?.detail || '撤销失败')
-  }
-}
-
 onMounted(loadAll)
 </script>
 
@@ -226,10 +207,22 @@ onMounted(loadAll)
   flex-direction: column;
   gap: 16px;
 }
+.card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
 .block-title {
   font-weight: 600;
 }
-.grant-form {
-  margin-bottom: 12px;
+.cell-muted {
+  color: var(--el-text-color-placeholder);
+}
+.cell-link {
+  color: var(--el-color-primary);
+  cursor: default;
+}
+.tip-line {
+  line-height: 1.6;
 }
 </style>

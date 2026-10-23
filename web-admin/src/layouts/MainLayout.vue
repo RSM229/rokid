@@ -13,8 +13,8 @@
         router
         :collapse="isCollapse"
         background-color="#001529"
-        text-color="rgba(255,255,255,0.65)"
-        active-text-color="#409EFF"
+        text-color="rgba(255,255,255,0.72)"
+        active-text-color="#ffffff"
       >
         <!-- 一级菜单：按截图结构 -->
         <template v-for="item in menuItems" :key="item.path">
@@ -34,7 +34,7 @@
           </el-sub-menu>
 
           <!-- 无子菜单的单项 -->
-          <el-menu-item v-else :index="item.path">
+          <el-menu-item v-else :index="item.path" :class="{ 'menu-sep': item.dividerBefore }">
             <el-icon><component :is="item.icon" /></el-icon>
             <span>{{ item.title }}</span>
           </el-menu-item>
@@ -274,13 +274,9 @@ const menuItems = computed(() => {
     items.push({ path: '/knowledge-base', title: '信息库', icon: 'Reading' })
   }
 
- // if (perm('todo_center')) {
+  // if (perm('todo_center')) {
    // items.push({ path: '/todo-center', title: '待办中心', icon: 'List' })
   //}
-
-  if (perm('settings')) {
-    items.push({ path: '/settings', title: '系统设置', icon: 'Setting' })
-  }
 
   // 项目管理（立项仅超管；总监等 member_manage 持有者可查看/切换/分配人员）
   if (perm('member_manage')) {
@@ -305,6 +301,11 @@ const menuItems = computed(() => {
   // 不能让持有 role_grant 的管理员进入，故按 org_role 而非权限 key 收敛）。
   if (isSuper.value) {
     items.push({ path: '/admin-grants', title: '管理员与授权', icon: 'Stamp' })
+  }
+
+  // 系统设置归入「系统管理」分组，置于全部业务/账号功能之后，并用分隔线与上方区分。
+  if (perm('settings')) {
+    items.push({ path: '/settings', title: '系统设置', icon: 'Setting', dividerBefore: true })
   }
 
   // 「角色权限」配置页已下线（2026-10-20）：权限矩阵改为后端/DB 维护，
@@ -338,10 +339,10 @@ function handleCommand(cmd: string) {
   display: flex;
   align-items: center;
   justify-content: center;
-  border-bottom: 1px solid rgba(255,255,255,0.1);
+  border-bottom: 1px solid rgba(255,255,255,0.08);
   color: #fff;
-  font-size: 18px;
-  font-weight: 700;
+  font-size: 17px;
+  font-weight: 600;
   letter-spacing: 2px;
   gap: 10px;
 }
@@ -368,9 +369,9 @@ function handleCommand(cmd: string) {
   align-items: center;
   justify-content: space-between;
   padding: 0 20px;
-  border-bottom: 1px solid #e8e8e8;
+  border-bottom: 1px solid var(--el-border-color-lighter);
   background: #fff;
-  box-shadow: 0 1px 4px rgba(0,21,42,0.08);
+  box-shadow: 0 1px 3px rgba(31, 35, 41, 0.05);
 }
 .header-left {
   display: flex;
@@ -398,7 +399,7 @@ function handleCommand(cmd: string) {
   cursor: pointer;
   color: #666;
 }
-.collapse-btn:hover { color: #409EFF; }
+.collapse-btn:hover { color: var(--el-color-primary); }
 .header-right {
   display: flex;
   align-items: center;
@@ -420,9 +421,54 @@ function handleCommand(cmd: string) {
   overflow-y: auto;
 }
 
-/* 深色侧边栏菜单样式覆盖 */
-:deep(.el-menu) { border-right: none; }
+/* 深色侧边栏菜单样式覆盖（A 深蓝精修） */
+:deep(.el-menu) {
+  border-right: none;
+  --el-menu-item-height: 46px;
+}
+:deep(.el-menu-item),
+:deep(.el-sub-menu__title) {
+  position: relative;
+  transition: background-color 0.15s, color 0.15s;
+}
 :deep(.el-sub-menu__title:hover),
-:deep(.el-menu-item:hover) { background-color: #1890ff20 !important; }
-:deep(.el-menu-item.is-active) { background-color: #1890ff30 !important; }
+:deep(.el-menu-item:hover) {
+  background-color: rgba(255, 255, 255, 0.06) !important;
+  color: #fff !important;
+}
+/* 展开态选中 = 内缩圆角胶囊（去掉左侧竖条，重量更轻、指示性更强） */
+:deep(.el-menu:not(.el-menu--collapse) .el-menu-item.is-active:not(.menu-sep)) {
+  background-color: rgba(59, 130, 246, 0.28) !important;
+  border-radius: 6px;
+  color: #fff !important;
+  font-weight: 600;
+  margin: 4px 9px;
+}
+/* 分组分隔线（系统设置前）：常态留 8px 间距 + 顶部淡线 */
+:deep(.el-menu-item.menu-sep) {
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  margin-top: 8px;
+}
+/* 分隔项同时选中时，保持顶部间距（不被上面的 margin 覆盖） */
+:deep(.el-menu:not(.el-menu--collapse) .el-menu-item.is-active.menu-sep) {
+  background-color: rgba(59, 130, 246, 0.28) !important;
+  border-radius: 6px;
+  color: #fff !important;
+  font-weight: 600;
+  margin: 12px 9px 4px;
+}
+/* 收起态（64px 图标列）：选中 = 满宽底色 + 左侧 2px 主色指示，不内缩（否则图标偏移） */
+:deep(.el-menu--collapse .el-menu-item.is-active) {
+  background-color: rgba(59, 130, 246, 0.30) !important;
+  color: #fff !important;
+  font-weight: 600;
+  border-left: 2px solid #3b82f6;
+}
+/* 子菜单面板底色与侧栏统一（弹出层默认是白的，在深蓝侧栏里很跳） */
+:deep(.el-menu--inline) {
+  background-color: #000c17 !important;
+}
+:deep(.el-menu--inline .el-menu-item.is-active) {
+  background-color: rgba(59, 130, 246, 0.30) !important;
+}
 </style>

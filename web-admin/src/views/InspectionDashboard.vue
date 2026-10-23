@@ -98,8 +98,8 @@ const statCards = computed(() => [
     title: '今日巡检次数',
     value: stats.value.today_inspection_count ?? 0,
     icon: View,
-    color: '#1890ff',
-    bg: '#e6f4ff',
+    color: '#2563EB',
+    bg: '#e9effd',
   },
   {
     title: '今日发现隐患',
@@ -132,7 +132,7 @@ const trendSeries = computed(() => [
     name: '巡检次数',
     data: trendData.value.map((d) => d.inspection_count ?? 0),
     yAxisIndex: 0,
-    color: '#1890ff',
+    color: '#2563EB',
   },
   {
     name: '隐患数',

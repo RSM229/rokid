@@ -434,7 +434,7 @@ onMounted(async () => {
 }
 .speech-loading {
   font-size: 12px;
-  color: #409eff;
+  color: var(--el-color-primary);
   margin-top: 4px;
 }
 </style>

@@ -26,7 +26,7 @@ from fastapi import (
 )
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -37,6 +37,8 @@ from app.models.knowledge_base import (
     KnowledgeBase,
     KnowledgeBaseMember,
     KnowledgeDocument,
+    KbFolder,
+    ensure_kb_folder_tree,
 )
 from app.models.user import User
 from app.routers.auth import get_current_user
@@ -194,6 +196,7 @@ def _serialize_doc(doc: KnowledgeDocument, uploader: User | None = None) -> dict
         "size_bytes": doc.size_bytes,
         "uploader_id": doc.uploader_id,
         "uploader_name": info["real_name"],
+        "folder_id": doc.folder_id,
         "created_at": doc.created_at.isoformat() if doc.created_at else None,
     }
 
@@ -231,6 +234,19 @@ class PublishRequest(BaseModel):
 class QueryRequest(BaseModel):
     question: str = Field(min_length=1, max_length=2000)
     use_llm: bool = True
+
+
+class FolderCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=128)
+    parent_id: Optional[int] = None
+
+
+class FolderUpdate(BaseModel):
+    name: str = Field(min_length=1, max_length=128)
+
+
+class MoveDocFolder(BaseModel):
+    folder_id: Optional[int] = None
 
 
 # ============ 知识库管理 ============
@@ -292,6 +308,38 @@ async def list_knowledge_bases(
     items.sort(key=lambda item: item["updated_at"] or "", reverse=True)
     items.sort(key=lambda item: 0 if item["is_builtin"] else 1)
     return {"items": items}
+
+
+@router.get("/mine")
+async def my_home_knowledge_base(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """返回当前用户的首页资料库（个人主库，没有则自动创建）。
+
+    小程序「资料库」tab 直接以它为根渲染分类树，不再让用户先选库。
+    """
+    result = await db.execute(
+        select(KnowledgeBase)
+        .where(KnowledgeBase.owner_id == user.id, KnowledgeBase.kb_type == "personal")
+        .order_by(KnowledgeBase.id)
+    )
+    kb = result.scalars().first()
+    if kb is None:
+        kb = KnowledgeBase(name="我的资料库", kb_type="personal", owner_id=user.id)
+        db.add(kb)
+        await db.flush()
+        db.add(KnowledgeBaseMember(kb_id=kb.id, user_id=user.id, role="owner"))
+        await db.commit()
+        await db.refresh(kb)
+    await ensure_kb_folder_tree(db, kb.id)
+    return {
+        "id": kb.id,
+        "name": kb.name,
+        "role": "owner",
+        "is_owner": True,
+        "kb_type": kb.kb_type,
+    }
 
 
 @router.post("")
@@ -685,6 +733,166 @@ async def join_knowledge_base(
     return {"detail": "已加入知识库", "kb_id": kb.id, "role": "viewer"}
 
 
+# ============ 文件夹（分类树） ============
+
+
+async def _get_folder(db: AsyncSession, kb_id: int, folder_id: int) -> KbFolder:
+    folder = await db.get(KbFolder, folder_id)
+    if folder is None or folder.kb_id != kb_id:
+        raise HTTPException(status_code=404, detail="文件夹不存在")
+    return folder
+
+
+@router.get("/{kb_id}/folders")
+async def list_folders(
+    kb_id: int,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """返回资料库内的文件夹树（带各文件夹直接文档数）。首次访问自动播种预设目录骨架。"""
+    kb = await _get_kb(db, kb_id)
+    await _require_role(db, kb, user, "viewer")
+    await ensure_kb_folder_tree(db, kb_id)
+
+    folders = (
+        await db.execute(
+            select(KbFolder)
+            .where(KbFolder.kb_id == kb_id)
+            .order_by(KbFolder.sort_order, KbFolder.name)
+        )
+    ).scalars().all()
+
+    counts = dict(
+        (await db.execute(
+            select(KnowledgeDocument.folder_id, func.count(KnowledgeDocument.id))
+            .where(KnowledgeDocument.kb_id == kb_id)
+            .group_by(KnowledgeDocument.folder_id)
+        )).all()
+    )
+
+    by_parent: dict[int | None, list[KbFolder]] = {}
+    for f in folders:
+        by_parent.setdefault(f.parent_id, []).append(f)
+
+    def recursive_count(fid: int) -> int:
+        direct = int(counts.get(fid, 0))
+        return direct + sum(
+            recursive_count(c.id) for c in by_parent.get(fid, [])
+        )
+
+    def node(f: KbFolder) -> dict:
+        return {
+            "id": f.id,
+            "name": f.name,
+            "parent_id": f.parent_id,
+            "is_preset": bool(f.is_preset),
+            "count": recursive_count(f.id),
+            "children": [node(c) for c in by_parent.get(f.id, [])],
+        }
+
+    return {"items": [node(r) for r in by_parent.get(None, [])]}
+
+
+@router.post("/{kb_id}/folders")
+async def create_folder(
+    kb_id: int,
+    req: FolderCreate,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """在资料库内新建文件夹（可指定父文件夹，不指定则为根）。"""
+    kb = await _get_kb(db, kb_id)
+    await _require_role(db, kb, user, "editor")
+    _reject_builtin(kb, "新建文件夹")
+    if req.parent_id is not None:
+        await _get_folder(db, kb_id, req.parent_id)
+    folder = KbFolder(
+        kb_id=kb_id,
+        parent_id=req.parent_id,
+        name=req.name.strip(),
+        sort_order=(
+            (await db.execute(
+                select(func.count(KbFolder.id)).where(
+                    KbFolder.kb_id == kb_id,
+                    KbFolder.parent_id == req.parent_id,
+                )
+            )).scalar() or 0
+        ),
+    )
+    db.add(folder)
+    await db.commit()
+    await db.refresh(folder)
+    return {"id": folder.id, "name": folder.name, "parent_id": folder.parent_id}
+
+
+@router.delete("/{kb_id}/folders/{folder_id}")
+async def delete_folder(
+    kb_id: int,
+    folder_id: int,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """删除文件夹（连同全部子文件夹）；其中的文档移到上层文件夹，不会丢失。"""
+    kb = await _get_kb(db, kb_id)
+    await _require_role(db, kb, user, "editor")
+    _reject_builtin(kb, "删除文件夹")
+    folder = await _get_folder(db, kb_id, folder_id)
+
+    # 收集该文件夹及其全部后代节点
+    all_folders = (
+        await db.execute(select(KbFolder).where(KbFolder.kb_id == kb_id))
+    ).scalars().all()
+    by_parent: dict[int | None, list[KbFolder]] = {}
+    for f in all_folders:
+        by_parent.setdefault(f.parent_id, []).append(f)
+    doomed: list[int] = []
+
+    def collect(fid: int) -> None:
+        doomed.append(fid)
+        for child in by_parent.get(fid, []):
+            collect(child.id)
+
+    collect(folder_id)
+
+    # 工程资料不因删文件夹丢失：先移到被删文件夹的父级（根目录则为未分类）
+    parent_id = folder.parent_id
+    moved = (
+        await db.execute(
+            update(KnowledgeDocument)
+            .where(
+                KnowledgeDocument.kb_id == kb_id,
+                KnowledgeDocument.folder_id.in_(doomed),
+            )
+            .values(folder_id=parent_id)
+        )
+    ).rowcount or 0
+    await db.execute(delete(KbFolder).where(KbFolder.id.in_(doomed)))
+    await db.commit()
+    return {
+        "deleted_folders": len(doomed),
+        "moved_documents": moved,
+        "parent_id": parent_id,
+    }
+
+
+@router.put("/{kb_id}/folders/{folder_id}")
+async def rename_folder(
+    kb_id: int,
+    folder_id: int,
+    req: FolderUpdate,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """重命名文件夹（仅改名称，不影响层级与文档归属）。"""
+    kb = await _get_kb(db, kb_id)
+    await _require_role(db, kb, user, "editor")
+    _reject_builtin(kb, "重命名文件夹")
+    folder = await _get_folder(db, kb_id, folder_id)
+    folder.name = req.name.strip()
+    await db.commit()
+    return {"id": folder.id, "name": folder.name, "parent_id": folder.parent_id}
+
+
 # ============ 文档 ============
 
 
@@ -692,6 +900,7 @@ async def join_knowledge_base(
 async def list_documents(
     kb_id: int,
     keyword: Optional[str] = None,
+    folder_id: Optional[int] = None,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -699,6 +908,14 @@ async def list_documents(
     await _require_role(db, kb, user, "viewer")
     await _ensure_builtin_synced(db, kb)
     query = select(KnowledgeDocument).where(KnowledgeDocument.kb_id == kb_id)
+    # folder_id 过滤：0/未传且显式 0 表示未分类（NULL）；>0 表示指定文件夹；
+    # 不传（None）则不过滤，保持历史「列出全部」行为。
+    if folder_id is not None:
+        if folder_id == 0:
+            query = query.where(KnowledgeDocument.folder_id.is_(None))
+        else:
+            await _get_folder(db, kb_id, folder_id)
+            query = query.where(KnowledgeDocument.folder_id == folder_id)
     if keyword:
         like = f"%{keyword.strip()}%"
         query = query.where(KnowledgeDocument.name.like(like))
@@ -720,12 +937,15 @@ async def upload_document(
     background: BackgroundTasks,
     file: UploadFile = File(...),
     name: Optional[str] = Form(None),
+    folder_id: Optional[int] = Form(None),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     kb = await _get_kb(db, kb_id)
     await _require_role(db, kb, user, "editor")
     _reject_builtin(kb, "上传")
+    if folder_id is not None:
+        await _get_folder(db, kb_id, folder_id)
     if not file.filename:
         raise HTTPException(status_code=400, detail="未选择文件")
     suffix = Path(file.filename).suffix.lower()
@@ -748,6 +968,7 @@ async def upload_document(
     doc = KnowledgeDocument(
         kb_id=kb_id,
         uploader_id=user.id,
+        folder_id=folder_id,
         name=(name or Path(file.filename).stem).strip() or Path(file.filename).stem,
         filename=file.filename,
         path=str(target),
@@ -768,6 +989,7 @@ async def upload_audio_transcript(
     kb_id: int,
     file: UploadFile = File(...),
     name: Optional[str] = Form(None),
+    folder_id: Optional[int] = Form(None),
     language: str = Form("zh"),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -777,6 +999,8 @@ async def upload_audio_transcript(
     await _require_role(db, kb, user, "editor")
     if kb.is_builtin:
         raise HTTPException(status_code=403, detail="系统内置知识库不支持上传")
+    if folder_id is not None:
+        await _get_folder(db, kb_id, folder_id)
     if not file.filename:
         raise HTTPException(status_code=400, detail="未选择音频文件")
     suffix = Path(file.filename).suffix.lower()
@@ -815,6 +1039,7 @@ async def upload_audio_transcript(
     doc = KnowledgeDocument(
         kb_id=kb_id,
         uploader_id=user.id,
+        folder_id=folder_id,
         name=doc_name,
         filename=f"{doc_name}.txt",
         path=str(target),
@@ -860,6 +1085,26 @@ async def delete_document(
     # 与上传对称：删掉的分块必须尽快回收，否则检索会继续召回已删除的文档内容
     background.add_task(_reindex_knowledge_docs)
     return {"detail": "文档已删除", "id": doc_id}
+
+
+@router.put("/{kb_id}/documents/{doc_id}/folder")
+async def move_document_folder(
+    kb_id: int,
+    doc_id: int,
+    req: MoveDocFolder,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """将文档移动到指定文件夹（folder_id=0 或省略表示移回未分类）。"""
+    kb = await _get_kb(db, kb_id)
+    await _require_role(db, kb, user, "editor")
+    _reject_builtin(kb, "移动文档")
+    doc = await _get_doc(db, kb_id, doc_id)
+    if req.folder_id not in (None, 0):
+        await _get_folder(db, kb_id, req.folder_id)
+    doc.folder_id = None if req.folder_id in (None, 0) else req.folder_id
+    await db.commit()
+    return {"id": doc.id, "folder_id": doc.folder_id}
 
 
 @router.get("/{kb_id}/documents/{doc_id}/content")

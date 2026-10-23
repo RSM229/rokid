@@ -1,0 +1,265 @@
+/**
+ * 全局主题精修（2026-10-22，风格 A「深蓝精修」）
+ *
+ * 设计原则：
+ * 1. **优先改 Element Plus 的 CSS 变量**，而不是逐组件写选择器覆盖 ——
+ *    变量由组件内部消费，29 个页面自动继承，且不会和页面 scoped 样式打架。
+ * 2. **保留品牌基因**：侧栏仍是深蓝 #001529，主色仍是蓝（从 #409EFF 收到
+ *    更沉的 #2563EB），不改结构、不换布局，只做「精修」而非「重做」。
+ * 3. **不动 App.vue**：全局样式只走 main.ts 引 CSS，不新增全局组件 ——
+ *    入口 chunk 里静态 import 带 element-plus 的组件会触发分包循环、整站白屏
+ *    （2026-10-20 踩过，详见 details/01 铁律 5）。
+ * 4. 需要写选择器的地方只针对 **teleport 到 body 的浮层**（下拉面板、弹窗），
+ *    因为 scoped 样式进不去它们。
+ */
+
+/* ============ 1. 设计令牌 ============ */
+:root {
+  /* 主色：#409EFF → #2563EB（更深更沉，配深蓝侧栏不发飘）。
+     light-N 按 Element Plus 规则手工算好写死，不用 color-mix，
+     避免老浏览器不支持导致按钮 hover/禁用态掉色。 */
+  --el-color-primary: #2563eb;
+  --el-color-primary-light-3: #6692f1;
+  --el-color-primary-light-5: #92b1f5;
+  --el-color-primary-light-7: #bed0f9;
+  --el-color-primary-light-8: #d3e0fb;
+  --el-color-primary-light-9: #e9effd;
+  --el-color-primary-dark-2: #1e4fbc;
+
+  /* 中性色：文字层级拉开一点，正文更清楚 */
+  --el-text-color-primary: #1f2329;
+  --el-text-color-regular: #4e5969;
+  --el-text-color-secondary: #86909c;
+  --el-text-color-placeholder: #a8abb2;
+
+  /* 边框与填充：整体减淡，减少"网格感" */
+  --el-border-color: #dcdfe6;
+  --el-border-color-light: #e4e7ed;
+  --el-border-color-lighter: #ebeef5;
+  --el-border-color-extra-light: #f2f6fc;
+  --el-fill-color-light: #f5f7fa;
+  --el-fill-color-lighter: #fafbfc;
+  --el-fill-color-blank: #fff;
+
+  /* 语义色：与统计条/状态标签统一口径 */
+  --el-color-success: #1d9e75;
+  --el-color-success-light-9: #e8f3ec;
+  --el-color-warning: #ba7517;
+  --el-color-warning-light-9: #faeeda;
+  --el-color-danger: #d85a30;
+  --el-color-danger-light-9: #faece7;
+  --el-color-info: #6b7280;
+  --el-color-info-light-9: #f1f2f4;
+
+  /* 圆角：从 4px 收到 6px（控件）/ 8px（卡片）/ 10px（弹窗），更现代但不浮夸 */
+  --el-border-radius-base: 6px;
+  --el-border-radius-small: 4px;
+  --el-border-radius-round: 16px;
+
+  /* 字体：中文优先 PingFang / 微软雅黑，比默认 Segoe UI 渲染中文更清晰 */
+  --el-font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC',
+    'Hiragino Sans GB', 'Microsoft YaHei', 'Segoe UI', Roboto, 'Helvetica Neue',
+    Arial, sans-serif;
+  --el-font-size-base: 14px;
+
+  /* 本项目自定义令牌（页面可复用，避免各页硬编码颜色） */
+  --bz-page-bg: #f5f7fa;
+  --bz-card-radius: 8px;
+  --bz-table-head-bg: #fafbfc;
+  --bz-table-row-hover: #f5f8ff;
+  --bz-sider-bg: #001529;
+  --bz-sider-text: rgba(255, 255, 255, 0.72);
+  --bz-sider-hover: rgba(255, 255, 255, 0.06);
+  --bz-sider-active-bg: rgba(37, 99, 235, 0.24);
+  --bz-sider-active-bar: #3b82f6;
+}
+
+/* ============ 2. 基础排版 ============ */
+body {
+  font-family: var(--el-font-family);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* 细滚动条：默认那个粗滚动条在数据密集的后台里很占视觉重量 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: #c9cdd4;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #a8abb2;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* ============ 3. 卡片 ============ */
+.el-card {
+  border-radius: var(--bz-card-radius);
+  border-color: var(--el-border-color-lighter);
+}
+.el-card__header {
+  padding: 14px 20px;
+  border-bottom-color: var(--el-border-color-lighter);
+  font-weight: 600;
+}
+.el-card__body {
+  padding: 18px 20px;
+}
+
+/* ============ 4. 表格（本页最影响观感的地方）============ */
+.el-table {
+  --el-table-border-color: var(--el-border-color-lighter);
+  --el-table-header-bg-color: var(--bz-table-head-bg);
+  --el-table-header-text-color: #4e5969;
+  --el-table-row-hover-bg-color: var(--bz-table-row-hover);
+  --el-table-text-color: var(--el-text-color-primary);
+  font-size: 13.5px;
+}
+/* 表头：浅底 + 加粗 + 小字号，和数据行拉开层次 */
+.el-table th.el-table__cell {
+  font-weight: 600;
+  font-size: 13px;
+  letter-spacing: 0.2px;
+}
+/* 行高略增，密集数据不那么挤 */
+.el-table .el-table__cell {
+  padding: 9px 0;
+}
+/* 斑马纹减淡：默认那条灰太重，会盖过表头的层次 */
+.el-table--striped .el-table__body tr.el-table__row--striped td.el-table__cell {
+  background: #fcfdfe;
+}
+/* 空数据提示 */
+.el-table__empty-text {
+  color: var(--el-text-color-secondary);
+}
+
+/* ============ 5. 按钮 / 链接按钮 ============ */
+.el-button {
+  font-weight: 500;
+}
+.el-button--primary {
+  --el-button-bg-color: var(--el-color-primary);
+  --el-button-border-color: var(--el-color-primary);
+}
+/* link 型按钮是操作列主力，字重和间距要能点得准 */
+.el-button.is-link {
+  font-weight: 500;
+}
+.el-button.is-link:not(.is-disabled):hover {
+  text-decoration: underline;
+  background: transparent;
+}
+
+/* ============ 6. 表单控件 ============ */
+.el-input__wrapper,
+.el-textarea__inner,
+.el-select__wrapper {
+  border-radius: var(--el-border-radius-base);
+}
+.el-form-item__label {
+  color: var(--el-text-color-regular);
+  font-weight: 500;
+}
+
+/* ============ 7. 标签 ============ */
+.el-tag {
+  border-radius: 4px;
+  font-weight: 500;
+}
+
+/* ============ 8. 弹窗 / 抽屉 ============ */
+.el-dialog {
+  border-radius: 10px;
+}
+.el-dialog__header {
+  padding-bottom: 14px;
+  margin-right: 0;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+}
+.el-dialog__title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+}
+.el-dialog__body {
+  padding-top: 18px;
+  color: var(--el-text-color-regular);
+}
+.el-dialog__footer {
+  padding-top: 12px;
+  border-top: 1px solid var(--el-border-color-lighter);
+}
+
+/* ============ 9. 分页 ============ */
+.el-pagination {
+  --el-pagination-button-bg-color: #fff;
+  font-weight: 400;
+}
+.el-pagination .el-pager li,
+.el-pagination button {
+  border-radius: var(--el-border-radius-base);
+}
+
+/* ============ 10. 下拉菜单（teleport 到 body，scoped 进不去）============ */
+.el-dropdown-menu {
+  border-radius: 8px;
+  padding: 4px;
+}
+.el-dropdown-menu__item {
+  border-radius: 5px;
+  font-size: 13px;
+  padding: 7px 14px;
+}
+.el-dropdown-menu__item:not(.is-disabled):hover {
+  background: var(--el-color-primary-light-9);
+  color: var(--el-color-primary);
+}
+/* 危险项统一红色（各页面共用这个类名即可） */
+.el-dropdown-menu__item.danger-item {
+  color: var(--el-color-danger);
+}
+.el-dropdown-menu__item.danger-item:not(.is-disabled):hover {
+  background: var(--el-color-danger-light-9);
+  color: var(--el-color-danger);
+}
+
+/* ============ 11. 消息提示 / 通知 ============ */
+.el-message {
+  border-radius: 8px;
+}
+.el-message-box {
+  border-radius: 10px;
+}
+.el-message-box__title {
+  font-weight: 600;
+}
+
+/* ============ 12. 标签页 / 面包屑 / 描述列表 ============ */
+.el-tabs__item {
+  font-weight: 500;
+}
+.el-breadcrumb__inner {
+  color: var(--el-text-color-secondary);
+  font-weight: 400 !important;
+}
+.el-descriptions__label {
+  color: var(--el-text-color-secondary);
+}
+
+/* ============ 13. 空状态 ============ */
+.el-empty__description p {
+  color: var(--el-text-color-secondary);
+  font-size: 13px;
+}
+
+/* ============ 14. 加载遮罩 ============ */
+.el-loading-mask {
+  border-radius: var(--bz-card-radius);
+  background-color: rgba(255, 255, 255, 0.72);
+}

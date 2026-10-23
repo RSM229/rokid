@@ -20,6 +20,8 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 from sqlalchemy.sql import func
 
 from app.db import Base
@@ -76,9 +78,135 @@ class KnowledgeDocument(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     kb_id: Mapped[int] = mapped_column(ForeignKey("knowledge_bases.id"), index=True)
     uploader_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    # 文档归属的文件夹（分类）；NULL 表示未分类（根目录）。新增可空列，
+    # 由 init_db 的 _reconcile_missing_columns 安全补齐，不破坏历史数据。
+    folder_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("kb_folders.id"), nullable=True, index=True
+    )
     name: Mapped[str] = mapped_column(String(256))
     filename: Mapped[str] = mapped_column(String(256))
     path: Mapped[str] = mapped_column(String(1024))
     mime_type: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     size_bytes: Mapped[int] = mapped_column(BigInteger, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class KbFolder(Base):
+    """资料库内的文件夹（分类）树 —— 对标 D:\\rokid\\预设目录 的文档分类标准。
+
+    每个资料库拥有独立的一棵文件夹树；``parent_id`` 自引用形成层级，
+    ``is_preset`` 标记来自预设模板的节点（用户可在此基础上增删自定义分类）。
+    """
+
+    __tablename__ = "kb_folders"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    kb_id: Mapped[int] = mapped_column(ForeignKey("knowledge_bases.id"), index=True)
+    parent_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("kb_folders.id"), nullable=True, index=True
+    )
+    name: Mapped[str] = mapped_column(String(128))
+    sort_order: Mapped[int] = mapped_column(
+        Integer, default=0, server_default=text("0")
+    )
+    is_preset: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=text("0")
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+# 预设目录分类树（与 D:\\rokid\\预设目录 对应）。每个资料库首次访问时播种为默认骨架。
+PRESET_FOLDER_TREE: list[dict] = [
+    {"name": "个人文件夹"},
+    {
+        "name": "项目文件夹",
+        "children": [
+            {"name": "会议记录"},
+            {
+                "name": "合同与资质",
+                "children": [
+                    {"name": "施工单位"},
+                    {"name": "监理单位"},
+                    {"name": "设计单位"},
+                ],
+            },
+            {
+                "name": "工作记录与表单",
+                "children": [
+                    {"name": "各类台账"},
+                    {"name": "巡视记录"},
+                    {"name": "旁站记录"},
+                    {"name": "材料进场记录"},
+                    {"name": "检监测记录"},
+                    {"name": "监理日志"},
+                    {"name": "监理月报"},
+                    {"name": "监理通知单"},
+                    {"name": "见证记录"},
+                    {"name": "验收记录"},
+                ],
+            },
+            {"name": "往来函件与通报"},
+            {
+                "name": "技术资料",
+                "children": [
+                    {"name": "施工组织设计与方案"},
+                    {"name": "管理规划与细则"},
+                ],
+            },
+            {"name": "报批报建"},
+            {"name": "支付管理"},
+            {"name": "汇报材料"},
+            {"name": "计划管理"},
+            {
+                "name": "设计文件",
+                "children": [
+                    {"name": "初步设计"},
+                    {"name": "方案图"},
+                    {"name": "施工图"},
+                    {"name": "竣工图"},
+                ],
+            },
+            {
+                "name": "造价文件",
+                "children": [
+                    {"name": "估算"},
+                    {"name": "概算"},
+                    {"name": "结算"},
+                    {"name": "预算"},
+                ],
+            },
+        ],
+    },
+]
+
+
+async def ensure_kb_folder_tree(db: AsyncSession, kb_id: int) -> None:
+    """若资料库尚无文件夹，则播种预设目录分类树（幂等）。"""
+    existing = (
+        await db.execute(
+            select(func.count(KbFolder.id)).where(KbFolder.kb_id == kb_id)
+        )
+    ).scalar() or 0
+    if existing:
+        return
+
+    order = 0
+
+    async def build(nodes: list[dict], parent_id: Optional[int]) -> None:
+        nonlocal order
+        for node in nodes:
+            folder = KbFolder(
+                kb_id=kb_id,
+                parent_id=parent_id,
+                name=node["name"],
+                sort_order=order,
+                is_preset=True,
+            )
+            db.add(folder)
+            await db.flush()
+            order += 1
+            if node.get("children"):
+                await build(node["children"], folder.id)
+
+    await build(PRESET_FOLDER_TREE, None)
+    await db.commit()

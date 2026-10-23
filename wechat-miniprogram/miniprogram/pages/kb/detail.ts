@@ -33,6 +33,15 @@ interface KbMember {
   username: string
 }
 
+interface KbFolderNode {
+  id: number
+  name: string
+  parent_id: number | null
+  is_preset: boolean
+  count: number
+  children: KbFolderNode[]
+}
+
 const ROLE_LABEL: Record<string, string> = {
   owner: '创建者',
   admin: '管理员',
@@ -57,6 +66,8 @@ Page(themed({
   recTimer: null as number | null,
   recorderStopHandler: null as Parameters<typeof recorder.onStop>[0] | null,
   recorderErrorHandler: null as Parameters<typeof recorder.onError>[0] | null,
+  /** 搜索防抖定时器 */
+  searchTimer: null as number | null,
   data: {
     kbId: 0,
     kb: {} as KbDetail,
@@ -67,6 +78,16 @@ Page(themed({
 
     docs: [] as Array<KbDoc & { sizeText: string }>,
     docsLoading: false,
+
+    /** 搜索：输入即全局搜文档名称（不带文件夹过滤），清空恢复文件夹视图 */
+    searchKeyword: '',
+
+    folders: [] as KbFolderNode[],
+    folderMap: {} as Record<number, KbFolderNode>,
+    currentFolderId: 0,
+    breadcrumb: [] as Array<{ id: number; name: string }>,
+    currentSubfolders: [] as KbFolderNode[],
+
     recording: false,
     recSec: 0,
 
@@ -88,6 +109,11 @@ Page(themed({
     addRoles: ['editor', 'viewer', 'admin'],
     addRoleLabels: ['协作成员', '普通成员', '管理员'],
     adding: false,
+
+    showRenameFolder: false,
+    renameFolderId: 0,
+    renameFolderName: '',
+    renamingFolder: false,
   },
 
   onLoad(options: Record<string, string>) {
@@ -104,7 +130,7 @@ Page(themed({
     this.setData({ kbId })
     this.attachRecorder()
     this.loadKb()
-    this.loadDocs()
+    this.loadFolders()
     this.loadMembers()
   },
 
@@ -169,7 +195,7 @@ Page(themed({
   },
 
   onPullDownRefresh() {
-    Promise.all([this.loadKb(), this.loadDocs(), this.loadMembers()])
+    Promise.all([this.loadKb(), this.loadFolders(), this.loadMembers()])
       .finally(() => wx.stopPullDownRefresh())
   },
 
@@ -193,10 +219,13 @@ Page(themed({
     }
   },
 
-  async loadDocs() {
+  async loadDocs(folderId: number = 0) {
     this.setData({ docsLoading: true })
     try {
-      const res = await request<{ items: KbDoc[] }>(`/kb/${this.data.kbId}/documents`)
+      const res = await request<{ items: KbDoc[] }>(
+        `/kb/${this.data.kbId}/documents`,
+        { data: { folder_id: folderId } },
+      )
       this.setData({
         docs: (res.items || []).map((d) => ({ ...d, sizeText: formatSize(d.size_bytes || 0) })),
       })
@@ -205,6 +234,186 @@ Page(themed({
     } finally {
       this.setData({ docsLoading: false })
     }
+  },
+
+  async loadFolders() {
+    try {
+      const res = await request<{ items: KbFolderNode[] }>(`/kb/${this.data.kbId}/folders`)
+      const map: Record<number, KbFolderNode> = {}
+      const flatten = (nodes: KbFolderNode[]) => {
+        for (const n of nodes) {
+          map[n.id] = n
+          if (n.children && n.children.length) flatten(n.children)
+        }
+      }
+      flatten(res.items || [])
+      this.setData({ folders: res.items || [], folderMap: map })
+      this.refreshCurrentFolder()
+    } catch (error) {
+      wx.showToast({ title: (error as Error).message, icon: 'none' })
+    }
+  },
+
+  onSearchInput(event: WechatMiniprogram.Input) {
+    const keyword = event.detail.value || ''
+    this.setData({ searchKeyword: keyword })
+    if (this.searchTimer) clearTimeout(this.searchTimer)
+    if (!keyword.trim()) {
+      // 清空即退出搜索态，恢复当前文件夹视图
+      this.loadFolders()
+      return
+    }
+    this.searchTimer = setTimeout(() => this.doSearch(), 300) as unknown as number
+  },
+
+  onSearchConfirm() {
+    if (this.searchTimer) clearTimeout(this.searchTimer)
+    this.doSearch()
+  },
+
+  async doSearch() {
+    const keyword = this.data.searchKeyword.trim()
+    if (!keyword) return
+    this.setData({ docsLoading: true })
+    try {
+      const res = await request<{ items: KbDoc[] }>(
+        `/kb/${this.data.kbId}/documents`,
+        { data: { keyword } },
+      )
+      this.setData({
+        docs: (res.items || []).map((d) => ({ ...d, sizeText: formatSize(d.size_bytes || 0) })),
+      })
+    } catch (error) {
+      wx.showToast({ title: (error as Error).message, icon: 'none' })
+    } finally {
+      this.setData({ docsLoading: false })
+    }
+  },
+
+  clearSearch() {
+    if (this.searchTimer) clearTimeout(this.searchTimer)
+    this.setData({ searchKeyword: '' })
+    this.loadFolders()
+  },
+
+  /** 文档变动后的刷新：搜索态下重搜，否则回到当前文件夹视图 */
+  refreshDocs() {
+    if (this.data.searchKeyword.trim()) this.doSearch()
+    else this.loadFolders()
+  },
+
+  refreshCurrentFolder() {
+    const folderId = this.data.currentFolderId
+    const map = this.data.folderMap
+    // 计算面包屑（从当前文件夹向上回溯到根）
+    const crumb: Array<{ id: number; name: string }> = []
+    let cur: KbFolderNode | undefined = folderId ? map[folderId] : undefined
+    while (cur) {
+      crumb.unshift({ id: cur.id, name: cur.name })
+      cur = cur.parent_id ? map[cur.parent_id] : undefined
+    }
+    // 当前层级的子文件夹
+    let subs: KbFolderNode[] = []
+    if (folderId === 0) {
+      subs = this.data.folders.filter((f) => f.parent_id === null || f.parent_id === 0)
+    } else {
+      const node = map[folderId]
+      subs = node && node.children ? node.children : []
+    }
+    this.setData({ breadcrumb: crumb, currentSubfolders: subs })
+    this.loadDocs(folderId)
+  },
+
+  selectFolder(event: WechatMiniprogram.TouchEvent) {
+    const id = Number(event.currentTarget.dataset.id)
+    this.setData({ currentFolderId: id })
+    this.refreshCurrentFolder()
+  },
+
+  goBreadcrumb(event: WechatMiniprogram.TouchEvent) {
+    const id = Number(event.currentTarget.dataset.id)
+    this.setData({ currentFolderId: id })
+    this.refreshCurrentFolder()
+  },
+
+  /** 判断 folderId 是否位于（或就是）ancestorId 的子树内 */
+  isInsideFolder(folderId: number, ancestorId: number): boolean {
+    let cur: KbFolderNode | undefined = this.data.folderMap[folderId]
+    while (cur) {
+      if (cur.id === ancestorId) return true
+      cur = cur.parent_id ? this.data.folderMap[cur.parent_id] : undefined
+    }
+    return false
+  },
+
+  openRenameFolder(event: WechatMiniprogram.TouchEvent) {
+    const folderId = Number(event.currentTarget.dataset.id)
+    const folder = this.data.folderMap[folderId]
+    if (!folder) return
+    this.setData({ showRenameFolder: true, renameFolderId: folderId, renameFolderName: folder.name })
+  },
+  hideRenameFolder() { this.setData({ showRenameFolder: false, renameFolderId: 0, renameFolderName: '' }) },
+  onRenameFolderInput(event: WechatMiniprogram.Input) { this.setData({ renameFolderName: event.detail.value }) },
+  async confirmRenameFolder() {
+    const name = this.data.renameFolderName.trim()
+    if (!name) { wx.showToast({ title: '请输入文件夹名称', icon: 'none' }); return }
+    this.setData({ renamingFolder: true })
+    wx.showLoading({ title: '保存中...', mask: true })
+    try {
+      await request(`/kb/${this.data.kbId}/folders/${this.data.renameFolderId}`, {
+        method: 'PUT',
+        data: { name },
+      })
+      wx.hideLoading()
+      wx.showToast({ title: '已保存', icon: 'success' })
+      this.setData({ showRenameFolder: false })
+      this.loadFolders()
+    } catch (error) {
+      wx.hideLoading()
+      wx.showToast({ title: (error as Error).message, icon: 'none' })
+    } finally {
+      this.setData({ renamingFolder: false })
+    }
+  },
+
+  deleteFolder(event: WechatMiniprogram.TouchEvent) {
+    const folderId = Number(event.currentTarget.dataset.id)
+    const folder = this.data.folderMap[folderId]
+    if (!folder) return
+    let subCount = 0
+    const walk = (nodes?: KbFolderNode[]) => {
+      for (const n of nodes || []) {
+        subCount += 1
+        walk(n.children)
+      }
+    }
+    walk(folder.children)
+    const parent = folder.parent_id ? this.data.folderMap[folder.parent_id] : undefined
+    const target = parent ? `「${parent.name}」` : '未分类'
+    let content = folder.count
+      ? `其中 ${folder.count} 份文档将移至${target}，不会丢失`
+      : '该文件夹为空'
+    if (subCount) content += `；${subCount} 个子文件夹会一并删除`
+    wx.showModal({
+      title: '删除文件夹',
+      content: `确定删除「${folder.name}」？\n${content}`,
+      confirmText: '删除',
+      confirmColor: '#d9534f',
+      success: async (res) => {
+        if (!res.confirm) return
+        try {
+          await request(`/kb/${this.data.kbId}/folders/${folderId}`, { method: 'DELETE' })
+          wx.showToast({ title: '已删除', icon: 'success' })
+          // 正停留在被删子树内时退回它的上层，避免浏览一个已不存在的节点
+          if (this.data.currentFolderId && this.isInsideFolder(this.data.currentFolderId, folderId)) {
+            this.setData({ currentFolderId: folder.parent_id || 0 })
+          }
+          this.loadFolders()
+        } catch (error) {
+          wx.showToast({ title: (error as Error).message, icon: 'none' })
+        }
+      },
+    })
   },
 
   uploadDoc() {
@@ -229,6 +438,8 @@ Page(themed({
 
   async doUpload(paths: string[]) {
     const token = session.getToken()
+    const folderId = this.data.currentFolderId
+    const formData = folderId ? { folder_id: String(folderId) } : {}
     let done = 0
     try {
       for (const path of paths) {
@@ -238,6 +449,7 @@ Page(themed({
             url: `${config.apiBaseUrl}/kb/${this.data.kbId}/documents`,
             filePath: path,
             name: 'file',
+            formData,
             header: token ? { Authorization: `Bearer ${token}` } : {},
             success(res) {
               if (res.statusCode >= 200 && res.statusCode < 300) { resolve(); return }
@@ -255,7 +467,7 @@ Page(themed({
       }
       wx.hideLoading()
       wx.showToast({ title: '上传完成', icon: 'success' })
-      this.loadDocs()
+      this.loadFolders()
       this.loadKb()
     } catch (error) {
       wx.hideLoading()
@@ -265,6 +477,10 @@ Page(themed({
 
   async uploadAudio(path: string, name?: string) {
     const token = session.getToken()
+    const folderId = this.data.currentFolderId
+    const formData: Record<string, string> = {}
+    if (name) formData.name = name
+    if (folderId) formData.folder_id = String(folderId)
     wx.showLoading({ title: '语音转写中...', mask: true })
     try {
       await new Promise<void>((resolve, reject) => {
@@ -272,7 +488,7 @@ Page(themed({
           url: `${config.apiBaseUrl}/kb/${this.data.kbId}/documents/audio`,
           filePath: path,
           name: 'file',
-          formData: name ? { name } : {},
+          formData,
           header: token ? { Authorization: `Bearer ${token}` } : {},
           success(res) {
             if (res.statusCode >= 200 && res.statusCode < 300) { resolve(); return }
@@ -288,7 +504,7 @@ Page(themed({
       })
       wx.hideLoading()
       wx.showToast({ title: '已转写入库', icon: 'success' })
-      this.loadDocs()
+      this.loadFolders()
       this.loadKb()
     } catch (error) {
       wx.hideLoading()
@@ -383,7 +599,7 @@ Page(themed({
         try {
           await request(`/kb/${this.data.kbId}/documents/${docId}`, { method: 'DELETE' })
           wx.showToast({ title: '已删除', icon: 'success' })
-          this.loadDocs()
+          this.refreshDocs()
           this.loadKb()
         } catch (error) {
           wx.showToast({ title: (error as Error).message, icon: 'none' })

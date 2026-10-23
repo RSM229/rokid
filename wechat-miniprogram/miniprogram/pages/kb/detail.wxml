@@ -27,8 +27,37 @@
 
   <!-- 文档 -->
   <block wx:if="{{tab === 'docs'}}">
-    <view wx:if="{{docsLoading && !docs.length}}" class="empty">正在加载…</view>
-    <view wx:elif="{{!docs.length}}" class="empty">还没有文档，点上方“+ 上传文档”</view>
+    <view class="breadcrumb">
+      <text class="crumb {{currentFolderId === 0 ? 'on' : ''}}" data-id="0" bindtap="goBreadcrumb">全部</text>
+      <text wx:for="{{breadcrumb}}" wx:key="id" class="crumb {{item.id === currentFolderId ? 'on' : ''}}" data-id="{{item.id}}" bindtap="goBreadcrumb"> › {{item.name}}</text>
+    </view>
+
+    <!-- 搜索：输入即全局搜文档名称（不带文件夹过滤），清空恢复文件夹视图 -->
+    <view class="search-bar">
+      <input
+        class="search-input"
+        value="{{searchKeyword}}"
+        placeholder="搜索文档名称"
+        confirm-type="search"
+        bindinput="onSearchInput"
+        bindconfirm="onSearchConfirm"
+      />
+      <text wx:if="{{searchKeyword}}" class="search-clear" bindtap="clearSearch">✕</text>
+    </view>
+    <view wx:if="{{searchKeyword}}" class="search-tip">搜索「{{searchKeyword}}」：{{docs.length}} 条结果</view>
+
+    <view wx:if="{{!searchKeyword && currentSubfolders.length}}" class="folder-grid">
+      <view wx:for="{{currentSubfolders}}" wx:key="id" class="folder-card" data-id="{{item.id}}" bindtap="selectFolder">
+        <text class="folder-ico">📁</text>
+        <text class="folder-name">{{item.name}}</text>
+        <text class="folder-count">{{item.count}} 份</text>
+        <text wx:if="{{canUpload}}" class="folder-rename" data-id="{{item.id}}" catchtap="openRenameFolder">重命名</text>
+        <text wx:if="{{canUpload}}" class="folder-del" data-id="{{item.id}}" catchtap="deleteFolder">删除</text>
+      </view>
+    </view>
+
+    <view wx:if="{{docsLoading && !docs.length && !currentSubfolders.length}}" class="empty">正在加载…</view>
+    <view wx:elif="{{!currentSubfolders.length && !docs.length}}" class="empty">{{searchKeyword ? '没有匹配的文档，换个关键词试试' : '还没有文档，点上方“+ 上传文档”归档到分类'}}</view>
     <view wx:for="{{docs}}" wx:key="id" class="card doc">
       <view class="doc-name">{{item.name}}</view>
       <view class="doc-meta">{{item.sizeText}} · {{item.uploader_name}}</view>
@@ -76,36 +105,48 @@
   </block>
 
   <!-- 文档内容 -->
-  <view wx:if="{{showContent}}" class="mask" bindtap="closeContent">
-    <view class="modal content-modal" catchtap="">
-      <view class="modal-title">{{contentTitle}}</view>
-      <scroll-view scroll-y class="content-scroll">
-        <text class="content-text">{{contentText}}</text>
-      </scroll-view>
-      <view class="modal-btns">
-        <button class="btn-cancel" bindtap="closeContent">关闭</button>
-      </view>
+  <view wx:if="{{showContent}}" class="mask" bindtap="closeContent"></view>
+  <view wx:if="{{showContent}}" class="modal content-modal">
+    <view class="modal-title">{{contentTitle}}</view>
+    <scroll-view scroll-y class="content-scroll">
+      <text class="content-text">{{contentText}}</text>
+    </scroll-view>
+    <view class="modal-btns">
+      <button class="btn-cancel" bindtap="closeContent">关闭</button>
     </view>
   </view>
 
   <!-- 添加成员 -->
-  <view wx:if="{{showAddMember}}" class="mask" bindtap="hideAddMember">
-    <view class="modal" catchtap="">
-      <view class="modal-title">添加成员</view>
-      <view class="field-group">
-        <text class="field-label">用户名</text>
-        <input class="field-input" value="{{addUsername}}" placeholder="对方的登录用户名" bindinput="onAddInput" />
-      </view>
-      <view class="field-group">
-        <text class="field-label">角色</text>
-        <picker mode="selector" range="{{addRoleLabels}}" value="{{addRoleIndex}}" bindchange="onAddRole">
-          <view class="field-input picker-val">{{addRoleLabels[addRoleIndex]}} ▾</view>
-        </picker>
-      </view>
-      <view class="modal-btns">
-        <button class="btn-cancel" bindtap="hideAddMember">取消</button>
-        <button class="btn-primary" loading="{{adding}}" bindtap="confirmAddMember">添加</button>
-      </view>
+  <view wx:if="{{showAddMember}}" class="mask" bindtap="hideAddMember"></view>
+  <view wx:if="{{showAddMember}}" class="modal">
+    <view class="modal-title">添加成员</view>
+    <view class="field-group">
+      <text class="field-label">用户名</text>
+      <input class="field-input" value="{{addUsername}}" placeholder="对方的登录用户名" bindinput="onAddInput" />
+    </view>
+    <view class="field-group">
+      <text class="field-label">角色</text>
+      <picker mode="selector" range="{{addRoleLabels}}" value="{{addRoleIndex}}" bindchange="onAddRole">
+        <view class="field-input picker-val">{{addRoleLabels[addRoleIndex]}} ▾</view>
+      </picker>
+    </view>
+    <view class="modal-btns">
+      <button class="btn-cancel" bindtap="hideAddMember">取消</button>
+      <button class="btn-primary" loading="{{adding}}" bindtap="confirmAddMember">添加</button>
+    </view>
+  </view>
+
+  <!-- 重命名文件夹 -->
+  <view wx:if="{{showRenameFolder}}" class="mask" bindtap="hideRenameFolder"></view>
+  <view wx:if="{{showRenameFolder}}" class="modal">
+    <view class="modal-title">重命名文件夹</view>
+    <view class="field-group">
+      <text class="field-label">文件夹名称</text>
+      <input class="field-input" value="{{renameFolderName}}" placeholder="输入新的名称" bindinput="onRenameFolderInput" />
+    </view>
+    <view class="modal-btns">
+      <button class="btn-cancel" bindtap="hideRenameFolder">取消</button>
+      <button class="btn-primary" loading="{{renamingFolder}}" bindtap="confirmRenameFolder">保存</button>
     </view>
   </view>
 </view>

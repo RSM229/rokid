@@ -499,6 +499,9 @@ export const projectApi = {
   // Step 5：项目生命周期（权限 project_complete，默认仅超管）
   complete: (projectId: number) => http.post(`/project/${projectId}/complete`),
   reopen: (projectId: number) => http.post(`/project/${projectId}/reopen`),
+  // 空壳项目物理删除（仅超管；后端校验所有 project_id 业务表为空 + 回显项目编号）
+  remove: (projectId: number, confirmCode: string) =>
+    http.delete(`/project/${projectId}`, { data: { confirm_code: confirmCode } }),
 }
 
 // 管理员与跨项目查看授权（仅超管；后端以 is_super_admin 兜底把关）

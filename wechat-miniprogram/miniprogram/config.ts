@@ -41,12 +41,19 @@ const isRelease = currentEnv === 'release'
 const productionApiBaseUrl = trimTrailingSlash(
   ext.apiBaseUrl || 'https://www.baize.gdces.cn:4432/api',
 )
-// The WeChat IDE's local simulator often has no injected ext config. Default
-// develop builds to loopback so a fresh checkout cannot silently hit production.
-const useLocalBackend = currentEnv === 'develop' && ext.useLocalBackend !== false
+// 联调总开关：true=连本机后端（SQLite 隔离库，tmp/dev_local.py serve --port 8001），
+// false=直连生产后端（生产 MySQL，真实账号与微信绑定关系）。
+// 默认 false —— IDE 模拟器不注入 ext.json（getExtConfigSync 返回空），
+// 只靠 ext.useLocalBackend 关不掉本地库，模拟器会静默连到本机 SQLite；
+// 用这个常量一行切换，保证模拟器与真机预览口径一致。
+// 本地端口注意：8000 常被本机其他项目（Docker 容器）占用，故本地后端跑 8001。
+// 正式/体验版不受影响，始终走生产。
+const PREFER_LOCAL_BACKEND = false
+const useLocalBackend =
+  currentEnv === 'develop' && PREFER_LOCAL_BACKEND && ext.useLocalBackend !== false
 const apiBaseUrl = trimTrailingSlash(
   useLocalBackend
-    ? ext.localApiBaseUrl || 'http://127.0.0.1:8000/api'
+    ? ext.localApiBaseUrl || 'http://127.0.0.1:8001/api'
     : productionApiBaseUrl,
 )
 const storageScope = encodeURIComponent(apiBaseUrl)

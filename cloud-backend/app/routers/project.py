@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, Form
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import case, or_, select
+from sqlalchemy import case, delete, or_, select, text, update
 from pydantic import BaseModel
 from typing import Optional
 
@@ -986,6 +986,237 @@ async def reopen_project(
         "project_id": project_id,
         "status": PROJECT_STATUS_ACTIVE,
         "changed": True,
+    }
+
+
+# ============ 空壳项目物理删除（2026-10-22） ============
+
+# 这三张表在项目删除时由接口**主动清理**，不计入"有业务数据"的拦截项：
+#   project_members     —— 创建项目时自动把创建者加为成员，空壳项目必然有 1 条
+#   project_view_grants —— 跨项目查看授权，随项目一起作废
+#   users               —— users.project_id 只是"当前上下文"单值，置空即可
+_CLEANUP_TABLES = {"project_members", "project_view_grants", "users"}
+
+# fail-closed 阈值：生产 information_schema 应返回 25+ 张带 project_id 的表。
+# 若扫到的表数少于此，说明判定依据本身失效（库连错/metadata 未加载），
+# 此时**必须拒绝删除**，绝不能"没查到引用"就放行。
+_MIN_REFERENCE_TABLES = 5
+
+
+class DeleteProjectRequest(BaseModel):
+    """删除请求体：必须回显项目编号，防止在长列表里点错行。"""
+    confirm_code: str
+
+
+async def _tables_with_project_id(db: AsyncSession) -> list[str]:
+    """返回库里所有带 ``project_id`` 列的表名（**数据库真源优先**）。
+
+    🔴 不能只依赖 ``Base.metadata``：ORM 元数据的内容取决于**哪些模型模块被
+    import 过**。实测 ``from app.main import app`` 得到 53 张表，但**缺
+    ``kb_chunks``**（``kb_chunk`` 模块只在 ``init_db()`` 里导入）—— 用元数据
+    扫描会漏掉这类表，而"漏表"在本接口里等价于"放行删除"，留下指向不存在
+    项目的孤儿数据（记忆里就有"kb_chunks 逻辑引用不清会 RAG 幻觉"的前车之鉴）。
+    所以优先查 ``information_schema``（MySQL 真源），失败再回退元数据。
+    """
+    try:
+        rows = (
+            await db.execute(
+                text(
+                    "SELECT table_name FROM information_schema.columns "
+                    "WHERE column_name = 'project_id' AND table_schema = DATABASE()"
+                )
+            )
+        ).all()
+        names = sorted({r[0] for r in rows if r[0]})
+        if names:
+            return names
+    except Exception:  # noqa: BLE001  SQLite 等无 information_schema 时回退
+        pass
+
+    from app.db import Base
+
+    return sorted(t.name for t in Base.metadata.sorted_tables if "project_id" in t.columns)
+
+
+def _project_file_refs(project_id: int, *subdirs: str) -> dict[str, int]:
+    """统计**只落文件不入库**的目录里属于该项目的文件数。
+
+    图纸 / 档案走的是「文件 + .meta.json」而非数据库表，FK 扫描看不见它们。
+    若不清点就删项目，这些文件会变成指向不存在项目的孤儿。
+    """
+    import json
+
+    hits: dict[str, int] = {}
+    for sub in subdirs:
+        d = settings.upload_dir / sub
+        if not d.is_dir():
+            continue
+        count = 0
+        for f in d.iterdir():
+            if not f.is_file() or not f.name.endswith(".meta.json"):
+                continue
+            try:
+                meta = json.loads(f.read_text(encoding="utf-8"))
+            except Exception:  # noqa: BLE001  坏 meta 文件不参与判定
+                continue
+            if meta.get("project_id") == project_id:
+                count += 1
+        if count:
+            hits[sub] = count
+    return hits
+
+
+@router.delete("/{project_id}")
+async def delete_project(
+    project_id: int,
+    req: DeleteProjectRequest,
+    request: Request,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """**物理删除**空壳项目（建错/手滑场景，不走结项流程）。
+
+    为什么不提供通用的项目删除：监理项目一旦产生巡视记录、验收资料、成员在场
+    历史，物理删除会破坏责任追溯链，也和对外的穗建通上报口径对不上。有数据的
+    项目应当走「结项」（软收口，可恢复）。本接口只收拾**从未产生业务数据**的
+    空壳，因此门槛设得极严：
+
+    1. 仅超级管理员（``_require_super``），不认 ``project_complete`` 之类的权限键；
+    2. 请求体必须回显项目编号（``confirm_code``），大小写不敏感但内容必须一致；
+    3. 不许删自己当前所在的项目（否则下面清空上下文会把操作者自己锁在项目外）；
+    4. 以 **information_schema 为真源**枚举所有带 ``project_id`` 列的表，任一表
+       存在该项目的记录即 409 拒绝 —— 用列名而非外键判定（部分表无 FK 约束），
+       用库真源而非 ORM 元数据（元数据取决于 import 过哪些模型，会漏表）；
+       枚举结果少于安全阈值时 **fail-closed**（500 中止），绝不"没查到就放行"；
+    5. 图纸 / 档案目录（文件 + meta，不入库）单独清点，有文件即 409 拒绝，
+       要求先删文件，避免留下指向不存在项目的孤儿文件。
+
+    通过全部检查后才清理成员行、查看授权、用户当前上下文，最后删项目行，
+    并写一条 ``project_delete`` 安全审计（含被清掉的成员名单，便于追责）。
+    被拒的场景同样落 ``project_delete_denied`` 审计——抵赖不了。
+    """
+    _require_super(user)
+    project = await _get_project_or_404(db, project_id)
+
+    # 不许删自己当前所在的项目：下面会把 users.project_id 置空，操作者自己的
+    # 上下文会跟着消失，之后所有写接口都会 400（require_project_id 拿不到项目）。
+    # 先让他切走，避免"删完自己出不去"。
+    if user.project_id == project_id:
+        raise HTTPException(
+            status_code=400,
+            detail="不能删除自己当前所在的项目，请先切换到其他项目再删除",
+        )
+
+    if (req.confirm_code or "").strip().upper() != (project.code or "").strip().upper():
+        _write_audit(
+            db, user, "project_delete_denied",
+            f"项目 #{project_id} {project.name} 删除失败：确认编号不匹配",
+            await _client_ip(request),
+        )
+        await db.commit()
+        raise HTTPException(
+            status_code=400,
+            detail=f"项目编号不匹配，请输入「{project.code}」以确认删除",
+        )
+
+    # ---- ③ 业务数据拦截：扫描所有指向本项目的表 ----
+    # 判定口径用**列名 project_id** 而非"是否有 FK"：agent_draft.AgentFlowInstance、
+    # kb_chunks 等表带 project_id 但**没有**外键约束，只扫 FK 会漏掉它们，
+    # 删完留下指向不存在项目的孤儿数据。宁严勿松。
+    ref_tables = [t for t in await _tables_with_project_id(db) if t not in _CLEANUP_TABLES]
+
+    # 🔴 fail-closed：判定依据本身失效（库连错 / 元数据未加载 / information_schema
+    # 不可用）时，"没扫到引用"不等于"没有引用"。宁可拒绝删除，不可误删。
+    if len(ref_tables) < _MIN_REFERENCE_TABLES:
+        _write_audit(
+            db, user, "project_delete_denied",
+            f"项目 #{project_id} {project.name} 删除被拒（引用表枚举异常，仅 {len(ref_tables)} 张，"
+            f"低于安全阈值 {_MIN_REFERENCE_TABLES}）",
+            await _client_ip(request),
+        )
+        await db.commit()
+        raise HTTPException(
+            status_code=500,
+            detail="无法完成引用检查（业务表枚举异常），为避免误删已中止。请联系管理员排查。",
+        )
+
+    blockers: list[str] = []
+    for name in ref_tables:
+        # 表名来自 information_schema，仍按标识符白名单校验后再拼接，杜绝注入
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+            blockers.append(f"{name}（表名非法，无法检查）")
+            continue
+        count = (
+            await db.execute(
+                text(f'SELECT COUNT(*) FROM `{name}` WHERE project_id = :pid'),
+                {"pid": project_id},
+            )
+        ).scalar() or 0
+        if count:
+            blockers.append(f"{name} {count} 条")
+
+    # ---- ④ 图纸 / 档案文件拦截（不入库，FK 扫描看不见）----
+    file_hits = _project_file_refs(project_id, "drawings", "archives")
+    for sub, count in file_hits.items():
+        blockers.append(f"{sub} 文件 {count} 个")
+
+    if blockers:
+        detail = "该项目已有业务数据，不能物理删除，请改用「结项」：" + "；".join(blockers)
+        _write_audit(
+            db, user, "project_delete_denied",
+            f"项目 #{project_id} {project.name} 删除被拒（存在业务数据：{detail[:300]}）",
+            await _client_ip(request),
+        )
+        await db.commit()
+        raise HTTPException(status_code=409, detail=detail)
+
+    # ---- 通过全部检查：清理归属关系后删除项目行 ----
+    members = (
+        await db.execute(select(ProjectMember).where(ProjectMember.project_id == project_id))
+    ).scalars().all()
+    member_names = []
+    for m in members:
+        mu = await db.get(User, m.user_id)
+        if mu:
+            member_names.append(f"{mu.real_name}({mu.username})")
+    await db.execute(delete(ProjectMember).where(ProjectMember.project_id == project_id))
+    await db.execute(delete(ProjectViewGrant).where(ProjectViewGrant.project_id == project_id))
+    cleared = (
+        await db.execute(
+            update(User).where(User.project_id == project_id).values(project_id=None)
+        )
+    ).rowcount or 0
+
+    name, code = project.name, project.code
+    await db.delete(project)
+    _write_audit(
+        db, user, "project_delete",
+        f"项目 #{project_id} {name}（{code}）已物理删除："
+        f"清理成员 {len(members)} 人[{','.join(member_names)[:200]}]、上下文 {cleared} 人",
+        await _client_ip(request),
+    )
+    try:
+        await db.commit()
+    except Exception as exc:  # noqa: BLE001
+        # 兜底：上面的扫描依赖 ORM 元数据，若某张带 FK 的表未被任何模块 import
+        # （不在 metadata 里）就会漏检。此时数据库的外键约束会拒绝删除并抛
+        # IntegrityError —— 绝不能让它变成 500，也不能留下半删状态。
+        await db.rollback()
+        _write_audit(
+            db, user, "project_delete_denied",
+            f"项目 #{project_id} {name} 删除被数据库外键约束拒绝：{str(exc)[:300]}",
+            await _client_ip(request),
+        )
+        await db.commit()
+        raise HTTPException(
+            status_code=409,
+            detail="该项目仍被其他数据引用，无法删除，请改用「结项」",
+        ) from exc
+    return {
+        "detail": f"项目「{name}」已删除",
+        "project_id": project_id,
+        "removed_members": len(members),
+        "cleared_contexts": cleared,
     }
 
 

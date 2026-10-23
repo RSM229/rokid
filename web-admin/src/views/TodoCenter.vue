@@ -131,7 +131,7 @@ const detailVisible = ref(false)
 const currentTask = ref<any>(null)
 
 const statsCards = ref([
-  { label: '全部待办', value: 0, icon: 'Document', bg: '#409EFF' },
+  { label: '全部待办', value: 0, icon: 'Document', bg: '#2563EB' },
   { label: '紧急待办', value: 0, icon: 'WarningFilled', bg: '#F56C6C' },
   { label: '今日提醒', value: 0, icon: 'Timer', bg: '#E6A23C' },
   { label: '已逾期', value: 0, icon: 'CloseBold', bg: '#909399' },
