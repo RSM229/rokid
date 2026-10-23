@@ -10,8 +10,8 @@
     <view class="kb-sub">{{kb.document_count}} 份文档 · {{kb.member_count}} 位成员 · 我的角色：{{roleLabel[kb.role]}}</view>
     <view class="kb-actions">
       <button wx:if="{{canUpload}}" class="btn-primary" size="mini" bindtap="uploadDoc">+ 上传文档</button>
-      <button wx:if="{{canUpload}}" class="btn-green" size="mini" bindtap="toggleRecord">{{recording ? ('停止录音 ' + recSec + 's') : '录音转写'}}</button>
-      <button wx:if="{{canUpload}}" class="btn-gray" size="mini" bindtap="chooseAudio">音频文件</button>
+      <button wx:if="{{false}}" class="btn-green" size="mini" bindtap="toggleRecord">{{recording ? ('停止录音 ' + recSec + 's') : '录音转写'}}</button>
+      <button wx:if="{{false}}" class="btn-gray" size="mini" bindtap="chooseAudio">音频文件</button>
       <button wx:if="{{canManage && kb.kb_type === 'shared'}}" class="btn-green" size="mini" bindtap="showInvite">邀请码</button>
       <button wx:if="{{canManage && kb.kb_type === 'shared'}}" class="btn-gray" size="mini" bindtap="togglePublish">{{kb.is_public ? '取消发布' : '发布到广场'}}</button>
       <button wx:if="{{canManage}}" class="btn-gray" size="mini" bindtap="showAddMember">+ 成员</button>

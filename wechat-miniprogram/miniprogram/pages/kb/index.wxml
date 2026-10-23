@@ -113,7 +113,7 @@
   <!-- 底部操作栏：新建文件夹已移到「文件夹」分组标题右侧，这里只留两个主操作；多选模式下让位给多选操作栏 -->
   <view wx:if="{{!selectMode}}" class="action-bar">
     <button wx:if="{{canUpload}}" class="btn-primary" size="mini" bindtap="uploadDoc">+ 上传文档</button>
-    <button wx:if="{{canUpload}}" class="btn-plain" size="mini" bindtap="chooseAudio">录音转写</button>
+    <button wx:if="{{false}}" class="btn-plain" size="mini" bindtap="chooseAudio">录音转写</button>
   </view>
 
   <!-- 文件夹多选操作栏：选择模式下替代主操作栏，支持全选 / 重命名 / 删除 / 完成 -->
