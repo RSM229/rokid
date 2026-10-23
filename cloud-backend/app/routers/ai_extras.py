@@ -54,7 +54,13 @@ async def _kb_context(db: AsyncSession, user: User, kb_id: int, question: str) -
     await _require_role(db, kb, user, "viewer")
     await _ensure_builtin_synced(db, kb)
     docs = (
-        await db.execute(select(KnowledgeDocument).where(KnowledgeDocument.kb_id == kb_id))
+        await db.execute(
+            select(KnowledgeDocument).where(
+                KnowledgeDocument.kb_id == kb_id,
+                KnowledgeDocument.is_deleted.is_(None)
+                | (KnowledgeDocument.is_deleted == False),  # noqa: E712
+            )
+        )
     ).scalars().all()
     citations = _retrieve(docs, question, top_k=6)
     return "\n\n".join(f"【{c['name']}】\n{c['snippet']}" for c in citations)

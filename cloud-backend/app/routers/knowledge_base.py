@@ -942,6 +942,10 @@ async def list_documents(
     await _require_role(db, kb, user, "viewer")
     await _ensure_builtin_synced(db, kb)
     query = select(KnowledgeDocument).where(KnowledgeDocument.kb_id == kb_id)
+    # 排除回收站里的软删除文档（is_deleted 为 NULL 的历史行视为未删除）
+    query = query.where(
+        KnowledgeDocument.is_deleted.is_(None) | (KnowledgeDocument.is_deleted == False)
+    )
     # folder_id 过滤：0/未传且显式 0 表示未分类（NULL）；>0 表示指定文件夹；
     # 不传（None）则不过滤，保持历史「列出全部」行为。
     if folder_id is not None:
@@ -1121,7 +1125,88 @@ async def delete_document(
     doc = await _get_doc(db, kb_id, doc_id)
     if doc.uploader_id != user.id and KB_ROLE_LEVEL[member.role] < KB_ROLE_LEVEL["admin"]:
         raise HTTPException(status_code=403, detail="仅上传者或管理员可删除该文档")
-    # 先取出路径：commit 后对象进入 deleted 状态，再访问属性会触发刷新查询而报错
+    # 软删除：标记 is_deleted 进回收站，保留磁盘文件，可恢复；不立即销毁。
+    # 与上传对称：删掉的分块必须尽快回收，否则检索会继续召回已删除的文档内容。
+    doc.is_deleted = True
+    doc.deleted_at = datetime.utcnow()
+    await db.commit()
+    background.add_task(_reindex_knowledge_docs)
+    return {"detail": "文档已移入回收站", "id": doc_id}
+
+
+# ---------- 回收站（软删除文档：可恢复 / 可彻底删除） ----------
+
+
+@router.get("/{kb_id}/trash")
+async def list_trash(
+    kb_id: int,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """列出回收站中的文档（软删除且未彻底删除）。"""
+    kb = await _get_kb(db, kb_id)
+    await _require_role(db, kb, user, "viewer")
+    docs = (
+        await db.execute(
+            select(KnowledgeDocument)
+            .where(KnowledgeDocument.kb_id == kb_id, KnowledgeDocument.is_deleted == True)  # noqa: E712
+            .order_by(KnowledgeDocument.deleted_at.desc())
+        )
+    ).scalars().all()
+    uploaders = {
+        u.id: u
+        for u in (
+            await db.execute(
+                select(User).where(User.id.in_({d.uploader_id for d in docs} or {0}))
+            )
+        ).scalars().all()
+    }
+    return {
+        "total": len(docs),
+        "items": [_serialize_doc(d, uploaders.get(d.uploader_id)) for d in docs],
+    }
+
+
+@router.post("/{kb_id}/documents/{doc_id}/restore")
+async def restore_document(
+    kb_id: int,
+    doc_id: int,
+    background: BackgroundTasks,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """从回收站恢复文档（还原 is_deleted，保留原文件夹归属）。"""
+    kb = await _get_kb(db, kb_id)
+    await _require_role(db, kb, user, "editor")
+    _reject_builtin(kb, "恢复文档")
+    doc = await _get_doc(db, kb_id, doc_id)
+    if not doc.is_deleted:
+        return {"detail": "文档未删除", "id": doc_id}
+    doc.is_deleted = False
+    doc.deleted_at = None
+    await db.commit()
+    # 与上传对称：恢复后必须尽快重新编入检索索引
+    background.add_task(_reindex_knowledge_docs)
+    return {"detail": "文档已恢复", "id": doc_id}
+
+
+@router.delete("/{kb_id}/trash/{doc_id}")
+async def purge_document(
+    kb_id: int,
+    doc_id: int,
+    background: BackgroundTasks,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """彻底删除回收站中的文档：从库移除记录并删除磁盘文件（不可恢复）。"""
+    kb = await _get_kb(db, kb_id)
+    member = await _require_role(db, kb, user, "editor")
+    _reject_builtin(kb, "彻底删除文档")
+    doc = await _get_doc(db, kb_id, doc_id)
+    if not doc.is_deleted:
+        raise HTTPException(status_code=400, detail="该文档不在回收站，无法彻底删除")
+    if doc.uploader_id != user.id and KB_ROLE_LEVEL[member.role] < KB_ROLE_LEVEL["admin"]:
+        raise HTTPException(status_code=403, detail="仅上传者或管理员可彻底删除该文档")
     doc_path = doc.path
     await db.delete(doc)
     await db.commit()
@@ -1129,9 +1214,8 @@ async def delete_document(
         Path(doc_path).unlink(missing_ok=True)
     except OSError:
         pass
-    # 与上传对称：删掉的分块必须尽快回收，否则检索会继续召回已删除的文档内容
     background.add_task(_reindex_knowledge_docs)
-    return {"detail": "文档已删除", "id": doc_id}
+    return {"detail": "文档已彻底删除", "id": doc_id}
 
 
 @router.put("/{kb_id}/documents/{doc_id}/folder")

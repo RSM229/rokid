@@ -27,6 +27,12 @@
 
   <!-- 文档 -->
   <block wx:if="{{tab === 'docs'}}">
+    <!-- 回收站入口：点此切换回收站视图（始终可见） -->
+    <view class="trash-row">
+      <text class="trash-link" bindtap="toggleTrash">{{showTrash ? '← 返回资料库' : '回收站'}}</text>
+    </view>
+
+    <block wx:if="{{!showTrash}}">
     <view class="breadcrumb">
       <text class="crumb {{currentFolderId === 0 ? 'on' : ''}}" data-id="0" bindtap="goBreadcrumb">全部</text>
       <text wx:for="{{breadcrumb}}" wx:key="id" class="crumb {{item.id === currentFolderId ? 'on' : ''}}" data-id="{{item.id}}" bindtap="goBreadcrumb"> › {{item.name}}</text>
@@ -80,6 +86,25 @@
         <text class="link-gray" data-id="{{item.id}}" bindtap="downloadDoc">下载</text>
         <text wx:if="{{canUpload}}" class="link-gray" data-id="{{item.id}}" data-name="{{item.name}}" bindtap="openTagEdit">标签</text>
         <text wx:if="{{canUpload}}" class="link-red" data-id="{{item.id}}" bindtap="deleteDoc">删除</text>
+      </view>
+    </view>
+    </block>
+
+    <!-- 回收站：软删除文档，可恢复 / 彻底删除 -->
+    <view wx:if="{{showTrash}}" class="trash-view">
+      <view class="sec-head">
+        <text class="sec-title">回收站</text>
+        <text class="sec-count">{{trashDocs.length}}</text>
+      </view>
+      <view wx:if="{{trashLoading && !trashDocs.length}}" class="empty">正在加载…</view>
+      <view wx:elif="{{!trashDocs.length}}" class="empty">回收站是空的。删除的文档会先到这里，可恢复或彻底删除。</view>
+      <view wx:for="{{trashDocs}}" wx:key="id" class="card doc">
+        <view class="doc-name">{{item.name}}</view>
+        <view class="doc-meta">{{item.sizeText}} · {{item.uploader_name}}</view>
+        <view class="doc-btns">
+          <text class="link-green" data-id="{{item.id}}" bindtap="restoreDoc">恢复</text>
+          <text class="link-red" data-id="{{item.id}}" bindtap="purgeDoc">彻底删除</text>
+        </view>
       </view>
     </view>
   </block>

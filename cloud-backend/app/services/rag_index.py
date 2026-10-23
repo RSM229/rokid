@@ -730,7 +730,12 @@ def _collect_knowledge_files(session: Session) -> list[dict]:
     # 显示名必须取自 DB：上传时文件以 uuid 落盘，若用 path.stem，
     # 索引里的文档名会变成一串十六进制，标题块（chunk_index=-1）随之失效。
     registered: dict[str, tuple[int, str]] = {}
-    for doc in session.execute(select(KnowledgeDocument)).scalars().all():
+    for doc in session.execute(
+        select(KnowledgeDocument).where(
+            KnowledgeDocument.is_deleted.is_(None)
+            | (KnowledgeDocument.is_deleted == False)  # noqa: E712
+        )
+    ).scalars().all():
         if doc.path:
             registered[os.path.normpath(doc.path)] = (doc.kb_id, doc.name or "")
     default_kb_id = session.execute(select(KnowledgeBase.id).order_by(KnowledgeBase.id)).scalars().first()

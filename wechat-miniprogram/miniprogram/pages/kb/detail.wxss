@@ -105,3 +105,13 @@
 /* 文档卡上的标签 chips */
 .doc-tags { display: flex; flex-wrap: wrap; gap: 8rpx; margin-top: 10rpx; }
 .doc-tag-chip { padding: 4rpx 14rpx; font-size: 20rpx; color: var(--brand-d, #0b5fd0); background: rgba(var(--brand-rgb, 22,119,255), 0.10); border-radius: 999rpx; }
+
+/* 回收站入口：点此切换回收站视图 */
+.trash-row { display: flex; justify-content: flex-end; padding: 2rpx 4rpx 14rpx; }
+.trash-link { font-size: 24rpx; font-weight: 600; color: var(--brand-l, #3b8cff); padding: 6rpx 18rpx; border-radius: 999rpx; background: rgba(var(--brand-rgb, 22,119,255), 0.08); }
+.trash-link:active { background: rgba(var(--brand-rgb, 22,119,255), 0.16); }
+.trash-view { margin-top: 4rpx; }
+/* 回收站标题条（复用 .sec-head 视觉，避免引入 index 专有的 .sec 容器） */
+.sec-head { display: flex; align-items: center; justify-content: space-between; padding: 14rpx 4rpx 16rpx; }
+.sec-title { font-size: 28rpx; font-weight: 700; color: var(--ink-2, #243b55); }
+.sec-count { font-size: 24rpx; color: #999; background: rgba(238,242,240,0.8); border-radius: 999rpx; padding: 4rpx 18rpx; }

@@ -89,6 +89,12 @@ class KnowledgeDocument(Base):
     mime_type: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     size_bytes: Mapped[int] = mapped_column(BigInteger, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    # 软删除：删除文档先标记 is_deleted，进回收站可恢复；彻底删除才移除磁盘文件。
+    # 两列由 init_db 的 _reconcile_missing_columns 安全补齐，不破坏历史数据。
+    is_deleted: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=text("0"), index=True
+    )
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
 
 class KbFolder(Base):

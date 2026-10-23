@@ -15,6 +15,12 @@
     <!-- 分类树接口未上线时的降级提示 -->
     <view wx:if="{{treeUnavailable}}" class="tree-tip">当前服务端暂未提供分类目录，已按平铺文档显示</view>
 
+    <!-- 回收站入口：始终可见，点此切换回收站视图 -->
+    <view class="trash-row">
+      <text class="trash-link" bindtap="toggleTrash">{{showTrash ? '← 返回资料库' : '回收站'}}</text>
+    </view>
+
+    <block wx:if="{{!showTrash}}">
     <!-- 搜索：输入即全局搜文档名称（不带文件夹过滤），清空恢复文件夹视图 -->
     <view class="search-bar">
       <input
@@ -101,6 +107,31 @@
       </view>
     </view>
   </block>
+
+  <!-- 回收站：软删除文档，可恢复 / 彻底删除 -->
+  <view wx:if="{{showTrash}}" class="trash-view">
+    <view class="sec-head">
+      <text class="sec-title">回收站</text>
+      <text class="sec-count">{{trashDocs.length}}</text>
+    </view>
+    <view wx:if="{{trashLoading && !trashDocs.length}}" class="empty-mini">正在加载…</view>
+    <view wx:elif="{{!trashDocs.length}}" class="empty-mini">回收站是空的。删除的文档会先到这里，可恢复或彻底删除。</view>
+    <view wx:for="{{trashDocs}}" wx:key="id" class="card doc">
+      <view class="doc-head">
+        <view class="doc-icon"><view class="doc-shape" /></view>
+        <view class="doc-info">
+          <view class="doc-name">{{item.name}}</view>
+          <view class="doc-meta">{{item.sizeText}} · {{item.uploader_name}}</view>
+        </view>
+      </view>
+      <view class="doc-btns">
+        <text class="link-green" data-id="{{item.id}}" bindtap="restoreDoc">恢复</text>
+        <text class="link-red" data-id="{{item.id}}" bindtap="purgeDoc">彻底删除</text>
+      </view>
+    </view>
+  </view>
+  </block>
+</view>
 
   <!-- 底部操作栏：新建文件夹已移到「文件夹」分组标题右侧，这里只留两个主操作 -->
   <view class="action-bar">

@@ -109,6 +109,11 @@ Page(themed({
     newTagName: '',
     creatingTag: false,
     savingTags: false,
+
+    /** 回收站：软删除文档视图 */
+    showTrash: false,
+    trashDocs: [] as Array<KbDoc & { sizeText: string }>,
+    trashLoading: false,
   },
 
   onShow() {
@@ -803,6 +808,56 @@ Page(themed({
     } finally {
       this.setData({ savingTags: false })
     }
+  },
+
+  /* ===== 回收站（软删除文档：可恢复 / 彻底删除） ===== */
+  toggleTrash() {
+    const next = !this.data.showTrash
+    this.setData({ showTrash: next })
+    if (next) this.loadTrash()
+  },
+  async loadTrash() {
+    this.setData({ trashLoading: true })
+    try {
+      const res = await request<{ items: KbDoc[] }>(`/kb/${this.data.kbId}/trash`)
+      this.setData({
+        trashDocs: (res.items || []).map((d) => ({ ...d, sizeText: formatSize(d.size_bytes || 0) })),
+      })
+    } catch (error) {
+      wx.showToast({ title: (error as Error).message, icon: 'none' })
+    } finally {
+      this.setData({ trashLoading: false })
+    }
+  },
+  async restoreDoc(event: WechatMiniprogram.TouchEvent) {
+    const docId = Number(event.currentTarget.dataset.id)
+    try {
+      await request(`/kb/${this.data.kbId}/documents/${docId}/restore`, { method: 'POST' })
+      wx.showToast({ title: '已恢复', icon: 'success' })
+      this.loadTrash()
+    } catch (error) {
+      wx.showToast({ title: (error as Error).message, icon: 'none' })
+    }
+  },
+  purgeDoc(event: WechatMiniprogram.TouchEvent) {
+    const docId = Number(event.currentTarget.dataset.id)
+    const doc = this.data.trashDocs.find((d) => d.id === docId)
+    wx.showModal({
+      title: '彻底删除',
+      content: `确定彻底删除「${doc?.name || docId}」？\n此操作不可恢复，磁盘文件将被移除。`,
+      confirmText: '彻底删除',
+      confirmColor: '#d9534f',
+      success: async (res) => {
+        if (!res.confirm) return
+        try {
+          await request(`/kb/${this.data.kbId}/trash/${docId}`, { method: 'DELETE' })
+          wx.showToast({ title: '已彻底删除', icon: 'success' })
+          this.loadTrash()
+        } catch (error) {
+          wx.showToast({ title: (error as Error).message, icon: 'none' })
+        }
+      },
+    })
   },
 
   deleteFolderById(folderId: number) {
