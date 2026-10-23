@@ -241,6 +241,10 @@ class FolderCreate(BaseModel):
     parent_id: Optional[int] = None
 
 
+class FolderUpdate(BaseModel):
+    name: str = Field(min_length=1, max_length=128)
+
+
 class MoveDocFolder(BaseModel):
     folder_id: Optional[int] = None
 
@@ -869,6 +873,24 @@ async def delete_folder(
         "moved_documents": moved,
         "parent_id": parent_id,
     }
+
+
+@router.put("/{kb_id}/folders/{folder_id}")
+async def rename_folder(
+    kb_id: int,
+    folder_id: int,
+    req: FolderUpdate,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """重命名文件夹（仅改名称，不影响层级与文档归属）。"""
+    kb = await _get_kb(db, kb_id)
+    await _require_role(db, kb, user, "editor")
+    _reject_builtin(kb, "重命名文件夹")
+    folder = await _get_folder(db, kb_id, folder_id)
+    folder.name = req.name.strip()
+    await db.commit()
+    return {"id": folder.id, "name": folder.name, "parent_id": folder.parent_id}
 
 
 # ============ 文档 ============

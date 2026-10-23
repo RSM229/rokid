@@ -76,6 +76,11 @@ Page(themed({
     showNewFolder: false,
     newFolderName: '',
     creatingFolder: false,
+
+    showRenameFolder: false,
+    renameFolderId: 0,
+    renameFolderName: '',
+    renamingFolder: false,
   },
 
   onShow() {
@@ -529,6 +534,36 @@ Page(themed({
   showNewFolder() { this.setData({ showNewFolder: true, newFolderName: '' }) },
   hideNewFolder() { this.setData({ showNewFolder: false }) },
   onNewFolderInput(event: WechatMiniprogram.Input) { this.setData({ newFolderName: event.detail.value }) },
+
+  openRenameFolder(event: WechatMiniprogram.TouchEvent) {
+    const folderId = Number(event.currentTarget.dataset.id)
+    const folder = this.data.folderMap[folderId]
+    if (!folder) return
+    this.setData({ showRenameFolder: true, renameFolderId: folderId, renameFolderName: folder.name })
+  },
+  hideRenameFolder() { this.setData({ showRenameFolder: false, renameFolderId: 0, renameFolderName: '' }) },
+  onRenameFolderInput(event: WechatMiniprogram.Input) { this.setData({ renameFolderName: event.detail.value }) },
+  async confirmRenameFolder() {
+    const name = this.data.renameFolderName.trim()
+    if (!name) { wx.showToast({ title: '请输入文件夹名称', icon: 'none' }); return }
+    this.setData({ renamingFolder: true })
+    wx.showLoading({ title: '保存中...', mask: true })
+    try {
+      await request(`/kb/${this.data.kbId}/folders/${this.data.renameFolderId}`, {
+        method: 'PUT',
+        data: { name },
+      })
+      wx.hideLoading()
+      wx.showToast({ title: '已保存', icon: 'success' })
+      this.setData({ showRenameFolder: false })
+      this.loadFolders()
+    } catch (error) {
+      wx.hideLoading()
+      wx.showToast({ title: (error as Error).message, icon: 'none' })
+    } finally {
+      this.setData({ renamingFolder: false })
+    }
+  },
   async confirmNewFolder() {
     const name = this.data.newFolderName.trim()
     if (!name) { wx.showToast({ title: '请输入文件夹名称', icon: 'none' }); return }

@@ -28,6 +28,7 @@
             <view class="fname">{{item.name}}</view>
             <view class="fsub">{{item.count}} 份文档</view>
           </view>
+          <text wx:if="{{canUpload}}" class="frename" data-id="{{item.id}}" catchtap="openRenameFolder">重命名</text>
           <text wx:if="{{canUpload}}" class="fdel" data-id="{{item.id}}" catchtap="deleteFolder">删除</text>
           <view class="fchev">›</view>
         </view>
@@ -85,6 +86,20 @@
     <view class="modal-btns">
       <button class="btn-cancel" bindtap="hideNewFolder">取消</button>
       <button class="btn-primary" loading="{{creatingFolder}}" bindtap="confirmNewFolder">创建</button>
+    </view>
+  </view>
+
+  <!-- 重命名文件夹 -->
+  <view wx:if="{{showRenameFolder}}" class="mask" bindtap="hideRenameFolder"></view>
+  <view wx:if="{{showRenameFolder}}" class="modal">
+    <view class="modal-title">重命名文件夹</view>
+    <view class="field-group">
+      <text class="field-label">文件夹名称</text>
+      <input class="field-input" value="{{renameFolderName}}" placeholder="输入新的名称" bindinput="onRenameFolderInput" />
+    </view>
+    <view class="modal-btns">
+      <button class="btn-cancel" bindtap="hideRenameFolder">取消</button>
+      <button class="btn-primary" loading="{{renamingFolder}}" bindtap="confirmRenameFolder">保存</button>
     </view>
   </view>
 
