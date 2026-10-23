@@ -34,7 +34,7 @@
           </el-sub-menu>
 
           <!-- 无子菜单的单项 -->
-          <el-menu-item v-else :index="item.path">
+          <el-menu-item v-else :index="item.path" :class="{ 'menu-sep': item.dividerBefore }">
             <el-icon><component :is="item.icon" /></el-icon>
             <span>{{ item.title }}</span>
           </el-menu-item>
@@ -274,13 +274,9 @@ const menuItems = computed(() => {
     items.push({ path: '/knowledge-base', title: '信息库', icon: 'Reading' })
   }
 
- // if (perm('todo_center')) {
+  // if (perm('todo_center')) {
    // items.push({ path: '/todo-center', title: '待办中心', icon: 'List' })
   //}
-
-  if (perm('settings')) {
-    items.push({ path: '/settings', title: '系统设置', icon: 'Setting' })
-  }
 
   // 项目管理（立项仅超管；总监等 member_manage 持有者可查看/切换/分配人员）
   if (perm('member_manage')) {
@@ -305,6 +301,11 @@ const menuItems = computed(() => {
   // 不能让持有 role_grant 的管理员进入，故按 org_role 而非权限 key 收敛）。
   if (isSuper.value) {
     items.push({ path: '/admin-grants', title: '管理员与授权', icon: 'Stamp' })
+  }
+
+  // 系统设置归入「系统管理」分组，置于全部业务/账号功能之后，并用分隔线与上方区分。
+  if (perm('settings')) {
+    items.push({ path: '/settings', title: '系统设置', icon: 'Setting', dividerBefore: true })
   }
 
   // 「角色权限」配置页已下线（2026-10-20）：权限矩阵改为后端/DB 维护，
@@ -420,8 +421,7 @@ function handleCommand(cmd: string) {
   overflow-y: auto;
 }
 
-/* 深色侧边栏菜单样式覆盖（A 深蓝精修）：
-   选中项 = 深蓝高亮底 + 左侧 3px 亮蓝指示条 + 白字，比原来只变字色清楚得多 */
+/* 深色侧边栏菜单样式覆盖（A 深蓝精修） */
 :deep(.el-menu) {
   border-right: none;
   --el-menu-item-height: 46px;
@@ -429,7 +429,6 @@ function handleCommand(cmd: string) {
 :deep(.el-menu-item),
 :deep(.el-sub-menu__title) {
   position: relative;
-  border-left: 3px solid transparent;
   transition: background-color 0.15s, color 0.15s;
 }
 :deep(.el-sub-menu__title:hover),
@@ -437,16 +436,39 @@ function handleCommand(cmd: string) {
   background-color: rgba(255, 255, 255, 0.06) !important;
   color: #fff !important;
 }
-:deep(.el-menu-item.is-active) {
-  background-color: rgba(37, 99, 235, 0.24) !important;
-  border-left-color: #3b82f6;
+/* 展开态选中 = 内缩圆角胶囊（去掉左侧竖条，重量更轻、指示性更强） */
+:deep(.el-menu:not(.el-menu--collapse) .el-menu-item.is-active:not(.menu-sep)) {
+  background-color: rgba(59, 130, 246, 0.28) !important;
+  border-radius: 6px;
+  color: #fff !important;
   font-weight: 600;
+  margin: 4px 9px;
+}
+/* 分组分隔线（系统设置前）：常态留 8px 间距 + 顶部淡线 */
+:deep(.el-menu-item.menu-sep) {
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  margin-top: 8px;
+}
+/* 分隔项同时选中时，保持顶部间距（不被上面的 margin 覆盖） */
+:deep(.el-menu:not(.el-menu--collapse) .el-menu-item.is-active.menu-sep) {
+  background-color: rgba(59, 130, 246, 0.28) !important;
+  border-radius: 6px;
+  color: #fff !important;
+  font-weight: 600;
+  margin: 12px 9px 4px;
+}
+/* 收起态（64px 图标列）：选中 = 满宽底色 + 左侧 2px 主色指示，不内缩（否则图标偏移） */
+:deep(.el-menu--collapse .el-menu-item.is-active) {
+  background-color: rgba(59, 130, 246, 0.30) !important;
+  color: #fff !important;
+  font-weight: 600;
+  border-left: 2px solid #3b82f6;
 }
 /* 子菜单面板底色与侧栏统一（弹出层默认是白的，在深蓝侧栏里很跳） */
 :deep(.el-menu--inline) {
   background-color: #000c17 !important;
 }
 :deep(.el-menu--inline .el-menu-item.is-active) {
-  background-color: rgba(37, 99, 235, 0.3) !important;
+  background-color: rgba(59, 130, 246, 0.30) !important;
 }
 </style>

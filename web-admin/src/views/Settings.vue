@@ -1,25 +1,23 @@
 <template>
   <div class="settings-page">
-    <div class="page-header">
-      <el-breadcrumb separator="/">
-        <el-breadcrumb-item>首页</el-breadcrumb-item>
-        <el-breadcrumb-item>系统设置</el-breadcrumb-item>
-      </el-breadcrumb>
-    </div>
-
     <p class="page-desc">管理通知、隐私、安全及服务端模型调用参数</p>
 
     <el-card shadow="never">
       <el-container>
         <!-- 左侧菜单 -->
-        <el-aside width="180px" style="border-right: 1px solid #f0f0f0;">
-          <el-menu :default-active="activeMenu" @select="selectMenu">
-            <el-menu-item index="notice">基础设置</el-menu-item>
-            <el-menu-item index="notify">通知设置</el-menu-item>
-            <el-menu-item index="privacy">隐私设置</el-menu-item>
-            <el-menu-item index="security">安全设置</el-menu-item>
-            <el-menu-item index="model">模型调用设置</el-menu-item>
-            <el-menu-item index="about">关于</el-menu-item>
+        <el-aside width="190px" style="border-right: 1px solid #f0f0f0;">
+          <el-menu :default-active="activeMenu" @select="selectMenu" class="settings-menu">
+            <el-menu-item index="grp-regular" disabled class="nav-group">常规</el-menu-item>
+            <el-menu-item index="notice"><el-icon><Tools /></el-icon>基础设置</el-menu-item>
+            <el-menu-item index="notify"><el-icon><Bell /></el-icon>通知设置</el-menu-item>
+            <el-menu-item index="privacy"><el-icon><View /></el-icon>隐私设置</el-menu-item>
+
+            <el-menu-item index="grp-secure" disabled class="nav-group">安全与模型</el-menu-item>
+            <el-menu-item index="security"><el-icon><Lock /></el-icon>安全设置</el-menu-item>
+            <el-menu-item index="model"><el-icon><Cpu /></el-icon>模型调用设置</el-menu-item>
+
+            <el-menu-item index="grp-about" disabled class="nav-group">关于</el-menu-item>
+            <el-menu-item index="about"><el-icon><InfoFilled /></el-icon>关于</el-menu-item>
           </el-menu>
         </el-aside>
 
@@ -567,8 +565,32 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.page-header { margin-bottom: 8px; }
-.page-desc { color: #999; font-size: 13px; margin-bottom: 16px; }
+.page-desc { color: #999; font-size: 13px; margin: 4px 0 16px; }
+/* 设置页左导航精修：图标 + 分组 + 与侧栏同款胶囊选中 */
+.settings-menu { border-right: none; }
+.settings-menu :deep(.el-menu-item) { height: 42px; border-radius: 6px; }
+.settings-menu :deep(.el-menu-item.is-active) {
+  background-color: rgba(37, 99, 235, 0.12) !important;
+  color: #2563eb !important;
+  font-weight: 600;
+  margin: 2px 8px;
+  border-left: none;
+}
+.settings-menu :deep(.el-icon) { margin-right: 8px; }
+.settings-menu :deep(.nav-group) {
+  font-size: 11px;
+  letter-spacing: 0.5px;
+  color: #868e98 !important;
+  font-weight: 600;
+  opacity: 1 !important;
+  height: 30px;
+  line-height: 30px;
+  margin-top: 14px;
+  padding-left: 18px;
+  background: transparent !important;
+  cursor: default;
+  pointer-events: none;
+}
 .section-title { font-size: 16px; font-weight: 600; margin-bottom: 16px; }
 .about-logo {
   width: 120px;
