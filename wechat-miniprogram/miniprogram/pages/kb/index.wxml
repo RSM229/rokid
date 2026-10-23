@@ -28,6 +28,21 @@
       <text wx:if="{{searchKeyword}}" class="search-clear" bindtap="clearSearch">✕</text>
     </view>
 
+    <!-- 标签筛选条：横向 chips，点选即跨文件夹过滤文档；「管理」入口可删除标签 -->
+    <scroll-view wx:if="{{tags.length}}" scroll-x class="tag-bar">
+      <view class="tag-chip {{tagFilterId === 0 ? 'on' : ''}}" bindtap="clearTagFilter">全部</view>
+      <view
+        wx:for="{{tags}}"
+        wx:key="id"
+        class="tag-chip {{tagFilterId === item.id ? 'on' : ''}}"
+        data-id="{{item.id}}"
+        bindtap="toggleTagFilter"
+      >
+        {{item.name}}（{{item.count}}）
+      </view>
+      <view wx:if="{{canUpload}}" class="tag-chip tag-manage-entry" bindtap="openTagManage">管理</view>
+    </scroll-view>
+
     <!-- 文件夹操作行：标题 + 「+ ▾」下拉（新建/重命名/删除）。当前目录为根时，重命名/删除禁用 -->
     <view wx:if="{{canUpload}}" class="sec folder-ops">
       <view class="sec-head">
@@ -43,8 +58,8 @@
       </view>
     </view>
 
-    <!-- 文件夹：竖排列表（文件管理器式）。根目录只列文件夹，文档只在文件夹内部出现 -->
-    <view wx:if="{{!searchKeyword && currentSubfolders.length}}" class="sec">
+    <!-- 文件夹：竖排列表（文件管理器式）。根目录只列文件夹，文档只在文件夹内部出现；搜索/标签筛选时隐藏 -->
+    <view wx:if="{{!searchKeyword && !tagFilterId && currentSubfolders.length}}" class="sec">
       <view class="folder-list">
         <view wx:for="{{currentSubfolders}}" wx:key="id" class="frow" data-id="{{item.id}}" bindtap="selectFolder">
           <view class="fico"><view class="fico-shape" /></view>
@@ -57,14 +72,14 @@
       </view>
     </view>
 
-    <!-- 文档：仅当「在文件夹内」或「根目录存在未分类文档」或「搜索中」时出现，避免和文件夹并列成同级 -->
-    <view wx:if="{{searchKeyword || currentFolderId !== 0 || docs.length}}" class="sec">
+    <!-- 文档：在文件夹内 / 根目录有未分类 / 搜索中 / 标签筛选中时出现，避免和文件夹并列成同级 -->
+    <view wx:if="{{searchKeyword || tagFilterId || currentFolderId !== 0 || docs.length}}" class="sec">
       <view class="sec-head">
-        <text class="sec-title">{{searchKeyword ? '搜索「' + searchKeyword + '」' : (currentFolderId !== 0 ? '文档' : '未分类文档')}}</text>
+        <text class="sec-title">{{searchKeyword ? '搜索「' + searchKeyword + '」' : (tagFilterId ? '标签「' + tagFilterName + '」' : (currentFolderId !== 0 ? '文档' : '未分类文档'))}}</text>
         <text class="sec-count">{{docs.length}}</text>
       </view>
       <view wx:if="{{docsLoading && !docs.length}}" class="empty-mini">正在加载…</view>
-      <view wx:elif="{{!docs.length}}" class="empty-mini">这个文件夹下还没有文档。点下方「上传文档」会直接归档到这里。</view>
+      <view wx:elif="{{!docs.length}}" class="empty-mini">{{tagFilterId ? '没有文档带这个标签' : '这个文件夹下还没有文档。点下方「上传文档」会直接归档到这里。'}}</view>
     </view>
     <view wx:for="{{docs}}" wx:key="id" class="card doc">
       <view class="doc-head">
@@ -72,12 +87,16 @@
         <view class="doc-info">
           <view class="doc-name">{{item.name}}</view>
           <view class="doc-meta">{{item.sizeText}} · {{item.uploader_name}}</view>
+          <view wx:if="{{item.tags && item.tags.length}}" class="doc-tags">
+            <text wx:for="{{item.tags}}" wx:for-item="tag" wx:key="id" class="doc-tag-chip">{{tag.name}}</text>
+          </view>
         </view>
       </view>
       <view class="doc-btns">
         <text class="link-green" data-id="{{item.id}}" bindtap="openContent">查看</text>
         <text class="link-gray" data-id="{{item.id}}" bindtap="downloadDoc">下载</text>
         <text wx:if="{{canUpload && folderOptions.length}}" class="link-gray" data-id="{{item.id}}" bindtap="openMoveDoc">移动</text>
+        <text wx:if="{{canUpload}}" class="link-gray" data-id="{{item.id}}" data-name="{{item.name}}" bindtap="openTagEdit">标签</text>
         <text wx:if="{{canUpload}}" class="link-red" data-id="{{item.id}}" bindtap="deleteDoc">删除</text>
       </view>
     </view>
@@ -125,6 +144,43 @@
     <view class="modal-btns">
       <button class="btn-cancel" bindtap="hideRenameFolder">取消</button>
       <button class="btn-primary" loading="{{renamingFolder}}" bindtap="confirmRenameFolder">保存</button>
+    </view>
+  </view>
+
+  <!-- 标签管理：列出库内全部标签，可删除（仅摘标签，不动文档） -->
+  <view wx:if="{{showTagManage}}" class="mask" bindtap="hideTagManage"></view>
+  <view wx:if="{{showTagManage}}" class="modal">
+    <view class="modal-title">标签管理</view>
+    <scroll-view scroll-y class="picker-list">
+      <view wx:for="{{tags}}" wx:key="id" class="prow">
+        <text class="prow-name">{{item.name}}（{{item.count}}）</text>
+        <text class="prow-arrow prow-del" data-id="{{item.id}}" catchtap="deleteTagInManage">删除</text>
+      </view>
+      <view wx:if="{{!tags.length}}" class="empty-mini">还没有标签。在文档卡片上点「标签」即可新建。</view>
+    </scroll-view>
+    <button class="btn-cancel" bindtap="hideTagManage">关闭</button>
+  </view>
+
+  <!-- 编辑文档标签：勾选已有标签 + 输入新建（全量替换保存） -->
+  <view wx:if="{{showTagEdit}}" class="mask" bindtap="cancelTagEdit"></view>
+  <view wx:if="{{showTagEdit}}" class="modal">
+    <view class="modal-title">设置标签</view>
+    <view class="field-group">
+      <text class="field-label">文档：{{editingDocName}}</text>
+    </view>
+    <scroll-view scroll-y class="picker-list">
+      <view wx:for="{{tags}}" wx:key="id" class="prow" data-id="{{item.id}}" bindtap="toggleEditTag">
+        <text class="prow-name">{{editTagIds.indexOf(item.id) >= 0 ? '☑' : '☐'}} {{item.name}}</text>
+      </view>
+      <view wx:if="{{!tags.length}}" class="empty-mini">还没有标签，用下面的输入框新建第一个。</view>
+    </scroll-view>
+    <view class="field-group tag-new-row">
+      <input class="field-input" value="{{newTagName}}" placeholder="新标签名称" bindinput="onNewTagInput" bindconfirm="createTagInline" />
+      <button class="btn-plain" size="mini" loading="{{creatingTag}}" bindtap="createTagInline">新建</button>
+    </view>
+    <view class="modal-btns">
+      <button class="btn-cancel" bindtap="cancelTagEdit">取消</button>
+      <button class="btn-primary" loading="{{savingTags}}" bindtap="confirmSaveDocTags">保存</button>
     </view>
   </view>
 

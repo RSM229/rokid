@@ -3,6 +3,12 @@ import { session } from '../../services/session'
 import { config } from '../../config'
 import { themed } from '../../utils/theme'
 
+interface KbTag {
+  id: number
+  name: string
+  count: number
+}
+
 interface KbDoc {
   id: number
   name: string
@@ -10,6 +16,7 @@ interface KbDoc {
   size_bytes: number
   uploader_name: string
   created_at?: string
+  tags?: KbTag[]
 }
 
 interface KbFolderNode {
@@ -89,6 +96,19 @@ Page(themed({
 
     /** 文件夹操作下拉菜单（新建/重命名/删除） */
     showFolderMenu: false,
+
+    /** 标签：跨文件夹的轻量分类维度（对标 ima 的 #标签） */
+    tags: [] as KbTag[],
+    tagFilterId: 0,
+    tagFilterName: '',
+    showTagManage: false,
+    showTagEdit: false,
+    editingDocId: 0,
+    editingDocName: '',
+    editTagIds: [] as number[],
+    newTagName: '',
+    creatingTag: false,
+    savingTags: false,
   },
 
   onShow() {
@@ -166,6 +186,7 @@ Page(themed({
       this.setData({ kbId: home.id, kbName: home.name, canUpload: true })
       wx.setNavigationBarTitle({ title: home.name || '资料库' })
       await this.loadFolders()
+      await this.loadTags()
     } catch (error) {
       // 后端版本较旧（尚无 /kb/mine，或分类树未上线）时降级：从资料库列表里定位个人库，
       // 保证文档、上传、录音仍可用，不把整页留成空白。
@@ -195,12 +216,14 @@ Page(themed({
     }
   },
 
-  async loadDocs(folderId: number = 0) {
+  async loadDocs(folderId: number = 0, tagId?: number) {
     this.setData({ docsLoading: true })
     try {
+      // 标签筛选是跨文件夹的，不叠加 folder_id（folder_id=0 会被后端当成「未分类」导致漏结果）
+      const data: Record<string, unknown> = tagId ? { tag_id: tagId } : { folder_id: folderId }
       const res = await request<{ items: KbDoc[] }>(
         `/kb/${this.data.kbId}/documents`,
-        { data: { folder_id: folderId } },
+        { data },
       )
       this.setData({
         docs: (res.items || []).map((d) => ({ ...d, sizeText: formatSize(d.size_bytes || 0) })),
@@ -277,9 +300,10 @@ Page(themed({
     this.loadFolders()
   },
 
-  /** 文档变动后的刷新：搜索态下重搜，否则回到当前文件夹视图 */
+  /** 文档变动后的刷新：标签筛选态下按标签重拉，搜索态下重搜，否则回到当前文件夹视图 */
   refreshDocs() {
-    if (this.data.searchKeyword.trim()) this.doSearch()
+    if (this.data.tagFilterId) this.loadDocs(0, this.data.tagFilterId)
+    else if (this.data.searchKeyword.trim()) this.doSearch()
     else this.loadFolders()
   },
 
@@ -673,6 +697,112 @@ Page(themed({
       cur = cur.parent_id ? this.data.folderMap[cur.parent_id] : undefined
     }
     return false
+  },
+
+  /* ===== 标签（跨文件夹轻量分类维度，对标 ima 的 #标签） ===== */
+  async loadTags() {
+    try {
+      const res = await request<{ items: KbTag[] }>(`/kb/${this.data.kbId}/tags`)
+      this.setData({ tags: res.items || [] })
+    } catch {
+      /* 标签接口不可用时不阻断页面其余功能 */
+    }
+  },
+
+  toggleTagFilter(event: WechatMiniprogram.TouchEvent) {
+    const tagId = Number(event.currentTarget.dataset.id)
+    if (this.data.tagFilterId === tagId) { this.clearTagFilter(); return }
+    const tag = this.data.tags.find((t) => t.id === tagId)
+    this.setData({ tagFilterId: tagId, tagFilterName: tag?.name || '' })
+    this.loadDocs(0, tagId)
+  },
+  clearTagFilter() {
+    this.setData({ tagFilterId: 0, tagFilterName: '' })
+    this.loadFolders()
+  },
+
+  openTagManage() { this.setData({ showTagManage: true }) },
+  hideTagManage() { this.setData({ showTagManage: false }) },
+  deleteTagInManage(event: WechatMiniprogram.TouchEvent) {
+    const tagId = Number(event.currentTarget.dataset.id)
+    const tag = this.data.tags.find((t) => t.id === tagId)
+    wx.showModal({
+      title: '删除标签',
+      content: `确定删除标签「${tag?.name || ''}」？\n仅摘除标签，文档不会丢失。`,
+      confirmText: '删除',
+      confirmColor: '#d9534f',
+      success: async (res) => {
+        if (!res.confirm) return
+        try {
+          await request(`/kb/${this.data.kbId}/tags/${tagId}`, { method: 'DELETE' })
+          wx.showToast({ title: '已删除', icon: 'success' })
+          this.loadTags()
+        } catch (error) {
+          wx.showToast({ title: (error as Error).message, icon: 'none' })
+        }
+      },
+    })
+  },
+
+  openTagEdit(event: WechatMiniprogram.TouchEvent) {
+    const docId = Number(event.currentTarget.dataset.id)
+    const doc = this.data.docs.find((d) => d.id === docId)
+    const currentTagIds = (doc?.tags || []).map((t) => t.id)
+    this.setData({
+      showTagEdit: true,
+      editingDocId: docId,
+      editingDocName: doc?.name || '',
+      editTagIds: currentTagIds,
+      newTagName: '',
+    })
+  },
+  cancelTagEdit() { this.setData({ showTagEdit: false }) },
+  toggleEditTag(event: WechatMiniprogram.TouchEvent) {
+    const tagId = Number(event.currentTarget.dataset.id)
+    const cur = this.data.editTagIds
+    this.setData({
+      editTagIds: cur.includes(tagId) ? cur.filter((i) => i !== tagId) : [...cur, tagId],
+    })
+  },
+  onNewTagInput(event: WechatMiniprogram.Input) { this.setData({ newTagName: event.detail.value }) },
+  async createTagInline() {
+    const name = this.data.newTagName.trim()
+    if (!name) { wx.showToast({ title: '请输入标签名称', icon: 'none' }); return }
+    this.setData({ creatingTag: true })
+    try {
+      const tag = await request<{ id: number; name: string }>(`/kb/${this.data.kbId}/tags`, {
+        method: 'POST',
+        data: { name },
+      })
+      const editTagIds = this.data.editTagIds.includes(tag.id)
+        ? this.data.editTagIds
+        : [...this.data.editTagIds, tag.id]
+      await this.loadTags()
+      this.setData({ newTagName: '', creatingTag: false, editTagIds })
+    } catch (error) {
+      this.setData({ creatingTag: false })
+      wx.showToast({ title: (error as Error).message, icon: 'none' })
+    }
+  },
+  async confirmSaveDocTags() {
+    this.setData({ savingTags: true })
+    wx.showLoading({ title: '保存中...', mask: true })
+    try {
+      await request(`/kb/${this.data.kbId}/documents/${this.data.editingDocId}/tags`, {
+        method: 'PUT',
+        data: { tag_ids: this.data.editTagIds },
+      })
+      wx.hideLoading()
+      wx.showToast({ title: '已保存', icon: 'success' })
+      this.setData({ showTagEdit: false })
+      this.refreshDocs()
+      this.loadTags()
+    } catch (error) {
+      wx.hideLoading()
+      wx.showToast({ title: (error as Error).message, icon: 'none' })
+    } finally {
+      this.setData({ savingTags: false })
+    }
   },
 
   deleteFolderById(folderId: number) {

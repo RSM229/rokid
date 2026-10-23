@@ -17,6 +17,12 @@ interface KbDetail {
   member_count: number
 }
 
+interface KbTag {
+  id: number
+  name: string
+  count: number
+}
+
 interface KbDoc {
   id: number
   name: string
@@ -24,6 +30,7 @@ interface KbDoc {
   size_bytes: number
   uploader_name: string
   created_at?: string
+  tags?: KbTag[]
 }
 
 interface KbMember {
@@ -121,6 +128,16 @@ Page(themed({
 
     /** 文件夹操作下拉菜单（新建/重命名/删除） */
     showFolderMenu: false,
+
+    /** 标签：跨文件夹的轻量分类维度（对标 ima 的 #标签） */
+    tags: [] as KbTag[],
+    showTagEdit: false,
+    editingDocId: 0,
+    editingDocName: '',
+    editTagIds: [] as number[],
+    newTagName: '',
+    creatingTag: false,
+    savingTags: false,
   },
 
   onLoad(options: Record<string, string>) {
@@ -139,6 +156,7 @@ Page(themed({
     this.loadKb()
     this.loadFolders()
     this.loadMembers()
+    this.loadTags()
   },
 
   onShow() {
@@ -793,6 +811,77 @@ Page(themed({
         wx.hideLoading()
         wx.showToast({ title: (error as Error).message, icon: 'none' })
       })
+  },
+
+  /* ===== 标签（跨文件夹轻量分类维度，对标 ima 的 #标签） ===== */
+  async loadTags() {
+    try {
+      const res = await request<{ items: KbTag[] }>(`/kb/${this.data.kbId}/tags`)
+      this.setData({ tags: res.items || [] })
+    } catch {
+      /* 标签接口不可用时不阻断页面其余功能 */
+    }
+  },
+
+  openTagEdit(event: WechatMiniprogram.TouchEvent) {
+    const docId = Number(event.currentTarget.dataset.id)
+    const doc = this.data.docs.find((d) => d.id === docId)
+    const currentTagIds = (doc?.tags || []).map((t) => t.id)
+    this.setData({
+      showTagEdit: true,
+      editingDocId: docId,
+      editingDocName: doc?.name || '',
+      editTagIds: currentTagIds,
+      newTagName: '',
+    })
+  },
+  cancelTagEdit() { this.setData({ showTagEdit: false }) },
+  toggleEditTag(event: WechatMiniprogram.TouchEvent) {
+    const tagId = Number(event.currentTarget.dataset.id)
+    const cur = this.data.editTagIds
+    this.setData({
+      editTagIds: cur.includes(tagId) ? cur.filter((i) => i !== tagId) : [...cur, tagId],
+    })
+  },
+  onNewTagInput(event: WechatMiniprogram.Input) { this.setData({ newTagName: event.detail.value }) },
+  async createTagInline() {
+    const name = this.data.newTagName.trim()
+    if (!name) { wx.showToast({ title: '请输入标签名称', icon: 'none' }); return }
+    this.setData({ creatingTag: true })
+    try {
+      const tag = await request<{ id: number; name: string }>(`/kb/${this.data.kbId}/tags`, {
+        method: 'POST',
+        data: { name },
+      })
+      const editTagIds = this.data.editTagIds.includes(tag.id)
+        ? this.data.editTagIds
+        : [...this.data.editTagIds, tag.id]
+      await this.loadTags()
+      this.setData({ newTagName: '', creatingTag: false, editTagIds })
+    } catch (error) {
+      this.setData({ creatingTag: false })
+      wx.showToast({ title: (error as Error).message, icon: 'none' })
+    }
+  },
+  async confirmSaveDocTags() {
+    this.setData({ savingTags: true })
+    wx.showLoading({ title: '保存中...', mask: true })
+    try {
+      await request(`/kb/${this.data.kbId}/documents/${this.data.editingDocId}/tags`, {
+        method: 'PUT',
+        data: { tag_ids: this.data.editTagIds },
+      })
+      wx.hideLoading()
+      wx.showToast({ title: '已保存', icon: 'success' })
+      this.setData({ showTagEdit: false })
+      this.loadFolders()
+      this.loadTags()
+    } catch (error) {
+      wx.hideLoading()
+      wx.showToast({ title: (error as Error).message, icon: 'none' })
+    } finally {
+      this.setData({ savingTags: false })
+    }
   },
 
   onShareAppMessage() {

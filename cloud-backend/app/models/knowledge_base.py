@@ -115,6 +115,35 @@ class KbFolder(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
+class KbTag(Base):
+    """资料库内的标签 —— 跨文件夹的轻量分类维度（对标 ima 的 #标签）。
+
+    一个文档可打多个标签；同库内标签名唯一（重复新建走幂等返回）。
+    """
+
+    __tablename__ = "kb_tags"
+    __table_args__ = (UniqueConstraint("kb_id", "name", name="uq_kb_tag_name"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    kb_id: Mapped[int] = mapped_column(ForeignKey("knowledge_bases.id"), index=True)
+    name: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class KbDocumentTag(Base):
+    """文档与标签的多对多关联（全量替换式设置）。"""
+
+    __tablename__ = "kb_document_tags"
+    __table_args__ = (UniqueConstraint("document_id", "tag_id", name="uq_doc_tag"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    document_id: Mapped[int] = mapped_column(
+        ForeignKey("knowledge_documents.id"), index=True
+    )
+    tag_id: Mapped[int] = mapped_column(ForeignKey("kb_tags.id"), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
 # 预设目录分类树（与 D:\\rokid\\预设目录 对应）。每个资料库首次访问时播种为默认骨架。
 PRESET_FOLDER_TREE: list[dict] = [
     {"name": "个人文件夹"},

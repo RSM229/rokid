@@ -37,7 +37,9 @@ from app.models.knowledge_base import (
     KnowledgeBase,
     KnowledgeBaseMember,
     KnowledgeDocument,
+    KbDocumentTag,
     KbFolder,
+    KbTag,
     ensure_kb_folder_tree,
 )
 from app.models.user import User
@@ -185,7 +187,27 @@ def _user_info(user: User | None) -> dict:
     }
 
 
-def _serialize_doc(doc: KnowledgeDocument, uploader: User | None = None) -> dict:
+async def _doc_tags(db: AsyncSession, doc_ids: list[int]) -> dict[int, list[dict]]:
+    """批量取文档的标签 [{id,name}]，供文档列表序列化复用。"""
+    if not doc_ids:
+        return {}
+    rows = (await db.execute(
+        select(KbDocumentTag.document_id, KbTag)
+        .join(KbTag, KbTag.id == KbDocumentTag.tag_id)
+        .where(KbDocumentTag.document_id.in_(doc_ids))
+        .order_by(KbTag.name)
+    )).all()
+    out: dict[int, list[dict]] = {}
+    for did, tag in rows:
+        out.setdefault(did, []).append({"id": tag.id, "name": tag.name})
+    return out
+
+
+def _serialize_doc(
+    doc: KnowledgeDocument,
+    uploader: User | None = None,
+    tags: list[dict] | None = None,
+) -> dict:
     info = _user_info(uploader)
     return {
         "id": doc.id,
@@ -197,6 +219,7 @@ def _serialize_doc(doc: KnowledgeDocument, uploader: User | None = None) -> dict
         "uploader_id": doc.uploader_id,
         "uploader_name": info["real_name"],
         "folder_id": doc.folder_id,
+        "tags": tags or [],
         "created_at": doc.created_at.isoformat() if doc.created_at else None,
     }
 
@@ -243,6 +266,16 @@ class FolderCreate(BaseModel):
 
 class FolderUpdate(BaseModel):
     name: str = Field(min_length=1, max_length=128)
+
+
+class TagCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=64)
+
+
+class DocTagsUpdate(BaseModel):
+    """全量替换文档标签（空数组 = 清空）。"""
+
+    tag_ids: list[int] = []
 
 
 class MoveDocFolder(BaseModel):
@@ -901,6 +934,7 @@ async def list_documents(
     kb_id: int,
     keyword: Optional[str] = None,
     folder_id: Optional[int] = None,
+    tag_id: Optional[int] = None,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -916,6 +950,12 @@ async def list_documents(
         else:
             await _get_folder(db, kb_id, folder_id)
             query = query.where(KnowledgeDocument.folder_id == folder_id)
+    if tag_id is not None:
+        # 标签筛选：跨文件夹列出打了该标签的文档
+        tagged = select(KbDocumentTag.document_id).where(
+            KbDocumentTag.tag_id == tag_id
+        )
+        query = query.where(KnowledgeDocument.id.in_(tagged))
     if keyword:
         like = f"%{keyword.strip()}%"
         query = query.where(KnowledgeDocument.name.like(like))
@@ -928,7 +968,14 @@ async def list_documents(
             )
         ).scalars().all()
     }
-    return {"total": len(docs), "items": [_serialize_doc(d, uploaders.get(d.uploader_id)) for d in docs]}
+    tag_map = await _doc_tags(db, [d.id for d in docs])
+    return {
+        "total": len(docs),
+        "items": [
+            _serialize_doc(d, uploaders.get(d.uploader_id), tag_map.get(d.id, []))
+            for d in docs
+        ],
+    }
 
 
 @router.post("/{kb_id}/documents")
@@ -1105,6 +1152,128 @@ async def move_document_folder(
     doc.folder_id = None if req.folder_id in (None, 0) else req.folder_id
     await db.commit()
     return {"id": doc.id, "folder_id": doc.folder_id}
+
+
+# ---------- 标签（跨文件夹的轻量分类维度，对标 ima 的 #标签） ----------
+
+
+@router.get("/{kb_id}/tags")
+async def list_tags(
+    kb_id: int,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """列出库内全部标签（含每个标签下的文档数）。"""
+    kb = await _get_kb(db, kb_id)
+    await _require_role(db, kb, user, "viewer")
+    tags = (
+        await db.execute(
+            select(KbTag).where(KbTag.kb_id == kb_id).order_by(KbTag.name)
+        )
+    ).scalars().all()
+    count_rows = (
+        await db.execute(
+            select(KbDocumentTag.tag_id, func.count())
+            .where(KbDocumentTag.tag_id.in_([t.id for t in tags] or [0]))
+            .group_by(KbDocumentTag.tag_id)
+        )
+    ).all()
+    counts = {tag_id: n for tag_id, n in count_rows}
+    return {
+        "total": len(tags),
+        "items": [
+            {"id": t.id, "name": t.name, "count": counts.get(t.id, 0)} for t in tags
+        ],
+    }
+
+
+@router.post("/{kb_id}/tags")
+async def create_tag(
+    kb_id: int,
+    req: TagCreate,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """新建标签；同名已存在则幂等返回既有标签。"""
+    kb = await _get_kb(db, kb_id)
+    await _require_role(db, kb, user, "editor")
+    _reject_builtin(kb, "新建标签")
+    name = req.name.strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="标签名称不能为空")
+    existing = (
+        await db.execute(
+            select(KbTag).where(KbTag.kb_id == kb_id, KbTag.name == name)
+        )
+    ).scalar_one_or_none()
+    if existing:
+        return {"id": existing.id, "name": existing.name, "existed": True}
+    tag = KbTag(kb_id=kb_id, name=name)
+    db.add(tag)
+    await db.commit()
+    await db.refresh(tag)
+    return {"id": tag.id, "name": tag.name, "existed": False}
+
+
+@router.delete("/{kb_id}/tags/{tag_id}")
+async def delete_tag(
+    kb_id: int,
+    tag_id: int,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """删除标签（仅摘除关联，文档本身不受影响）。"""
+    kb = await _get_kb(db, kb_id)
+    await _require_role(db, kb, user, "editor")
+    _reject_builtin(kb, "删除标签")
+    tag = await db.get(KbTag, tag_id)
+    if tag is None or tag.kb_id != kb_id:
+        raise HTTPException(status_code=404, detail="标签不存在")
+    await db.execute(
+        delete(KbDocumentTag).where(KbDocumentTag.tag_id == tag_id)
+    )
+    await db.delete(tag)
+    await db.commit()
+    return {"detail": "标签已删除", "id": tag_id}
+
+
+@router.put("/{kb_id}/documents/{doc_id}/tags")
+async def set_document_tags(
+    kb_id: int,
+    doc_id: int,
+    req: DocTagsUpdate,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """全量替换某文档的标签（空数组 = 清空）。"""
+    kb = await _get_kb(db, kb_id)
+    await _require_role(db, kb, user, "editor")
+    _reject_builtin(kb, "编辑标签")
+    doc = await _get_doc(db, kb_id, doc_id)
+    tag_ids = list(dict.fromkeys(req.tag_ids))  # 去重且保序
+    valid_ids = set()
+    if tag_ids:
+        rows = (
+            await db.execute(
+                select(KbTag.id).where(
+                    KbTag.kb_id == kb_id, KbTag.id.in_(tag_ids)
+                )
+            )
+        ).scalars().all()
+        valid_ids = set(rows)
+        if valid_ids != set(tag_ids):
+            raise HTTPException(status_code=422, detail="包含不属于本库的标签")
+    await db.execute(
+        delete(KbDocumentTag).where(KbDocumentTag.document_id == doc_id)
+    )
+    for tid in tag_ids:
+        db.add(KbDocumentTag(document_id=doc_id, tag_id=tid))
+    await db.commit()
+    tag_map = await _doc_tags(db, [doc_id])
+    return {
+        "id": doc.id,
+        "tags": tag_map.get(doc_id, []),
+    }
 
 
 @router.get("/{kb_id}/documents/{doc_id}/content")

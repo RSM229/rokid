@@ -72,9 +72,13 @@
     <view wx:for="{{docs}}" wx:key="id" class="card doc">
       <view class="doc-name">{{item.name}}</view>
       <view class="doc-meta">{{item.sizeText}} · {{item.uploader_name}}</view>
+      <view wx:if="{{item.tags && item.tags.length}}" class="doc-tags">
+        <text wx:for="{{item.tags}}" wx:for-item="tag" wx:key="id" class="doc-tag-chip">{{tag.name}}</text>
+      </view>
       <view class="doc-btns">
         <text class="link-green" data-id="{{item.id}}" bindtap="openContent">查看</text>
         <text class="link-gray" data-id="{{item.id}}" bindtap="downloadDoc">下载</text>
+        <text wx:if="{{canUpload}}" class="link-gray" data-id="{{item.id}}" data-name="{{item.name}}" bindtap="openTagEdit">标签</text>
         <text wx:if="{{canUpload}}" class="link-red" data-id="{{item.id}}" bindtap="deleteDoc">删除</text>
       </view>
     </view>
@@ -175,6 +179,29 @@
     <view class="modal-btns">
       <button class="btn-cancel" bindtap="hideNewFolder">取消</button>
       <button class="btn-primary" loading="{{creatingFolder}}" bindtap="confirmNewFolder">创建</button>
+    </view>
+  </view>
+
+  <!-- 编辑文档标签：勾选已有标签 + 输入新建（全量替换保存） -->
+  <view wx:if="{{showTagEdit}}" class="mask" bindtap="cancelTagEdit"></view>
+  <view wx:if="{{showTagEdit}}" class="modal">
+    <view class="modal-title">设置标签</view>
+    <view class="field-group">
+      <text class="field-label">文档：{{editingDocName}}</text>
+    </view>
+    <scroll-view scroll-y class="picker-list">
+      <view wx:for="{{tags}}" wx:key="id" class="prow" data-id="{{item.id}}" bindtap="toggleEditTag">
+        <text class="prow-name">{{editTagIds.indexOf(item.id) >= 0 ? '☑' : '☐'}} {{item.name}}</text>
+      </view>
+      <view wx:if="{{!tags.length}}" class="empty-mini">还没有标签，用下面的输入框新建第一个。</view>
+    </scroll-view>
+    <view class="field-group tag-new-row">
+      <input class="field-input" value="{{newTagName}}" placeholder="新标签名称" bindinput="onNewTagInput" bindconfirm="createTagInline" />
+      <button class="btn-plain" size="mini" loading="{{creatingTag}}" bindtap="createTagInline">新建</button>
+    </view>
+    <view class="modal-btns">
+      <button class="btn-cancel" bindtap="cancelTagEdit">取消</button>
+      <button class="btn-primary" loading="{{savingTags}}" bindtap="confirmSaveDocTags">保存</button>
     </view>
   </view>
 </view>
