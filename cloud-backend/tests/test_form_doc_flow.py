@@ -339,6 +339,28 @@ def test_crane_safety_form_fields_fill_the_matching_word_cells(tmp_path):
         assert value in rendered, value
 
 
+def test_acceptance_template_falls_back_to_bundled_knowledge_base(tmp_path):
+    from app.config import settings
+    from app.services.form_renderer import render_form
+
+    old_root = settings.knowledge_base_path
+    settings.knowledge_base_path = Path(__file__).resolve().parents[2] / "知识库"
+    try:
+        output = render_form("acceptance_record", {
+            "project_name": "TEST-PROJECT", "doc_number": "YS-0001",
+            "date": "2026-10-08", "acceptance_type": "隐蔽验收",
+            "section": "A栋二层", "acceptance_content": "钢筋绑扎",
+            "acceptance_result": "合格", "acceptance_participants": "施工张工、监理李工",
+        }, tmp_path)
+    finally:
+        settings.knowledge_base_path = old_root
+    from docx import Document as ReadDocx
+    rendered = ReadDocx(str(output))
+    text = "\n".join(cell.text for table in rendered.tables for row in table.rows for cell in row.cells)
+    assert "隐蔽验收" in text
+    assert "钢筋绑扎" in text
+
+
 def test_record_forms(ctx):
     resp = ctx["client"].get(
         f"/api/form-docs/record/{ctx['record_id']}/forms",

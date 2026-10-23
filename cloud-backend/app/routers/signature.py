@@ -4,6 +4,7 @@
 创建日期: 2026-07-18
 """
 import hashlib
+import io
 import time
 from datetime import datetime
 from pathlib import Path
@@ -12,6 +13,7 @@ from typing import Optional
 from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
+from PIL import Image
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,6 +21,7 @@ from app.config import settings
 from app.db import get_db
 from app.models.document import Document, DocStatus
 from app.models.signature import Signature
+from app.models.document_signoff import DocumentSignoff
 from app.models.user import User
 from app.routers.auth import (
     get_current_user,
@@ -44,6 +47,11 @@ class DeleteSignatureRequest(BaseModel):
     password: str
 
 
+class SigningModeRequest(BaseModel):
+    mode: str
+    slot: Optional[str] = None
+
+
 class SignatureResponse(BaseModel):
     id: int
     name: str
@@ -55,10 +63,34 @@ class SignatureResponse(BaseModel):
 
 def _save_signature_image(image_bytes: bytes, user_id: int, filename: str) -> str:
     """保存签章图片到上传目录，返回相对 URL"""
-    ext = Path(filename).suffix.lower() or ".png"
-    if ext not in {".png"}:
-        raise HTTPException(status_code=400, detail="签章图片仅支持 PNG 格式（透明背景）")
-    img_name = f"signature_{user_id}_{int(time.time())}_{hashlib.md5(image_bytes).hexdigest()[:8]}{ext}"
+    try:
+        with Image.open(io.BytesIO(image_bytes)) as source:
+            if source.width * source.height > 20_000_000:
+                raise HTTPException(status_code=413, detail="签名图片尺寸过大")
+            image = source.convert("RGBA")
+            pixels = image.load()
+            for y in range(image.height):
+                for x in range(image.width):
+                    r, g, b, a = pixels[x, y]
+                    if not a or min(r, g, b) < 220 or max(r, g, b) - min(r, g, b) > 35:
+                        continue
+                    white = min(r, g, b)
+                    alpha = round(a * (255 - white) / 255)
+                    if alpha:
+                        r = max(0, min(255, round((r - white) * 255 / (255 - white))))
+                        g = max(0, min(255, round((g - white) * 255 / (255 - white))))
+                        b = max(0, min(255, round((b - white) * 255 / (255 - white))))
+                    else:
+                        r, g, b = 0, 0, 0
+                    pixels[x, y] = (r, g, b, alpha)
+            output = io.BytesIO()
+            image.save(output, format="PNG", optimize=True)
+            image_bytes = output.getvalue()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="签名图片无法解析") from exc
+    img_name = f"signature_{user_id}_{int(time.time())}_{hashlib.md5(image_bytes).hexdigest()[:8]}.png"
     img_path = settings.upload_dir / "signatures" / img_name
     img_path.parent.mkdir(parents=True, exist_ok=True)
     img_path.write_bytes(image_bytes)
@@ -74,7 +106,7 @@ async def upload_signature(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """上传签章图片（PNG，透明背景），需设置使用密码"""
+    """上传签章图片；服务端会把近白背景转换为透明 PNG。"""
     if len(password.encode("utf-8")) > 72:
         raise HTTPException(status_code=400, detail="签章密码 UTF-8 编码后不能超过 72 字节")
 
@@ -85,12 +117,9 @@ async def upload_signature(
     if len(image_bytes) > settings.max_image_bytes:
         raise HTTPException(status_code=413, detail="签章图片超过大小限制")
 
-    # 校验为 PNG
     ext = Path(file.filename or "").suffix.lower()
-    if ext != ".png":
-        raise HTTPException(status_code=400, detail="签章图片仅支持 PNG 格式")
-    if not image_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
-        raise HTTPException(status_code=400, detail="文件内容不是有效的 PNG")
+    if ext not in {".png", ".jpg", ".jpeg", ".webp"}:
+        raise HTTPException(status_code=400, detail="请上传 PNG、JPG 或 WEBP 图片")
 
     img_url = _save_signature_image(image_bytes, user.id, file.filename or "signature.png")
 
@@ -114,6 +143,54 @@ async def upload_signature(
         is_active=signature.is_active,
         created_at=signature.created_at.isoformat() if signature.created_at else "",
     )
+
+
+@router.post("/documents/{doc_id}/signing-mode")
+async def set_document_signing_mode(
+    doc_id: int,
+    req: SigningModeRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """记录所选签署方式；线下模式只留状态，不生成电子签名。"""
+    if req.mode not in {"online", "uploaded", "offline"}:
+        raise HTTPException(400, "签署方式必须是 online、uploaded 或 offline")
+    doc = (await db.execute(select(Document).where(
+        Document.id == doc_id,
+        Document.project_id == require_project_id(user),
+    ))).scalar_one_or_none()
+    if not doc:
+        raise HTTPException(404, "文书不存在")
+    if doc.status == DocStatus.ARCHIVED.value:
+        raise HTTPException(409, "归档文书不能修改签署方式")
+    from app.services.document_signoffs import slots_for
+    if req.slot and req.slot not in slots_for(doc):
+        raise HTTPException(400, "该文书没有此签认位置")
+    if req.slot == "project_seal" and req.mode == "online":
+        raise HTTPException(400, "项目用章只能使用已授权印章或选择线下签署")
+    if req.slot:
+        from app.services.document_signoffs import assert_slot_authorized
+        await assert_slot_authorized(db, doc, user, req.slot)
+    content = dict(doc.content or {})
+    signing = dict(content.get("signing") or {})
+    slot = req.slot or "default"
+    current = await db.execute(select(DocumentSignoff.id).where(
+        DocumentSignoff.document_id == doc.id,
+        DocumentSignoff.revision == (doc.content_revision or 1),
+    ).limit(1))
+    if current.first():
+        raise HTTPException(409, "该版本已有签认，不能更换签署方式")
+    signing[slot] = {
+        "mode": req.mode,
+        "selected_at": datetime.now().isoformat(),
+        "selected_by": user.id,
+    }
+    content["signing"] = signing
+    # Signing method is workflow metadata, not a business-body revision. Keep
+    # the current DOCX/PDF and existing signatures intact when the user picks it.
+    doc.content = content
+    await db.commit()
+    return {"doc_id": doc.id, "slot": slot, "mode": req.mode, "revision": doc.content_revision or 1}
 
 
 @router.get("/signatures/me", response_model=list[SignatureResponse])
@@ -176,9 +253,19 @@ async def document_signoffs(doc_id: int, all_projects: bool = Query(False, descr
         raise HTTPException(404, "文书不存在")
     history = (await db.execute(select(DocumentSignoff).where(DocumentSignoff.document_id == doc.id).order_by(DocumentSignoff.signed_at))).scalars().all()
     project = await db.get(Project, doc.project_id)
+    signing = dict((doc.content or {}).get("signing") or {})
+    slot_modes = {key: value.get("mode") for key, value in signing.items() if isinstance(value, dict)}
+    role_labels = {
+        ("supervisor", "gdaq_30306_weida"): "监理检查人员",
+        ("chief", "gdaq_30306_weida"): "总监理工程师",
+        ("supervisor", "gdaq_30305_qizhong"): "监理检查人员",
+        ("chief", "gdaq_30305_qizhong"): "总监理工程师",
+        ("supervisor", "巡视记录"): "巡视监理人员",
+        ("inspector", "见证取样记录"): "见证取样人",
+    }
     return {
         "revision": doc.content_revision or 1,
-        "slots": [{"key": key, "label": SLOTS[key][0], "required": key in required_slots_for(doc)} for key in slots_for(doc)],
+        "slots": [{"key": key, "label": role_labels.get((key, doc.form_code), role_labels.get((key, doc.doc_type), SLOTS[key][0])), "required": key in required_slots_for(doc), "mode": slot_modes.get(key)} for key in slots_for(doc)],
         "project_seal_signature_id": getattr(project, "seal_signature_id", None),
         "history": [{"slot": s.slot, "label": SLOTS.get(s.slot, (s.slot,))[0], "signer": s.signer_name,
                      "signed_at": s.signed_at.isoformat(), "revision": s.revision,
@@ -193,7 +280,6 @@ async def sign_document(doc_id: int, req: SignDocumentRequest, user: User = Depe
     from app.models.user import Project
     from app.services.document_signoffs import SLOTS, slots_for, current_signoffs, assert_slot_authorized
     from app.services.record_fields import now_local
-    from app.services.doc_generator import generate_pdf
     from app.services.signature_service import _signature_hash
     doc = (await db.execute(select(Document).where(Document.id == doc_id, Document.project_id == require_project_id(user)).with_for_update())).scalar_one_or_none()
     if not doc: raise HTTPException(404, "文书不存在")
@@ -201,6 +287,10 @@ async def sign_document(doc_id: int, req: SignDocumentRequest, user: User = Depe
     validate_document(doc)
     if doc.status == DocStatus.ARCHIVED.value: raise HTTPException(409, "归档文书不能追加签认")
     slot = req.slot or slots_for(doc)[0]
+    selected_mode = ((doc.content or {}).get("signing") or {}).get(slot, {})
+    selected_mode = selected_mode.get("mode") if isinstance(selected_mode, dict) else None
+    if selected_mode == "offline":
+        raise HTTPException(409, "当前签署方式为线下打印手签，不能提交电子签认")
     await assert_slot_authorized(db, doc, user, slot)
     previous = await current_signoffs(db, doc)
     if any(s.slot == slot for s in previous): raise HTTPException(409, "该版本的此签认位置已经签署")
@@ -221,35 +311,82 @@ async def sign_document(doc_id: int, req: SignDocumentRequest, user: User = Depe
         doc.content = {**(doc.content or {}), "review_date": signed_at.date().isoformat()}
     import json
     # 审阅日期是独立签认事件的元数据；业务正文的签认摘要须保持不变。
-    signed_content = {k: v for k, v in (doc.content or {}).items() if k != "review_date"}
+    signed_content = {k: v for k, v in (doc.content or {}).items() if k not in {"review_date", "signing"}}
     content_hash = hashlib.sha256(json.dumps(signed_content, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
     if any(old.content_hash != content_hash for old in previous):
         raise HTTPException(409, "业务内容已变化，请按修订流程生成新版本后重新签认")
     # 每次在当前完整内容上重放已有签认，既保留多签又让审阅日期进入PDF。
-    filename = f"doc_{doc.id}_r{doc.content_revision or 1}_{uuid4().hex}.pdf"
-    unsigned = settings.export_dir / filename
-    unsigned.parent.mkdir(parents=True, exist_ok=True)
-    output_files = [unsigned]
+    settings.export_dir.mkdir(parents=True, exist_ok=True)
+    output_files = []
     try:
-        generate_pdf(doc, str(unsigned))
-        pdf_url = f"/exports/{filename}"
-        for old in previous:
-            old_signature = await db.get(Signature, old.signature_id)
-            path = _resolve_file_path(old_signature.image_path) if old_signature else None
-            if not path or not path.exists() or _signature_hash(path) != old.signature_hash:
-                raise HTTPException(409, "原签章图片已变更，不能重放签认，请保留原签署版本")
-            name = f"doc_{doc.id}_{old.slot}_{uuid4().hex}.pdf"
+        signature_path = _resolve_file_path(signature.image_path)
+        if not signature_path or not signature_path.exists():
+            raise HTTPException(409, "签名图片文件不存在，请重新上传")
+        signature_hash = _signature_hash(signature_path)
+        pdf_url = ""
+        if doc.docx_path:
+            source_docx = _resolve_file_path(doc.docx_path)
+            if not source_docx or not source_docx.exists():
+                raise HTTPException(404, "Word 模板文件不存在，无法在签名栏定位签名")
+            from app.services.form_renderer import docx_to_pdf, embed_signoff_image
+            stamped_name = f"doc_{doc.id}_r{doc.content_revision or 1}_{uuid4().hex}.docx"
+            stamped_docx = settings.export_dir / stamped_name
+            import shutil
+            shutil.copy2(source_docx, stamped_docx)
+            output_files.append(stamped_docx)
+            if not embed_signoff_image(stamped_docx, slot, signature.image_path, doc.form_code):
+                raise HTTPException(422, "未能在该表式定位对应签认栏，请勿使用错误位置代签")
+            signed_pdf = docx_to_pdf(stamped_docx)
+            if signed_pdf is None:
+                raise HTTPException(501, "当前服务未安装 Word/LibreOffice，无法从已签 Word 生成同版式 PDF")
+            output_files.append(signed_pdf)
+            doc.docx_path = f"/exports/{stamped_docx.name}"
+            doc.pdf_path = f"/exports/{signed_pdf.name}"
+            pdf_url = doc.pdf_path
+        else:
+            from app.services.doc_generator import generate_pdf
+            filename = f"doc_{doc.id}_r{doc.content_revision or 1}_{uuid4().hex}.pdf"
+            unsigned = settings.export_dir / filename
+            output_files.append(unsigned)
+            generate_pdf(doc, str(unsigned))
+            pdf_url = f"/exports/{filename}"
+            for old in previous:
+                old_signature = await db.get(Signature, old.signature_id)
+                path = _resolve_file_path(old_signature.image_path) if old_signature else None
+                if not path or not path.exists() or _signature_hash(path) != old.signature_hash:
+                    raise HTTPException(409, "原签章图片已变更，不能重放签认，请保留原签署版本")
+                name = f"doc_{doc.id}_{old.slot}_{uuid4().hex}.pdf"
+                output_files.append(settings.export_dir / name)
+                pdf_url, _ = embed_signature_to_pdf(pdf_url, old_signature.image_path, name, position=SLOTS[old.slot][1], stamp_width=95, stamp_height=70)
+            name = f"doc_{doc.id}_{slot}_{uuid4().hex}.pdf"
             output_files.append(settings.export_dir / name)
-            pdf_url, _ = embed_signature_to_pdf(pdf_url, old_signature.image_path, name, position=SLOTS[old.slot][1], stamp_width=95, stamp_height=70)
-        name = f"doc_{doc.id}_{slot}_{uuid4().hex}.pdf"
-        output_files.append(settings.export_dir / name)
-        pdf_url, signature_hash = embed_signature_to_pdf(pdf_url, signature.image_path, name, position=SLOTS[slot][1], stamp_width=95, stamp_height=70)
+            pdf_url, _ = embed_signature_to_pdf(pdf_url, signature.image_path, name, position=SLOTS[slot][1], stamp_width=95, stamp_height=70)
         db.add(DocumentSignoff(document_id=doc.id, revision=doc.content_revision or 1, slot=slot,
                                signer_id=user.id, signer_name=user.real_name or user.username,
                                signature_id=signature.id, signature_hash=signature_hash, content_hash=content_hash,
                                signed_pdf_path=pdf_url, signed_at=signed_at))
-        doc.pdf_path = f"/exports/{filename}"
         doc.signed_pdf_path, doc.signed_at, doc.signed_by = pdf_url, signed_at, user.id
+        from app.models.work_record import WorkRecord
+        linked_record = (await db.execute(select(WorkRecord).where(
+            WorkRecord.generated_doc_id == doc.id,
+        ).with_for_update())).scalar_one_or_none()
+        if linked_record:
+            record_content = dict(linked_record.content_json or {})
+            history = list(record_content.get("document_signoffs") or [])
+            history.append({
+                "document_id": doc.id,
+                "revision": doc.content_revision or 1,
+                "slot": slot,
+                "signer_id": user.id,
+                "signer_name": user.real_name or user.username,
+                "signature_id": signature.id,
+                "signature_hash": signature_hash,
+                "signed_at": signed_at.isoformat(),
+                "signed_docx_path": doc.docx_path,
+                "signed_pdf_path": pdf_url,
+            })
+            record_content["document_signoffs"] = history
+            linked_record.content_json = record_content
         from app.models.security_audit import SecurityAudit
         db.add(SecurityAudit(user_id=user.id, username=user.username, action="document_signoff",
                              detail=f"doc={doc.id} revision={doc.content_revision or 1} slot={slot} hash={signature_hash}"))

@@ -81,10 +81,13 @@
     <view class="card" style="width:100%;">
       <view class="card-title">签认 / 用章授权</view>
       <picker range="{{signSlots}}" range-key="label" value="{{signSlotIndex}}" bindchange="onSignSlot"><view style="padding:20rpx;">签认位置：{{signSlots[signSlotIndex].label}}</view></picker>
-      <picker range="{{signatures}}" range-key="name" value="{{signSignatureIndex}}" bindchange="onSignSignature"><view style="padding:20rpx;">签章：{{signatures[signSignatureIndex].name || '请先上传个人签名'}}</view></picker>
-      <input password value="{{signPassword}}" bindinput="onSignPassword" placeholder="签章使用密码" style="padding:20rpx;" />
+      <picker range="{{['在线手写签名','上传电子签名','线下打印手签']}}" value="{{signingModeIndex}}" bindchange="onSigningMode"><view style="padding:20rpx;">签署方式：{{signingMode === 'online' ? '在线手写签名' : (signingMode === 'offline' ? '线下打印手签' : '上传电子签名')}}</view></picker>
+      <canvas wx:if="{{signingMode === 'online'}}" canvas-id="signatureCanvas" width="750" height="260" style="width:100%;height:260rpx;background:#fafafa;border:1rpx solid #ddd;" disable-scroll="true" bindtouchstart="onSignatureTouchStart" bindtouchmove="onSignatureTouchMove" bindtouchend="onSignatureTouchEnd"></canvas>
+      <button wx:if="{{signingMode === 'online'}}" class="doc-btn ghost" bindtap="clearSignatureCanvas">清除重签</button>
+      <picker wx:if="{{signingMode === 'uploaded'}}" range="{{signatures}}" range-key="name" value="{{signSignatureIndex}}" bindchange="onSignSignature"><view style="padding:20rpx;">签名：{{signatures[signSignatureIndex].name || '请先上传个人签名'}}</view></picker>
+      <input wx:if="{{signingMode !== 'offline'}}" password value="{{signPassword}}" bindinput="onSignPassword" placeholder="签认密码" style="padding:20rpx;" />
       <button loading="{{signing}}" bindtap="confirmSign">确认本人授权签认</button>
-      <button bindtap="uploadPersonalSignature">上传个人签名 PNG（先设密码）</button>
+      <button wx:if="{{signingMode === 'uploaded'}}" bindtap="uploadPersonalSignature">从相册上传签名图片</button>
       <button bindtap="closeSign">取消</button>
     </view>
   </view>

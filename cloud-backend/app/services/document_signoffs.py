@@ -16,6 +16,11 @@ SLOTS = {
 
 def required_slots_for(doc):
     # 用户明确选择保留既有表式的必签要求（2026-10-12）。
+    form_code = getattr(doc, "form_code", None)
+    if form_code in {"gdaq_30306_weida", "gdaq_30305_qizhong"}:
+        return {"supervisor"}
+    if form_code == "witness_record":
+        return {"inspector"}
     if doc.doc_type == "验收记录":
         return {"acceptor"}
     if doc.doc_type in ("旁站记录", "巡视记录"):
@@ -31,6 +36,11 @@ def required_slots_for(doc):
 
 def slots_for(doc):
     kind = doc.doc_type
+    form_code = getattr(doc, "form_code", None)
+    if form_code in {"gdaq_30306_weida", "gdaq_30305_qizhong"}:
+        return ["supervisor", "chief"]
+    if form_code == "witness_record":
+        return ["inspector"]
     if kind == "验收记录":
         return ["acceptor"]
     if kind == "平行检查记录":
@@ -81,7 +91,11 @@ async def assert_slot_authorized(db, doc, user, slot):
             raise HTTPException(403, "检查人与复核人不能是同一人")
     if slot in ("inspector", "acceptor") and not member:
         raise HTTPException(403, "签认人须是本项目在岗成员")
-    permission = "acceptance" if slot == "acceptor" else "station" if doc.doc_type == "旁站记录" else "inspection"
+    permission = (
+        "acceptance" if slot == "acceptor" or getattr(doc, "form_code", None) == "witness_record"
+        else "station" if doc.doc_type == "旁站记录"
+        else "inspection"
+    )
     if slot in ("inspector", "acceptor") and not user.has_permission(permission):
         raise HTTPException(403, "当前项目岗位无权签认该类记录")
     if slot == "project_seal" and not user.has_permission("document_approve"):

@@ -373,6 +373,81 @@ class RecordRepairTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(HTTPException):
             await signature.sign_document(doc.id,signature.SignDocumentRequest(signature_id=sig2.id,password='repair-test-123',slot='reviewer'),self.v,self.db)
 
+    async def test_uploaded_signature_background_is_removed_and_png_is_normalized(self):
+        import io
+        from PIL import Image
+        source = Image.new('RGB', (3, 1), 'white')
+        source.putpixel((1, 0), (20, 40, 60))
+        raw = io.BytesIO(); source.save(raw, format='JPEG')
+        url = signature._save_signature_image(raw.getvalue(), self.u.id, 'signature.jpg')
+        saved = settings.upload_dir / url.removeprefix('/uploads/')
+        with Image.open(saved) as result:
+            self.assertEqual(result.mode, 'RGBA')
+            self.assertLessEqual(result.getpixel((0, 0))[3], 10)
+            self.assertGreater(result.getpixel((1, 0))[3], 0)
+
+    async def test_template_signoff_image_is_inserted_only_at_role_marker(self):
+        from docx import Document as WordDocument
+        from app.services.form_renderer import embed_signoff_image
+        output = render_form('gd_b_213_pingxing', {
+            'project_name': self.p.name, 'doc_number': 'TEST-SIGN', 'date': '2026-10-08',
+            'section': 'A栋', 'acceptance_content': '钢筋', 'method': '实测',
+            'basis': '图纸', 'record': '实测符合', 'conclusion': '合格', 'handling': '无',
+        }, settings.export_dir)
+        sig_path = settings.upload_dir / 'signature-test.png'
+        Image.new('RGBA', (80, 40), (0, 0, 0, 180)).save(sig_path)
+        copied = settings.export_dir / 'signed-test.docx'
+        import shutil
+        shutil.copy2(output, copied)
+        self.assertTrue(embed_signoff_image(copied, 'inspector', f'/uploads/{sig_path.relative_to(settings.upload_dir).as_posix()}', 'gd_b_213_pingxing'))
+        rendered = WordDocument(str(copied))
+        self.assertTrue(any('word/media/' in name for name in __import__('zipfile').ZipFile(copied).namelist()))
+        self.assertFalse(embed_signoff_image(copied, 'chief', f'/uploads/{sig_path.relative_to(settings.upload_dir).as_posix()}', 'witness_record'))
+
+    async def test_template_signing_updates_word_pdf_and_linked_record_together(self):
+        from app.services.form_renderer import render_form
+        docx_path = render_form('gd_b_213_pingxing', {
+            'project_name': self.p.name, 'doc_number': 'TEST-LINK', 'date': '2026-10-08',
+            'section': 'A栋', 'acceptance_content': '钢筋', 'method': '实测',
+            'basis': '图纸', 'record': '实测符合', 'conclusion': '合格', 'handling': '无',
+        }, settings.export_dir)
+        doc = Document(project_id=self.p.id, creator_id=self.u.id, doc_type='平行检查记录',
+                       title='联动签认', form_code='gd_b_213_pingxing',
+                       content={'project_name': self.p.name, 'date': '2026-10-08', 'section': 'A栋',
+                                'acceptance_content': '钢筋', 'conclusion': '合格', 'record': '实测符合'},
+                       docx_path=f'/exports/{docx_path.name}', status='草稿')
+        self.db.add(doc); await self.db.flush()
+        record = self.rec('平行检验', content_json={'source': 'agent_review_plan'})
+        record.generated_doc_id = doc.id
+        self.db.add(record); await self.db.commit()
+        sig = await self.make_signature(self.u)
+
+        def fake_convert(path):
+            target = path.with_suffix('.pdf')
+            from reportlab.pdfgen import canvas
+            canvas.Canvas(str(target)).save()
+            return target
+
+        with patch('app.services.form_renderer.docx_to_pdf', side_effect=fake_convert):
+            result = await signature.sign_document(
+                doc.id, signature.SignDocumentRequest(signature_id=sig.id, password='repair-test-123', slot='inspector'), self.u, self.db,
+            )
+        await self.db.refresh(record)
+        self.assertEqual(doc.docx_path.rsplit('.', 1)[-1], 'docx')
+        self.assertEqual(doc.pdf_path, result['signed_pdf_url'])
+        self.assertEqual(doc.signed_pdf_path, doc.pdf_path)
+        self.assertEqual(record.content_json['document_signoffs'][0]['signed_pdf_path'], doc.pdf_path)
+        self.assertTrue(any(name.startswith('word/media/') for name in __import__('zipfile').ZipFile(settings.export_dir / doc.docx_path.removeprefix('/exports/')).namelist()))
+
+    async def test_signing_mode_does_not_change_business_revision(self):
+        doc=Document(project_id=self.p.id,creator_id=self.u.id,doc_type='巡视记录',title='签署模式',content={'project_name':self.p.name},status='草稿')
+        self.db.add(doc);await self.db.commit()
+        revision = doc.content_revision
+        result = await signature.set_document_signing_mode(doc.id, signature.SigningModeRequest(mode='offline', slot='inspector'), self.u, self.db)
+        self.assertEqual(result['revision'], revision)
+        self.assertEqual(doc.content_revision, revision)
+        self.assertIsNone(doc.signed_pdf_path)
+
 
 if __name__=='__main__':
     unittest.main(verbosity=2)

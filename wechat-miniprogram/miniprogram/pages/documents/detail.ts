@@ -82,9 +82,14 @@ Page(themed({
     canApprove: false,
     approving: false,
     contentEditor: [] as { key: string; label: string; value: string }[],
-    signSlots: [] as { key: string; label: string }[], signHistory: [] as { slot: string; label: string; signer: string; signed_at: string; revision: number; current: boolean }[],
+    signSlots: [] as { key: string; label: string; mode?: string }[], signHistory: [] as { slot: string; label: string; signer: string; signed_at: string; revision: number; current: boolean }[],
     projectSealId: 0, signatures: [] as { id: number; name: string }[],
     showSign: false, signing: false, signPassword: '', signSlotIndex: 0, signSignatureIndex: 0,
+    signingMode: 'uploaded', signingModeIndex: 1,
+    signingModes: ['在线手写签名', '上传电子签名', '线下打印手签'],
+    signatureDrawing: false,
+    signatureHasInk: false,
+    signatureLastPoint: null as { x: number; y: number } | null,
   },
 
   onLoad(options: Record<string, string>) {
@@ -128,7 +133,7 @@ Page(themed({
       // S2：user.role 是英文 key，比较必须用 key（用中文会静默永假）
       const canApprove = doc.status === '待审批'
         && (isChiefRole(user?.role) || (user?.permissions || []).includes('document_approve'))
-      const signoffs = await request<{ slots: { key: string; label: string }[]; history: { slot: string; label: string; signer: string; signed_at: string; revision: number; current: boolean }[]; project_seal_signature_id?: number }>(`/documents/${id}/signoffs`)
+      const signoffs = await request<{ slots: { key: string; label: string; mode?: string }[]; history: { slot: string; label: string; signer: string; signed_at: string; revision: number; current: boolean }[]; project_seal_signature_id?: number }>(`/documents/${id}/signoffs`)
       const editableKeys = ['temperature_high', 'temperature_low', 'weather_morning', 'weather_afternoon', 'weather_night', 'construction_progress', 'material_section', 'supervision_section', 'parallel_section', 'acceptance_section', 'other_work_section', 'problems_section', 'meeting_section', 'document_section', 'closure_section', 'report_section', 'misc_section']
       const contentEditor = doc.doc_type === '监理日志' ? editableKeys.map(key => ({ key, label: CONTENT_LABELS[key] || key, value: String(doc.content?.[key] ?? '') })) : []
       this.setData({ doc, fields, images, contentEditor, signSlots: signoffs.slots, signHistory: signoffs.history, projectSealId: signoffs.project_seal_signature_id || 0, hasPdf: Boolean(doc.signed_pdf_path || doc.pdf_path), canApprove, loading: false })
@@ -168,23 +173,123 @@ Page(themed({
       const signatures = await request<{ id: number; name: string }[]>('/signatures/me')
       const choices = [...signatures]
       if (this.data.projectSealId && !choices.some(s => s.id === this.data.projectSealId)) choices.push({ id: this.data.projectSealId, name: '本项目机构章（需授权密码）' })
-      this.setData({ signatures: choices, signPassword: '', signSlotIndex: 0, signSignatureIndex: 0, showSign: true })
+      const mode = this.data.signSlots[0]?.mode || 'uploaded'
+      const signingModeIndex = mode === 'online' ? 0 : mode === 'offline' ? 2 : 1
+      this.setData({ signatures: choices, signPassword: '', signSlotIndex: 0, signSignatureIndex: 0, signingMode: mode, signingModeIndex, signatureHasInk: false, signatureLastPoint: null, showSign: true })
     } catch (error) { wx.showToast({ title: (error as Error).message, icon: 'none' }) }
   },
-  closeSign() { this.setData({ showSign: false, signPassword: '' }) },
-  onSignSlot(event: WechatMiniprogram.PickerChange) { this.setData({ signSlotIndex: Number(event.detail.value) }) },
+  closeSign() { this.setData({ showSign: false, signPassword: '', signatureDrawing: false, signatureHasInk: false, signatureLastPoint: null }) },
+  onSignSlot(event: WechatMiniprogram.PickerChange) {
+    const index = Number(event.detail.value)
+    const mode = this.data.signSlots[index]?.mode || 'uploaded'
+    this.setData({ signSlotIndex: index, signingMode: mode, signingModeIndex: mode === 'online' ? 0 : mode === 'offline' ? 2 : 1, signatureHasInk: false })
+  },
   onSignSignature(event: WechatMiniprogram.PickerChange) { this.setData({ signSignatureIndex: Number(event.detail.value) }) },
   onSignPassword(event: WechatMiniprogram.Input) { this.setData({ signPassword: event.detail.value }) },
+  onSigningMode(event: WechatMiniprogram.PickerChange) {
+    const modes = ['online', 'uploaded', 'offline']
+    const index = Number(event.detail.value)
+    const mode = modes[index] || 'uploaded'
+    if (this.data.signSlots[this.data.signSlotIndex]?.key === 'project_seal' && mode === 'online') {
+      wx.showToast({ title: '项目用章只能选择已授权印章或线下签署', icon: 'none' })
+      return
+    }
+    this.setData({ signingMode: mode, signingModeIndex: index, signatureDrawing: false, signatureHasInk: false, signatureLastPoint: null })
+  },
+
+  onSignatureTouchStart(event: WechatMiniprogram.TouchEvent) {
+    const point = event.touches[0]
+    if (!point) return
+    wx.createSelectorQuery().in(this).select('#signatureCanvas').boundingClientRect(rect => {
+      if (!rect) return
+      const current = { x: (point.clientX - rect.left) * 750 / rect.width, y: (point.clientY - rect.top) * 260 / rect.height }
+      this.setData({ signatureDrawing: true, signatureHasInk: true, signatureLastPoint: current })
+    }).exec()
+  },
+  onSignatureTouchMove(event: WechatMiniprogram.TouchEvent) {
+    const point = event.touches[0]
+    if (!point || !this.data.signatureDrawing) return
+    const previous = this.data.signatureLastPoint
+    if (!previous) return
+    wx.createSelectorQuery().in(this).select('#signatureCanvas').boundingClientRect(rect => {
+      if (!rect) return
+      const current = { x: (point.clientX - rect.left) * 750 / rect.width, y: (point.clientY - rect.top) * 260 / rect.height }
+      const context = wx.createCanvasContext('signatureCanvas', this)
+      context.setStrokeStyle('#172b3a')
+      context.setLineWidth(3)
+      context.setLineCap('round')
+      context.setLineJoin('round')
+      context.beginPath()
+      context.moveTo(previous.x, previous.y)
+      context.lineTo(current.x, current.y)
+      context.stroke()
+      context.draw(true)
+      this.setData({ signatureLastPoint: current })
+    }).exec()
+  },
+  onSignatureTouchEnd() { this.setData({ signatureDrawing: false, signatureLastPoint: null }) },
+
+  uploadSignaturePath(path: string): Promise<number> {
+    return new Promise((resolve, reject) => {
+      wx.uploadFile({
+        url: `${config.apiBaseUrl}/signatures/upload`, filePath: path, name: 'file',
+        header: { Authorization: `Bearer ${session.getToken()}` },
+        formData: { name: '个人签名', password: this.data.signPassword },
+        success: (response) => {
+          try {
+            const value = JSON.parse(response.data) as { id?: number; detail?: string }
+            if (response.statusCode !== 200 || !value.id) throw new Error(value.detail || '签名上传失败')
+            resolve(value.id)
+          } catch (error) { reject(error) }
+        },
+        fail: () => reject(new Error('签名上传失败，请重试')),
+      })
+    })
+  },
+
+  async saveSigningMode(docId: number, slot: string, mode: string) {
+    await request(`/documents/${docId}/signing-mode`, {
+      method: 'POST', data: { slot, mode },
+    })
+  },
+
+  clearSignatureCanvas() {
+    const context = wx.createCanvasContext('signatureCanvas', this)
+    context.clearRect(0, 0, 750, 260)
+    context.draw()
+    this.setData({ signatureDrawing: false, signatureHasInk: false, signatureLastPoint: null })
+  },
 
   async confirmSign() {
     if (this.data.signing) return
     const doc = this.data.doc
     const slot = this.data.signSlots[this.data.signSlotIndex]
     const sig = this.data.signatures[this.data.signSignatureIndex]
-    if (!doc || !slot || !sig || !this.data.signPassword) { wx.showToast({ title: '请选择签认位置和签章并输入密码', icon: 'none' }); return }
+    const mode = this.data.signingMode as string
+    if (!doc || !slot) { wx.showToast({ title: '请选择签认位置', icon: 'none' }); return }
+    if (mode === 'offline') {
+      try {
+        await this.saveSigningMode(doc.id, slot.key, mode)
+        this.closeSign()
+        wx.showModal({ title: '已记录线下签署方式', content: '请下载并打印文书，由相关人员手写签名。系统不会生成电子签名图。', showCancel: false })
+        await this.loadDoc(doc.id)
+      } catch (error) { wx.showModal({ title: '设置失败', content: (error as Error).message, showCancel: false }) }
+      return
+    }
+    if (!doc || !slot || (!sig && mode !== 'online') || !this.data.signPassword) { wx.showToast({ title: '请选择签认位置和签章并输入密码', icon: 'none' }); return }
     this.setData({ signing: true })
     try {
-      await request(`/documents/${doc.id}/sign`, { method: 'POST', data: { slot: slot.key, signature_id: sig.id, password: this.data.signPassword } })
+      let signatureId = sig?.id || 0
+      if (mode === 'online') {
+        if (!this.data.signatureHasInk) throw new Error('请先完成手写签名')
+        const temp = await new Promise<string>((resolve, reject) => wx.canvasToTempFilePath({
+          canvasId: 'signatureCanvas', fileType: 'png', success: result => resolve(result.tempFilePath),
+          fail: () => reject(new Error('请先完成签名')),
+        }, this))
+        signatureId = await this.uploadSignaturePath(temp)
+      }
+      await this.saveSigningMode(doc.id, slot.key, mode)
+      await request(`/documents/${doc.id}/sign`, { method: 'POST', data: { slot: slot.key, signature_id: signatureId, password: this.data.signPassword } })
       this.closeSign()
       wx.showToast({ title: '签认已完成', icon: 'success' })
       await this.loadDoc(doc.id)
@@ -194,10 +299,10 @@ Page(themed({
 
   uploadPersonalSignature() {
     if (!this.data.signPassword || this.data.signPassword.length < 6) { wx.showToast({ title: '先输入至少6位签章密码', icon: 'none' }); return }
-    wx.chooseMessageFile({ count: 1, type: 'file', extension: ['png'], success: (res) => {
+    wx.chooseMedia({ count: 1, mediaType: ['image'], sourceType: ['album'], success: (res) => {
       const file = res.tempFiles[0]
       if (!file) return
-      wx.uploadFile({ url: `${config.apiBaseUrl}/signatures/upload`, filePath: file.path, name: 'file',
+      wx.uploadFile({ url: `${config.apiBaseUrl}/signatures/upload`, filePath: file.tempFilePath, name: 'file',
         header: { Authorization: `Bearer ${session.getToken()}` },
         formData: { name: '个人签名', password: this.data.signPassword },
         success: async (response) => {

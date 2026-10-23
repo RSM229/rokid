@@ -1370,6 +1370,60 @@ def _fill_signature_inline(cell: _Cell, marker: str, name: str) -> bool:
     return False
 
 
+def embed_signoff_image(docx_path: Path, slot: str, image_url: str, form_code: str | None) -> bool:
+    """Embed a signature image only in a known template signoff cell."""
+    from app.services.signature_service import _resolve_file_path
+    from docx.shared import Inches
+
+    image_path = _resolve_file_path(image_url)
+    if not image_path or not image_path.exists():
+        raise FileNotFoundError("签名图片不存在")
+    doc = DocxDocument(str(docx_path))
+    role_labels = {
+        "gd_b_214_xunshi": "巡视监理人员",
+        "gd_b_212_pangzhan": "旁站监理人员",
+        "gd_b_213_pingxing": "复核人员" if slot in {"reviewer", "chief"} else "检查人员",
+        "acceptance_record": "监理验收人" if slot in {"acceptor", "inspector"} else "施工单位质检员",
+        "gdaq_30306_weida": "总监理工程师" if slot in {"chief", "reviewer"} else "监理检查人员",
+        "gdaq_30305_qizhong": "总监理工程师" if slot in {"chief", "reviewer"} else "监理检查人员",
+        "witness_record": "见证取样人",
+    }
+    role = role_labels.get(form_code or "")
+    if not role:
+        return False
+    preferred_row = None
+    if form_code == "gd_b_214_xunshi" and doc.tables:
+        preferred_row = 4 if len(doc.tables[0].rows) >= 5 else 3
+    elif form_code == "gd_b_212_pangzhan":
+        preferred_row = 3
+    elif form_code == "gd_b_213_pingxing":
+        preferred_row = 5 if slot in {"reviewer", "chief"} else 3
+    elif form_code == "acceptance_record":
+        preferred_row = 7
+    seen: set[int] = set()
+    for table_index, table in enumerate(doc.tables):
+        for row_index, row in enumerate(table.rows):
+            if preferred_row is not None and table_index == 0 and row_index != preferred_row:
+                continue
+            for cell in row.cells:
+                key = id(cell._tc)
+                if key in seen:
+                    continue
+                seen.add(key)
+                para = next((p for p in cell.paragraphs if role in p.text and ("签名" in p.text or "签字" in p.text)), None)
+                if para:
+                    para.add_run(" ").add_picture(str(image_path), width=Inches(0.9))
+                    doc.save(str(docx_path))
+                    return True
+    if form_code == "witness_record":
+        for para in doc.paragraphs:
+            if "见证取样人" in para.text and "签名" in para.text:
+                para.add_run(" ").add_picture(str(image_path), width=Inches(0.9))
+                doc.save(str(docx_path))
+                return True
+    return False
+
+
 def _fill_weida_checklist(sub_tbl, template_tr, rows: list[dict], parent) -> None:
     """按检查项清单重建嵌套表数据行（模板行克隆，序号/内容/记录/结果逐格写入）。"""
     import copy
@@ -2204,7 +2258,19 @@ def render_form(form_code: str, data: dict, output_dir: Path | None = None) -> P
     )
     template_path = folder / spec.template
     if not template_path.exists():
-        raise TemplateNotFoundError(f"模板不存在：{template_path}")
+        bundled_root = Path(__file__).resolve().parents[2] / "知识库"
+        fallback_folder = (
+            bundled_root / "省统表word版"
+            if spec.folder == "sheng_tong_biao"
+            else bundled_root / "第三节安全监理用表" / "安全监理用表"
+            if spec.folder == "safety"
+            else bundled_root
+        )
+        fallback_path = fallback_folder / spec.template
+        if fallback_path.exists():
+            template_path = fallback_path
+        else:
+            raise TemplateNotFoundError(f"模板不存在：{template_path}")
 
     doc = DocxDocument(str(template_path))
     filler = FILLERS.get(form_code)
