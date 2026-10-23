@@ -131,7 +131,6 @@
     </view>
   </view>
   </block>
-</view>
 
   <!-- 底部操作栏：新建文件夹已移到「文件夹」分组标题右侧，这里只留两个主操作 -->
   <view class="action-bar">
