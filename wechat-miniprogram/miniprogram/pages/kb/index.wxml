@@ -15,8 +15,21 @@
     <!-- 分类树接口未上线时的降级提示 -->
     <view wx:if="{{treeUnavailable}}" class="tree-tip">当前服务端暂未提供分类目录，已按平铺文档显示</view>
 
+    <!-- 搜索：输入即全局搜文档名称（不带文件夹过滤），清空恢复文件夹视图 -->
+    <view class="search-bar">
+      <input
+        class="search-input"
+        value="{{searchKeyword}}"
+        placeholder="搜索文档名称"
+        confirm-type="search"
+        bindinput="onSearchInput"
+        bindconfirm="onSearchConfirm"
+      />
+      <text wx:if="{{searchKeyword}}" class="search-clear" bindtap="clearSearch">✕</text>
+    </view>
+
     <!-- 文件夹：竖排列表（文件管理器式）。根目录只列文件夹，文档只在文件夹内部出现 -->
-    <view wx:if="{{currentSubfolders.length}}" class="sec">
+    <view wx:if="{{!searchKeyword && currentSubfolders.length}}" class="sec">
       <view class="sec-head">
         <text class="sec-title">文件夹</text>
         <text wx:if="{{canUpload}}" class="sec-act" bindtap="showNewFolder">+ 新建</text>
@@ -35,10 +48,10 @@
       </view>
     </view>
 
-    <!-- 文档：仅当「在文件夹内」或「根目录存在未分类文档」时出现，避免和文件夹并列成同级 -->
-    <view wx:if="{{currentFolderId !== 0 || docs.length}}" class="sec">
+    <!-- 文档：仅当「在文件夹内」或「根目录存在未分类文档」或「搜索中」时出现，避免和文件夹并列成同级 -->
+    <view wx:if="{{searchKeyword || currentFolderId !== 0 || docs.length}}" class="sec">
       <view class="sec-head">
-        <text class="sec-title">{{currentFolderId !== 0 ? '文档' : '未分类文档'}}</text>
+        <text class="sec-title">{{searchKeyword ? '搜索「' + searchKeyword + '」' : (currentFolderId !== 0 ? '文档' : '未分类文档')}}</text>
         <text class="sec-count">{{docs.length}}</text>
       </view>
       <view wx:if="{{docsLoading && !docs.length}}" class="empty-mini">正在加载…</view>

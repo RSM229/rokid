@@ -1,6 +1,11 @@
 /* 资料库首页：直接渲染分类树（去掉多库列表） */
 .page { padding: 0 24rpx calc(180rpx + env(safe-area-inset-bottom)); box-sizing: border-box; }
 
+/* 搜索栏：输入即搜（300ms 防抖），清空恢复文件夹视图 */
+.search-bar { position: relative; display: flex; align-items: center; margin: 16rpx 0 20rpx; }
+.search-input { flex: 1; height: 68rpx; padding: 0 64rpx 0 28rpx; background: rgba(255,255,255,0.60); border: 2rpx solid rgba(var(--brand-rgb, 22,119,255), 0.14); border-radius: 34rpx; font-size: 26rpx; color: var(--ink-2, #243b55); }
+.search-clear { position: absolute; right: 20rpx; width: 44rpx; height: 44rpx; line-height: 44rpx; text-align: center; font-size: 24rpx; color: #8a9bb0; }
+
 /* 文档卡沿用全局 .card 玻璃风格（app.wxss），这里只补内部排版 */
 .doc { padding: 24rpx 26rpx; }
 .doc-head { display: flex; align-items: center; gap: 18rpx; }

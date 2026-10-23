@@ -66,6 +66,8 @@ Page(themed({
   recTimer: null as number | null,
   recorderStopHandler: null as Parameters<typeof recorder.onStop>[0] | null,
   recorderErrorHandler: null as Parameters<typeof recorder.onError>[0] | null,
+  /** 搜索防抖定时器 */
+  searchTimer: null as number | null,
   data: {
     kbId: 0,
     kb: {} as KbDetail,
@@ -76,6 +78,9 @@ Page(themed({
 
     docs: [] as Array<KbDoc & { sizeText: string }>,
     docsLoading: false,
+
+    /** 搜索：输入即全局搜文档名称（不带文件夹过滤），清空恢复文件夹视图 */
+    searchKeyword: '',
 
     folders: [] as KbFolderNode[],
     folderMap: {} as Record<number, KbFolderNode>,
@@ -247,6 +252,54 @@ Page(themed({
     } catch (error) {
       wx.showToast({ title: (error as Error).message, icon: 'none' })
     }
+  },
+
+  onSearchInput(event: WechatMiniprogram.Input) {
+    const keyword = event.detail.value || ''
+    this.setData({ searchKeyword: keyword })
+    if (this.searchTimer) clearTimeout(this.searchTimer)
+    if (!keyword.trim()) {
+      // 清空即退出搜索态，恢复当前文件夹视图
+      this.loadFolders()
+      return
+    }
+    this.searchTimer = setTimeout(() => this.doSearch(), 300) as unknown as number
+  },
+
+  onSearchConfirm() {
+    if (this.searchTimer) clearTimeout(this.searchTimer)
+    this.doSearch()
+  },
+
+  async doSearch() {
+    const keyword = this.data.searchKeyword.trim()
+    if (!keyword) return
+    this.setData({ docsLoading: true })
+    try {
+      const res = await request<{ items: KbDoc[] }>(
+        `/kb/${this.data.kbId}/documents`,
+        { data: { keyword } },
+      )
+      this.setData({
+        docs: (res.items || []).map((d) => ({ ...d, sizeText: formatSize(d.size_bytes || 0) })),
+      })
+    } catch (error) {
+      wx.showToast({ title: (error as Error).message, icon: 'none' })
+    } finally {
+      this.setData({ docsLoading: false })
+    }
+  },
+
+  clearSearch() {
+    if (this.searchTimer) clearTimeout(this.searchTimer)
+    this.setData({ searchKeyword: '' })
+    this.loadFolders()
+  },
+
+  /** 文档变动后的刷新：搜索态下重搜，否则回到当前文件夹视图 */
+  refreshDocs() {
+    if (this.data.searchKeyword.trim()) this.doSearch()
+    else this.loadFolders()
   },
 
   refreshCurrentFolder() {
@@ -546,7 +599,7 @@ Page(themed({
         try {
           await request(`/kb/${this.data.kbId}/documents/${docId}`, { method: 'DELETE' })
           wx.showToast({ title: '已删除', icon: 'success' })
-          this.loadFolders()
+          this.refreshDocs()
           this.loadKb()
         } catch (error) {
           wx.showToast({ title: (error as Error).message, icon: 'none' })

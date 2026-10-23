@@ -41,6 +41,8 @@ Page(themed({
   pendingFiles: [] as string[],
   pendingAudio: '',
   pendingAudioName: '',
+  /** 搜索防抖定时器 */
+  searchTimer: null as number | null,
   data: {
     kbId: 0,
     kbName: '资料库',
@@ -59,6 +61,9 @@ Page(themed({
     currentSubfolders: [] as KbFolderNode[],
     /** 后端尚未提供分类树接口时的降级标记（仍按平铺文档展示） */
     treeUnavailable: false,
+
+    /** 搜索：输入即全局搜文档名称（不带文件夹过滤），清空恢复文件夹视图 */
+    searchKeyword: '',
 
     /** 文件夹选择器：上传前选目标文件夹 / 文档移动 */
     showPicker: false,
@@ -225,6 +230,54 @@ Page(themed({
       await this.loadDocs(0)
       wx.showToast({ title: (error as Error).message, icon: 'none' })
     }
+  },
+
+  onSearchInput(event: WechatMiniprogram.Input) {
+    const keyword = event.detail.value || ''
+    this.setData({ searchKeyword: keyword })
+    if (this.searchTimer) clearTimeout(this.searchTimer)
+    if (!keyword.trim()) {
+      // 清空即退出搜索态，恢复当前文件夹视图
+      this.loadFolders()
+      return
+    }
+    this.searchTimer = setTimeout(() => this.doSearch(), 300) as unknown as number
+  },
+
+  onSearchConfirm() {
+    if (this.searchTimer) clearTimeout(this.searchTimer)
+    this.doSearch()
+  },
+
+  async doSearch() {
+    const keyword = this.data.searchKeyword.trim()
+    if (!keyword) return
+    this.setData({ docsLoading: true })
+    try {
+      const res = await request<{ items: KbDoc[] }>(
+        `/kb/${this.data.kbId}/documents`,
+        { data: { keyword } },
+      )
+      this.setData({
+        docs: (res.items || []).map((d) => ({ ...d, sizeText: formatSize(d.size_bytes || 0) })),
+      })
+    } catch (error) {
+      wx.showToast({ title: (error as Error).message, icon: 'none' })
+    } finally {
+      this.setData({ docsLoading: false })
+    }
+  },
+
+  clearSearch() {
+    if (this.searchTimer) clearTimeout(this.searchTimer)
+    this.setData({ searchKeyword: '' })
+    this.loadFolders()
+  },
+
+  /** 文档变动后的刷新：搜索态下重搜，否则回到当前文件夹视图 */
+  refreshDocs() {
+    if (this.data.searchKeyword.trim()) this.doSearch()
+    else this.loadFolders()
   },
 
   refreshCurrentFolder() {
@@ -463,7 +516,7 @@ Page(themed({
         try {
           await request(`/kb/${this.data.kbId}/documents/${docId}`, { method: 'DELETE' })
           wx.showToast({ title: '已删除', icon: 'success' })
-          this.loadFolders()
+          this.refreshDocs()
         } catch (error) {
           wx.showToast({ title: (error as Error).message, icon: 'none' })
         }
@@ -524,7 +577,7 @@ Page(themed({
       })
       wx.hideLoading()
       wx.showToast({ title: folderId ? '已移动' : '已移回未分类', icon: 'success' })
-      this.loadFolders()
+      this.refreshDocs()
     } catch (error) {
       wx.hideLoading()
       wx.showToast({ title: (error as Error).message, icon: 'none' })

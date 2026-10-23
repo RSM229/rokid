@@ -53,6 +53,11 @@
 .folder-ico { font-size: 40rpx; line-height: 1; }
 .folder-name { margin-top: 10rpx; font-size: 24rpx; font-weight: 600; color: var(--ink-2, #243b55); text-align: center; }
 .folder-count { margin-top: 6rpx; font-size: 20rpx; color: #999; }
+/* 搜索栏：输入即搜（300ms 防抖），清空恢复文件夹视图 */
+.search-bar { position: relative; display: flex; align-items: center; margin: 16rpx 0 14rpx; }
+.search-input { flex: 1; height: 68rpx; padding: 0 64rpx 0 28rpx; background: rgba(255,255,255,0.40); border: 2rpx solid rgba(var(--brand-rgb, 22,119,255), 0.14); border-radius: 34rpx; font-size: 26rpx; color: var(--ink-2, #243b55); }
+.search-clear { position: absolute; right: 20rpx; width: 44rpx; height: 44rpx; line-height: 44rpx; text-align: center; font-size: 24rpx; color: #8a9bb0; }
+.search-tip { margin-bottom: 14rpx; font-size: 22rpx; color: #8a9bb0; }
 /* 文件夹卡片内的删除入口（catchtap 挂真实处理器，阻止冒泡触发整卡进入文件夹） */
 .folder-del { margin-top: 8rpx; font-size: 20rpx; font-weight: 600; color: #d9534f; }
 /* 文件夹卡片内的重命名入口 */

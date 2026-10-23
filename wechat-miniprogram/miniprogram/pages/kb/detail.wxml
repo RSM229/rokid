@@ -32,7 +32,21 @@
       <text wx:for="{{breadcrumb}}" wx:key="id" class="crumb {{item.id === currentFolderId ? 'on' : ''}}" data-id="{{item.id}}" bindtap="goBreadcrumb"> › {{item.name}}</text>
     </view>
 
-    <view wx:if="{{currentSubfolders.length}}" class="folder-grid">
+    <!-- 搜索：输入即全局搜文档名称（不带文件夹过滤），清空恢复文件夹视图 -->
+    <view class="search-bar">
+      <input
+        class="search-input"
+        value="{{searchKeyword}}"
+        placeholder="搜索文档名称"
+        confirm-type="search"
+        bindinput="onSearchInput"
+        bindconfirm="onSearchConfirm"
+      />
+      <text wx:if="{{searchKeyword}}" class="search-clear" bindtap="clearSearch">✕</text>
+    </view>
+    <view wx:if="{{searchKeyword}}" class="search-tip">搜索「{{searchKeyword}}」：{{docs.length}} 条结果</view>
+
+    <view wx:if="{{!searchKeyword && currentSubfolders.length}}" class="folder-grid">
       <view wx:for="{{currentSubfolders}}" wx:key="id" class="folder-card" data-id="{{item.id}}" bindtap="selectFolder">
         <text class="folder-ico">📁</text>
         <text class="folder-name">{{item.name}}</text>
@@ -43,7 +57,7 @@
     </view>
 
     <view wx:if="{{docsLoading && !docs.length && !currentSubfolders.length}}" class="empty">正在加载…</view>
-    <view wx:elif="{{!currentSubfolders.length && !docs.length}}" class="empty">还没有文档，点上方“+ 上传文档”归档到分类</view>
+    <view wx:elif="{{!currentSubfolders.length && !docs.length}}" class="empty">{{searchKeyword ? '没有匹配的文档，换个关键词试试' : '还没有文档，点上方“+ 上传文档”归档到分类'}}</view>
     <view wx:for="{{docs}}" wx:key="id" class="card doc">
       <view class="doc-name">{{item.name}}</view>
       <view class="doc-meta">{{item.sizeText}} · {{item.uploader_name}}</view>
