@@ -75,7 +75,7 @@
             <view class="fname">{{item.name}}<text wx:if="{{item.is_pinned}}" class="fbadge">置顶</text></view>
             <view class="fsub">{{item.count}} 份文档</view>
           </view>
-          <text wx:if="{{!selectMode}}" class="fpin {{item.is_pinned ? 'fpin-on' : ''}}" data-id="{{item.id}}" catchtap="togglePinFolder">{{item.is_pinned ? '取消' : '置顶}}</text>
+          <text wx:if="{{!selectMode}}" class="fpin {{item.is_pinned ? 'fpin-on' : ''}}" data-id="{{item.id}}" catchtap="togglePinFolder">{{item.is_pinned ? '取消' : '置顶'}}</text>
           <view wx:if="{{!selectMode}}" class="fchev">›</view>
         </view>
       </view>
