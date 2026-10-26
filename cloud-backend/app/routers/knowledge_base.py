@@ -999,7 +999,11 @@ async def upload_document(
         await _get_folder(db, kb_id, folder_id)
     if not file.filename:
         raise HTTPException(status_code=400, detail="未选择文件")
-    suffix = Path(file.filename).suffix.lower()
+    # 微信小程序 chooseMessageFile 上传时，multipart filename 是微信内部临时名
+    # （形如 d3VoY5wpTT6F1ee... 的一串字符），用户可见的原始文件名由前端随 name 提交；
+    # web 端不传 name，仍以 file.filename 为准
+    original_name = (name or "").strip() or file.filename
+    suffix = Path(original_name).suffix.lower()
     if suffix not in ALLOWED_DOC_EXTS:
         raise HTTPException(status_code=400, detail=f"不支持的文件类型：{suffix or '未知'}")
 
@@ -1020,8 +1024,8 @@ async def upload_document(
         kb_id=kb_id,
         uploader_id=user.id,
         folder_id=folder_id,
-        name=(name or Path(file.filename).stem).strip() or Path(file.filename).stem,
-        filename=file.filename,
+        name=Path(original_name).stem.strip() or original_name,
+        filename=original_name,
         path=str(target),
         mime_type=file.content_type,
         size_bytes=len(data),
@@ -1109,6 +1113,36 @@ async def _get_doc(db: AsyncSession, kb_id: int, doc_id: int) -> KnowledgeDocume
     if doc is None or doc.kb_id != kb_id:
         raise HTTPException(status_code=404, detail="文档不存在")
     return doc
+
+
+@router.put("/{kb_id}/documents/{doc_id}")
+async def rename_document(
+    kb_id: int,
+    doc_id: int,
+    name: str = Form(...),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """重命名文档：修正上传时丢失原始名的历史文档（微信内部临时名）。"""
+    kb = await _get_kb(db, kb_id)
+    await _require_role(db, kb, user, "editor")
+    _reject_builtin(kb, "重命名文档")
+    doc = await _get_doc(db, kb_id, doc_id)
+    new_name = (name or "").strip()
+    if not new_name:
+        raise HTTPException(status_code=400, detail="名称不能为空")
+    doc.name = new_name
+    # 保持 filename 扩展名与磁盘文件一致：新名不带扩展名时补回原扩展名，
+    # 保证前端的类型判断（pdf/office 分流）与下载文件名仍然正确
+    orig_suffix = Path(doc.filename or "").suffix
+    new_suffix = Path(new_name).suffix
+    if new_suffix:
+        doc.filename = new_name
+    elif orig_suffix:
+        doc.filename = f"{new_name}{orig_suffix}"
+    await db.commit()
+    await db.refresh(doc)
+    return _serialize_doc(doc, user)
 
 
 @router.delete("/{kb_id}/documents/{doc_id}")
