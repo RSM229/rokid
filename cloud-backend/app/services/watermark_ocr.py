@@ -103,10 +103,12 @@ _SEMANTIC_ALIASES = {
     "天气": "weather", "气温": "weather",
     "拍摄人": "inspector", "拍照人": "inspector", "记录人": "inspector",
     "人员": "inspector", "检查人员": "inspector", "检查人": "inspector",
+    "监理单位": "supervision_unit", "监理单位名称": "supervision_unit",
+    "监理单位名称（盖章）": "supervision_unit", "项目监理机构": "supervision_unit",
     "监理": "inspector", "监理人员": "inspector", "旁站人员": "inspector",
     "见证人": "inspector", "验收人员": "inspector",
     "建设单位": "owner_unit", "施工单位": "construction_unit", "监理单位": "supervision_unit",
-    "建设单位名称": "owner_unit", "施工单位名称": "construction_unit", "监理单位名称": "supervision_unit",
+    "建设单位名称": "owner_unit", "施工单位名称": "construction_unit",
     "施工区域名称": "work_area",
     "部位": "section", "施工部位": "section", "施工区域": "work_area",
     "危大名称": "hazard_name", "危大工程名称": "hazard_name",
@@ -133,7 +135,10 @@ def _clean_line(raw: str) -> str:
 def _norm_label(value: str) -> str:
     text = str(value or "").strip().lower()
     text = text.replace("（", "(").replace("）", ")")
-    return re.sub(r"[\s:·•,，.。;；/\\_\-—]+", "", text)
+    # OCR 经常在中文标签内部插入空格（如“监 理单位”）。字段匹配时
+    # 空白不承载语义，应与冒号、分隔点一样统一去除；原始标签仍保存在证据中。
+    text = re.sub(r"[\s:：·•,，.。;；/\\_\-—]+", "", text)
+    return text.replace("(盖章)", "")
 
 
 def _schema_index() -> dict[str, str]:
@@ -231,8 +236,7 @@ def _valid_label(label: str) -> bool:
     text = label.strip(" \t-—·•")
     if not (1 <= len(text) <= 28):
         return False
-    if re.search(r"\s", text):
-        return False
+    # OCR 可能在中文标签内部插入空格；后续 _norm_label 会统一归一化。
     if re.search(r"https?$", text, re.IGNORECASE):
         return False
     if _DT_RE.search(text) or _GPS_RE.search(text):

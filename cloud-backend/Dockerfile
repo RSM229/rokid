@@ -8,8 +8,9 @@
 # 所以改代码走 uvicorn --reload，不需要重新 build 镜像。
 FROM python:3.12-slim
 
+# RapidOCR is not mirrored by Tsinghua; use official PyPI so fresh images include OCR.
 ENV TZ=Asia/Shanghai \
-    PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple \
+    PIP_INDEX_URL=https://pypi.org/simple \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
