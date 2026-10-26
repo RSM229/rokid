@@ -301,52 +301,11 @@ function sessionIdFromConversationId(conversationId: string): number {
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : Date.now()
 }
 
-interface CommandRoute {
-  level1?: string
-  level2?: string
-  level3?: string
-  navigate?: string
-  localAction?: string
-  reply: string
-}
-
-const COMMAND_ROUTES: Record<string, CommandRoute> = {
-  // 「工作记录 / 巡视 / 旁站 / 验收 / 见证」不再走指令跳转（2026-10-14 用户拍板删除弹窗界面）：
-  // 这些词直接落到 /agent/chat 由智能体建记录；「XX记录」保留为打开对应页面的指令。
-  '巡视记录': { level1: '工作记录', level2: '巡视记录', navigate: '/pages/work/index', reply: '正在打开巡视记录...' },
-  '验收记录': { level1: '工作记录', level2: '验收记录', navigate: '/pages/work/index', reply: '正在打开验收记录...' },
-  '旁站记录': { level1: '工作记录', level2: '旁站记录', navigate: '/pages/work/index', reply: '正在打开旁站记录...' },
-  '见证记录': { level1: '工作记录', level2: '见证记录', navigate: '/pages/work/index', reply: '正在打开见证记录...' },
-  '安全隐患': { level1: '安全隐患', reply: '可执行操作：启动隐患识别、查看隐患列表' },
-  '隐患识别': { level1: '安全隐患', level2: 'AI识别', localAction: 'hazard-recognition', reply: '请点击拍照导入现场图片进行隐患识别' },
-  '启动隐患识别': { level1: '安全隐患', level2: 'AI识别', localAction: 'hazard-recognition', reply: '请点击拍照导入现场图片进行隐患识别' },
-  '隐患列表': { level1: '安全隐患', level2: '隐患列表', navigate: '/pages/hazards/index', reply: '正在打开隐患列表...' },
-  'AI隐患识别': { level1: '安全隐患', level2: 'AI识别', navigate: '/pages/capture/index?mode=hazard', reply: '正在打开AI隐患识别...' },
-  '拍照': { level1: '安全隐患', level2: '现场识别', navigate: '/pages/capture/index', reply: '正在打开拍照识别...' },
-  '生成监理日志': { level1: '文书管理', level2: '监理日志', localAction: 'daily-log', reply: '请选择日期生成监理日志：' },
-  '监理日志': { level1: '文书管理', level2: '监理日志', localAction: 'daily-log', reply: '请选择日期生成监理日志：' },
-  '查看台账': { level1: '台账管理', navigate: '/pages/documents/index?tab=ledger', reply: '正在打开台账...' },
-  '台账': { level1: '台账管理', navigate: '/pages/documents/index?tab=ledger', reply: '正在打开台账...' },
-  '知识库': { level1: '信息库', localAction: 'knowledge-query', reply: '请选择资料范围后输入问题查询：' },
-  // 「资料库」＝「知识库」新名称（2026-10-09 改名，两个词都保留为可识别指令）
-  '资料库': { level1: '信息库', localAction: 'knowledge-query', reply: '请选择资料范围后输入问题查询：' },
-  '我的知识库': { level1: '资料库', navigate: '/pages/kb/index', reply: '正在打开我的资料库...' },
-  '我的资料库': { level1: '资料库', navigate: '/pages/kb/index', reply: '正在打开我的资料库...' },
-  '知识库管理': { level1: '资料库', navigate: '/pages/kb/index', reply: '正在打开资料库...' },
-  '资料库管理': { level1: '资料库', navigate: '/pages/kb/index', reply: '正在打开资料库...' },
-  '查看规范': { level1: '信息库', localAction: 'knowledge-query', reply: '好的，请输入要查询的规范或资料问题：' },
-  '文书审批': { level1: '文书管理', level2: '文书审批', navigate: '/pages/documents/index', reply: '正在打开文书审批...' },
-  '监理文书': { level1: '文书管理', navigate: '/pages/documents/index', reply: '正在打开监理文书...' },
-  '待办任务': { level1: '任务管理', navigate: '/pages/todo/index', reply: '正在打开待办任务...' },
-  '任务': { level1: '任务管理', navigate: '/pages/todo/index', reply: '正在打开任务列表...' },
-  'AI巡检': { level1: '安全隐患', level2: 'AI巡检', navigate: '/pages/inspection/index', reply: '正在打开AI巡检...' },
-  // “巡检”在监理业务里也可能是巡视记录的同义表达，不能由前端直接劫持到
-  // AI巡检页；交给服务端结合上下文判断。
-  '规范查询': { level1: '信息库', navigate: '/pages/knowledge/index', reply: '正在打开规范查询...' },
-  '返回': { reply: '已返回主页' },
-  '返回主页': { reply: '已返回主页' },
-  '主页': { reply: '已返回主页' },
-}
+// 🔴 2026-10-26（方案①）：原前端关键词指令表 COMMAND_ROUTES / matchCommand / handleCommand 已删除。
+// 自由文本「打开XX页」统一交后端 /agent/chat 的 navigate 工具（页面词典 = agent_tools.py _PAGE_ALIASES），
+// 后端回执 actions[{type:'navigate', url}] → agentReplyToMessage 映射为 navigate: 指令 → 点击即跳。
+// 确定性本地动作（语音记录/拍照识别/查资料/生成日志）仍由空态宫格 heroActions → handleActionTap 直接触发，
+// 零延迟、不经过 LLM。
 
 /** 工作台「模型」下拉可选的大模型清单（2026-10-09 改版：原为千问/华工两供应商，现扩展为多个模型）。
  * 2026-10-09 14:13 按需求精简为「华工 + 千问 3.7」两项系列（共 3 条）。
@@ -843,23 +802,6 @@ Page(themed({
     })
   },
 
-  matchCommand(text: string): CommandRoute | null {
-    const lower = text.toLowerCase().trim()
-    if (COMMAND_ROUTES[lower]) return COMMAND_ROUTES[lower]
-    // 创建/录入类意图不走路由跳转：直连智能体在对话里建记录（聊天即操作）。
-    // 修复「我要创建一条巡视记录」被子串命中「巡视记录」跳到工作记录页的问题。
-    if (/创建|新建|新增|录入|登记|建一条|写一条|记录一条|生成一条/.test(lower)) return null
-    // 子串兜底只认「短指令」（≤10 字且非疑问句）：修复
-    // 「混凝土浇筑旁站监理的要点有哪些？」因含「旁站」被劫持跳工作记录的问题。
-    // 长句 / 疑问句一律落到 AI 问答。
-    if (lower.length > 10) return null
-    if (/[?？]|哪些|什么|怎么|如何|为什么|要点|介绍|讲解|说明|区别/.test(lower)) return null
-    for (const key of Object.keys(COMMAND_ROUTES)) {
-      if (lower.includes(key)) return COMMAND_ROUTES[key]
-    }
-    return null
-  },
-
   async send() {
     const text = this.data.input.trim()
     const attachments = this.data.attachments
@@ -904,6 +846,9 @@ Page(themed({
     const userMsg: Message = { role: 'user', text }
     this.setData({ input: '', canSend: false })
 
+    // 确定性本地动作：「返回主页」精确匹配 → 重置会话（其余自然语言交后端智能体）
+    if (this.tryLocalReset(text, userMsg)) return
+
     // Pending evidence plan owns short follow-ups such as "巡视"; update that
     // draft in place instead of sending the answer to the general chat router.
     const lastAssistantIndex = [...this.data.messages].map((message, index) => ({ message, index }))
@@ -920,19 +865,17 @@ Page(themed({
     }
 
     // 上一轮是智能体追问（带快速选项/待补充字段）→ 本句按「答案」处理，直连智能体。
-    // 否则「巡视」「晴」这类短答会被指令表跳转或被知识范围拦截，中断建记录流程。
+    // 否则「巡视」「晴」这类短答会被知识范围拦截，中断建记录流程。
     const previousAssistant = [...this.data.messages].reverse().find(m => m.role === 'assistant')
     if (previousAssistant && ((previousAssistant.chips && previousAssistant.chips.length) || previousAssistant.hint)) {
       this.handleLlmChat(text, userMsg)
       return
     }
 
-    const route = this.matchCommand(text)
-    if (route) {
-      this.handleCommand(route, userMsg)
-      return
-    }
-
+    // 🔴 2026-10-26（方案①）：不再用前端关键词表（matchCommand）猜用户想跳哪个页。
+    // 「打开台账」「巡视记录」等自由文本统一交 /agent/chat，由后端 navigate 工具决定
+    // 跳哪个页并回 navigate 动作（agentReplyToMessage 已映射为 navigate: 指令，点击即跳）。
+    // 消除「前端指令表 + 后端意图路由」双轨漂移；确定性本地动作仍由宫格/按钮直接触发。
     if (this.data.knowledgeScope !== 'all') {
       this.handleKnowledgeQuery(text, userMsg)
       return
@@ -2727,37 +2670,20 @@ Page(themed({
     if (command) this.handleActionTap({ currentTarget: { dataset: { command } } } as unknown as WechatMiniprogram.TouchEvent)
   },
 
-  async handleCommand(route: CommandRoute, userMsg: Message) {
-    const breadcrumb = [route.level1, route.level2, route.level3].filter(Boolean) as string[]
-
-    if (route.reply === '已返回主页') {
-      this.setData({
-        breadcrumb: [],
-        hazardMode: false,
-        messages: [...this.data.messages, userMsg, { role: 'assistant', text: route.reply }],
-      })
-      this.currentSessionId = 0
-      this.initMessages()
-      return
-    }
-
+  /**
+   * 确定性本地动作：精确文本「返回/返回主页/主页」→ 重置会话回空态。
+   * 这是纯 UI 动作、无语义歧义，保留在前端；其余自然语言一律交后端智能体。
+   */
+  tryLocalReset(text: string, userMsg: Message): boolean {
+    if (!['返回', '返回主页', '主页'].includes(text.trim())) return false
     this.setData({
-      breadcrumb,
-      messages: [...this.data.messages, userMsg, { role: 'assistant', text: route.reply }],
+      breadcrumb: [],
+      hazardMode: false,
+      messages: [...this.data.messages, userMsg, { role: 'assistant', text: '已返回主页' }],
     })
-
-    if (route.localAction === 'hazard-recognition') {
-      this.setData({ hazardMode: true, mode: 'hazard' })
-    } else if (route.localAction === 'daily-log') {
-      this.setData({ showLogDialog: true })
-    } else if (route.localAction === 'knowledge-query') {
-      // 2026-10-09：不再弹「选择知识范围」，直接提示输入问题（范围固定走当前 knowledgeScope）
-      this.setData({
-        messages: [...this.data.messages, { role: 'assistant', text: '请输入要查询的规范或资料问题：' }],
-      })
-    } else     if (route.navigate) {
-      setTimeout(() => { wx.navigateTo({ url: route.navigate! }) }, 800)
-    }
+    this.currentSessionId = 0
+    this.initMessages()
+    return true
   },
 
   async handleKnowledgeQuery(text: string, userMsg: Message) {
