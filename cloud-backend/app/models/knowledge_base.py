@@ -118,6 +118,12 @@ class KbFolder(Base):
     is_preset: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default=text("0")
     )
+    # 置顶：同级内置顶文件夹排最前，多个置顶按 pinned_at 倒序（后置顶的更靠前）。
+    # 两列由 init_db 的 _reconcile_missing_columns 安全补齐，不破坏历史数据。
+    is_pinned: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=text("0")
+    )
+    pinned_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 

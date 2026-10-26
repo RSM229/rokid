@@ -268,6 +268,10 @@ class FolderUpdate(BaseModel):
     name: str = Field(min_length=1, max_length=128)
 
 
+class FolderPin(BaseModel):
+    pinned: bool = True
+
+
 class TagCreate(BaseModel):
     name: str = Field(min_length=1, max_length=64)
 
@@ -791,7 +795,12 @@ async def list_folders(
         await db.execute(
             select(KbFolder)
             .where(KbFolder.kb_id == kb_id)
-            .order_by(KbFolder.sort_order, KbFolder.name)
+            .order_by(
+                KbFolder.is_pinned.desc(),
+                KbFolder.pinned_at.desc(),
+                KbFolder.sort_order,
+                KbFolder.name,
+            )
         )
     ).scalars().all()
 
@@ -819,6 +828,7 @@ async def list_folders(
             "name": f.name,
             "parent_id": f.parent_id,
             "is_preset": bool(f.is_preset),
+            "is_pinned": bool(f.is_pinned),
             "count": recursive_count(f.id),
             "children": [node(c) for c in by_parent.get(f.id, [])],
         }
@@ -856,6 +866,26 @@ async def create_folder(
     await db.commit()
     await db.refresh(folder)
     return {"id": folder.id, "name": folder.name, "parent_id": folder.parent_id}
+
+
+@router.put("/{kb_id}/folders/{folder_id}/pin")
+async def pin_folder(
+    kb_id: int,
+    folder_id: int,
+    req: FolderPin,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """置顶/取消置顶文件夹：置顶的排在同级最前，多个置顶按置顶时间倒序。"""
+    kb = await _get_kb(db, kb_id)
+    await _require_role(db, kb, user, "editor")
+    _reject_builtin(kb, "置顶文件夹")
+    folder = await _get_folder(db, kb_id, folder_id)
+    folder.is_pinned = req.pinned
+    folder.pinned_at = datetime.now() if req.pinned else None
+    await db.commit()
+    await db.refresh(folder)
+    return {"id": folder.id, "name": folder.name, "is_pinned": bool(folder.is_pinned)}
 
 
 @router.delete("/{kb_id}/folders/{folder_id}")
