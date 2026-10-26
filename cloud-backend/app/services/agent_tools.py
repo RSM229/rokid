@@ -72,20 +72,45 @@ PROVFORM_CHOICES = (
     ("anquan_jianli_rizhi", "安全监理日志"),
 )
 
+# 页面别名词典：navigate 工具据此把「打开XX」映射到小程序页面。
+# 🔴 2026-10-26：与前端工作台指令表对齐（前端 matchCommand 的自由文本路由将退役，
+# 自然语言「打开某页」统一由本词典决定）。新增页面时两边同步。
 _PAGE_ALIASES = {
     "工作记录": "/pages/work/index",
     "记录": "/pages/work/index",
+    "巡视记录": "/pages/work/index",
+    "验收记录": "/pages/work/index",
+    "旁站记录": "/pages/work/index",
+    "见证记录": "/pages/work/index",
     "隐患": "/pages/hazards/index",
+    "隐患列表": "/pages/hazards/index",
     "隐患识别": "/pages/hazards/index",
     "文书": "/pages/documents/index",
     "文书列表": "/pages/documents/index",
+    "监理文书": "/pages/documents/index",
+    "文书审批": "/pages/documents/index",
+    "台账": "/pages/documents/index?tab=ledger",
+    "查看台账": "/pages/documents/index?tab=ledger",
     "工作台": "/pages/agent/index",
     "待办": "/pages/todo/index",
+    "待办任务": "/pages/todo/index",
+    "任务": "/pages/todo/index",
     "看板": "/pages/dashboard/index",
     "资料库": "/pages/kb/index",
     "知识库": "/pages/kb/index",
+    "我的知识库": "/pages/kb/index",
+    "我的资料库": "/pages/kb/index",
+    "知识库管理": "/pages/kb/index",
+    "资料库管理": "/pages/kb/index",
+    "规范查询": "/pages/knowledge/index",
+    "AI巡检": "/pages/inspection/index",
+    "巡检": "/pages/inspection/index",
+    "拍照识别": "/pages/capture/index",
+    "拍照": "/pages/capture/index",
+    "AI隐患识别": "/pages/capture/index?mode=hazard",
     "我的": "/pages/mine/index",
     "省统表": "/pages/record-form/choose",
+    "平行检验": "/pages/parallel/index",
 }
 
 
@@ -1782,7 +1807,7 @@ async def _navigate(ctx: ToolContext, args: dict) -> dict:
                 url, raw = val, key
                 break
     if not url:
-        return _ok("要打开哪个页面？可以说「打开工作记录」「打开隐患识别」「打开文书」「打开省统表录入」。")
+        return _ok("要打开哪个页面？可以说「打开工作记录」「打开隐患识别」「打开文书」「打开台账」「打开省统表录入」。")
     return _ok(f"已为你打开「{raw}」。", actions=[{"type": "navigate", "label": raw, "url": url}])
 
 
@@ -2343,10 +2368,11 @@ TOOLS: tuple[ToolSpec, ...] = (
     ),
     ToolSpec(
         "navigate",
-        "打开系统页面（工作记录/隐患识别/文书/待办/看板/资料库/省统表录入/我的）。用户说「打开XX」时用。",
-        {"*page": "页面名，如 工作记录"},
+        "打开系统页面（工作记录/巡视记录/验收记录/旁站记录/见证记录/隐患/隐患识别/文书/监理文书/台账/AI巡检/规范查询/拍照识别/待办/看板/资料库/知识库/省统表录入/平行检验/我的）。"
+        "用户说「打开XX」「查看XX」「XX页面」或只报一个页面名/功能名时用；不要追问用户想干什么，也不要当成知识问答。",
+        {"*page": "页面名，如 工作记录/台账/规范查询"},
         None, "read", _navigate,
-        ("打开工作记录", "打开隐患识别"),
+        ("打开工作记录", "打开台账", "规范查询"),
     ),
 )
 
