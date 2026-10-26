@@ -72,9 +72,10 @@
           <view wx:if="{{selectMode}}" class="fcheck {{selectedMap[item.id] ? 'fcheck-on' : ''}}">{{selectedMap[item.id] ? '✓' : ''}}</view>
           <view class="fico"><view class="fico-shape" /></view>
           <view class="fmain">
-            <view class="fname">{{item.name}}</view>
+            <view class="fname">{{item.name}}<text wx:if="{{item.is_pinned}}" class="fbadge">置顶</text></view>
             <view class="fsub">{{item.count}} 份文档</view>
           </view>
+          <text wx:if="{{!selectMode}}" class="fpin {{item.is_pinned ? 'fpin-on' : ''}}" data-id="{{item.id}}" catchtap="togglePinFolder">{{item.is_pinned ? '取消' : '置顶}}</text>
           <view wx:if="{{!selectMode}}" class="fchev">›</view>
         </view>
       </view>
@@ -120,6 +121,7 @@
   <!-- 文件夹多选操作栏：选择模式下替代主操作栏，支持全选 / 重命名 / 删除 / 完成 -->
   <view wx:if="{{selectMode}}" class="action-bar select-bar">
     <button class="btn-plain" size="mini" bindtap="toggleSelectAllFolders">全选</button>
+    <button class="btn-plain {{selectedFolderIds.length ? '' : 'btn-disabled'}}" size="mini" bindtap="pinSelectedFolders">{{pinLabel}}</button>
     <button class="btn-plain {{selectedFolderIds.length === 1 ? '' : 'btn-disabled'}}" size="mini" bindtap="renameSelectedFolder">重命名</button>
     <button class="btn-danger {{selectedFolderIds.length ? '' : 'btn-disabled'}}" size="mini" bindtap="deleteSelectedFolders">删除</button>
     <button class="btn-primary" size="mini" bindtap="exitSelectMode">完成</button>

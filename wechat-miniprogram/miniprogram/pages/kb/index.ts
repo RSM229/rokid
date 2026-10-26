@@ -26,6 +26,8 @@ interface KbFolderNode {
   is_preset: boolean
   count: number
   children: KbFolderNode[]
+  /** 置顶：同级内置顶文件夹排最前 */
+  is_pinned?: boolean
 }
 
 function formatSize(bytes: number): string {
@@ -121,6 +123,9 @@ Page(themed({
     selectedFolderIds: [] as number[],
     // WXML 表达式不支持方法调用（indexOf 不可用），用对象映射做勾选态绑定
     selectedMap: {} as Record<string, boolean>,
+
+    /** 多选栏置顶按钮文案：选中的文件夹全部已置顶时变为「取消置顶」 */
+    pinLabel: '置顶',
 
     /** 回收站：软删除文档列表（可恢复 / 彻底删除） */
     showTrash: false,
@@ -677,7 +682,13 @@ Page(themed({
   applySelection(ids: number[]) {
     const map: Record<string, boolean> = {}
     for (const id of ids) map[String(id)] = true
-    this.setData({ selectedFolderIds: ids, selectedMap: map })
+    // 选中项全部已置顶时，多选栏按钮切换为「取消置顶」
+    const allPinned = ids.length > 0 && ids.every((id) => this.data.folderMap[id]?.is_pinned)
+    this.setData({
+      selectedFolderIds: ids,
+      selectedMap: map,
+      pinLabel: allPinned ? '取消置顶' : '置顶',
+    })
   },
   toggleFolderSelect(folderId: number) {
     const cur = this.data.selectedFolderIds
@@ -811,6 +822,51 @@ Page(themed({
     } finally {
       this.setData({ creatingFolder: false })
     }
+  },
+
+  /* ===== 置顶：单文件夹一键切换 + 多选批量置顶/取消 ===== */
+  async togglePinFolder(event: WechatMiniprogram.TouchEvent) {
+    // catchtap 已阻止冒泡，不会误触发行内的「进入文件夹」
+    const id = Number(event.currentTarget.dataset.id)
+    const folder = this.data.folderMap[id]
+    if (!folder) return
+    const toPin = !folder.is_pinned
+    try {
+      await request(`/kb/${this.data.kbId}/folders/${id}/pin`, {
+        method: 'PUT',
+        data: { pinned: toPin },
+      })
+      this.loadFolders()
+    } catch (error) {
+      wx.showToast({ title: (error as Error).message, icon: 'none' })
+    }
+  },
+  async pinSelectedFolders() {
+    const ids = this.data.selectedFolderIds
+    if (!ids.length) {
+      wx.showToast({ title: '请先勾选文件夹', icon: 'none' })
+      return
+    }
+    // 混合选择时统一朝「置顶」操作；全部已置顶时一键取消
+    const toPin = !ids.every((id) => this.data.folderMap[id]?.is_pinned)
+    wx.showLoading({ title: toPin ? '置顶中...' : '取消中...', mask: true })
+    let failed = 0
+    for (const id of ids) {
+      try {
+        await request(`/kb/${this.data.kbId}/folders/${id}/pin`, {
+          method: 'PUT',
+          data: { pinned: toPin },
+        })
+      } catch {
+        failed += 1
+      }
+    }
+    wx.hideLoading()
+    wx.showToast({
+      title: failed ? `${failed} 个操作失败` : toPin ? '已置顶' : '已取消置顶',
+      icon: failed ? 'none' : 'success',
+    })
+    this.loadFolders()
   },
 
   /* ===== 文档重命名：修正上传时丢了原始名的历史文档 ===== */

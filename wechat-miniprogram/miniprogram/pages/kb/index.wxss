@@ -57,6 +57,10 @@
 .fname { font-size: 29rpx; font-weight: 600; color: var(--ink-2, #243b55); line-height: 1.35; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fsub { margin-top: 4rpx; font-size: 22rpx; color: #8a9bb0; }
 .fchev { flex: none; color: #c2ccd6; font-size: 34rpx; line-height: 1; }
+/* 置顶：名称后小徽标（不用 emoji，各机型渲染差异大）+ 行尾一键置顶/取消 */
+.fbadge { margin-left: 14rpx; padding: 2rpx 12rpx; border-radius: 8rpx; background: var(--brand-l, #3b8cff); color: #fff; font-size: 19rpx; font-weight: 500; vertical-align: 4rpx; }
+.fpin { flex: none; font-size: 23rpx; color: #8a9bb0; padding: 10rpx 6rpx; }
+.fpin-on { color: var(--brand-l, #3b8cff); font-weight: 600; }
 /* 多选模式：行首圆形勾选框 + 选中行高亮（点行只切勾选、不进入文件夹） */
 .fcheck { flex: none; width: 36rpx; height: 36rpx; border-radius: 50%; border: 2rpx solid #c2ccd6; box-sizing: border-box; display: flex; align-items: center; justify-content: center; font-size: 22rpx; line-height: 1; color: #fff; }
 .fcheck-on { background: var(--brand-l, #3b8cff); border-color: var(--brand-l, #3b8cff); }
