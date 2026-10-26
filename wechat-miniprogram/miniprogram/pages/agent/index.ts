@@ -254,6 +254,24 @@ function conversationIdFor(sessionId: number): string {
   return sessionId ? `wx-${sessionId}` : ''
 }
 
+/** 服务端 upload_image（/media/images）返回的水印识别结果 */
+interface ServerWatermark {
+  available?: boolean
+  recognized?: boolean
+  fields?: Record<string, any>
+  labeled_items?: Array<{ label?: string; value?: string }>
+  lines?: string[]
+}
+
+/** upload_image 响应（只列工作台用到的字段） */
+interface UploadedImageResult {
+  id: number
+  url: string
+  watermark?: ServerWatermark
+  capture_time?: string
+  capture_time_source?: string
+}
+
 /** 待发送附件：来自相册/相机/文件的本地临时路径 */
 interface Attachment {
   id: string
@@ -263,6 +281,12 @@ interface Attachment {
   ext?: string
   size?: number
   cameraCapture?: boolean
+  /** 准备阶段已上传：服务端媒体 id / 远端 url / 水印识别结果（唯一来源），下游复用，不再二次上传或 OCR */
+  mediaId?: number
+  remoteUrl?: string
+  serverWatermark?: ServerWatermark
+  captureTime?: string
+  captureTimeSource?: string
 }
 
 const LEGACY_HISTORY_KEY = `gdjl_${config.storageScope}_chat_history`
@@ -949,11 +973,13 @@ Page(themed({
     /** 水印读到的拍摄时间/地点/天气——相机记的比转述可靠，用来预填记录字段 */
     const wmFields: Record<string, string> = {}
     try {
-      // 图片先做统一证据准备：水印、EXIF 和通用场景观察。是否调用隐患模型
-      // 由后端请求计划决定，前端不再用关键词把图片直接送进某个业务分支。
+      // 图片统一证据准备：一次上传（服务端随上传完成水印 OCR + EXIF 并返回结果），
+      // 外加通用场景观察。是否调用隐患模型由后端请求计划决定，前端不再用关键词
+      // 把图片直接送进某个业务分支；也不再前端二次 OCR（水印唯一来源 = upload_image 返回）。
       if (images.length) {
         const results = await Promise.all(images.map(async (img) => {
-          const wm = await this.readWatermark(img.path)
+          const uploaded = await this.uploadEvidence(img, 'agent_workbench')
+          const wm = this.normalizeWatermark(uploaded)
           const observation = await this.observeImageOnce(img.path)
           return { path: img.path, wm, observation }
         }))
@@ -1017,7 +1043,7 @@ Page(themed({
       )
       if (wantsRecordPlan) {
         if (detections.length) {
-          await this.createReviewPlanFromAttachments(note, images, watermarks, observations, requestPlan, false)
+          await this.createReviewPlanFromAttachments(note, images, observations, requestPlan, false)
           await this.appendHazardCandidateMessage(
             detections,
             images,
@@ -1025,7 +1051,7 @@ Page(themed({
             '工作记录候选与安全隐患候选已分开整理。隐患识别不会自动建档，请分别核对后确认。',
           )
         } else {
-          await this.createReviewPlanFromAttachments(note, images, watermarks, observations, requestPlan)
+          await this.createReviewPlanFromAttachments(note, images, observations, requestPlan)
         }
         return
       }
@@ -1060,7 +1086,7 @@ Page(themed({
 
       await this.runAgentWithMaterial(
         note || '记录今天的工作', material, this.watermarkPrefill(wmFields), messages, wmFields,
-        images.length > 0, images.map(i => i.path), requestPlan,
+        images.length > 0, images, requestPlan,
       )
     } catch (error) {
       this.addMessage({ role: 'assistant', text: `识别失败：${(error as Error).message}` })
@@ -1072,7 +1098,6 @@ Page(themed({
   async createReviewPlanFromAttachments(
     note: string,
     images: Attachment[],
-    watermarks: Array<Record<string, any>>,
     observations: string[] = [],
     requestPlan?: AgentRequestPlan,
     manageLoading = true,
@@ -1082,17 +1107,19 @@ Page(themed({
       const conversationId = conversationIdFor(this.currentSessionId)
       const evidence: ReviewPlan['evidence'] = []
       for (const [index, image] of images.entries()) {
-        const uploaded = await uploadImage<{ id: number; url: string; watermark?: { available?: boolean; recognized?: boolean; fields?: Record<string, any>; lines?: string[] }; capture_time?: string; capture_time_source?: string }>(image.path, {
-          source: 'agent_review_plan', trigger_detection: false, add_system_watermark: image.cameraCapture === true,
-        })
-        const clientWatermark = watermarks[index] || {}
+        // 复用准备阶段已上传的媒体（含服务端水印识别结果）；未上传的（异常路径）兜底补传一次
+        const uploaded = image.mediaId !== undefined
+          ? { id: image.mediaId, url: image.remoteUrl || '', watermark: image.serverWatermark, capture_time: image.captureTime, capture_time_source: image.captureTimeSource } as UploadedImageResult
+          : await this.uploadEvidence(image, 'agent_review_plan')
+        if (!uploaded) throw new Error('图片证据上传失败，请重试')
         const serverFields = uploaded.watermark?.fields || {}
         const watermark: Record<string, any> = {
           ...serverFields,
-          ...clientWatermark,
-          _available: uploaded.watermark?.available === false ? 'false' : uploaded.watermark?.recognized ? 'true' : uploaded.watermark?.available ? 'empty' : clientWatermark._available,
-          _lines: uploaded.watermark?.lines?.length ? uploaded.watermark.lines : clientWatermark._lines,
-          labeled_items: serverFields.labeled_items?.length ? serverFields.labeled_items : clientWatermark.labeled_items,
+          _available: uploaded.watermark?.available === false ? 'false' : uploaded.watermark?.recognized ? 'true' : uploaded.watermark?.available ? 'empty' : 'false',
+          _lines: Array.isArray(uploaded.watermark?.lines) ? uploaded.watermark!.lines : [],
+          labeled_items: Array.isArray(serverFields.labeled_items) && serverFields.labeled_items.length
+            ? serverFields.labeled_items
+            : (uploaded.watermark?.labeled_items || []),
         }
         const exifTakenAt = uploaded.capture_time_source === 'exif' ? String(uploaded.capture_time || '') : ''
         const takenAt = String(watermark.taken_at || exifTakenAt)
@@ -1926,8 +1953,9 @@ Page(themed({
         : []
       return [{
         id: `hazard-${Date.now()}-${detectionIndex}`,
-        image: item.path,
+        image: image?.remoteUrl ? absoluteMediaUrl(image.remoteUrl) : item.path,
         localImage: item.path,
+        mediaId: image?.mediaId,
         title: String(item.raw?.top1_risk || item.raw?.description || item.raw?.risk_category || '待核实的现场安全隐患'),
         riskCategory: String(item.raw?.risk_category || item.raw?.hazard_type || '未分类'),
         evidence,
@@ -1948,6 +1976,11 @@ Page(themed({
   async registerHazardCandidateMedia(candidates: HazardCandidateView[]): Promise<HazardCandidateView[]> {
     const registered: HazardCandidateView[] = []
     for (const candidate of candidates) {
+      // 证据准备阶段已上传过的直接复用 mediaId，不再重复上传
+      if (candidate.mediaId) {
+        registered.push(candidate)
+        continue
+      }
       try {
         const uploaded = await uploadImage<{ id: number; url: string }>(candidate.localImage, {
           source: 'agent_hazard_candidate',
@@ -2153,45 +2186,57 @@ Page(themed({
     return { text: '未识别到明显安全隐患。', raw: result }
   },
 
-  /** 读图片水印（拍摄时间/地点/天气等）；失败静默返回空对象，不影响主流程 */
-  async readWatermark(imagePath: string): Promise<Record<string, any>> {
-    const token = session.getToken()
-    try {
-      const result = await new Promise<any>((resolve, reject) => {
-        wx.uploadFile({
-          url: `${config.apiBaseUrl}/media/watermark/recognize`,
-          filePath: imagePath,
-          name: 'file',
-          header: { Authorization: `Bearer ${token}` },
-          success: (res) => {
-            if (res.statusCode >= 200 && res.statusCode < 300) {
-              try {
-                resolve(JSON.parse(res.data))
-              } catch {
-                reject(new Error('水印返回格式异常'))
-              }
-            } else {
-              reject(new Error(`水印识别失败（HTTP ${res.statusCode}）`))
-            }
-          },
-          fail: (err) => reject(new Error(err.errMsg || '上传失败')),
-        })
-      })
-      const fields = (result && result.fields) || {}
-      const out: Record<string, any> = {
-        _available: result?.recognized ? 'true' : result?.available ? 'empty' : 'false',
-        _lines: Array.isArray(result?.lines) ? result.lines : [],
-        labeled_items: Array.isArray(fields.labeled_items) ? fields.labeled_items : [],
+  /**
+   * 证据准备阶段的唯一上传口：图片一次上传（/media/images），服务端随上传完成
+   * 水印 OCR + EXIF 解析并在响应中返回；结果缓存到 Attachment 上，下游
+   * （ReviewPlan / 隐患候选 / 挂记录）直接复用 mediaId，不再二次上传或二次 OCR。
+   * 失败返回空壳（_available=false 语义），不阻塞主流程。
+   */
+  async uploadEvidence(image: Attachment, source: string): Promise<UploadedImageResult | null> {
+    if (image.mediaId !== undefined) {
+      return {
+        id: image.mediaId,
+        url: image.remoteUrl || '',
+        watermark: image.serverWatermark,
+        capture_time: image.captureTime,
+        capture_time_source: image.captureTimeSource,
       }
-      for (const key of Object.keys(fields)) {
-        if (key === 'labeled_items') continue
-        const value = String(fields[key] || '').trim()
-        if (value) out[key] = value
-      }
-      return out
-    } catch {
-      return { _available: 'false' }
     }
+    try {
+      const uploaded = await uploadImage<UploadedImageResult>(image.path, {
+        source,
+        trigger_detection: false,
+        add_system_watermark: image.cameraCapture === true,
+      })
+      image.mediaId = uploaded.id
+      image.remoteUrl = uploaded.url
+      image.serverWatermark = uploaded.watermark
+      image.captureTime = uploaded.capture_time
+      image.captureTimeSource = uploaded.capture_time_source
+      return uploaded
+    } catch {
+      return null
+    }
+  },
+
+  /** 服务端水印识别结果 → 前端扁平字段记录（原 readWatermark 的输出格式） */
+  normalizeWatermark(uploaded: UploadedImageResult | null): Record<string, any> {
+    if (!uploaded || !uploaded.watermark) return { _available: 'false' }
+    const result = uploaded.watermark
+    const fields = result.fields || {}
+    const out: Record<string, any> = {
+      _available: result.recognized ? 'true' : result.available ? 'empty' : 'false',
+      _lines: Array.isArray(result.lines) ? result.lines : [],
+      labeled_items: Array.isArray(fields.labeled_items) && fields.labeled_items.length
+        ? fields.labeled_items
+        : (Array.isArray(result.labeled_items) ? result.labeled_items : []),
+    }
+    for (const key of Object.keys(fields)) {
+      if (key === 'labeled_items') continue
+      const value = String(fields[key] || '').trim()
+      if (value) out[key] = value
+    }
+    return out
   },
 
   /** 通用多模态场景观察，与专用隐患检测分离。 */
@@ -2254,7 +2299,7 @@ Page(themed({
     messages: Message[],
     wmFields: Record<string, string>,
     hasImage = false,
-    imagePaths: string[] = [],
+    images: Attachment[] = [],
     requestPlan?: AgentRequestPlan,
   ) {
     const selModel = this.data.models.find(m => m.id === this.data.currentModel)
@@ -2299,15 +2344,16 @@ Page(themed({
       }
       this.applyAgentReply(result, messages)
       // 上传图片且 Agent 建的是工作记录 → 自动把这张照片挂到该记录
-      // （复用 /media/images business_type=work_record 链路，后端会自动同步 inspection_photos/witness_photos/content_json.media_ids）
+      // （已上传的直接 /media/link 关联；未上传的走 /media/images business_type=work_record 链路。
+      //   后端会自动同步 inspection_photos/witness_photos/content_json.media_ids）
       // 单独 try 包裹：挂图失败绝不能冲掉已建好的记录卡片（落到外层 catch 会用原始 messages 覆盖）。
-      if (imagePaths.length) {
+      if (images.length) {
         try {
           const recCard =
             (result.cards && result.cards.find(c => c.kind === 'work_record' && c.id)) ||
             (result.card && result.card.kind === 'work_record' ? result.card : undefined)
           if (recCard && recCard.id) {
-            const { ok, failed, lastError } = await this.uploadPhotosToRecord(recCard.id, imagePaths)
+            const { ok, failed, lastError } = await this.attachPhotosToRecord(recCard.id, images)
             if (ok) {
               this.addMessage({
                 role: 'assistant',
@@ -2547,11 +2593,13 @@ Page(themed({
         if (value) values[field.name] = value
       }
       if (form.kind === 'attachments' && form.record_id) {
-        const watermarks = await Promise.all(picked.map(item => this.readWatermark(item.path)))
+        // 一次上传即拿到服务端水印识别结果（mediaId 缓存到 Attachment，下游 link/复核复用）
+        const uploadedList = await Promise.all(picked.map(item => this.uploadEvidence(item, 'agent_workbench')))
+        const watermarks = uploadedList.map(item => this.normalizeWatermark(item))
         const previewEvidence: ReviewPlan['evidence'] = picked.map((item, index) => {
           const watermark = watermarks[index] || {}
           return {
-            id: item.id, image: item.path,
+            id: item.id, image: item.remoteUrl ? absoluteMediaUrl(item.remoteUrl) : item.path,
             observedDate: this.watermarkDate(String(watermark.taken_at || '')),
             observedDateSource: watermark.taken_at ? 'watermark' : '',
             project: String(watermark.project || watermark.project_name || ''),
@@ -2577,13 +2625,12 @@ Page(themed({
           await this.createReviewPlanFromAttachments(
             note,
             picked,
-            watermarks,
             observations,
             requestPlan,
           )
           return
         }
-        const result = await this.uploadPhotosToRecord(form.record_id, picked.map(item => item.path))
+        const result = await this.attachPhotosToRecord(form.record_id, picked)
         this.updateAgentForm(messageIndex, current => ({
           ...current, busy: false, kind: 'attachments_done', attachments: current.attachments ? { ...current.attachments, picked: [] } : undefined,
         }))
@@ -2636,7 +2683,9 @@ Page(themed({
     const watermarks: Array<Record<string, any>> = []
     const observations: string[] = []
     const results = await Promise.all(images.map(async image => ({
-      image, watermark: await this.readWatermark(image.path), observation: await this.observeImageOnce(image.path),
+      image,
+      watermark: this.normalizeWatermark(await this.uploadEvidence(image, 'agent_workbench')),
+      observation: await this.observeImageOnce(image.path),
     })))
     for (const result of results) {
       watermarks.push(result.watermark)
@@ -2648,7 +2697,7 @@ Page(themed({
       note,
       this.buildPlanEvidence(images, watermarks, observations),
     )
-    const reviewMessageIndex = await this.createReviewPlanFromAttachments(note, images, watermarks, observations, requestPlan)
+    const reviewMessageIndex = await this.createReviewPlanFromAttachments(note, images, observations, requestPlan)
     if (reviewMessageIndex === null || form.kind !== 'work_record') return
     const plan = this.data.messages[reviewMessageIndex]?.reviewPlan
     if (plan && reviewIssues(plan).length === 0) {
@@ -2851,6 +2900,42 @@ Page(themed({
         failed += 1
         lastError = (error as Error).message
       }
+    }
+    if (ok) {
+      invalidateByPrefix('/work-record')
+      invalidateCache(CACHE_KEYS.WORK_RECORD_STATS)
+    }
+    return { ok, failed, lastError }
+  },
+
+  /**
+   * 把 Attachment[] 挂到工作记录：证据准备阶段已上传的直接 /media/link 关联（零重复上传），
+   * 未上传的退回 uploadPhotosToRecord 逐张上传。返回与 uploadPhotosToRecord 相同的统计。
+   */
+  async attachPhotosToRecord(recordId: number, images: Attachment[]): Promise<{ ok: number; failed: number; lastError: string }> {
+    const uploadedIds = images.filter(img => img.mediaId !== undefined).map(img => img.mediaId as number)
+    const pending = images.filter(img => img.mediaId === undefined)
+    let ok = 0
+    let failed = 0
+    let lastError = ''
+    if (uploadedIds.length) {
+      try {
+        await request('/media/link', {
+          method: 'POST',
+          data: { media_ids: uploadedIds, business_type: 'work_record', business_id: recordId },
+          timeout: 30000,
+        })
+        ok += uploadedIds.length
+      } catch (error) {
+        failed += uploadedIds.length
+        lastError = (error as Error).message
+      }
+    }
+    if (pending.length) {
+      const result = await this.uploadPhotosToRecord(recordId, pending.map(img => img.path))
+      ok += result.ok
+      failed += result.failed
+      lastError = result.lastError || lastError
     }
     if (ok) {
       invalidateByPrefix('/work-record')
