@@ -45,7 +45,7 @@ Page(themed({
   recorderStopHandler: null as Parameters<typeof recorder.onStop>[0] | null,
   recorderErrorHandler: null as Parameters<typeof recorder.onError>[0] | null,
   /** 等待选好文件夹后再上传的暂存内容（不放进 data，避免无谓的渲染层序列化） */
-  pendingFiles: [] as string[],
+  pendingFiles: [] as Array<{ path: string; name: string }>,
   pendingAudio: '',
   pendingAudioName: '',
   /** 搜索防抖定时器 */
@@ -93,6 +93,12 @@ Page(themed({
     renameFolderId: 0,
     renameFolderName: '',
     renamingFolder: false,
+
+    /** 文档重命名：修正上传时丢了原始名的历史文档（微信内部临时名） */
+    showRenameDoc: false,
+    renameDocId: 0,
+    renameDocName: '',
+    renamingDoc: false,
 
     /** 文件夹操作下拉菜单（新建/重命名/删除） */
     showFolderMenu: false,
@@ -362,19 +368,22 @@ Page(themed({
       success: (res) => {
         const files = res.tempFiles || []
         if (!files.length) return
-        const paths = files.map((f) => f.path)
+        // 微信 chooseMessageFile 上传后，服务端 multipart filename 是微信内部临时名
+        // （形如 d3VoY5wpTT6F1ee... 的一串字符），用户可见的原始文件名只在 f.name，
+        // 必须随表单一起提交，后端才存得到真实文档名
+        const picked = files.map((f) => ({ path: f.path, name: f.name || '' }))
         // 已在某个文件夹内：直接归档到当前文件夹
         if (this.data.currentFolderId) {
-          this.doUpload(paths, this.data.currentFolderId)
+          this.doUpload(picked, this.data.currentFolderId)
           return
         }
         // 根目录：先选目标文件夹，保证文档一定落在文件夹里；
         // 若分类接口不可用（降级模式没有任何文件夹），退回旧的未分类上传，不阻断使用
         if (!this.data.folderOptions.length) {
-          this.doUpload(paths, 0)
+          this.doUpload(picked, 0)
           return
         }
-        this.pendingFiles = paths
+        this.pendingFiles = picked
         this.openPicker('upload', '上传到哪个文件夹')
       },
       fail: (err) => {
@@ -387,17 +396,21 @@ Page(themed({
     })
   },
 
-  async doUpload(paths: string[], folderId: number) {
+  async doUpload(files: Array<{ path: string; name: string }>, folderId: number) {
     const token = session.getToken()
-    const formData = folderId ? { folder_id: String(folderId) } : {}
+    const formData: Record<string, string> = {}
+    if (folderId) formData.folder_id = String(folderId)
     let done = 0
     try {
-      for (const path of paths) {
-        wx.showLoading({ title: `上传中 ${done + 1}/${paths.length}`, mask: true })
+      for (const file of files) {
+        // 原始文件名（含扩展名）随表单提交：后端据此存显示名与 filename，
+        // 否则微信会把内部临时名当成文档名
+        if (file.name) formData.name = file.name
+        wx.showLoading({ title: `上传中 ${done + 1}/${files.length}`, mask: true })
         await new Promise<void>((resolve, reject) => {
           wx.uploadFile({
             url: `${config.apiBaseUrl}/kb/${this.data.kbId}/documents`,
-            filePath: path,
+            filePath: file.path,
             name: 'file',
             formData,
             header: token ? { Authorization: `Bearer ${token}` } : {},
@@ -598,9 +611,9 @@ Page(themed({
     this.setData({ showPicker: false, pickerMode: '', pickerDocId: 0 })
 
     if (mode === 'upload') {
-      const paths = this.pendingFiles
+      const files = this.pendingFiles
       this.pendingFiles = []
-      if (paths.length) await this.doUpload(paths, targetId)
+      if (files.length) await this.doUpload(files, targetId)
       return
     }
     if (mode === 'audio') {
@@ -797,6 +810,37 @@ Page(themed({
       wx.showToast({ title: (error as Error).message, icon: 'none' })
     } finally {
       this.setData({ creatingFolder: false })
+    }
+  },
+
+  /* ===== 文档重命名：修正上传时丢了原始名的历史文档 ===== */
+  openRenameDoc(event: WechatMiniprogram.TouchEvent) {
+    const docId = Number(event.currentTarget.dataset.id)
+    const doc = this.data.docs.find((d) => d.id === docId)
+    if (!doc) return
+    this.setData({ showRenameDoc: true, renameDocId: docId, renameDocName: doc.name || '' })
+  },
+  hideRenameDoc() { this.setData({ showRenameDoc: false }) },
+  onRenameDocInput(event: WechatMiniprogram.Input) { this.setData({ renameDocName: event.detail.value }) },
+  async confirmRenameDoc() {
+    const name = this.data.renameDocName.trim()
+    if (!name) { wx.showToast({ title: '请输入文档名称', icon: 'none' }); return }
+    this.setData({ renamingDoc: true })
+    wx.showLoading({ title: '保存中...', mask: true })
+    try {
+      await request(`/kb/${this.data.kbId}/documents/${this.data.renameDocId}`, {
+        method: 'PUT',
+        data: { name },
+      })
+      wx.hideLoading()
+      wx.showToast({ title: '已保存', icon: 'success' })
+      this.setData({ showRenameDoc: false })
+      this.refreshDocs()
+    } catch (error) {
+      wx.hideLoading()
+      wx.showToast({ title: (error as Error).message, icon: 'none' })
+    } finally {
+      this.setData({ renamingDoc: false })
     }
   },
 

@@ -104,6 +104,7 @@
         <text class="link-green" data-id="{{item.id}}" bindtap="openContent">查看</text>
         <text class="link-gray" data-id="{{item.id}}" bindtap="downloadDoc">下载</text>
         <text wx:if="{{canUpload && folderOptions.length}}" class="link-gray" data-id="{{item.id}}" bindtap="openMoveDoc">移动</text>
+        <text wx:if="{{canUpload}}" class="link-gray" data-id="{{item.id}}" bindtap="openRenameDoc">重命名</text>
         <text wx:if="{{canUpload}}" class="link-gray" data-id="{{item.id}}" data-name="{{item.name}}" bindtap="openTagEdit">标签</text>
         <text wx:if="{{canUpload}}" class="link-red" data-id="{{item.id}}" bindtap="deleteDoc">删除</text>
       </view>
@@ -160,6 +161,20 @@
     <view class="modal-btns">
       <button class="btn-cancel" bindtap="hideRenameFolder">取消</button>
       <button class="btn-primary" loading="{{renamingFolder}}" bindtap="confirmRenameFolder">保存</button>
+    </view>
+  </view>
+
+  <!-- 重命名文档：修正上传时丢失原始名的历史文档（微信内部临时名） -->
+  <view wx:if="{{showRenameDoc}}" class="mask" bindtap="hideRenameDoc"></view>
+  <view wx:if="{{showRenameDoc}}" class="modal">
+    <view class="modal-title">重命名文档</view>
+    <view class="field-group">
+      <text class="field-label">文档名称</text>
+      <input class="field-input" value="{{renameDocName}}" placeholder="输入新的名称" bindinput="onRenameDocInput" />
+    </view>
+    <view class="modal-btns">
+      <button class="btn-cancel" bindtap="hideRenameDoc">取消</button>
+      <button class="btn-primary" loading="{{renamingDoc}}" bindtap="confirmRenameDoc">保存</button>
     </view>
   </view>
 
