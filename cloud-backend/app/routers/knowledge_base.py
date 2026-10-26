@@ -63,6 +63,11 @@ router = APIRouter()
 ALLOWED_DOC_EXTS = {".docx", ".xlsx", ".pdf", ".doc", ".xls", ".txt", ".md"}
 AUDIO_EXTS = {".mp3", ".m4a", ".aac", ".wav", ".webm", ".ogg", ".amr"}
 
+# 文档「未删除」过滤：删除是软删除（is_deleted=True 进回收站），
+# is_deleted 为 NULL 的历史行视为未删除。所有计数查询都必须带上它——
+# 否则回收站里的文档会把「N 份文档」算虚高（删了文档计数不变）。
+_DOC_ALIVE = KnowledgeDocument.is_deleted.is_(None) | (KnowledgeDocument.is_deleted == False)  # noqa: E712
+
 
 def _kb_root() -> Path:
     root = settings.knowledge_base_path / "user_kb"
@@ -311,7 +316,9 @@ async def list_knowledge_bases(
 
     doc_counts = dict(
         (await db.execute(
-            select(KnowledgeDocument.kb_id, func.count(KnowledgeDocument.id)).group_by(
+            select(KnowledgeDocument.kb_id, func.count(KnowledgeDocument.id))
+            .where(_DOC_ALIVE)
+            .group_by(
                 KnowledgeDocument.kb_id
             )
         )).all()
@@ -449,7 +456,9 @@ async def list_plaza(
     )
     doc_counts = dict(
         (await db.execute(
-            select(KnowledgeDocument.kb_id, func.count(KnowledgeDocument.id)).group_by(
+            select(KnowledgeDocument.kb_id, func.count(KnowledgeDocument.id))
+            .where(_DOC_ALIVE)
+            .group_by(
                 KnowledgeDocument.kb_id
             )
         )).all()
@@ -535,7 +544,9 @@ async def get_knowledge_base(
     await _ensure_builtin_synced(db, kb)
     document_count = (
         await db.execute(
-            select(func.count(KnowledgeDocument.id)).where(KnowledgeDocument.kb_id == kb_id)
+            select(func.count(KnowledgeDocument.id)).where(
+                KnowledgeDocument.kb_id == kb_id, _DOC_ALIVE
+            )
         )
     ).scalar() or 0
     member_count = (
@@ -807,7 +818,7 @@ async def list_folders(
     counts = dict(
         (await db.execute(
             select(KnowledgeDocument.folder_id, func.count(KnowledgeDocument.id))
-            .where(KnowledgeDocument.kb_id == kb_id)
+            .where(KnowledgeDocument.kb_id == kb_id, _DOC_ALIVE)
             .group_by(KnowledgeDocument.folder_id)
         )).all()
     )
