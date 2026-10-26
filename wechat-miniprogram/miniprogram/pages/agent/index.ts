@@ -8,6 +8,7 @@ import { getCached, invalidateCache, invalidateByPrefix, CACHE_KEYS } from '../.
 import { ensurePrivacy } from '../../utils/privacy'
 import { themed } from '../../utils/theme'
 import { cleanMarkdown } from '../../utils/markdown'
+import { normalizeDateTimeInput, resolveDateTimeRange } from '../../utils/date-time-picker'
 import { FORM_CODE_BY_LABEL, createReviewPlan, saveReviewPlan, listReviewPlans, confirmReviewPlan, executeReviewPlan, editEvent, editFormField, editEvidenceWatermark, addEvidenceWatermark, confirmPlan, reviewIssues, evidenceTargetConflicts, reviewPlanFromItemPlan, mergeEvents, splitEvidence, releaseEvidence, assignEvidence, addEvent, removeEvent, type ReviewPlan, type RequestPlanItemPlan } from '../../services/work-review'
 
 const INLINE_RECORD_TYPES = ['巡视', '验收', '见证', '旁站', '平行检验', '起重机械安拆检查', '待定']
@@ -31,7 +32,7 @@ interface AgentFormField {
   canonical?: string
   definition_source?: string
   label: string
-  control: 'text' | 'textarea' | 'select' | 'date' | 'datetime' | 'number' | string
+  control: 'text' | 'textarea' | 'select' | 'date' | 'time' | 'datetime' | 'number' | string
   required: boolean
   value: string
   options: string[]
@@ -364,7 +365,7 @@ const FIELD_SUGGESTIONS: Record<string, string[]> = {
   witness_accept_result: ['合格', '待检测', '不合格'],
 }
 
-const WORK_FIELD_LABELS: Record<string, string> = {"section": "工程部位", "location": "具体位置", "work_content": "现场施工/工作内容", "weather": "天气", "inspection_remark": "巡视备注", "problems": "发现问题", "treatment": "处理措施", "worker_count": "施工人数（正式提交必填）", "inspection_start_time": "巡视开始时间 YYYY-MM-DD HH:mm", "inspection_end_time": "巡视结束时间 YYYY-MM-DD HH:mm", "record_date": "业务日期 YYYY-MM-DD（默认现场当天）", "acceptance_type": "验收类型", "acceptance_content": "验收内容", "acceptance_basis": "验收依据", "acceptance_participants": "实际参验单位及人员", "acceptance_result": "人工确认的验收结论", "station_project_name": "旁站工程名称", "station_location": "旁站关键部位", "station_process": "旁站关键工序", "start_time": "旁站开始时间 YYYY-MM-DD HH:mm 或 HH:mm", "end_time": "旁站结束时间 YYYY-MM-DD HH:mm 或 HH:mm", "station_content": "旁站施工情况", "station_supervision_status": "旁站监理情况", "station_conclusion": "旁站结论", "witness_material_name": "材料名称", "witness_material_spec": "规格型号", "witness_quantity": "取样数量", "witness_unit": "计量单位", "witness_cert_no": "合格证/检测报告编号", "witness_accept_result": "进场验收结论", "manufacturer": "生产厂家", "remark": "备注"}
+const WORK_FIELD_LABELS: Record<string, string> = {"section": "工程部位", "location": "具体位置", "work_content": "现场施工/工作内容", "weather": "天气", "inspection_remark": "巡视备注", "problems": "发现问题", "treatment": "处理措施", "worker_count": "施工人数（正式提交必填）", "inspection_start_time": "巡视开始时间", "inspection_end_time": "巡视结束时间", "record_date": "业务日期", "acceptance_type": "验收类型", "acceptance_content": "验收内容", "acceptance_basis": "验收依据", "acceptance_participants": "实际参验单位及人员", "acceptance_result": "人工确认的验收结论", "station_project_name": "旁站工程名称", "station_location": "旁站关键部位", "station_process": "旁站关键工序", "start_time": "旁站开始时间", "end_time": "旁站结束时间", "station_content": "旁站施工情况", "station_supervision_status": "旁站监理情况", "station_conclusion": "旁站结论", "witness_material_name": "材料名称", "witness_material_spec": "规格型号", "witness_quantity": "取样数量", "witness_unit": "计量单位", "witness_cert_no": "合格证/检测报告编号", "witness_accept_result": "进场验收结论", "manufacturer": "生产厂家", "remark": "备注"}
 
 Page(themed({
   discardRecording: false,
@@ -1724,15 +1725,36 @@ Page(themed({
       .catch(error => wx.showToast({ title: `表单字段保存失败：${(error as Error).message}`, icon: 'none' }))
   },
 
+  changeInlineReviewDateTime(event: WechatMiniprogram.CustomEvent<{ value: string }>) {
+    const index = Number(event.currentTarget.dataset.index)
+    const id = String(event.currentTarget.dataset.id || '')
+    const formCode = String(event.currentTarget.dataset.formCode || '')
+    const field = String(event.currentTarget.dataset.field || '')
+    const plan = this.data.messages[index]?.reviewPlan
+    if (!plan || !formCode || !field) return
+    const candidate = editFormField(plan, id, formCode, field, event.detail.value)
+    void this.updateInlineReview(index, candidate)
+      .catch(error => wx.showToast({ title: `时间保存失败：${(error as Error).message}`, icon: 'none' }))
+  },
+
   chooseInlineReviewFormOption(event: WechatMiniprogram.TouchEvent) {
     const index = Number(event.currentTarget.dataset.index)
     const id = String(event.currentTarget.dataset.id)
     const formCode = String(event.currentTarget.dataset.formCode || '')
     const field = String(event.currentTarget.dataset.field || '')
-    const value = String(event.currentTarget.dataset.value || '')
+    let value = String(event.currentTarget.dataset.value || '')
     if (!formCode || !field) return
     const plan = this.data.messages[index]?.reviewPlan
     if (!plan) return
+    const fieldState = plan.events.find(item => item.id === id)?.formFields?.find(item => item.canonical === field)
+    if (fieldState?.control === 'datetime-local' || fieldState?.control === 'time') {
+      const normalized = normalizeDateTimeInput(value, fieldState.control === 'time' ? 'time' : 'datetime')
+      if (!normalized) {
+        wx.showToast({ title: '这个时间候选无法识别，请用时间滚轮选择', icon: 'none' })
+        return
+      }
+      value = normalized
+    }
     const candidate = editFormField(plan, id, formCode, field, value)
     void this.updateInlineReview(index, candidate)
       .catch(error => wx.showToast({ title: `表单字段保存失败：${(error as Error).message}`, icon: 'none' }))
@@ -2431,10 +2453,29 @@ Page(themed({
     }))
   },
 
+  onAgentFormDateTimeChange(event: WechatMiniprogram.CustomEvent<{ value: string }>) {
+    const messageIndex = Number(event.currentTarget.dataset.message)
+    const name = String(event.currentTarget.dataset.field || '')
+    const value = String(event.detail.value || '')
+    this.updateAgentForm(messageIndex, form => ({
+      ...form,
+      fields: form.fields.map(field => field.name === name ? { ...field, value } : field),
+    }))
+  },
+
   chooseAgentFormOption(event: WechatMiniprogram.TouchEvent) {
     const messageIndex = Number(event.currentTarget.dataset.message)
     const name = String(event.currentTarget.dataset.field || '')
-    const value = String(event.currentTarget.dataset.value || '')
+    let value = String(event.currentTarget.dataset.value || '')
+    const fieldState = this.data.messages[messageIndex]?.agentForm?.fields.find(field => field.name === name)
+    if (fieldState?.control === 'datetime' || fieldState?.control === 'time') {
+      const normalized = normalizeDateTimeInput(value, fieldState.control === 'time' ? 'time' : 'datetime')
+      if (!normalized) {
+        wx.showToast({ title: '这个时间建议无法识别，请用时间滚轮选择', icon: 'none' })
+        return
+      }
+      value = normalized
+    }
     this.updateAgentForm(messageIndex, form => ({
       ...form,
       fields: form.fields.map(field => field.name === name ? { ...field, value } : field),
@@ -3498,8 +3539,8 @@ Page(themed({
         station_process: fields.station_process || '', record_date: fields.record_date || '',
         station_location: fields.station_location || '',
         weather: fields.weather || '',
-        start_time: '',
-        end_time: '',
+        start_time: fields.start_time || fields.station_start_time || '',
+        end_time: fields.end_time || fields.station_end_time || '',
         station_content: fields.station_content || '',
         station_supervision_status: fields.station_supervision_status || '',
         station_conclusion: fields.station_conclusion || '',
@@ -3603,6 +3644,18 @@ Page(themed({
     this.setData({ [`workForm.${field}`]: options[Number(event.detail.value)] || '' })
   },
 
+  onWorkFormDateChange(event: WechatMiniprogram.PickerChange) {
+    const field = String(event.currentTarget.dataset.field || '')
+    if (field !== 'record_date') return
+    this.setData({ [`workForm.${field}`]: String(event.detail.value) })
+  },
+
+  onWorkFormDateTimeChange(event: WechatMiniprogram.CustomEvent<{ value: string }>) {
+    const field = String(event.currentTarget.dataset.field || '')
+    if (!['inspection_start_time', 'inspection_end_time', 'start_time', 'end_time'].includes(field)) return
+    this.setData({ [`workForm.${field}`]: event.detail.value })
+  },
+
   async submitWorkForm() {
     const type = this.data.workFormType
     const form: Record<string, any> = { ...this.data.workForm }
@@ -3610,9 +3663,9 @@ Page(themed({
     if ('worker_count' in form) form.worker_count = form.worker_count === '' ? null : Number(form.worker_count)
     // schema 必填字段校验（provform draft-2026.09）
     const required: Record<string, Array<[string, string]>> = {
-      inspection: [['section', '巡视部位'], ['work_content', '施工情况']],
+      inspection: [['section', '巡视部位'], ['work_content', '施工情况'], ['inspection_start_time', '巡视开始时间']],
       acceptance: [['acceptance_type', '验收类型'], ['section', '施工区域'], ['acceptance_content', '验收内容'], ['acceptance_result', '验收结果']],
-      station: [['station_location', '旁站部位'], ['station_process', '关键工序']],
+      station: [['station_location', '旁站部位'], ['station_process', '关键工序'], ['start_time', '旁站开始时间'], ['end_time', '旁站结束时间']],
       witness: [['witness_material_name', '材料名称'], ['witness_quantity', '取样数量']],
     }
     for (const [field, label] of required[type] || []) {
@@ -3621,14 +3674,18 @@ Page(themed({
         return
       }
     }
-    // 旁站时间为 HH:MM（省统表 schema），后端为 datetime：与当日日期拼成 ISO 提交
-    if (type === 'station') {
-      const today = this.data.logDate || new Date().toISOString().slice(0, 10)
-      const payload = { ...form }
-      if (payload.start_time && /^\d{2}:\d{2}$/.test(payload.start_time)) payload.start_time = `${form.record_date || today}T${payload.start_time}`
-      if (payload.end_time && /^\d{2}:\d{2}$/.test(payload.end_time)) payload.end_time = `${form.record_date || today}T${payload.end_time}`
-      await this.postWorkForm(type, payload)
-      return
+
+    if (type === 'inspection' || type === 'station') {
+      const startField = type === 'station' ? 'start_time' : 'inspection_start_time'
+      const endField = type === 'station' ? 'end_time' : 'inspection_end_time'
+      const range = resolveDateTimeRange(String(form[startField] || ''), String(form[endField] || ''), String(form.record_date || ''))
+      if (range.invalidField) {
+        const field = range.invalidField === 'start' ? startField : endField
+        wx.showToast({ title: `请重新选择${WORK_FIELD_LABELS[field] || '时间'}`, icon: 'none' })
+        return
+      }
+      if (range.start) form[startField] = range.start
+      if (range.end) form[endField] = range.end
     }
     await this.postWorkForm(type, form)
   },

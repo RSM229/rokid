@@ -1,0 +1,8 @@
+.picker-value { box-sizing: border-box; min-height: 68rpx; padding: 0 14rpx; border: 1rpx solid #dce2e6; border-radius: 5rpx; display: flex; align-items: center; justify-content: space-between; color: #283943; font-size: 24rpx; background: #fff; }
+.reference-value { color: #8a6a2e; background: #fffaf0; border-color: #e5d7b8; }
+.placeholder-value { color: #99a4b0; }
+.disabled-value { color: #65747e; background: #f2f5f5; }
+.picker-caret { color: #7d8b93; font-size: 32rpx; line-height: 1; }
+.picker-hint-row { display: flex; align-items: center; justify-content: space-between; gap: 12rpx; margin-top: 5rpx; }
+.picker-hint { color: #8a6a2e; font-size: 19rpx; }
+.picker-adopt { flex: none; color: #28645b; font-size: 19rpx; }

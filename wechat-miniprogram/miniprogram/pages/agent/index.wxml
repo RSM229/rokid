@@ -160,7 +160,9 @@
                   <view wx:if="{{formField.conflict && formField.candidates.length}}" class="inline-review-chip-row form-option-row">
                     <view wx:for="{{formField.candidates}}" wx:for-item="candidate" wx:for-index="candidateIndex" wx:key="candidateIndex" class="inline-review-chip {{formField.value === candidate.value ? 'selected' : ''}}" data-index="{{mi}}" data-id="{{event.id}}" data-form-code="{{event.formCode}}" data-field="{{formField.canonical}}" data-value="{{candidate.value}}" bindtap="chooseInlineReviewFormOption">采用 {{candidate.value}}</view>
                   </view>
-                  <textarea wx:if="{{formField.control === 'textarea'}}" value="{{formField.value}}" disabled="{{formField.readonly}}" auto-height maxlength="-1" placeholder="{{formField.question || '请填写'}}" data-index="{{mi}}" data-id="{{event.id}}" data-form-code="{{event.formCode}}" data-field="{{formField.canonical}}" bindblur="changeInlineReviewFormField" />
+                  <date-time-picker wx:if="{{formField.control === 'datetime-local'}}" value="{{formField.value}}" reference-date="{{event.date}}" reference-enabled="{{formField.required}}" disabled="{{formField.readonly}}" data-index="{{mi}}" data-id="{{event.id}}" data-form-code="{{event.formCode}}" data-field="{{formField.canonical}}" bind:change="changeInlineReviewDateTime" />
+                  <date-time-picker wx:elif="{{formField.control === 'time'}}" mode="time" value="{{formField.value}}" reference-enabled="{{formField.required}}" disabled="{{formField.readonly}}" data-index="{{mi}}" data-id="{{event.id}}" data-form-code="{{event.formCode}}" data-field="{{formField.canonical}}" bind:change="changeInlineReviewDateTime" />
+                  <textarea wx:elif="{{formField.control === 'textarea'}}" value="{{formField.value}}" disabled="{{formField.readonly}}" auto-height maxlength="-1" placeholder="{{formField.question || '请填写'}}" data-index="{{mi}}" data-id="{{event.id}}" data-form-code="{{event.formCode}}" data-field="{{formField.canonical}}" bindblur="changeInlineReviewFormField" />
                   <view wx:elif="{{formField.control === 'select' && formField.options.length}}" class="inline-review-chip-row form-option-row">
                     <view wx:for="{{formField.options}}" wx:for-item="option" wx:for-index="optionIndex" wx:key="optionIndex" class="inline-review-chip {{formField.value === option ? 'selected' : ''}}" data-index="{{mi}}" data-id="{{event.id}}" data-form-code="{{event.formCode}}" data-field="{{formField.canonical}}" data-value="{{option}}" bindtap="chooseInlineReviewFormOption">{{option}}</view>
                   </view>
@@ -287,6 +289,8 @@
                 <picker wx:elif="{{field.control === 'date'}}" mode="date" value="{{field.value || '2000-01-01'}}" data-message="{{mi}}" data-field="{{field.name}}" bindchange="onAgentFormPicker">
                   <view class="agent-task-control {{field.value ? '' : 'placeholder'}}">{{field.value || '选择日期'}}<text class="agent-task-control-caret">›</text></view>
                 </picker>
+                <date-time-picker wx:elif="{{field.control === 'datetime'}}" value="{{field.value}}" reference-enabled="{{field.required}}" bind:change="onAgentFormDateTimeChange" data-message="{{mi}}" data-field="{{field.name}}" />
+                <date-time-picker wx:elif="{{field.control === 'time'}}" mode="time" value="{{field.value}}" reference-enabled="{{field.required}}" bind:change="onAgentFormDateTimeChange" data-message="{{mi}}" data-field="{{field.name}}" />
                 <textarea wx:elif="{{field.control === 'textarea'}}" class="agent-task-textarea" value="{{field.value}}" auto-height maxlength="-1" placeholder="{{field.placeholder || '填写' + field.label}}" data-message="{{mi}}" data-field="{{field.name}}" bindinput="onAgentFormInput" />
                 <input wx:else class="agent-task-control" type="{{field.control === 'number' ? 'number' : 'text'}}" value="{{field.value}}" placeholder="{{field.placeholder || '填写' + field.label}}" data-message="{{mi}}" data-field="{{field.name}}" bindinput="onAgentFormInput" />
               </view>
@@ -702,6 +706,8 @@
         <view class="form-group" wx:for="{{workFormFields}}" wx:key="key">
           <text class="form-label">{{item.label}}</text>
           <picker wx:if="{{item.key === 'acceptance_result' || item.key === 'witness_accept_result'}}" range="{{['合格','不合格','待整改']}}" data-field="{{item.key}}" data-options="{{['合格','不合格','待整改']}}" bindchange="onWorkFormPickerChange"><view class="form-input">{{workForm[item.key] || '请人工确认'}}</view></picker>
+          <picker wx:elif="{{item.key === 'record_date'}}" mode="date" value="{{workForm[item.key]}}" data-field="{{item.key}}" bindchange="onWorkFormDateChange"><view class="form-input">{{workForm[item.key] || '选择业务日期'}}<text class="agent-task-control-caret">›</text></view></picker>
+          <date-time-picker wx:elif="{{item.key === 'inspection_start_time' || item.key === 'inspection_end_time' || item.key === 'start_time' || item.key === 'end_time'}}" value="{{workForm[item.key]}}" reference-date="{{workForm.record_date}}" reference-enabled="{{item.key !== 'inspection_end_time'}}" data-field="{{item.key}}" bind:change="onWorkFormDateTimeChange" />
           <textarea wx:else class="form-textarea" value="{{workForm[item.key]}}" data-field="{{item.key}}" bindinput="onWorkFormInput" auto-height maxlength="5000" />
         </view>
       </scroll-view>

@@ -301,10 +301,13 @@
       <text class="close" bindtap="closeEditModal">×</text>
     </view>
     <scroll-view scroll-y class="edit-scroll">
-      <input class="edit-field" value="{{editForm.record_date}}" placeholder="业务日期 YYYY-MM-DD" bindinput="onEditInput" data-field="record_date" />
+      <view class="edit-field-label">业务日期</view>
+      <picker mode="date" value="{{editForm.record_date || '2000-01-01'}}" bindchange="onEditDateChange"><view class="edit-field edit-picker-value">{{editForm.record_date || '选择业务日期'}}<text>›</text></view></picker>
       <input wx:if="{{editForm.record_type === '巡视'}}" class="edit-field" type="number" value="{{editForm.worker_count}}" placeholder="施工人数（必填，可填0）" bindinput="onEditInput" data-field="worker_count" />
-      <input wx:if="{{editForm.record_type === '巡视'}}" class="edit-field" value="{{editForm.inspection_start_time}}" placeholder="巡视开始时间 YYYY-MM-DD HH:mm" bindinput="onEditInput" data-field="inspection_start_time" />
-      <input wx:if="{{editForm.record_type === '巡视'}}" class="edit-field" value="{{editForm.inspection_end_time}}" placeholder="巡视结束时间 YYYY-MM-DD HH:mm" bindinput="onEditInput" data-field="inspection_end_time" />
+      <view wx:if="{{editForm.record_type === '巡视'}}" class="edit-field-label">巡视开始时间</view>
+      <date-time-picker wx:if="{{editForm.record_type === '巡视'}}" value="{{editForm.inspection_start_time}}" reference-date="{{editForm.record_date}}" data-field="inspection_start_time" bind:change="onEditDateTimeChange" />
+      <view wx:if="{{editForm.record_type === '巡视'}}" class="edit-field-label">巡视结束时间</view>
+      <date-time-picker wx:if="{{editForm.record_type === '巡视'}}" value="{{editForm.inspection_end_time}}" reference-date="{{editForm.record_date}}" reference-enabled="false" data-field="inspection_end_time" bind:change="onEditDateTimeChange" />
       <input wx:if="{{editForm.record_type === '旁站'}}" class="edit-field" value="{{editForm.station_location}}" placeholder="旁站关键部位（必填）" bindinput="onEditInput" data-field="station_location" />
       <input wx:if="{{editForm.record_type === '旁站'}}" class="edit-field" value="{{editForm.station_process}}" placeholder="旁站关键工序（必填）" bindinput="onEditInput" data-field="station_process" />
       <textarea wx:if="{{editForm.record_type === '验收'}}" class="edit-field textarea" value="{{editForm.acceptance_content}}" placeholder="验收内容（必填）" bindinput="onEditInput" data-field="acceptance_content" />
@@ -323,8 +326,10 @@
       <textarea class="edit-field textarea" value="{{editForm.station_content}}" placeholder="旁站内容" bindinput="onEditInput" data-field="station_content" wx:if="{{editForm.record_type === '旁站'}}" />
       <textarea class="edit-field textarea" value="{{editForm.station_supervision_status}}" placeholder="旁站监理情况" bindinput="onEditInput" data-field="station_supervision_status" wx:if="{{editForm.record_type === '旁站'}}" />
       <textarea class="edit-field textarea" value="{{editForm.station_conclusion}}" placeholder="旁站结论" bindinput="onEditInput" data-field="station_conclusion" wx:if="{{editForm.record_type === '旁站'}}" />
-      <input class="edit-field" value="{{editForm.station_start_time}}" placeholder="开始时间" bindinput="onEditInput" data-field="station_start_time" wx:if="{{editForm.record_type === '旁站'}}" />
-      <input class="edit-field" value="{{editForm.station_end_time}}" placeholder="结束时间" bindinput="onEditInput" data-field="station_end_time" wx:if="{{editForm.record_type === '旁站'}}" />
+      <view wx:if="{{editForm.record_type === '旁站'}}" class="edit-field-label">旁站开始时间</view>
+      <date-time-picker wx:if="{{editForm.record_type === '旁站'}}" value="{{editForm.station_start_time}}" reference-date="{{editForm.record_date}}" data-field="station_start_time" bind:change="onEditDateTimeChange" />
+      <view wx:if="{{editForm.record_type === '旁站'}}" class="edit-field-label">旁站结束时间</view>
+      <date-time-picker wx:if="{{editForm.record_type === '旁站'}}" value="{{editForm.station_end_time}}" reference-date="{{editForm.record_date}}" data-field="station_end_time" bind:change="onEditDateTimeChange" />
       <input class="edit-field" value="{{editForm.witness_material_name}}" placeholder="材料名称" bindinput="onEditInput" data-field="witness_material_name" wx:if="{{editForm.record_type === '见证'}}" />
       <input class="edit-field" value="{{editForm.witness_material_spec}}" placeholder="规格型号" bindinput="onEditInput" data-field="witness_material_spec" wx:if="{{editForm.record_type === '见证'}}" />
       <input class="edit-field" value="{{editForm.witness_quantity}}" placeholder="取样数量" bindinput="onEditInput" data-field="witness_quantity" wx:if="{{editForm.record_type === '见证'}}" />

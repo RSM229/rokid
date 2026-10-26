@@ -1,0 +1,18 @@
+<view class="date-time-picker">
+  <picker
+    mode="multiSelector"
+    range="{{ranges}}"
+    value="{{indexes}}"
+    disabled="{{disabled}}"
+    bindcolumnchange="onColumnChange"
+    bindchange="onChange">
+    <view class="picker-value {{isReference && displayValue ? 'reference-value' : ''}} {{!displayValue ? 'placeholder-value' : ''}} {{disabled ? 'disabled-value' : ''}}">
+      <text>{{displayValue || (mode === 'time' ? '选择时间' : '选择日期和时间')}}</text>
+      <text class="picker-caret">›</text>
+    </view>
+  </picker>
+  <view wx:if="{{hint}}" class="picker-hint-row">
+    <text class="picker-hint">{{hint}}</text>
+    <text wx:if="{{!disabled}}" class="picker-adopt" bindtap="adoptReference">采用</text>
+  </view>
+</view>

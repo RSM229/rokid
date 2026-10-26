@@ -11,12 +11,18 @@
       </view>
 
       <input
-        wx:if="{{f.type === 'text' || f.type === 'datetime'}}"
+        wx:if="{{f.type === 'text'}}"
         class="pf-input"
         value="{{value[f.key]}}"
-        placeholder="{{f.placeholder || (f.type === 'datetime' ? 'YYYY-MM-DD HH:mm' : '请输入')}}"
+        placeholder="{{f.placeholder || '请输入'}}"
         data-key="{{f.key}}"
         bindinput="onInput" />
+      <date-time-picker
+        wx:elif="{{f.type === 'datetime'}}"
+        value="{{value[f.key]}}"
+        reference-enabled="{{f.required}}"
+        bind:change="onDateTime"
+        data-key="{{f.key}}" />
       <textarea
         wx:elif="{{f.type === 'textarea'}}"
         class="pf-textarea"
@@ -40,14 +46,13 @@
         bindchange="onPicker">
         <view class="pf-picker {{value[f.key] ? '' : 'pf-picker-empty'}}">{{value[f.key] || '请选择日期'}}</view>
       </picker>
-      <picker
+      <date-time-picker
         wx:elif="{{f.type === 'time'}}"
         mode="time"
         value="{{value[f.key]}}"
+        reference-enabled="{{f.required}}"
         data-key="{{f.key}}"
-        bindchange="onPicker">
-        <view class="pf-picker {{value[f.key] ? '' : 'pf-picker-empty'}}">{{value[f.key] || '请选择时间'}}</view>
-      </picker>
+        bind:change="onDateTime" />
       <picker
         wx:elif="{{f.type === 'select'}}"
         mode="selector"

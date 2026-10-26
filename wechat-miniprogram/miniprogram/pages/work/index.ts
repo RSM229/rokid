@@ -683,6 +683,16 @@ Page(themed({
     this.setData({ editForm })
   },
 
+  onEditDateChange(event: WechatMiniprogram.PickerChange) {
+    this.setData({ 'editForm.record_date': String(event.detail.value) })
+  },
+
+  onEditDateTimeChange(event: WechatMiniprogram.CustomEvent<{ value: string }>) {
+    const field = String(event.currentTarget.dataset.field || '')
+    if (!['inspection_start_time', 'inspection_end_time', 'station_start_time', 'station_end_time'].includes(field)) return
+    this.setData({ [`editForm.${field}`]: event.detail.value })
+  },
+
   onAcceptanceResultChange(event: WechatMiniprogram.PickerChange) {
     this.setData({ 'editForm.acceptance_result': this.data.acceptanceResults[Number(event.detail.value)] })
   },

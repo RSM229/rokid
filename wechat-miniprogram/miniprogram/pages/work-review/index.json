@@ -1,5 +1,8 @@
 {
   "navigationBarTitleText": "工作资料整理",
   "navigationBarBackgroundColor": "#ffffff",
-  "navigationBarTextStyle": "black"
+  "navigationBarTextStyle": "black",
+  "usingComponents": {
+    "date-time-picker": "/components/date-time-picker/index"
+  }
 }

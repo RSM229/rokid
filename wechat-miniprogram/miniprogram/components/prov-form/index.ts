@@ -69,6 +69,11 @@ Component({
       if (key) this._set(key, String(event.detail.value))
     },
 
+    onDateTime(event: WechatMiniprogram.CustomEvent<{ value: string }>) {
+      const key = String(event.currentTarget.dataset.key || '')
+      if (key) this._set(key, event.detail.value)
+    },
+
     onSelect(event: WechatMiniprogram.PickerChange) {
       const key = String(event.currentTarget.dataset.key || '')
       const field = this._field(key)

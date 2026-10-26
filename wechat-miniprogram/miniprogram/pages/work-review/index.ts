@@ -96,6 +96,10 @@ Page({
     const { id, form, field } = e.currentTarget.dataset as { id: string; form: string; field: string }
     this.save(editFormField(this.data.plan, id, form, field, String(e.detail.value)))
   },
+  updateSchemaDateTime(e: WechatMiniprogram.CustomEvent<{ value: string }>) {
+    const { id, form, field } = e.currentTarget.dataset as { id: string; form: string; field: string }
+    this.save(editFormField(this.data.plan, id, form, field, e.detail.value))
+  },
   toggleEvent(e: WechatMiniprogram.TouchEvent) {
     const id = String(e.currentTarget.dataset.id), selected = this.data.selectedIds as string[]
     const selectedIds = selected.includes(id) ? selected.filter(value => value !== id) : [...selected, id]
