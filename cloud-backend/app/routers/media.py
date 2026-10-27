@@ -549,8 +549,15 @@ async def upload_video(
             business_id=business_id,
         )
         db.add(video_record)
-    except Exception:
-        pass
+    except Exception as exc:
+        # 🔴 2026-10-27：原来是 `except Exception: pass` —— 完全静默。
+        # 这段在**主上传路径**上（视频本体已 add/flush，VideoRecord 是冗余索引行），
+        # 吞掉异常会让「建档静默失败」无从追查，与上方水印失败记 warning 的口径也不一致。
+        # 冗余行失败不该让整次上传 500，所以仍不重抛，但必须留痕。
+        import logging as _logging
+        _logging.getLogger(__name__).warning(
+            "视频冗余索引 VideoRecord 建档失败（视频本体已入库，不影响上传结果）：%s", exc
+        )
 
     await db.commit()
     await db.refresh(record)
