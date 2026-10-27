@@ -2,14 +2,22 @@
 
 为什么这么设计
 --------------
-本机 venv **缺 pydantic**，无法 `import app.routers.agent`。所以本脚本走
-**AST 提取**而非导入：直接从生产源码里把 `_AGENT_SYSTEM` 模板和 TOOLS 注册表
-抠出来，复刻 `catalog_for_prompt()`。好处不只是绕开依赖 ——
+`_AGENT_SYSTEM` 模板和 TOOLS 注册表走 **AST 提取**（不 import `app.routers.agent`，
+那是 FastAPI router，依赖链重）。好处不只是绕开依赖 ——
 
   🔴 **prompt 与生产同源**。你改了 agent.py 里的硬约束、或给 ToolSpec 加了
      examples，跑分器自动跟上，不存在「测的是另一套 prompt」这种假分数。
 
-零第三方依赖：只用标准库（ast / json / urllib / argparse / concurrent）。
+🔴 但**解析与评分层必须直接 import 生产函数**（agent_request_plan /
+agent_fact_model / agent_context / agent_tools），不能手抄。
+2026-10-27 教训：10-16 契约改版后模型输出从 `{tool,args,answer}` 变成
+`{intent,actions[].id,record_type,facts}`，而 judge 仍读 `parsed["tool"]`
+→ 恒 null → 45 条里 37 条被误杀，报出 17.8% 的假分数（模型其实全答对了）。
+手抄一份映射只会再漂移一次，所以这里直接调生产的 `normalize_candidate` +
+`enrich_plan_facts` + `facts_to_args`，与 agent.py:838-919 同一条链路。
+
+若生产模块 import 失败（venv 缺依赖），降级为 AST 提取的 ACTIONS 词典做
+id→tool 映射（不复刻 clarifications 逻辑），并在报告里标注降级。
 
 用法
 ----
@@ -69,6 +77,20 @@ EXPORTS = Path("D:/rokid/exports")
 
 sys.path.insert(0, str(HERE))
 from cases import CASES, groups, scorable, gap_cases  # noqa: E402
+
+# 🔴 生产解析链：评分必须与 agent.py 走同一条路（见文件头「2026-10-27 教训」）。
+# BACKEND 入 sys.path，使 `import app.*` 在任何 cwd 下都能成立。
+sys.path.insert(0, str(BACKEND))
+try:
+    from app.services import agent_fact_model as _fact_model
+    from app.services import agent_request_plan as _plan
+    from app.services import agent_tools as _tools_mod
+    from app.services.agent_context import extract_explicit_message_facts as _explicit_facts
+    PROD_CHAIN_OK = True
+    PROD_CHAIN_ERR = ""
+except Exception as exc:  # noqa: BLE001
+    PROD_CHAIN_OK = False
+    PROD_CHAIN_ERR = f"{type(exc).__name__}: {exc}"
 
 DEFAULT_BASE_URL = "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
 DEFAULT_MODEL = "qwen3.7-plus"
@@ -147,21 +169,34 @@ def _module_level_dict(tree: ast.AST, name: str) -> dict:
     raise RuntimeError(f"在 agent_request_plan.py 里找不到 {name} 字典字面量")
 
 
+# 降级用：生产模块 import 不了时，用 AST 抠的 ACTIONS 词典做 id→tool 映射。
+_AST_ACTIONS: dict = {}
+
+
 def extract_plan_catalog(path: Path = PLAN_PY) -> tuple[str, str]:
-    """复刻生产端 agent.py:768 的 format 参数：
-    actions = json.dumps(agent_request_plan.action_catalog())   # [{"id": 动作id, **spec}]
-    record_types = json.dumps(agent_request_plan.RECORD_TYPES)
-    同样走 AST 提取（零依赖，与 extract_tools 一致）。"""
+    """取 agent.py:770-771 的 format 参数（actions / record_types）。
+
+    🔴 优先直接调生产 `action_catalog()` + `RECORD_TYPES`（同源，不会漂移）；
+    生产 import 不了才降级为 AST 抠字面量，并把结果缓存进 `_AST_ACTIONS`
+    供 resolve_via_ast_fallback 用。"""
+    if PROD_CHAIN_OK:
+        _AST_ACTIONS.update(_module_level_dict(ast.parse(path.read_text(encoding="utf-8")), "ACTIONS"))
+        return (json.dumps(_plan.action_catalog(), ensure_ascii=False),
+                json.dumps(_plan.RECORD_TYPES, ensure_ascii=False))
     tree = ast.parse(path.read_text(encoding="utf-8"))
     actions = _module_level_dict(tree, "ACTIONS")
     record_types = _module_level_dict(tree, "RECORD_TYPES")
+    _AST_ACTIONS.update(actions)
     catalog = [{"id": action_id, **spec} for action_id, spec in actions.items()]
     return (json.dumps(catalog, ensure_ascii=False),
             json.dumps(record_types, ensure_ascii=False))
 
 
 def build_catalog(tools: list[dict]) -> str:
-    """逐行对齐 agent_tools.catalog_for_prompt() 的输出格式。"""
+    """工具参数说明段。生产 `catalog_for_prompt()` 可用时直接用（同源），
+    否则退回 AST 提取结果逐行拼装。"""
+    if PROD_CHAIN_OK:
+        return _tools_mod.catalog_for_prompt()
     blocks = []
     for t in tools:
         params = "、".join(f"{k}={v}" for k, v in t["params"].items()) or "（无参数）"
@@ -522,6 +557,90 @@ def normalize_split_tools(parsed: dict | None) -> dict | None:
     return out
 
 
+# 🔴 新契约 → judge 期望的旧形态。生产 agent.py:838-919 的同一链路：
+#   normalize_candidate → enrich_plan_facts → facts_to_args + args 合并 → selected_tool
+def resolve_via_production(parsed: dict | None, message: str,
+                           material: str = "") -> dict | None:
+    """用生产函数把模型 JSON 解析成 {tool, args, answer}。
+
+    与 agent_chat 保持一致的三件事：
+      1. record_type 只放在 args 里时也认（agent.py:846-847）；
+      2. selected_tool 由 actions 经目录解析，受 clarifications 影响
+         （agent_request_plan.py:373-376）—— 所以「该追问却建单」能被测出来；
+      3. args = facts_to_args(facts) 打底，模型显式 args 覆盖（agent.py:916-917），
+         并补 record_type（agent.py:918-919）。
+    """
+    if not isinstance(parsed, dict):
+        return parsed
+    has_material = bool(material)
+    candidate = dict(parsed)
+    semantic_args = candidate.get("args") if isinstance(candidate.get("args"), dict) else {}
+    if not candidate.get("record_type") and semantic_args.get("record_type"):
+        candidate["record_type"] = semantic_args.get("record_type")
+    plan = _plan.normalize_candidate(
+        candidate,
+        message=message,
+        attachment_count=1 if has_material else 0,
+        evidence_count=1 if has_material else 0,
+        evidence=[],
+        system_facts=[],
+    )
+    plan = _plan.enrich_plan_facts(
+        plan, _explicit_facts(message, message_ref=message),
+        evidence=[], system_facts=[],
+    )
+    tool = str(plan.get("selected_tool") or "").strip()
+    if tool not in _tools_mod.TOOL_BY_NAME:
+        tool = ""
+    args = {**_fact_model.facts_to_args(plan.get("facts")), **semantic_args}
+    if plan.get("record_type") and not str(args.get("record_type") or "").strip():
+        args["record_type"] = plan["record_type"]
+    return {
+        "tool": tool or None,
+        "args": args,
+        "answer": _norm(parsed.get("answer")) or "",
+        # 透传给报告用，judge 不读
+        "intent": plan.get("intent"),
+        "action_ids": [str(i.get("id") or "") for i in (plan.get("actions") or [])],
+        "clarifications": plan.get("clarifications") or [],
+        "execution_mode": plan.get("execution_mode"),
+    }
+
+
+def resolve_via_ast_fallback(parsed: dict | None) -> dict | None:
+    """降级路径：生产模块 import 不了时，用 AST 抠的 ACTIONS 做 id→tool 映射。
+
+    只覆盖「单动作直译」，不复刻 clarifications/多动作判定（那是生产逻辑，
+    抄一遍就会再漂移）。报告里会标注降级，此时分数只能当粗筛。
+    """
+    if not isinstance(parsed, dict):
+        return parsed
+    actions = parsed.get("actions")
+    action_ids: list[str] = []
+    if isinstance(actions, list):
+        for item in actions[:8]:
+            aid = item.strip() if isinstance(item, str) else (
+                _norm(item.get("id") or item.get("action")) if isinstance(item, dict) else "")
+            if aid:
+                action_ids.append(aid)
+    tool = None
+    if len(action_ids) == 1:
+        spec = _AST_ACTIONS.get(action_ids[0]) or {}
+        tool = spec.get("tool") or None
+    args = dict(parsed.get("args")) if isinstance(parsed.get("args"), dict) else {}
+    for fact in (parsed.get("facts") or []):
+        if isinstance(fact, dict):
+            field, value = _norm(fact.get("field")), fact.get("value")
+            if field and _norm(value) and field not in args:
+                args[field] = value
+    if parsed.get("record_type") and not args.get("record_type"):
+        args["record_type"] = parsed["record_type"]
+    return {"tool": tool, "args": args,
+            "answer": _norm(parsed.get("answer")) or "",
+            "intent": parsed.get("intent"), "action_ids": action_ids,
+            "clarifications": [], "execution_mode": "fallback"}
+
+
 def resolve_key(cli_key: str | None) -> str | None:
     for env in ("AGENT_EVAL_API_KEY", "DEFAULT_LLM_API_KEY"):
         v = os.environ.get(env)
@@ -568,6 +687,14 @@ def run(cases: list[dict], *, system: str, base_url: str, model: str, api_key: s
             if attempt < retries:
                 time.sleep(1.5 * (attempt + 1))
         parsed = normalize_native(res) if native else parse_json_object(res.get("content") or "")
+        # 🔴 新契约解析：生产链可用则调生产函数（normalize_candidate→
+        # enrich_plan_facts→facts_to_args），否则降级 AST id→tool 映射。
+        # native 对照组已产出 {tool,args}，无需再解析。
+        if not native and parsed is not None:
+            say = case.get("say") or ""
+            material = str(case.get("material") or "").strip()
+            parsed = (resolve_via_production(parsed, say, material)
+                      if PROD_CHAIN_OK else resolve_via_ast_fallback(parsed))
         if split_tools:
             parsed = normalize_split_tools(parsed)
         ok, fails = judge(case, parsed, res.get("error"))
