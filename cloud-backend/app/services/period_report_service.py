@@ -156,6 +156,16 @@ async def aggregate_records(
         )
     )
     rects = rects_result.scalars().all()
+    parallel_result = await db.execute(
+        select(ParallelInspection)
+        .where(
+            ParallelInspection.project_id == project_id,
+            ParallelInspection.inspect_date >= start.isoformat(),
+            ParallelInspection.inspect_date <= end.isoformat(),
+        )
+        .order_by(ParallelInspection.inspect_date, ParallelInspection.created_at)
+    )
+    parallels = parallel_result.scalars().all()
 
     # 进度
     progress_lines = []
@@ -199,6 +209,11 @@ async def aggregate_records(
     sup_sec = "；".join([*by_type["巡视"], *by_type["旁站"]]) or "无旁站及巡视记录。"
     acc_sec = "；".join(by_type["验收"]) or "无验收记录。"
     other_sec = "；".join(other_lines) or "无。"
+    parallel_sec = "\n".join(
+        f"{item.part} {item.item}：{item.result_detail}，结论：{item.conclusion}，"
+        f"依据：{item.basis}，方法：{item.method or ''}"
+        for item in parallels
+    ) or "本期无平行检验记录。"
 
     return {
         "work_records": len(records),
@@ -209,6 +224,7 @@ async def aggregate_records(
         "acceptance_section": acc_sec,
         "other_work_section": other_sec,
         "problems_section": problems_text,
+        "parallel_section": parallel_sec,
         "hazard_details": [
             {
                 "top1_risk": h.top1_risk,
@@ -735,7 +751,7 @@ async def generate_aggregate_doc(
         "doc_number": "",
         "date": start.isoformat(),
         "period": period_label,
-        "weekday": "日一二三四五六"[start.weekday()],
+        "weekday": "一二三四五六日"[start.weekday()],
         "date_start": start.isoformat(),
         "date_end": end.isoformat(),
         **project_fields(project),
