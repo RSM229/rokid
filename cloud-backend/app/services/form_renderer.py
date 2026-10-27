@@ -208,10 +208,9 @@ def _fill_units_across_row(row_cells: list, value: Any) -> None:
     # 保留 XML 节点引用；只存 id 会因代理对象回收后 id 复用而误跳过后续签章行。
     seen_tcs: list = []
     for cell in row_cells:
-        key = id(cell._tc)
-        if key in seen:
+        if any(cell._tc is tc for tc in seen_tcs):
             continue
-        seen.add(key)
+        seen_tcs.append(cell._tc)
         txt = cell.text
         for unit in ("年", "月", "日", "时", "分"):
             if unit in txt and unit in units:
@@ -1111,7 +1110,7 @@ def _fill_rizhi_shengtong(doc: DocxDocument, data: dict) -> None:
         date_val = _coerce_datetime(data.get("date") or data.get("target_date"))
         if date_val is not None:
             # 行0：年/月/日 各自独立网格格（同 tc 分段）
-            seen: set[int] = set()
+            seen_tcs: list = []
             for cell in table.rows[0].cells:
                 if any(cell._tc is tc for tc in seen_tcs):
                     continue
