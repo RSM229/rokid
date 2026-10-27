@@ -117,6 +117,29 @@ function progressEventView(raw: Record<string, unknown>): AgentProgressEventView
   }
 }
 
+/** 对话时间戳：沿用备案助手的「YYYY-MM-DD HH:mm:ss」展示。 */
+function formatMessageTime(value?: string | number | Date): string {
+  const date = value == null ? new Date() : new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  const pad = (part: number) => String(part).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+}
+
+/** 把一次处理的进度轨迹合并进最终助手回复，保持「步骤在正文前」。 */
+function mergeAgentProgress(target: Message, progress: Message): Message {
+  return {
+    ...target,
+    timeText: progress.timeText || target.timeText,
+    progressRequestId: progress.progressRequestId,
+    progressEvents: progress.progressEvents,
+    progressExpanded: progress.progressExpanded,
+    progressHeadline: progress.progressHeadline,
+    progressElapsedSeconds: progress.progressElapsedSeconds,
+    progressStartedAt: progress.progressStartedAt,
+    progressTerminal: progress.progressTerminal,
+  }
+}
+
 const recorder = wx.getRecorderManager()
 const player = wx.createInnerAudioContext()
 
@@ -143,6 +166,7 @@ interface AgentFormField {
   placeholder?: string
   hint?: string
   section?: string
+  showSection?: boolean
   recommendation?: string
   reason?: string
 }
@@ -150,6 +174,7 @@ interface AgentFormField {
 interface AgentForm {
   id: string
   kind: string
+  expanded?: boolean
   schema_version?: number
   field_schema?: string
   form_code?: string
@@ -190,6 +215,8 @@ interface HazardCandidateView {
 interface Message {
   role: 'user' | 'assistant'
   text: string
+  /** 消息头展示时间（备案助手样式：名称 + 时间） */
+  timeText?: string
   hint?: string
   image?: string
   images?: string[]
@@ -246,6 +273,8 @@ interface Message {
   reviewResult?: string
   reviewIssues?: string[]
   reviewSummary?: string
+  /** 工作记录草稿详情默认收起，点按钮再展开 */
+  reviewDetailsExpanded?: boolean
   progressRequestId?: string
   progressEvents?: AgentProgressEventView[]
   progressExpanded?: boolean
@@ -703,6 +732,19 @@ Page(themed({
     this.setData({ messages })
   },
 
+  toggleAgentForm(event: WechatMiniprogram.TouchEvent) {
+    const messageIndex = Number(event.currentTarget.dataset.message)
+    this.updateAgentForm(messageIndex, form => ({ ...form, expanded: !form.expanded }))
+  },
+
+  toggleInlineReviewDetails(event: WechatMiniprogram.TouchEvent) {
+    const index = Number(event.currentTarget.dataset.index)
+    const messages = [...this.data.messages]
+    if (!messages[index]?.reviewPlan) return
+    messages[index] = { ...messages[index], reviewDetailsExpanded: !messages[index].reviewDetailsExpanded }
+    this.setData({ messages })
+  },
+
   updateAgentProgressMessage(requestId: string, update: (message: Message) => Message) {
     const index = this.data.messages.findIndex(message => message.progressRequestId === requestId)
     if (index < 0) return -1
@@ -816,12 +858,18 @@ Page(themed({
     if (!requestId || messageIndex < 0) return
     const messages = [...this.data.messages]
     if (!messages[messageIndex]) return
-    messages[messageIndex] = {
-      ...messages[messageIndex], progressRequestId: requestId, progressEvents: [],
+    // 处理过程必须属于助手消息：用户消息右侧只保留提问，步骤插到它后面。
+    let progressIndex = messageIndex
+    if (messages[progressIndex].role === 'user') {
+      progressIndex += 1
+      messages.splice(progressIndex, 0, { role: 'assistant', text: '', timeText: formatMessageTime() })
+    }
+    messages[progressIndex] = {
+      ...messages[progressIndex], progressRequestId: requestId, progressEvents: [],
       progressExpanded: true, progressStartedAt: Date.now(), progressElapsedSeconds: 0,
       progressTerminal: false, progressHeadline: title,
     }
-    this.setData({ messages, activeProgressIndex: messageIndex, activeProgressRequestId: requestId })
+    this.setData({ messages, activeProgressIndex: progressIndex, activeProgressRequestId: requestId })
     this.startAgentProgressPolling(requestId)
     void this.reportAgentProgress(requestId, 'input_received', 'running', title, detail)
   },
@@ -898,6 +946,7 @@ Page(themed({
       messages: [{
         role: 'assistant',
         text: '您好，我是白泽监理智能助手。可以询问规范流程、生成文书、管理隐患等。',
+        timeText: formatMessageTime(),
       }],
     })
   },
@@ -930,6 +979,7 @@ Page(themed({
     return {
       role: raw.role === 'assistant' ? 'assistant' : 'user',
       text: String(raw.text || ''),
+      timeText: raw.created_at || raw.createdAt ? formatMessageTime(raw.created_at || raw.createdAt) : undefined,
     }
   },
 
@@ -942,8 +992,8 @@ Page(themed({
       const requestId = String(raw.response.request_id || '').trim()
       const previous = messages[index - 1]
       if (!requestId || previous?.role !== 'user') continue
-      messages[index - 1] = {
-        ...previous, progressRequestId: requestId, progressEvents: [],
+      messages[index] = {
+        ...messages[index], progressRequestId: requestId, progressEvents: [],
         progressExpanded: false, progressStartedAt: Date.now(), progressTerminal: false,
       }
     }
@@ -2915,11 +2965,19 @@ Page(themed({
     } : undefined)
     const agentForm: AgentForm | undefined = sourceForm ? {
       ...sourceForm,
-      fields: (sourceForm.fields || []).map(field => {
+      expanded: sourceForm.expanded === true,
+      fields: (sourceForm.fields || []).map((field, index, fields) => {
         const recommendation = recommendations.find(item => (
           item.field === field.name || item.field === field.label || item.field === field.canonical
         ))
-        return { ...field, value: field.value || '', options: field.options || [], recommendation: recommendation?.value || '', reason: recommendation?.reason || '' }
+        return {
+          ...field,
+          value: field.value || '',
+          options: field.options || [],
+          recommendation: recommendation?.value || '',
+          reason: recommendation?.reason || '',
+          showSection: Boolean(field.section) && (index === 0 || field.section !== fields[index - 1]?.section),
+        }
       }),
       attachments: sourceForm.attachments ? { ...sourceForm.attachments, picked: sourceForm.attachments.picked || [] } : undefined,
       actions: [...(sourceForm.actions || [])],
@@ -2934,6 +2992,8 @@ Page(themed({
     return {
       role: 'assistant',
       text: result.reply || '智能体未返回内容',
+      timeText: formatMessageTime(),
+      reviewDetailsExpanded: false,
       cards,
       actions,
       chips: chips.length ? chips : undefined,
@@ -2944,7 +3004,16 @@ Page(themed({
 
   /** 把 /agent/chat 回执渲染成一条助手消息（卡片/动作/chips/缺项提示） */
   applyAgentReply(result: AgentChatResponse, messages: Message[]) {
-    this.setData({ messages: [...messages, this.agentReplyToMessage(result)] })
+    const reply = this.agentReplyToMessage(result)
+    const progressIndex = messages.length - 1
+    const progress = messages[progressIndex]
+    if (progress?.role === 'assistant' && progress.progressRequestId && !progress.text) {
+      const next = [...messages]
+      next[progressIndex] = mergeAgentProgress(reply, progress)
+      this.setData({ messages: next })
+      return
+    }
+    this.setData({ messages: [...messages, reply] })
   },
 
   updateAgentForm(messageIndex: number, patch: (form: AgentForm) => AgentForm) {
@@ -4151,7 +4220,18 @@ Page(themed({
     if (msg.role === 'assistant' && msg.text) {
       msg = { ...msg, text: cleanMarkdown(msg.text) }
     }
-    const messages = [...this.data.messages, msg]
+    if (!msg.timeText) {
+      msg = { ...msg, timeText: formatMessageTime() }
+    }
+    const messages = [...this.data.messages]
+    const progressIndex = messages.length - 1
+    const progress = messages[progressIndex]
+    if (msg.role === 'assistant' && progress?.role === 'assistant' && progress.progressRequestId && !progress.text) {
+      messages[progressIndex] = mergeAgentProgress(msg, progress)
+      this.setData({ messages })
+      return progressIndex
+    }
+    messages.push(msg)
     this.setData({ messages })
     return messages.length - 1
   },

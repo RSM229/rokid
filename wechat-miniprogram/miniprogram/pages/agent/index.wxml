@@ -51,7 +51,17 @@
       </view>
       <block wx:else>
         <view wx:for="{{messages}}" wx:for-index="mi" wx:key="index" class="message {{item.role}}" id="msg-{{mi}}">
-          <view class="bubble">
+          <view class="message-head">
+            <block wx:if="{{item.role === 'assistant'}}">
+              <text class="message-role">监理智能体</text>
+              <text wx:if="{{item.timeText}}" class="message-time">{{item.timeText}}</text>
+            </block>
+            <block wx:else>
+              <text wx:if="{{item.timeText}}" class="message-time">{{item.timeText}}</text>
+              <text class="message-role">我</text>
+            </block>
+          </view>
+          <view wx:if="{{item.text || item.image || (item.images && item.images.length)}}" class="bubble">
             <image wx:if="{{item.image}}" class="msg-image" src="{{item.image}}" mode="widthFix" data-url="{{item.image}}" bindtap="previewImageUrl" />
             <view wx:if="{{item.images && item.images.length}}" class="msg-images">
               <image wx:for="{{item.images}}" wx:for-item="img" wx:key="*this" class="msg-image-grid"
@@ -101,6 +111,10 @@
               <text class="inline-review-meta">{{item.reviewPlan.evidence.length}} 张图片 · {{item.reviewPlan.events.length}} 个事项</text>
             </view>
             <text wx:if="{{item.reviewSummary}}" class="inline-review-summary">{{item.reviewSummary}}</text>
+            <view wx:if="{{(item.reviewEvents && item.reviewEvents.length) || (item.reviewUnassignedEvidence && item.reviewUnassignedEvidence.length)}}" class="inline-review-preview" data-index="{{mi}}" bindtap="toggleInlineReviewDetails">
+              <text>{{item.reviewDetailsExpanded ? '收起草稿详情' : '查看草稿详情'}}</text>
+              <text class="inline-review-preview-arrow {{item.reviewDetailsExpanded ? 'expanded' : ''}}">›</text>
+            </view>
             <view wx:if="{{!item.reviewEvents || !item.reviewEvents.length}}" class="inline-review-empty">照片已收到，正在等待你确定用途。可点下面的记录类型，也可继续用下方输入框打字、语音或添加图片。</view>
             <view wx:if="{{item.reviewPurposeOptions && item.reviewPurposeOptions.length}}" class="inline-review-chip-row review-purpose-options">
               <view wx:if="{{item.reviewRecommendation}}" class="review-ai-recommendation">
@@ -109,6 +123,7 @@
               </view>
               <button wx:for="{{item.reviewPurposeOptions}}" wx:for-item="purpose" wx:key="value" class="inline-review-chip" data-index="{{mi}}" data-purpose="{{purpose.value}}" bindtap="chooseInlineReviewPurpose">{{purpose.label}}</button>
             </view>
+            <block wx:if="{{item.reviewDetailsExpanded}}">
             <view wx:if="{{item.reviewUnassignedEvidence && item.reviewUnassignedEvidence.length}}" class="inline-review-unassigned">
               <text class="inline-review-label">尚未分配的照片证据</text>
               <view wx:for="{{item.reviewUnassignedEvidence}}" wx:for-item="photo" wx:key="id" class="inline-watermark-photo">
@@ -227,6 +242,7 @@
               <view class="inline-review-remove" data-index="{{mi}}" data-id="{{event.id}}" bindtap="removeInlineReviewEvent">删除此事项（照片保留到待分配）</view>
             </view>
             <button wx:if="{{item.reviewMergeSelection.length >= 2}}" class="inline-review-merge" data-index="{{mi}}" bindtap="mergeInlineReview">合并已选 {{item.reviewMergeSelection.length}} 个事项</button>
+            </block>
             <view wx:if="{{item.reviewIssues && item.reviewIssues.length}}" class="inline-review-issues">
               <text wx:for="{{item.reviewIssues}}" wx:key="*this" class="inline-review-issue">{{item}}</text>
             </view>
@@ -283,56 +299,69 @@
               <text class="agent-task-state">{{item.agentForm.kind === 'attachments_done' ? '已完成' : (item.agentForm.busy ? '处理中' : '待补全')}}</text>
             </view>
 
-            <view wx:if="{{item.agentForm.filled && item.agentForm.filled.length}}" class="agent-task-read">
-              <text class="agent-task-read-title">已从你的描述和照片读取</text>
-              <view wx:for="{{item.agentForm.filled}}" wx:for-item="known" wx:key="label" class="agent-task-read-row">
-                <text>{{known.label}}</text><text>{{known.value}}</text>
+            <button class="agent-task-toggle" type="default" data-message="{{mi}}" bindtap="toggleAgentForm">
+              <view class="agent-task-toggle-copy">
+                <text class="agent-task-toggle-title">{{item.agentForm.kind === 'attachments_done' ? '查看补全信息' : '填写或核对信息'}}</text>
+                <text class="agent-task-toggle-meta">{{item.agentForm.fields.length}} 项信息{{item.agentForm.attachments && item.agentForm.attachments.enabled ? ' · 含附件' : ''}}</text>
               </view>
-            </view>
-
-            <view wx:if="{{item.agentForm.fields && item.agentForm.fields.length}}" class="agent-task-fields">
-              <view wx:for="{{item.agentForm.fields}}" wx:for-item="field" wx:for-index="fieldIndex" wx:key="name" class="agent-task-field">
-                <text wx:if="{{field.section}}" class="agent-task-section">{{field.section}}</text>
-                <view class="agent-task-label"><text>{{field.label}}</text><text class="agent-task-required">{{field.required ? '必填' : '选填'}}</text></view>
-                <text wx:if="{{field.hint}}" class="agent-task-field-hint">{{field.hint}}</text>
-                <view wx:if="{{field.recommendation}}" class="agent-task-suggestion">
-                  <text>建议 {{field.recommendation}}<text wx:if="{{field.reason}}"> · {{field.reason}}</text></text>
-                  <text class="agent-task-suggestion-use" data-message="{{mi}}" data-field="{{field.name}}" data-value="{{field.recommendation}}" bindtap="chooseAgentFormOption">采用</text>
-                </view>
-                <picker wx:if="{{field.control === 'select'}}" range="{{field.options}}" data-message="{{mi}}" data-field="{{field.name}}" bindchange="onAgentFormPicker">
-                  <view class="agent-task-control {{field.value ? '' : 'placeholder'}}">{{field.value || field.placeholder || '请选择'}}<text class="agent-task-control-caret">›</text></view>
-                </picker>
-                <picker wx:elif="{{field.control === 'date'}}" mode="date" value="{{field.value || '2000-01-01'}}" data-message="{{mi}}" data-field="{{field.name}}" bindchange="onAgentFormPicker">
-                  <view class="agent-task-control {{field.value ? '' : 'placeholder'}}">{{field.value || '选择日期'}}<text class="agent-task-control-caret">›</text></view>
-                </picker>
-                <date-time-picker wx:elif="{{field.control === 'datetime'}}" value="{{field.value}}" reference-enabled="{{field.required}}" bind:change="onAgentFormDateTimeChange" data-message="{{mi}}" data-field="{{field.name}}" />
-                <date-time-picker wx:elif="{{field.control === 'time'}}" mode="time" value="{{field.value}}" reference-enabled="{{field.required}}" bind:change="onAgentFormDateTimeChange" data-message="{{mi}}" data-field="{{field.name}}" />
-                <textarea wx:elif="{{field.control === 'textarea'}}" class="agent-task-textarea" value="{{field.value}}" auto-height maxlength="-1" placeholder="{{field.placeholder || '填写' + field.label}}" data-message="{{mi}}" data-field="{{field.name}}" bindinput="onAgentFormInput" />
-                <input wx:else class="agent-task-control" type="{{field.control === 'number' ? 'number' : 'text'}}" value="{{field.value}}" placeholder="{{field.placeholder || '填写' + field.label}}" data-message="{{mi}}" data-field="{{field.name}}" bindinput="onAgentFormInput" />
+              <view class="agent-task-toggle-action">
+                <text>{{item.agentForm.expanded ? '收起' : (item.agentForm.kind === 'attachments_done' ? '查看' : '展开')}}</text>
+                <text class="agent-task-toggle-arrow {{item.agentForm.expanded ? 'expanded' : ''}}">›</text>
               </view>
-            </view>
+            </button>
 
-            <view wx:if="{{item.agentForm.attachments && item.agentForm.attachments.enabled}}" class="agent-task-upload">
-              <view class="agent-task-upload-head"><text>{{item.agentForm.attachments.label}}</text><text>{{item.agentForm.attachments.picked.length}}/{{item.agentForm.attachments.max}}</text></view>
-              <text class="agent-task-field-hint">{{item.agentForm.attachments.hint}}</text>
-              <view class="agent-task-photos" wx:if="{{item.agentForm.attachments.picked.length}}">
-                <view wx:for="{{item.agentForm.attachments.picked}}" wx:for-item="photo" wx:key="id" class="agent-task-photo">
-                  <image src="{{photo.path}}" mode="aspectFill" />
-                  <view class="agent-task-photo-remove" data-message="{{mi}}" data-id="{{photo.id}}" catchtap="removeAgentFormAttachment">×</view>
+            <view wx:if="{{item.agentForm.expanded}}" class="agent-task-body">
+              <view wx:if="{{item.agentForm.filled && item.agentForm.filled.length}}" class="agent-task-read">
+                <text class="agent-task-read-title">已从你的描述和照片读取</text>
+                <view wx:for="{{item.agentForm.filled}}" wx:for-item="known" wx:key="label" class="agent-task-read-row">
+                  <text>{{known.label}}</text><text>{{known.value}}</text>
                 </view>
               </view>
-              <view class="agent-task-upload-box {{item.agentForm.busy ? 'disabled' : ''}}" data-message="{{mi}}" bindtap="chooseAgentFormAttachments">
-                <text class="agent-task-upload-plus">＋</text>
-                <text>点击拍照或从相册上传</text>
-              </view>
-            </view>
 
-            <view wx:if="{{item.agentForm.kind !== 'attachments_done'}}" class="agent-task-submit-row">
-              <button class="agent-task-submit" loading="{{item.agentForm.busy}}" disabled="{{item.agentForm.busy}}" data-message="{{mi}}" bindtap="submitAgentForm">{{item.agentForm.busy ? '提交中' : (item.agentForm.submit_label === '保存记录' ? '保存并生成记录' : (item.agentForm.submit_label || '提交'))}}</button>
-              <text wx:if="{{item.agentForm.skippable}}" class="agent-task-skip" data-message="{{mi}}" bindtap="skipAgentForm">暂时跳过</text>
-            </view>
-            <view wx:if="{{item.agentForm.actions && item.agentForm.actions.length}}" class="agent-task-links">
-              <text wx:for="{{item.agentForm.actions}}" wx:for-item="formAction" wx:key="label" class="agent-task-link" data-type="{{formAction.type}}" data-url="{{formAction.url}}" data-record-id="{{formAction.record_id}}" data-command="{{formAction.command}}" bindtap="handleAgentFormAction">{{formAction.label}}</text>
+              <view wx:if="{{item.agentForm.fields && item.agentForm.fields.length}}" class="agent-task-fields">
+                <view wx:for="{{item.agentForm.fields}}" wx:for-item="field" wx:for-index="fieldIndex" wx:key="name" class="agent-task-field">
+                  <text wx:if="{{field.showSection}}" class="agent-task-section">{{field.section}}</text>
+                  <view class="agent-task-label"><text wx:if="{{field.required}}" class="agent-task-required">*</text><text>{{field.label}}</text></view>
+                  <text wx:if="{{field.hint}}" class="agent-task-field-hint">{{field.hint}}</text>
+                  <view wx:if="{{field.recommendation}}" class="agent-task-suggestion">
+                    <text>建议 {{field.recommendation}}<text wx:if="{{field.reason}}"> · {{field.reason}}</text></text>
+                    <text class="agent-task-suggestion-use" data-message="{{mi}}" data-field="{{field.name}}" data-value="{{field.recommendation}}" bindtap="chooseAgentFormOption">采用</text>
+                  </view>
+                  <picker wx:if="{{field.control === 'select'}}" range="{{field.options}}" data-message="{{mi}}" data-field="{{field.name}}" bindchange="onAgentFormPicker">
+                    <view class="agent-task-control {{field.value ? '' : 'placeholder'}}">{{field.value || field.placeholder || '请选择'}}<text class="agent-task-control-caret">›</text></view>
+                  </picker>
+                  <picker wx:elif="{{field.control === 'date'}}" mode="date" value="{{field.value || '2000-01-01'}}" data-message="{{mi}}" data-field="{{field.name}}" bindchange="onAgentFormPicker">
+                    <view class="agent-task-control {{field.value ? '' : 'placeholder'}}">{{field.value || '选择日期'}}<text class="agent-task-control-caret">›</text></view>
+                  </picker>
+                  <date-time-picker wx:elif="{{field.control === 'datetime'}}" value="{{field.value}}" reference-enabled="{{field.required}}" bind:change="onAgentFormDateTimeChange" data-message="{{mi}}" data-field="{{field.name}}" />
+                  <date-time-picker wx:elif="{{field.control === 'time'}}" mode="time" value="{{field.value}}" reference-enabled="{{field.required}}" bind:change="onAgentFormDateTimeChange" data-message="{{mi}}" data-field="{{field.name}}" />
+                  <textarea wx:elif="{{field.control === 'textarea'}}" class="agent-task-textarea" value="{{field.value}}" auto-height maxlength="-1" placeholder="{{field.placeholder || '填写' + field.label}}" data-message="{{mi}}" data-field="{{field.name}}" bindinput="onAgentFormInput" />
+                  <input wx:else class="agent-task-control" type="{{field.control === 'number' ? 'number' : 'text'}}" value="{{field.value}}" placeholder="{{field.placeholder || '填写' + field.label}}" data-message="{{mi}}" data-field="{{field.name}}" bindinput="onAgentFormInput" />
+                </view>
+              </view>
+
+              <view wx:if="{{item.agentForm.attachments && item.agentForm.attachments.enabled}}" class="agent-task-upload">
+                <view class="agent-task-upload-head"><text>{{item.agentForm.attachments.label}}</text><text>{{item.agentForm.attachments.picked.length}}/{{item.agentForm.attachments.max}}</text></view>
+                <text class="agent-task-field-hint">{{item.agentForm.attachments.hint}}</text>
+                <view class="agent-task-photos" wx:if="{{item.agentForm.attachments.picked.length}}">
+                  <view wx:for="{{item.agentForm.attachments.picked}}" wx:for-item="photo" wx:key="id" class="agent-task-photo">
+                    <image src="{{photo.path}}" mode="aspectFill" />
+                    <view class="agent-task-photo-remove" data-message="{{mi}}" data-id="{{photo.id}}" catchtap="removeAgentFormAttachment">×</view>
+                  </view>
+                </view>
+                <view class="agent-task-upload-box {{item.agentForm.busy ? 'disabled' : ''}}" data-message="{{mi}}" bindtap="chooseAgentFormAttachments">
+                  <text class="agent-task-upload-plus">＋</text>
+                  <text>点击拍照或从相册上传</text>
+                </view>
+              </view>
+
+              <view wx:if="{{item.agentForm.kind !== 'attachments_done'}}" class="agent-task-submit-row">
+                <button class="agent-task-submit" loading="{{item.agentForm.busy}}" disabled="{{item.agentForm.busy}}" data-message="{{mi}}" bindtap="submitAgentForm">{{item.agentForm.busy ? '提交中' : (item.agentForm.submit_label === '保存记录' ? '保存并生成记录' : (item.agentForm.submit_label || '提交'))}}</button>
+                <text wx:if="{{item.agentForm.skippable}}" class="agent-task-skip" data-message="{{mi}}" bindtap="skipAgentForm">暂时跳过</text>
+              </view>
+              <view wx:if="{{item.agentForm.actions && item.agentForm.actions.length}}" class="agent-task-links">
+                <text wx:for="{{item.agentForm.actions}}" wx:for-item="formAction" wx:key="label" class="agent-task-link" data-type="{{formAction.type}}" data-url="{{formAction.url}}" data-record-id="{{formAction.record_id}}" data-command="{{formAction.command}}" bindtap="handleAgentFormAction">{{formAction.label}}</text>
+              </view>
             </view>
           </view>
           <!-- 工作记录字段候选：点选即填入，不符合的走「自己填写」 -->
@@ -348,7 +377,7 @@
           </view>
         </view>
       </block>
-      <view wx:if="{{loading && activeProgressIndex < 0}}" class="message assistant">
+      <view wx:if="{{loading && activeProgressIndex < 0}}" class="message assistant typing-message">
         <view class="bubble typing">
           <view class="dot"></view>
           <view class="dot"></view>
