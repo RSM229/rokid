@@ -11,6 +11,7 @@ import re
 from typing import Any, Iterable
 
 from app.services import form_contracts, form_registry, record_field_spec, record_fields
+from app.services.time_normalization import normalize_datetime_value, parse_local_date
 from app.services.watermark_ocr import match_form_field
 
 
@@ -239,7 +240,10 @@ def resolve_event_form(
         if kind == "auto" and not required:
             continue
 
-        aliases = [canonical, _text(spec.get("key")), _text(spec.get("arg")), *_INPUT_ALIASES.get(canonical, ())]
+        field_aliases = list(_INPUT_ALIASES.get(canonical, ()))
+        if canonical == "acceptance_content":
+            field_aliases.extend(("content", "work_content"))
+        aliases = [canonical, _text(spec.get("key")), _text(spec.get("arg")), *field_aliases]
         value = ""
         source = ""
         status = ""
@@ -321,20 +325,19 @@ def resolve_event_form(
                 if options and value not in options:
                     problem = "请选择合同定义中的有效选项"
             elif control == "date":
-                try:
-                    date.fromisoformat(value)
-                except ValueError:
+                parsed_date = parse_local_date(value)
+                if parsed_date is None:
                     problem = "日期格式无效，请使用 YYYY-MM-DD"
+                else:
+                    value = parsed_date.isoformat()
             elif control == "datetime-local":
-                normalized = value.replace("年", "-").replace("月", "-").replace("日", " ").replace("时", ":").replace("分", "").strip()
-                # The record date is stored separately, so a clearly stated
-                # time-only value is valid and is combined with that date at
-                # materialization. A vague/unparseable time remains blocked.
-                if not re.fullmatch(r"\d{1,2}:\d{2}", normalized):
-                    try:
-                        datetime.fromisoformat(normalized)
-                    except ValueError:
-                        problem = "日期时间格式无法识别，请补充为明确日期和时间"
+                normalized = normalize_datetime_value(
+                    value, event.get("date") or values.get("date") or values.get("record_date"),
+                )
+                if normalized is None:
+                    problem = "日期时间格式无法识别，请补充为明确日期和时间"
+                else:
+                    value = normalized
             elif control == "number":
                 try:
                     float(value)
@@ -343,10 +346,28 @@ def resolve_event_form(
             if problem:
                 row["validation_error"] = problem
                 invalid_fields.append({"canonical": canonical, "label": row["label"], "message": problem})
+            else:
+                row["value"] = value
         rows.append(row)
         if row["missing"]:
             missing.append(canonical)
             missing_labels.append(row["label"])
+
+    row_values = {row["canonical"]: row["value"] for row in rows}
+    start_value = row_values.get("start_time")
+    end_value = row_values.get("end_time")
+    if start_value and end_value:
+        start_dt = normalize_datetime_value(start_value, event.get("date"))
+        end_dt = normalize_datetime_value(end_value, event.get("date"))
+        if start_dt and end_dt and end_dt < start_dt:
+            label = next(
+                (_text(row.get("label")) for row in rows if row.get("canonical") == "end_time"),
+                "结束时间",
+            )
+            invalid_fields.append({
+                "canonical": "end_time", "label": label,
+                "message": "结束时间早于开始时间；若为跨日记录，请明确次日日期",
+            })
 
     return {
         "form_code": form_code,
@@ -387,8 +408,18 @@ def resolve_record_form(
             return
         selected[key] = {"value": text, "source": source, "status": status}
 
-    # Confirmed/resolved values have priority.  Candidate maps are fallback
-    # material for legacy records, never a reason to overwrite a user choice.
+    def replace(key: str, value: Any, source: str = "record", status: str = "user_confirmed") -> None:
+        canonical = _CANONICAL_INPUT_FIELDS.get(key, key)
+        text = _text(value)
+        if not canonical or not _usable(text):
+            return
+        for selected_key in list(selected):
+            if _CANONICAL_INPUT_FIELDS.get(selected_key, selected_key) == canonical:
+                selected.pop(selected_key, None)
+        selected[canonical] = {"value": text, "source": source, "status": status}
+
+    # Start with confirmed and candidate snapshots, then replace them with the
+    # persisted record columns that define the current business record.
     for map_name, source, status in (
         ("field_resolutions", "user_confirmed", "user_confirmed"),
         ("confirmed_fields", "user_confirmed", "user_confirmed"),
@@ -423,7 +454,7 @@ def resolve_record_form(
         "problems": getattr(record, "problems", None),
         "treatment": getattr(record, "treatment", None),
         "worker_count": getattr(record, "worker_count", None),
-        "inspector": getattr(record, "acceptance_participants", None),
+        "acceptance_participants": getattr(record, "acceptance_participants", None),
         "station_process": getattr(record, "station_process", None),
         "station_content": getattr(record, "station_content", None),
         "station_conclusion": getattr(record, "station_conclusion", None),
@@ -437,6 +468,11 @@ def resolve_record_form(
     station_location = getattr(record, "station_location", None)
     if record_type == "旁站" and _usable(station_location):
         direct["section"] = station_location
+        direct["content"] = getattr(record, "station_content", None) or getattr(record, "work_content", None)
+    elif record_type == "验收":
+        acceptance_content = content.get("acceptance_content") or getattr(record, "work_content", None)
+        direct["content"] = acceptance_content
+        direct["acceptance_content"] = acceptance_content
     for value, attr in (
         ("start_time", "station_start_time"),
         ("end_time", "station_end_time"),
@@ -457,7 +493,26 @@ def resolve_record_form(
         direct["sampler"] = getattr(record, "acceptance_participants", None)
         direct["test_result"] = content.get("test_result")
     for key, value in direct.items():
-        put(key, value, "record", "user_confirmed")
+        replace(key, value, "record", "user_confirmed")
+
+    cleared_fields: set[str] = set()
+    field_edits = content.get("record_field_edits")
+    if isinstance(field_edits, dict):
+        for key, raw in field_edits.items():
+            canonical = _CANONICAL_INPUT_FIELDS.get(str(key), str(key))
+            for selected_key in list(selected):
+                if _CANONICAL_INPUT_FIELDS.get(selected_key, selected_key) == canonical:
+                    selected.pop(selected_key, None)
+            value, source, status = _selected_value(raw)
+            if _usable(value):
+                selected[canonical] = {
+                    "value": value,
+                    "source": source or "user_edit",
+                    "status": status or "user_confirmed",
+                }
+                cleared_fields.discard(canonical)
+            else:
+                cleared_fields.add(canonical)
 
     entity_fields: dict[str, str] = {}
     if project is not None:
@@ -471,8 +526,14 @@ def resolve_record_form(
 
     event: dict[str, Any] = {
         "record_type": record_type,
-        "date": date_text,
+        "date": "" if "date" in cleared_fields else date_text,
         "date_source": "record",
+        "section": "" if "section" in cleared_fields else str(
+            station_location if record_type == "旁站" and _usable(station_location)
+            else getattr(record, "section", None) or ""
+        ),
+        "location": "" if "location" in cleared_fields else str(getattr(record, "location", None) or ""),
+        "content": "" if "content" in cleared_fields else str(direct.get("content") or ""),
         "fields": selected,
         "entity_fields": {key: value for key, value in entity_fields.items() if value},
     }

@@ -1,4 +1,4 @@
-from app.services import agent_fact_model
+from app.services import agent_fact_model, agent_tools, record_field_spec
 
 
 def test_model_cannot_assign_itself_a_trusted_source():
@@ -96,3 +96,25 @@ def test_system_project_and_profile_values_are_non_destructive_conflict_candidat
     assert by_field["construction_unit"]["system_value"] == "系统施工单位"
     assert by_field["inspector"]["preferred_source"] == "watermark"
     assert all(item["needs_confirmation"] is True for item in conflicts)
+
+
+def test_explicit_spoken_times_override_conflicting_model_arguments_for_selected_form():
+    facts = agent_fact_model.normalize_model_facts({
+        "station_start_time": "08:00", "station_end_time": "09:00",
+    }, message_ref="model")
+    facts.extend(agent_fact_model.merge_fact_candidates([], [
+        {
+            "field": "start_time", "value": "10:00",
+            "source": "user_message_deterministic", "status": "user_stated_candidate",
+        },
+        {
+            "field": "end_time", "value": "12:00",
+            "source": "user_message_deterministic", "status": "user_stated_candidate",
+        },
+    ]))
+    form = record_field_spec.form_for_record_type("旁站")
+    args = agent_tools.apply_explicit_user_facts(
+        {"station_start_time": "08:00", "station_end_time": "09:00"}, facts, form,
+    )
+    assert args["station_start_time"] == "10:00"
+    assert args["station_end_time"] == "12:00"

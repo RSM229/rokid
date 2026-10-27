@@ -137,7 +137,14 @@ def _finish_stage(
     return updated
 
 
-def trace_payload(row: AgentRequestTrace) -> dict[str, Any]:
+def trace_payload(row: AgentRequestTrace, *, after_sequence: int = 0) -> dict[str, Any]:
+    stages = _loads(row.stages_json, [])
+    progress_events = [
+        item for item in stages
+        if isinstance(item, dict)
+        and item.get("kind") == "progress"
+        and int(item.get("sequence") or 0) > max(0, int(after_sequence))
+    ]
     return {
         "request_id": row.request_id,
         "endpoint": row.endpoint,
@@ -147,7 +154,13 @@ def trace_payload(row: AgentRequestTrace) -> dict[str, Any]:
         "provider": row.provider,
         "model": row.model,
         "request_plan": _loads(row.request_plan_json, {}),
-        "stages": _loads(row.stages_json, []),
+        "stages": stages,
+        "progress_events": progress_events,
+        "latest_progress_sequence": max(
+            (int(item.get("sequence") or 0) for item in stages
+             if isinstance(item, dict) and item.get("kind") == "progress"),
+            default=0,
+        ),
         "result": _loads(row.result_json, {}),
         "error_stage": row.error_stage,
         "error_message": row.error_message,
@@ -158,6 +171,131 @@ def trace_payload(row: AgentRequestTrace) -> dict[str, Any]:
         "finished_at": row.finished_at.isoformat() if row.finished_at else None,
         "duration_ms": row.duration_ms,
     }
+
+
+def _bounded_detail(value: Any, depth: int = 0) -> Any:
+    if depth >= 4:
+        return _excerpt(value, 240)
+    if isinstance(value, dict):
+        return {
+            _excerpt(key, 64): _bounded_detail(item, depth + 1)
+            for key, item in list(value.items())[:24]
+        }
+    if isinstance(value, (list, tuple)):
+        return [_bounded_detail(item, depth + 1) for item in value[:24]]
+    if isinstance(value, str):
+        return _excerpt(value, 500)
+    if isinstance(value, (int, float, bool)) or value is None:
+        return value
+    return _excerpt(value, 240)
+
+
+async def append_progress_event(
+    *,
+    request_id: Any,
+    user_id: int,
+    project_id: int | None,
+    conversation_id: str | None = None,
+    endpoint: str = "/api/agent/progress",
+    event_id: Any = None,
+    stage: str,
+    status: str,
+    title: str,
+    detail: Any = None,
+    terminal: bool = False,
+    session_factory: Callable[[], Any] | None = None,
+) -> dict[str, Any] | None:
+    """Persist one ordered, replayable workbench progress event."""
+    if _trace_suppressed():
+        return None
+    rid = normalize_request_id(request_id)
+    stage_key = _stage_name(stage)
+    state = str(status or "").strip().lower()
+    if state not in {"running", "completed", "failed", "waiting", "skipped"}:
+        return None
+    client_event_id = _ID_SAFE.sub("-", str(event_id or "").strip()).strip("-.:_")[:80]
+    now = datetime.now()
+    factory = session_factory or async_session
+    try:
+        async with factory() as db:
+            row = (await db.execute(
+                select(AgentRequestTrace).where(
+                    AgentRequestTrace.request_id == rid,
+                ).with_for_update()
+            )).scalars().first()
+            if row is not None and row.user_id != user_id:
+                logger.warning("拒绝写入其他用户的 progress request_id=%s", rid)
+                return None
+            stages = _loads(row.stages_json, []) if row else []
+            if client_event_id:
+                existing = next((item for item in stages if (
+                    isinstance(item, dict)
+                    and item.get("kind") == "progress"
+                    and item.get("event_id") == client_event_id
+                )), None)
+                if existing:
+                    return existing
+            sequence = max(
+                (int(item.get("sequence") or 0) for item in stages
+                 if isinstance(item, dict) and item.get("kind") == "progress"),
+                default=0,
+            ) + 1
+            event = {
+                "kind": "progress",
+                "event_id": client_event_id or f"progress-{uuid.uuid4().hex}",
+                "sequence": sequence,
+                "name": stage_key,
+                "endpoint": endpoint[:80],
+                "status": state,
+                "terminal": bool(terminal),
+                "title": _excerpt(title, 180),
+                "detail": _bounded_detail(detail if detail is not None else {}),
+                "created_at": now.isoformat(timespec="milliseconds"),
+            }
+            stages = [*stages, event]
+            if len(stages) > 600:
+                stages = stages[-400:]
+            if row is None:
+                row = AgentRequestTrace(
+                    request_id=rid,
+                    user_id=user_id,
+                    project_id=project_id,
+                    conversation_id=conversation_id,
+                    endpoint=endpoint[:80],
+                    status="running",
+                    current_stage=stage_key,
+                    message_excerpt="",
+                    started_at=now,
+                    updated_at=now,
+                    stages_json=_json(stages),
+                )
+                db.add(row)
+            else:
+                row.stages_json = _json(stages)
+                row.updated_at = now
+                row.current_stage = stage_key
+                row.status = "running"
+                row.finished_at = None
+                row.duration_ms = None
+                if project_id is not None:
+                    row.project_id = project_id
+                if conversation_id:
+                    row.conversation_id = conversation_id
+            if terminal:
+                row.status = "failed" if state == "failed" else (
+                    "waiting_user" if state == "waiting" else "completed"
+                )
+                row.finished_at = now if state != "waiting" else None
+                row.duration_ms = max(0, int((now - row.started_at).total_seconds() * 1000))
+            await db.commit()
+            _mark_trace_available()
+            return event
+    except (SQLAlchemyError, OSError) as exc:
+        logger.warning("工作台进度写入不可用，业务请求继续执行：%s", exc)
+        _mark_trace_unavailable()
+    except Exception:  # noqa: BLE001
+        logger.exception("工作台进度写入意外失败，业务请求继续执行")
+    return None
 
 
 async def start_request(
@@ -183,7 +321,7 @@ async def start_request(
     try:
         async with factory() as db:
             row = (await db.execute(
-                select(AgentRequestTrace).where(AgentRequestTrace.request_id == rid)
+                select(AgentRequestTrace).where(AgentRequestTrace.request_id == rid).with_for_update()
             )).scalars().first()
             if row and row.user_id != user_id:
                 logger.warning("拒绝复用其他用户的 request_id=%s", rid)
@@ -260,7 +398,7 @@ async def finish_request(
     try:
         async with factory() as db:
             row = (await db.execute(
-                select(AgentRequestTrace).where(AgentRequestTrace.request_id == request_id)
+                select(AgentRequestTrace).where(AgentRequestTrace.request_id == request_id).with_for_update()
             )).scalars().first()
             if row is None or row.user_id != user_id:
                 return

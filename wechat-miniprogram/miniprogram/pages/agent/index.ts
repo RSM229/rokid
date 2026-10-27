@@ -13,6 +13,110 @@ import { FORM_CODE_BY_LABEL, createReviewPlan, saveReviewPlan, listReviewPlans, 
 
 const INLINE_RECORD_TYPES = ['巡视', '验收', '见证', '旁站', '平行检验', '起重机械安拆检查', '待定']
 
+interface AgentProgressEventView {
+  eventId: string
+  sequence: number
+  status: 'running' | 'completed' | 'failed' | 'waiting' | 'skipped' | string
+  title: string
+  detailText: string
+  createdAt: string
+}
+
+interface AgentProgressTraceResponse {
+  progress_events?: Array<Record<string, unknown>>
+  latest_progress_sequence?: number
+  status?: string
+}
+
+let progressPollTimer: number | null = null
+let progressClockTimer: number | null = null
+let progressWriteQueue: Promise<void> = Promise.resolve()
+let activeProgressRequestId = ''
+let activeProgressMessageIndex = -1
+let activeProgressSequence = 0
+let activeProgressPollInFlight = false
+
+const PROGRESS_FIELD_LABELS: Record<string, string> = {
+  record_date: '业务日期', date: '日期', start_time: '开始时间', end_time: '结束时间',
+  inspection_start_time: '巡视开始时间', inspection_end_time: '巡视结束时间',
+  station_start_time: '旁站开始时间', station_end_time: '旁站结束时间',
+  record_type: '记录类型', project: '项目', project_name: '项目', location: '地点',
+  section: '工程部位', work_content: '工作内容', content: '内容', inspector: '检查人员',
+  construction_unit: '施工单位', supervision_unit: '监理单位', weather: '天气',
+  worker_count: '作业人数', material_name: '材料名称', material_spec: '规格型号',
+  sample_date: '取样日期', acceptance_result: '验收结论', problems: '发现问题',
+  treatment: '处理情况',
+}
+
+function progressScalar(value: unknown): string {
+  if (value == null) return ''
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return String(value)
+  try { return JSON.stringify(value) } catch { return String(value) }
+}
+
+function progressFieldEntries(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return value.slice(0, 24).flatMap((item: any) => {
+    if (!item || typeof item !== 'object') return []
+    const field = String(item.field || item.canonical || item.label || '').trim()
+    const fieldValue = progressScalar(item.value).trim()
+    if (!field || !fieldValue) return []
+    const label = PROGRESS_FIELD_LABELS[field] || field
+    const source = String(item.source || '').trim()
+    return [`${label}：${fieldValue}${source ? `（${source}）` : ''}`]
+  })
+}
+
+function progressDetailText(detail: unknown): string {
+  if (!detail || typeof detail !== 'object' || Array.isArray(detail)) return progressScalar(detail).slice(0, 900)
+  const data = detail as Record<string, unknown>
+  const parts: string[] = []
+  for (const key of ['facts', 'explicit_user_fields', 'recognized_fields', 'provided_fields', 'extra_fields']) {
+    const entries = progressFieldEntries(data[key])
+    if (entries.length) parts.push(entries.join('；'))
+  }
+  for (const key of ['observation', 'ocr_text', 'text_excerpt', 'file_excerpt', 'response_excerpt', 'error', 'degraded_reason']) {
+    const value = progressScalar(data[key]).trim()
+    if (value) parts.push(value)
+  }
+  const labels: Record<string, string> = {
+    model: '模型', intent: '意图', action: '动作', proposed_action: '模型候选动作',
+    record_type: '记录类型', proposed_record_type: '模型候选类型', form: '表式',
+    file_name: '文件', filename: '文件', extracted_characters: '提取字符数',
+    image_index: '图片序号', image_count: '图片数', file_count: '文件数',
+    evidence_count: '证据数', recognized: '识别到字段', available: '服务可用',
+    has_json_result: '结构化结果', missing_fields: '待补字段', created_id: '创建编号',
+    created_ids: '创建编号', media_id: '资料编号', status: '状态',
+    page_count: '页数', candidate_count: '候选事项数', event_count: '事项数',
+    item_count: '字段数', duration_ms: '耗时毫秒', file_type: '文件类型',
+  }
+  for (const [key, label] of Object.entries(labels)) {
+    if (data[key] == null || data[key] === '') continue
+    const value = progressScalar(data[key])
+    if (value && !parts.some(part => part.includes(`${label}：`))) parts.push(`${label}：${value}`)
+  }
+  if (!parts.length) return JSON.stringify(data).slice(0, 900)
+  return parts.join(' · ').slice(0, 1200)
+}
+
+function progressEventView(raw: Record<string, unknown>): AgentProgressEventView | null {
+  const eventId = String(raw.event_id || raw.eventId || '').trim()
+  if (!eventId) return null
+  const created = String(raw.created_at || raw.createdAt || '')
+  const parsed = created ? new Date(created) : new Date()
+  const createdAt = Number.isNaN(parsed.getTime())
+    ? created
+    : `${String(parsed.getHours()).padStart(2, '0')}:${String(parsed.getMinutes()).padStart(2, '0')}:${String(parsed.getSeconds()).padStart(2, '0')}`
+  return {
+    eventId,
+    sequence: Number(raw.sequence || 0),
+    status: String(raw.status || 'completed'),
+    title: String(raw.title || raw.name || '处理事件'),
+    detailText: progressDetailText(raw.detail),
+    createdAt,
+  }
+}
+
 const recorder = wx.getRecorderManager()
 const player = wx.createInnerAudioContext()
 
@@ -141,8 +245,15 @@ interface Message {
   reviewBusy?: boolean
   reviewResult?: string
   reviewIssues?: string[]
-  reviewProgress?: Array<{ label: string; state: 'done' | 'current' | 'pending' }>
   reviewSummary?: string
+  progressRequestId?: string
+  progressEvents?: AgentProgressEventView[]
+  progressExpanded?: boolean
+  progressHeadline?: string
+  progressElapsedSeconds?: number
+  progressStartedAt?: number
+  progressTerminal?: boolean
+  reviewProgress?: Array<{ label: string; state: 'done' | 'current' | 'pending' }>
 }
 
 /** /agent/chat 响应：kind=action 表示服务端已执行动作，chat 表示纯问答 */
@@ -388,6 +499,8 @@ Page(themed({
     ] as { key: string; label: string; url: string }[],
     input: '',
     loading: false,
+    activeProgressIndex: -1,
+    activeProgressRequestId: '',
     recording: false,
     speaking: false,
     showHistory: false,
@@ -558,9 +671,11 @@ Page(themed({
     }
     this.refreshPendingVoice()
     this.loadPendingDrafts()
+    void this.resumeAgentProgress()
   },
 
   onHide() {
+    this.stopAgentProgressTimers()
     if (this.voiceAutoTimer !== null) {
       clearTimeout(this.voiceAutoTimer)
       this.voiceAutoTimer = null
@@ -575,8 +690,158 @@ Page(themed({
   },
 
   onUnload() {
+    this.stopAgentProgressTimers()
     this.saveCurrentSession()
     player.stop()
+  },
+
+  toggleAgentProgress(event: WechatMiniprogram.TouchEvent) {
+    const index = Number(event.currentTarget.dataset.index)
+    const messages = [...this.data.messages]
+    if (!messages[index]?.progressRequestId) return
+    messages[index] = { ...messages[index], progressExpanded: !messages[index].progressExpanded }
+    this.setData({ messages })
+  },
+
+  updateAgentProgressMessage(requestId: string, update: (message: Message) => Message) {
+    const index = this.data.messages.findIndex(message => message.progressRequestId === requestId)
+    if (index < 0) return -1
+    const messages = [...this.data.messages]
+    messages[index] = update(messages[index])
+    this.setData({ messages })
+    return index
+  },
+
+  upsertAgentProgressEvent(requestId: string, event: AgentProgressEventView) {
+    this.updateAgentProgressMessage(requestId, message => {
+      const events = [...(message.progressEvents || [])]
+      const existingIndex = events.findIndex(item => item.eventId === event.eventId)
+      if (existingIndex >= 0) events[existingIndex] = { ...events[existingIndex], ...event }
+      else events.push(event)
+      events.sort((left, right) => {
+        if (left.sequence > 0 && right.sequence > 0) return left.sequence - right.sequence
+        return left.createdAt.localeCompare(right.createdAt)
+      })
+      const headline = [...events].reverse().find(item => item.status === 'running' || item.status === 'waiting')
+        || events[events.length - 1]
+      return { ...message, progressEvents: events, progressHeadline: headline?.title || '等待处理事件' }
+    })
+  },
+
+  async reportAgentProgress(
+    requestId: string,
+    stage: string,
+    status: AgentProgressEventView['status'],
+    title: string,
+    detail: Record<string, unknown> = {},
+    terminal = false,
+  ) {
+    if (!requestId) return
+    const eventId = newOperationId('progress')
+    const createdAt = new Date().toISOString()
+    const local = progressEventView({
+      event_id: eventId, sequence: 0, status, title, detail, created_at: createdAt,
+    })
+    if (local) this.upsertAgentProgressEvent(requestId, local)
+    const write = progressWriteQueue.catch(() => undefined).then(async () => {
+      const response = await request<{ event?: Record<string, unknown> | null }>(
+        `/agent/requests/${encodeURIComponent(requestId)}/progress`,
+        {
+          method: 'POST',
+          data: { event_id: eventId, stage, status, title, detail, terminal },
+          timeout: 10000,
+        },
+      )
+      const persisted = response.event && progressEventView(response.event)
+      if (persisted) this.upsertAgentProgressEvent(requestId, persisted)
+    })
+    progressWriteQueue = write.then(() => undefined, () => undefined)
+    await write.catch(() => undefined)
+  },
+
+  async pollAgentProgress(requestId: string) {
+    if (!requestId || activeProgressPollInFlight) return
+    activeProgressPollInFlight = true
+    try {
+      const response = await request<AgentProgressTraceResponse>(
+        `/agent/requests/${encodeURIComponent(requestId)}?after_sequence=${activeProgressSequence}&progress_only=true`,
+        { timeout: 10000 },
+      )
+      const events = (response.progress_events || [])
+        .map(progressEventView).filter((item): item is AgentProgressEventView => item !== null)
+        .sort((left, right) => left.sequence - right.sequence)
+      for (const item of events) {
+        this.upsertAgentProgressEvent(requestId, item)
+        activeProgressSequence = Math.max(activeProgressSequence, item.sequence)
+      }
+      activeProgressSequence = Math.max(activeProgressSequence, Number(response.latest_progress_sequence || 0))
+      const hasTerminalEvent = (response.progress_events || []).some(item => item.terminal === true)
+      const activeTurn = activeProgressRequestId === requestId && this.data.loading
+      if (hasTerminalEvent || (!activeTurn && response.status && response.status !== 'running')) {
+        this.updateAgentProgressMessage(requestId, message => ({ ...message, progressTerminal: true }))
+        if (activeProgressRequestId === requestId) this.stopAgentProgressTimers()
+      }
+    } catch {
+      // Keep the last received events; the next poll resumes from its sequence.
+    } finally {
+      activeProgressPollInFlight = false
+    }
+  },
+
+  startAgentProgressPolling(requestId: string) {
+    this.stopAgentProgressTimers()
+    activeProgressRequestId = requestId
+    activeProgressSequence = 0
+    void this.pollAgentProgress(requestId)
+    progressPollTimer = setInterval(() => {
+      if (activeProgressRequestId === requestId) void this.pollAgentProgress(requestId)
+    }, 1200) as unknown as number
+    progressClockTimer = setInterval(() => {
+      const startedAt = this.data.messages.find(message => message.progressRequestId === requestId)?.progressStartedAt || Date.now()
+      this.updateAgentProgressMessage(requestId, message => ({
+        ...message, progressElapsedSeconds: Math.max(0, Math.floor((Date.now() - startedAt) / 1000)),
+      }))
+    }, 1000) as unknown as number
+  },
+
+  stopAgentProgressTimers() {
+    if (progressPollTimer !== null) clearInterval(progressPollTimer)
+    if (progressClockTimer !== null) clearInterval(progressClockTimer)
+    progressPollTimer = null
+    progressClockTimer = null
+    activeProgressPollInFlight = false
+  },
+
+  beginAgentProgress(requestId: string, messageIndex: number, title: string, detail: Record<string, unknown> = {}) {
+    if (!requestId || messageIndex < 0) return
+    const messages = [...this.data.messages]
+    if (!messages[messageIndex]) return
+    messages[messageIndex] = {
+      ...messages[messageIndex], progressRequestId: requestId, progressEvents: [],
+      progressExpanded: true, progressStartedAt: Date.now(), progressElapsedSeconds: 0,
+      progressTerminal: false, progressHeadline: title,
+    }
+    this.setData({ messages, activeProgressIndex: messageIndex, activeProgressRequestId: requestId })
+    this.startAgentProgressPolling(requestId)
+    void this.reportAgentProgress(requestId, 'input_received', 'running', title, detail)
+  },
+
+  async finishAgentProgress(requestId: string, status: 'completed' | 'failed' | 'waiting', title: string, detail: Record<string, unknown> = {}) {
+    await this.reportAgentProgress(requestId, 'turn_result', status, title, detail, true)
+    if (activeProgressRequestId === requestId) this.stopAgentProgressTimers()
+    this.updateAgentProgressMessage(requestId, message => ({ ...message, progressTerminal: true }))
+    this.saveCurrentSession()
+  },
+
+  async resumeAgentProgress() {
+    if (this.data.loading) {
+      const active = [...this.data.messages].reverse().find(message => message.progressRequestId && !message.progressTerminal)
+      if (active?.progressRequestId) this.startAgentProgressPolling(active.progressRequestId)
+      return
+    }
+    const pending = [...this.data.messages].reverse().find(message => message.progressRequestId && !message.progressTerminal)
+    if (!pending?.progressRequestId) return
+    this.startAgentProgressPolling(pending.progressRequestId)
   },
 
   /** 拉取当前用户的待补全草稿，用于在聊天页顶部挂「待补全」提示横幅 */
@@ -671,17 +936,29 @@ Page(themed({
   applyConversationDetail(detail: RemoteConversationDetail) {
     const messages = (detail.messages || [])
       .map(message => this.historyMessageFromRemote(message))
-      .filter(message => Boolean(message.text || message.cards?.length || message.agentForm))
-    if (!messages.length) return
+    for (let index = 0; index < (detail.messages || []).length; index += 1) {
+      const raw = detail.messages[index]
+      if (raw?.role !== 'assistant' || !raw.response || typeof raw.response !== 'object') continue
+      const requestId = String(raw.response.request_id || '').trim()
+      const previous = messages[index - 1]
+      if (!requestId || previous?.role !== 'user') continue
+      messages[index - 1] = {
+        ...previous, progressRequestId: requestId, progressEvents: [],
+        progressExpanded: false, progressStartedAt: Date.now(), progressTerminal: false,
+      }
+    }
+    const visibleMessages = messages.filter(message => Boolean(message.text || message.cards?.length || message.agentForm))
+    if (!visibleMessages.length) return
     this.currentSessionId = sessionIdFromConversationId(detail.conversation_id)
     this.setData({
       showHistory: false,
       mode: 'chat',
       hazardMode: false,
-      messages,
+      messages: visibleMessages,
     })
     void this.loadPendingDrafts()
     void this.restorePendingReviewPlan(detail.conversation_id)
+    void this.resumeAgentProgress()
   },
 
   async restorePendingReviewPlan(conversationId: string) {
@@ -892,6 +1169,7 @@ Page(themed({
     if (images.length) parts.push(`${images.length} 张图片`)
     if (files.length) parts.push(`${files.length} 个文件`)
     const summary = parts.join(' + ')
+    const requestId = newOperationId('agent-turn')
 
     const userMsg: Message = {
       role: 'user',
@@ -906,6 +1184,10 @@ Page(themed({
       messages,
       loading: true,
     })
+    this.beginAgentProgress(requestId, messages.length - 1,
+      `已接收本轮输入：${summary || '文字消息'}`,
+      { image_count: images.length, file_count: files.length, text_excerpt: note.slice(0, 500) },
+    )
 
     const blocks: string[] = []
     /** 每张图的原始识别结果：聊天里只展示结论，落库时复用同一份结论（不再调一次视觉模型） */
@@ -920,11 +1202,62 @@ Page(themed({
       // 外加通用场景观察。是否调用隐患模型由后端请求计划决定，前端不再用关键词
       // 把图片直接送进某个业务分支；也不再前端二次 OCR（水印唯一来源 = upload_image 返回）。
       if (images.length) {
-        const results = await Promise.all(images.map(async (img) => {
+        const results = await Promise.all(images.map(async (img, index) => {
+          const imageIndex = index + 1
+          void this.reportAgentProgress(requestId, 'evidence_upload', 'running',
+            `图片 ${imageIndex}/${images.length}：正在上传；服务端会在同一次请求中提取水印 OCR 和 EXIF`,
+            { image_index: imageIndex, image_count: images.length, file_name: img.name },
+          )
+          void this.reportAgentProgress(requestId, 'watermark_ocr', 'running',
+            `图片 ${imageIndex}/${images.length}：等待上传接口返回水印 OCR 结果`,
+            { image_index: imageIndex, image_count: images.length, file_name: img.name },
+          )
           const uploaded = await this.uploadEvidence(img, 'agent_workbench')
           const wm = this.normalizeWatermark(uploaded)
-          const observation = await this.observeImageOnce(img.path)
-          return { path: img.path, wm, observation }
+          const watermarkResult = uploaded?.watermark
+          const recognizedFields = Object.entries(watermarkResult?.fields || {})
+            .filter(([key, value]) => !key.startsWith('_') && key !== 'labeled_items' && String(value || '').trim())
+            .map(([field, value]) => ({ field, value: String(value) }))
+          const ocrText = (watermarkResult?.lines || []).map(String).join('\n').slice(0, 1200)
+          const ocrStatus = watermarkResult?.available ? 'completed' : 'failed'
+          const ocrTitle = watermarkResult?.recognized
+            ? `图片 ${imageIndex}/${images.length}：水印 OCR 完成，识别到 ${recognizedFields.length} 个字段`
+            : watermarkResult?.available
+              ? `图片 ${imageIndex}/${images.length}：水印 OCR 完成，但没有识别到可读字段`
+              : `图片 ${imageIndex}/${images.length}：上传接口未提供可用的水印 OCR 结果`
+          void this.reportAgentProgress(requestId, 'evidence_upload', uploaded ? 'completed' : 'failed',
+            uploaded
+              ? `图片 ${imageIndex}/${images.length}：上传完成，媒体编号 ${uploaded.id}`
+              : `图片 ${imageIndex}/${images.length}：图片上传失败`,
+            { image_index: imageIndex, image_count: images.length, file_name: img.name,
+              media_id: uploaded?.id || null, capture_time: uploaded?.capture_time || '',
+              capture_time_source: uploaded?.capture_time_source || '' },
+          )
+          void this.reportAgentProgress(requestId, 'watermark_ocr', ocrStatus, ocrTitle, {
+            image_index: imageIndex, image_count: images.length, file_name: img.name,
+            recognized_fields: recognizedFields, ocr_text: ocrText,
+            capture_time: uploaded?.capture_time || '',
+            capture_time_source: uploaded?.capture_time_source || '',
+          })
+
+          void this.reportAgentProgress(requestId, 'image_observation', 'running',
+            `图片 ${imageIndex}/${images.length}：开始读取现场画面内容`,
+            { image_index: imageIndex, image_count: images.length, file_name: img.name },
+          )
+          const observationResult = await this.observeImageWithStatus(img.path)
+          void this.reportAgentProgress(requestId, 'image_observation',
+            observationResult.state === 'failed' || observationResult.state === 'unavailable' ? 'failed' : 'completed',
+            observationResult.observation
+              ? `图片 ${imageIndex}/${images.length}：画面内容读取完成`
+              : observationResult.state === 'empty'
+                ? `图片 ${imageIndex}/${images.length}：画面读取已完成，没有返回可用描述`
+                : `图片 ${imageIndex}/${images.length}：画面内容读取未能完成`,
+            {
+              image_index: imageIndex, image_count: images.length, file_name: img.name,
+              observation: observationResult.observation, error: observationResult.error || '',
+            },
+          )
+          return { path: img.path, wm, observation: observationResult.observation }
         }))
         watermarks.push(...results.map(result => result.wm))
         observations.push(...results.map(result => result.observation))
@@ -941,9 +1274,21 @@ Page(themed({
       }
       // 文件：逐个解析文本
       for (const file of files) {
+        void this.reportAgentProgress(requestId, 'document_parse', 'running',
+          `正在解析文件《${file.name}》`,
+          { file_name: file.name, file_type: file.ext || '', file_count: files.length },
+        )
         try {
           const parsed = await uploadDocument<{ filename?: string; text?: string }>(file.path)
           const content = (parsed.text || '').trim()
+          void this.reportAgentProgress(requestId, 'document_parse', content ? 'completed' : 'waiting',
+            content ? `文件《${parsed.filename || file.name}》解析完成` : `文件《${parsed.filename || file.name}》已解析，但没有提取到文本`,
+            {
+              file_name: parsed.filename || file.name, file_type: file.ext || '',
+              extracted_characters: content.length, text_excerpt: content.slice(0, 1400),
+              status: content ? '文本已提取' : '无可用文本',
+            },
+          )
           blocks.push(content
             ? `【文件《${parsed.filename || file.name}》】\n${content.slice(0, 3000)}`
             : `【文件《${file.name}》】未能提取到文本内容`)
@@ -954,26 +1299,55 @@ Page(themed({
           })
         } catch (error) {
           const message = `文件《${file.name}》解析失败：${(error as Error).message}`
+          void this.reportAgentProgress(requestId, 'document_parse', 'failed', message, {
+            file_name: file.name, file_type: file.ext || '', error: (error as Error).message,
+          })
           blocks.push(`【${message}】`)
           filePlanEvidence.push({ kind: 'file', note: message, observation: '' })
         }
       }
 
       const planEvidence = this.buildPlanEvidence(images, watermarks, observations)
-      const requestPlan = await this.requestAgentPlan(
-        note, [...planEvidence, ...filePlanEvidence], files.length,
+      void this.reportAgentProgress(requestId, 'planning', 'running',
+        '正在把用户原话和本轮识别到的证据提交给结构化规划器',
+        { image_count: images.length, file_count: files.length, evidence_count: planEvidence.length + filePlanEvidence.length },
       )
+      const requestPlan = await this.requestAgentPlan(
+        note, [...planEvidence, ...filePlanEvidence], files.length, requestId,
+      )
+      if (requestPlan.degraded) {
+        void this.reportAgentProgress(requestId, 'planning', 'failed',
+          '规划服务没有返回可用候选；当前使用保守的待确认结果，未自动创建记录',
+          { degraded_reason: String(requestPlan.trace?.degraded_reason || requestPlan.reason || '规划结果不可用'),
+            explicit_user_fields: requestPlan.facts.filter(item => item.source === 'user_message_deterministic') },
+        )
+      }
 
       if (requestPlan.needs_hazard_analysis && images.length) {
-        const hazardResults = await Promise.all(images.map(async image => ({
-          path: image.path,
-          result: await this.detectImageOnce(image.path),
-        })))
+        void this.reportAgentProgress(requestId, 'hazard_analysis', 'running',
+          '规划结果要求进行安全隐患分析，正在逐张提交图片进行识别',
+          { image_count: images.length },
+        )
+        const hazardResults = await Promise.all(images.map(async (image, index) => {
+          try {
+            const result = await this.detectImageOnce(image.path)
+            return { path: image.path, result, error: '' }
+          } catch (error) {
+            return { path: image.path, result: { text: '', raw: null }, error: (error as Error).message }
+          }
+        }))
         hazardResults.forEach((item, index) => {
-          detections.push({ path: item.path, raw: item.result.raw })
-          const detectionLine = `【安全隐患分析】${item.result.text}`
+          if (item.result.raw) detections.push({ path: item.path, raw: item.result.raw })
+          const detectionLine = item.result.text ? `【安全隐患分析】${item.result.text}` : ''
           observations[index] = [observations[index], detectionLine].filter(Boolean).join('\n')
-          blocks.push(`【图片 ${index + 1} 安全隐患分析】\n${item.result.text}`)
+          blocks.push(item.error
+            ? `【图片 ${index + 1} 安全隐患分析失败】\n${item.error}`
+            : `【图片 ${index + 1} 安全隐患分析】\n${item.result.text}`)
+          void this.reportAgentProgress(requestId, 'hazard_analysis', item.error ? 'failed' : 'completed',
+            item.error ? `图片 ${index + 1}/${images.length}：安全分析失败` : `图片 ${index + 1}/${images.length}：安全分析完成`,
+            { image_index: index + 1, image_count: images.length,
+              observation: item.result.text, error: item.error },
+          )
           if (requestPlan) requestPlan.attachment_purposes = [...new Set([...requestPlan.attachment_purposes, 'hazard_evidence'])]
         })
       }
@@ -986,15 +1360,28 @@ Page(themed({
       )
       if (wantsRecordPlan) {
         if (detections.length) {
-          await this.createReviewPlanFromAttachments(note, images, observations, requestPlan, false)
+          const reviewMessageIndex = await this.createReviewPlanFromAttachments(note, images, observations, requestPlan, false)
+          if (reviewMessageIndex === null) return
           await this.appendHazardCandidateMessage(
             detections,
             images,
             watermarks,
             '工作记录候选与安全隐患候选已分开整理。隐患识别不会自动建档，请分别核对后确认。',
           )
+          await this.finishAgentProgress(requestId, 'waiting', '工作记录候选与隐患候选已分别整理，等待用户核对', {
+            candidate_count: requestPlan.item_plan?.candidate_count || 0,
+            hazard_candidate_count: detections.length,
+          })
         } else {
-          await this.createReviewPlanFromAttachments(note, images, observations, requestPlan)
+          const reviewMessageIndex = await this.createReviewPlanFromAttachments(note, images, observations, requestPlan)
+          if (reviewMessageIndex === null) return
+          const savedReview = [...this.data.messages].reverse().find(message => message.reviewPlan)?.reviewPlan
+          await this.finishAgentProgress(requestId, 'waiting',
+            savedReview?.events?.length
+              ? `已保存 ${savedReview.events.length} 个候选事项的待确认草稿，等待用户核对`
+              : '资料草稿已保存，记录用途或类型仍需用户确认',
+            { event_count: savedReview?.events?.length || 0, evidence_count: savedReview?.evidence?.length || 0 },
+          )
         }
         return
       }
@@ -1007,6 +1394,10 @@ Page(themed({
           : `以下是现场发送的素材（图片识别结果、水印与文件内容）：\n${material}\n\n请综合判断是否存在安全隐患或需要监理处理的事项，并给出处理建议。`
 
         const selModel = this.data.models.find(m => m.id === this.data.currentModel)
+        void this.reportAgentProgress(requestId, 'hazard_answer', 'running',
+          '正在根据实际识别结果生成安全分析答复',
+          { image_count: images.length, file_count: files.length },
+        )
         const result = await request<{ answer?: string; reply?: string }>('/local/llm/chat', {
           method: 'POST',
           data: {
@@ -1024,6 +1415,10 @@ Page(themed({
           watermarks,
           result.answer || result.reply || '识别未返回内容',
         )
+        await this.finishAgentProgress(requestId, 'completed', '安全分析结果已返回工作台', {
+          response_excerpt: String(result.answer || result.reply || '').slice(0, 900),
+          hazard_candidate_count: detections.length,
+        })
         return
       }
 
@@ -1033,6 +1428,7 @@ Page(themed({
       )
     } catch (error) {
       this.addMessage({ role: 'assistant', text: `识别失败：${(error as Error).message}` })
+      await this.finishAgentProgress(requestId, 'failed', '本轮资料处理未能完成', { error: (error as Error).message })
     } finally {
       this.setData({ loading: false })
     }
@@ -1051,10 +1447,26 @@ Page(themed({
       const evidence: ReviewPlan['evidence'] = []
       for (const [index, image] of images.entries()) {
         // 复用准备阶段已上传的媒体（含服务端水印识别结果）；未上传的（异常路径）兜底补传一次
-        const uploaded = image.mediaId !== undefined
+        const alreadyUploaded = image.mediaId !== undefined
+        const requestId = String(requestPlan?.request_id || '')
+        void this.reportAgentProgress(requestId, 'evidence_upload', 'running',
+          alreadyUploaded
+            ? `图片 ${index + 1}/${images.length}：复用已上传的媒体编号 ${image.mediaId}`
+            : `图片 ${index + 1}/${images.length}：准备补传并登记为本次计划证据`,
+          { image_index: index + 1, image_count: images.length, file_name: image.name,
+            media_id: image.mediaId || null, reused: alreadyUploaded },
+        )
+        const uploaded = alreadyUploaded
           ? { id: image.mediaId, url: image.remoteUrl || '', watermark: image.serverWatermark, capture_time: image.captureTime, capture_time_source: image.captureTimeSource } as UploadedImageResult
           : await this.uploadEvidence(image, 'agent_review_plan')
         if (!uploaded) throw new Error('图片证据上传失败，请重试')
+        void this.reportAgentProgress(requestId, 'evidence_upload', 'completed',
+          alreadyUploaded
+            ? `图片 ${index + 1}/${images.length}：已复用本次计划证据`
+            : `图片 ${index + 1}/${images.length}：补传完成并登记为本次计划证据`,
+          { image_index: index + 1, image_count: images.length, file_name: image.name,
+            media_id: uploaded.id, reused: alreadyUploaded },
+        )
         const serverFields = uploaded.watermark?.fields || {}
         const watermark: Record<string, any> = {
           ...serverFields,
@@ -1133,7 +1545,13 @@ Page(themed({
         itemPlan, evidence, note, notices,
         requestPlan ? requestPlan as unknown as Record<string, unknown> : undefined,
       )
-      const saved = await createReviewPlan(conversationId, plan)
+      void this.reportAgentProgress(String(requestPlan?.request_id || ''), 'review_plan_save', 'running',
+        '正在按当前候选事项和表式字段合同保存待确认草稿',
+        { record_type: requestPlan?.record_type || '', candidate_count: itemPlan.candidate_count,
+          evidence_count: evidence.length, conflicts: requestPlan?.field_conflicts || [],
+          clarifications: requestPlan?.clarifications || [] },
+      )
+      const saved = await createReviewPlan(conversationId, plan, requestPlan?.request_id)
       const issueList = reviewIssues(saved)
       const messageIndex = this.addMessage({
         role: 'assistant',
@@ -1158,9 +1576,20 @@ Page(themed({
           observations.some(value => !value) ? '部分图片内容观察不可用；其余用户文字和水印证据仍保留。' : '已完成通用图片内容观察，未调用隐患专用识别。',
         ].filter(Boolean).join(' '),
       })
+      if (requestPlan?.request_id) {
+        void this.reportAgentProgress(requestPlan.request_id, 'review_plan_save', 'completed',
+          `待确认草稿已保存，当前版本 ${saved.serverRevision || saved.revision}`,
+          { plan_id: saved.serverId || '', revision: saved.serverRevision || saved.revision,
+            event_count: saved.events.length, evidence_count: saved.evidence.length,
+            missing_fields: issueList },
+        )
+      }
       return messageIndex
     } catch (error) {
       this.addMessage({ role: 'assistant', text: `整理计划创建失败：${(error as Error).message}。已上传的资料不会自动创建业务记录。` })
+      if (requestPlan?.request_id) {
+        await this.finishAgentProgress(requestPlan.request_id, 'failed', '待确认草稿保存失败', { error: (error as Error).message })
+      }
       return null
     } finally {
       if (manageLoading) this.setData({ loading: false })
@@ -1214,9 +1643,9 @@ Page(themed({
     note: string,
     evidence: Array<Record<string, any>> = [],
     fileCount = 0,
+    requestId = newOperationId('request-plan'),
   ): Promise<AgentRequestPlan> {
     const selected = this.data.models.find(model => model.id === this.data.currentModel)
-    const requestId = newOperationId('request-plan')
     const history = this.data.messages
       .filter(message => message.role === 'user' || message.role === 'assistant')
       .slice(-8)
@@ -1420,6 +1849,14 @@ Page(themed({
     const message = this.data.messages[index]
     const current = message?.reviewPlan
     if (!current) return
+    const requestId = newOperationId('agent-turn')
+    const userMessageIndex = userMessage ? this.addMessage(userMessage) : -1
+    this.setData({ loading: true })
+    this.beginAgentProgress(requestId, userMessageIndex,
+      `已收到草稿补充：${reply.slice(0, 80)}`,
+      { plan_id: current.serverId || '', revision: current.serverRevision || current.revision,
+        text_excerpt: reply.slice(0, 700) },
+    )
     let selectedType = reply.startsWith('record_type:') ? reply.slice('record_type:'.length) : ''
     let archiveOnly = reply === 'archive_only'
     const priorRequest = current.requestText === '用户仅上传图片，尚未说明整理用途' ? '' : current.requestText
@@ -1444,7 +1881,11 @@ Page(themed({
         ...(item.section ? { section: 'watermark' } : {}),
       },
     }))
-    const planner = !archiveOnly ? await this.requestAgentPlan(plannerMessage, plannerEvidence) : null
+    void this.reportAgentProgress(requestId, 'planning', 'running',
+      '正在结合当前草稿证据和本轮补充重新判断记录类型及字段候选',
+      { evidence_count: plannerEvidence.length, previous_event_count: current.events.length },
+    )
+    const planner = !archiveOnly ? await this.requestAgentPlan(plannerMessage, plannerEvidence, 0, requestId) : null
     if (!selectedType && !archiveOnly && current.events.length === 0) {
       const purpose = planner ? this.purposeFromPlan(planner) : await this.requestPurposeRecommendation(`${current.requestText}\n${reply}`, current.evidence)
       if (purpose.intent === 'archive') archiveOnly = true
@@ -1456,18 +1897,26 @@ Page(themed({
         }
         this.setData({ messages })
         this.addMessage({ role: 'assistant', text: `结合你刚才的补充，我建议整理为「${purpose.recommendation.record_type}」记录。请点“采用建议”确认类型，或选择其他类型；也可以继续补充描述。` })
+        await this.finishAgentProgress(requestId, 'waiting', '已给出记录类型建议，等待用户选择或继续补充', {
+          proposed_record_type: purpose.recommendation.record_type,
+          confidence: purpose.recommendation.confidence, reason: purpose.recommendation.reason,
+        })
+        this.setData({ loading: false })
         return
       }
       if (purpose.intent !== 'archive') {
         this.addMessage({ role: 'assistant', text: '我还不能可靠判断这批资料的用途。你可以从下面的事项/记录类型中选择，也可以补充说明要完成的工作。' })
+        await this.finishAgentProgress(requestId, 'waiting', '当前证据不足以确定用途，等待用户选择或补充', {
+          choices: purpose.choices.map(choice => choice.label),
+        })
+        this.setData({ loading: false })
         return
       }
     }
     const type = selectedType ? { type: selectedType, confidence: 1, reason: '用户已选择记录类型' } : { type: '待定', confidence: 0, reason: '' }
     const messages = [...this.data.messages]
-    if (userMessage) messages.push(userMessage)
     const revisedPlan: ReviewPlan = { ...current, revision: current.revision + 1, confirmedRevision: null,
-      requestText: [priorRequest, reply].filter(Boolean).join('\n') }
+      requestText: [priorRequest, reply].filter(Boolean).join('\n'), requestId }
     if (type.type === '待定' && archiveOnly) {
       revisedPlan.notices = [...(current.notices || []), '用户选择仅保存/整理图片，不创建工作记录。']
     } else if (planner?.item_plan?.items?.length) {
@@ -1510,6 +1959,11 @@ Page(themed({
     } else if (current.events.length) {
       revisedPlan.notices = [...(current.notices || []), '服务端未能可靠重构这句话对应的事项；当前草稿未被覆盖，请补充日期、地点或工作内容后重试。']
     }
+    void this.reportAgentProgress(requestId, 'review_plan_revision', 'running',
+      '正在向服务端提交草稿修订，并重新校验当前表式合同',
+      { record_type: type.type, previous_revision: current.serverRevision || current.revision,
+        event_count: revisedPlan.events.length, unresolved_conflicts: revisedPlan.events.flatMap(event => event.unresolvedConflicts || []) },
+    )
     try {
       const saved = await saveReviewPlan(revisedPlan, current.serverRevision || current.revision)
       messages[index] = { ...message,
@@ -1520,9 +1974,16 @@ Page(themed({
       this.addMessage({ role: 'assistant', text: archiveOnly
         ? '已保留图片及识别到的证据，不创建工作记录。之后也可以继续补充文字、语音或图片。'
         : `已把“${reply}”并入当前草稿。${saved.events.length ? `由服务端重新核对 ${saved.events.length} 个工作事项。` : ''}${this.reviewFollowupText(saved)}`, reviewFollowupPlanId: saved.serverId })
+      await this.finishAgentProgress(requestId, archiveOnly ? 'completed' : 'waiting',
+        archiveOnly ? '已更新归档整理结果，不创建工作记录' : '草稿修订及服务端字段合同复核已完成，等待继续补充或确认',
+        { plan_id: saved.serverId || '', revision: saved.serverRevision || saved.revision,
+          record_type: type.type, event_count: saved.events.length, missing_fields: reviewIssues(saved) },
+      )
     } catch (error) {
       this.addMessage({ role: 'assistant', text: `当前草稿更新失败：${(error as Error).message}` })
+      await this.finishAgentProgress(requestId, 'failed', '当前草稿修订或服务端校验失败', { error: (error as Error).message })
     }
+    this.setData({ loading: false })
   },
 
   reviewProgress(plan: ReviewPlan) {
@@ -2182,8 +2643,63 @@ Page(themed({
     return out
   },
 
-  /** 通用多模态场景观察，与专用隐患检测分离。 */
-  async observeImageOnce(imagePath: string): Promise<string> {
+  /** Standalone preview endpoint; the workbench upload path reuses uploadImage's OCR result. */
+  async readWatermarkWithStatus(imagePath: string): Promise<{
+    fields: Record<string, any>
+    state: 'recognized' | 'empty' | 'unavailable' | 'failed'
+    error?: string
+  }> {
+    const token = session.getToken()
+    try {
+      const result = await new Promise<any>((resolve, reject) => {
+        wx.uploadFile({
+          url: `${config.apiBaseUrl}/media/watermark/recognize`,
+          filePath: imagePath,
+          name: 'file',
+          header: { Authorization: `Bearer ${token}` },
+          success: (res) => {
+            if (res.statusCode >= 200 && res.statusCode < 300) {
+              try {
+                resolve(JSON.parse(res.data))
+              } catch {
+                reject(new Error('水印返回格式异常'))
+              }
+            } else {
+              reject(new Error(`水印识别失败（HTTP ${res.statusCode}）`))
+            }
+          },
+          fail: (err) => reject(new Error(err.errMsg || '上传失败')),
+        })
+      })
+      const fields = (result && result.fields) || {}
+      const out: Record<string, any> = {
+        _available: result?.recognized ? 'true' : result?.available ? 'empty' : 'false',
+        _lines: Array.isArray(result?.lines) ? result.lines : [],
+        labeled_items: Array.isArray(fields.labeled_items) ? fields.labeled_items : [],
+      }
+      for (const key of Object.keys(fields)) {
+        if (key === 'labeled_items') continue
+        const value = String(fields[key] || '').trim()
+        if (value) out[key] = value
+      }
+      const state = result?.recognized ? 'recognized' : result?.available ? 'empty' : 'unavailable'
+      return { fields: out, state }
+    } catch (error) {
+      return { fields: { _available: 'false' }, state: 'failed', error: (error as Error).message }
+    }
+  },
+
+  /** Compatibility wrapper for flows that only need the extracted fields. */
+  async readWatermark(imagePath: string): Promise<Record<string, any>> {
+    return (await this.readWatermarkWithStatus(imagePath)).fields
+  },
+
+  /** Generic image observation, distinct from dedicated hazard detection. */
+  async observeImageWithStatus(imagePath: string): Promise<{
+    observation: string
+    state: 'completed' | 'empty' | 'unavailable' | 'failed'
+    error?: string
+  }> {
     const token = session.getToken()
     try {
       const result = await new Promise<any>((resolve, reject) => {
@@ -2198,10 +2714,19 @@ Page(themed({
           fail: (err) => reject(new Error(err.errMsg || '图片观察上传失败')),
         })
       })
-      return result?.available ? String(result.observation || '').trim() : ''
-    } catch {
-      return ''
+      const observation = result?.available ? String(result.observation || '').trim() : ''
+      return {
+        observation,
+        state: result?.available ? (observation ? 'completed' : 'empty') : 'unavailable',
+        ...(!result?.available && result?.detail ? { error: String(result.detail) } : {}),
+      }
+    } catch (error) {
+      return { observation: '', state: 'failed', error: (error as Error).message }
     }
+  },
+
+  async observeImageOnce(imagePath: string): Promise<string> {
+    return (await this.observeImageWithStatus(imagePath)).observation
   },
 
   /** 水印字段 → 一行可读文案；没有识别到就返回空串 */
@@ -2245,6 +2770,7 @@ Page(themed({
     images: Attachment[] = [],
     requestPlan?: AgentRequestPlan,
   ) {
+    const requestId = requestPlan?.request_id || newOperationId('agent-chat')
     const selModel = this.data.models.find(m => m.id === this.data.currentModel)
     const history = messages
       .slice(0, -1)
@@ -2257,7 +2783,7 @@ Page(themed({
         method: 'POST',
         data: {
           message: text,
-          request_id: requestPlan?.request_id || newOperationId('agent-chat'),
+          request_id: requestId,
           conversation_id: conversationIdFor(this.currentSessionId),
           material: material || undefined,
           prefill,
@@ -2285,7 +2811,7 @@ Page(themed({
           reply,
         ].filter(Boolean).join('\n')
       }
-      this.applyAgentReply(result, messages)
+      this.applyAgentReply(result, this.data.messages)
       // 上传图片且 Agent 建的是工作记录 → 自动把这张照片挂到该记录
       // （已上传的直接 /media/link 关联；未上传的走 /media/images business_type=work_record 链路。
       //   后端会自动同步 inspection_photos/witness_photos/content_json.media_ids）
@@ -2314,10 +2840,22 @@ Page(themed({
           console.warn('自动挂照片失败（不影响已建记录）：', attachErr)
         }
       }
+      await this.finishAgentProgress(
+        requestId,
+        result.need_more?.length || result.form ? 'waiting' : 'completed',
+        result.need_more?.length || result.form
+          ? 'Agent 已整理出当前草稿，正在等待用户补充或确认'
+          : 'Agent 本轮处理已完成，结果已返回工作台',
+        {
+          tool: result.tool || '', model: result.model || '',
+          missing_fields: result.need_more || [],
+          response_excerpt: String(result.reply || '').slice(0, 700),
+          card_ids: (result.cards || (result.card ? [result.card] : [])).map(card => card.id).filter(Boolean),
+        },
+      )
     } catch (error) {
-      this.setData({
-        messages: [...messages, { role: 'assistant', text: `调用失败：${(error as Error).message}` }],
-      })
+      this.addMessage({ role: 'assistant', text: `调用失败：${(error as Error).message}` })
+      await this.finishAgentProgress(requestId, 'failed', 'Agent 请求失败，未返回成功结果', { error: (error as Error).message })
     } finally {
       this.setData({ loading: false })
       void this.loadPendingDrafts()
@@ -2613,7 +3151,7 @@ Page(themed({
         timeout: 120000,
       })
       this.updateAgentForm(messageIndex, current => ({ ...current, busy: false }))
-      this.applyAgentReply(result, messages)
+      this.applyAgentReply(result, this.data.messages)
     } catch (error) {
       this.updateAgentForm(messageIndex, current => ({ ...current, busy: false }))
       this.addMessage({ role: 'assistant', text: `表单提交失败：${(error as Error).message}` })
@@ -2726,8 +3264,12 @@ Page(themed({
    * 因此前端无需再按 mode 分两套提示词，隐患识别只是 mode 提示。
    */
   async handleLlmChat(text: string, userMsg: Message) {
+    const requestId = newOperationId('agent-chat')
     const messages = [...this.data.messages, userMsg] as Message[]
     this.setData({ messages, loading: true })
+    this.beginAgentProgress(requestId, messages.length - 1, '已接收文字消息，正在读取会话与当前任务状态', {
+      text_excerpt: text.slice(0, 700), conversation_id: conversationIdFor(this.currentSessionId),
+    })
 
     const selModel = this.data.models.find(m => m.id === this.data.currentModel)
     // 最近 6 轮纯文本作为上下文（用于「把这条生成日志」这类指代消解）
@@ -2741,7 +3283,7 @@ Page(themed({
         method: 'POST',
         data: {
           message: text,
-          request_id: newOperationId('agent-chat'),
+          request_id: requestId,
           conversation_id: conversationIdFor(this.currentSessionId),
           history,
           mode: this.data.mode,
@@ -2750,11 +3292,19 @@ Page(themed({
         },
         timeout: 120000,
       })
-      this.applyAgentReply(result, messages)
+      this.applyAgentReply(result, this.data.messages)
+      await this.finishAgentProgress(
+        requestId,
+        result.need_more?.length || result.form ? 'waiting' : 'completed',
+        result.need_more?.length || result.form
+          ? 'Agent 已给出当前判断，等待用户补充或确认'
+          : 'Agent 本轮回复已完成',
+        { tool: result.tool || '', model: result.model || '', missing_fields: result.need_more || [],
+          response_excerpt: String(result.reply || '').slice(0, 900) },
+      )
     } catch (error) {
-      this.setData({
-        messages: [...messages, { role: 'assistant', text: `调用失败：${(error as Error).message}` }],
-      })
+      this.addMessage({ role: 'assistant', text: `调用失败：${(error as Error).message}` })
+      await this.finishAgentProgress(requestId, 'failed', 'Agent 请求失败，未返回成功结果', { error: (error as Error).message })
     } finally {
       this.setData({ loading: false })
       void this.loadPendingDrafts()
@@ -4246,6 +4796,7 @@ Page(themed({
       messages: item.messages,
     })
     void this.loadPendingDrafts()
+    void this.resumeAgentProgress()
   },
 
   async deleteHistoryItem(event: WechatMiniprogram.TouchEvent) {

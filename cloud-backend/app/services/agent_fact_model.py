@@ -26,6 +26,10 @@ _EMPTY_VALUES = {"", "null", "none", "unknown", "未知", "未识别", "待定",
 _FACT_ALIASES = {
     "date": "record_date",
     "business_date": "record_date",
+    "inspection_start_time": "start_time",
+    "station_start_time": "start_time",
+    "inspection_end_time": "end_time",
+    "station_end_time": "end_time",
     "content": "work_content",
     "work_description": "work_content",
     "project_name": "project",
@@ -46,6 +50,7 @@ _FACT_ALIASES = {
 # table-specific values still travel through args/extra_fields.
 _ALLOWED_FACT_FIELDS = {
     "record_type", "record_date", "project", "location", "section",
+    "start_time", "end_time",
     "work_content", "problems", "treatment", "worker_count", "weather",
     "owner_unit", "construction_unit", "supervision_unit", "supervision_org",
     "inspector",
@@ -70,6 +75,8 @@ _EVIDENCE_FIELD_KEYS = {
 }
 _FACT_FIELD_LABELS = {
     "record_date": "日期",
+    "start_time": "开始时间",
+    "end_time": "结束时间",
     "project": "项目",
     "location": "地点",
     "section": "工程部位",

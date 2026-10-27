@@ -67,3 +67,25 @@ def test_conversation_history_is_reference_only():
     assert rendered.startswith("以下 JSON")
     assert "强行合并" in rendered
     assert "在A区施工" in rendered
+
+
+def test_explicit_spoken_time_range_is_preserved_when_model_omits_it():
+    facts = agent_context.extract_explicit_message_facts(
+        "今天 13 点到 15 点，我在一技楼7楼进行巡视",
+        message_ref="m-time",
+    )
+    values = {item["field"]: item["value"] for item in facts}
+    assert values["start_time"] == "13:00"
+    assert values["end_time"] == "15:00"
+    assert "record_date" in values
+
+
+def test_explicit_relative_dates_and_labelled_single_times_are_preserved():
+    facts = agent_context.extract_explicit_message_facts(
+        "明天巡视开始时间上午9点，在西楼A区巡查",
+        message_ref="m-relative",
+    )
+    values = {item["field"]: item["value"] for item in facts}
+    assert values["record_date"]
+    assert values["start_time"] == "09:00"
+    assert values["location"] == "西楼A区"

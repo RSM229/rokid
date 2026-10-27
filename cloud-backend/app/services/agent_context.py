@@ -13,6 +13,8 @@ from datetime import datetime, timedelta, timezone
 import re
 from typing import Any
 
+from app.services.time_normalization import extract_explicit_time_range, parse_local_date
+
 
 FACTS_KEY = "_user_facts"
 CN_TZ = timezone(timedelta(hours=8))
@@ -66,7 +68,7 @@ def extract_user_facts(args: dict[str, Any] | None, *, message_ref: str = "") ->
 
 
 def extract_explicit_message_facts(message: str, *, message_ref: str = "") -> list[dict[str, Any]]:
-    """Extract only high-signal date/location statements from the user's words.
+    """Extract high-signal date/time/location statements from the user's words.
 
     This is a loss-prevention pass, not an intent classifier.  It supplements
     model arguments so an omitted model field cannot erase a fact the user
@@ -76,22 +78,30 @@ def extract_explicit_message_facts(message: str, *, message_ref: str = "") -> li
     if not text:
         return []
     values: list[tuple[str, Any]] = []
+    event_date = None
     full = re.search(r"(20\d{2})\s*[年./-]\s*(\d{1,2})\s*[月./-]\s*(\d{1,2})\s*日?", text)
     short = re.search(r"(?<!\d)(\d{1,2})\s*月\s*(\d{1,2})\s*日?", text)
     if full:
         try:
             candidate = datetime(int(full.group(1)), int(full.group(2)), int(full.group(3))).date()
+            event_date = candidate
             values.append(("record_date", candidate.isoformat()))
         except ValueError:
             pass
     elif short:
         try:
             candidate = datetime(datetime.now(CN_TZ).year, int(short.group(1)), int(short.group(2))).date()
+            event_date = candidate
             values.append(("record_date", candidate.isoformat()))
         except ValueError:
             pass
-    elif re.search(r"今天|今日|当天", text):
-        values.append(("record_date", datetime.now(CN_TZ).date().isoformat()))
+    else:
+        relative = re.search(r"今天|今日|当天|昨天|昨日|明天|明日", text)
+        if relative:
+            event_date = parse_local_date(relative.group(0))
+            if event_date:
+                values.append(("record_date", event_date.isoformat()))
+    values.extend(extract_explicit_time_range(text, event_date).items())
     location = re.search(
         r"(?:在|位于|地点为|位置为)\s*([^，。；,;\n]{2,80}?)(?=(?:进行|开展|完成|做了|做|干了|检查|施工|浇筑|验收|旁站|巡视|巡查|记录)|[，。；,;\n]|$)",
         text,

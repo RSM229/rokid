@@ -93,6 +93,62 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(payload["created_record_refs"]), 2)
         self.assertIsNotNone(payload["duration_ms"])
 
+    async def test_progress_events_are_ordered_idempotent_and_resumable(self):
+        request_id = await agent_runtime.start_request(
+            request_id="req-progress-1",
+            user_id=7,
+            project_id=3,
+            conversation_id="session-1",
+            endpoint="/api/agent/request-plan",
+            stage="request_plan",
+            session_factory=self.sessions,
+        )
+        started = await agent_runtime.append_progress_event(
+            request_id=request_id,
+            user_id=7,
+            project_id=3,
+            event_id="progress-ocr-start",
+            stage="image_ocr",
+            status="running",
+            title="正在识别图片 1 水印",
+            detail={"filename": "现场.jpg"},
+            session_factory=self.sessions,
+        )
+        completed = await agent_runtime.append_progress_event(
+            request_id=request_id,
+            user_id=7,
+            project_id=3,
+            event_id="progress-ocr-done",
+            stage="image_ocr",
+            status="completed",
+            title="图片 1 水印 OCR 完成",
+            detail={"recognized_fields": ["拍摄时间：2026-10-26 13:00", "地点：A区"]},
+            session_factory=self.sessions,
+        )
+        retried = await agent_runtime.append_progress_event(
+            request_id=request_id,
+            user_id=7,
+            project_id=3,
+            event_id="progress-ocr-done",
+            stage="image_ocr",
+            status="completed",
+            title="重复请求不能追加第二条",
+            session_factory=self.sessions,
+        )
+
+        async with self.sessions() as db:
+            row = (await db.execute(select(AgentRequestTrace).where(
+                AgentRequestTrace.request_id == request_id,
+            ))).scalars().one()
+            all_events = agent_runtime.trace_payload(row)["progress_events"]
+            resumed = agent_runtime.trace_payload(row, after_sequence=started["sequence"])
+
+        self.assertEqual(started["sequence"], 1)
+        self.assertEqual(completed["sequence"], 2)
+        self.assertEqual(retried["title"], completed["title"])
+        self.assertEqual(len(all_events), 2)
+        self.assertEqual([item["event_id"] for item in resumed["progress_events"]], ["progress-ocr-done"])
+
     async def test_trace_write_failure_never_breaks_business_call(self):
         def broken_session_factory():
             raise RuntimeError("trace database unavailable")

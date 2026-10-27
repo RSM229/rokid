@@ -1,5 +1,5 @@
 // Review-plan transport and editing rules shared by the work-review page.
-import { request } from './request'
+import { ApiRequestError, request } from './request'
 import { absoluteMediaUrl } from '../config'
 import { isExecutionRecoverable, waitForAgentExecution } from './agent-execution'
 export const FORM_TYPES = [
@@ -408,7 +408,7 @@ export async function createReviewPlan(conversationId: string, plan: ReviewPlan,
     })
     return fromServerPlan(result)
   } catch (error) {
-    if (!(error instanceof Error) || !error.message.includes('已有整理计划')) throw error
+    if (!(error instanceof ApiRequestError) || error.code !== 'ACTIVE_PLAN_EXISTS') throw error
     const existing = (await listReviewPlans(conversationId))[0]
     if (!existing || existing.status !== 'draft' || !existing.serverId) throw error
     const prefix = `turn-${Date.now()}-`

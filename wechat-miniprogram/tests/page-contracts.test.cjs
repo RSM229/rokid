@@ -35,6 +35,17 @@ test('history restores the latest unfinished review plan instead of orphaning it
   assert.match(agentPage, /已恢复上次未完成的记录草稿/)
 })
 
+test('review-purpose replies append the user message only once', () => {
+  const method = agentPage.match(/async applyReviewPurposeReply\([\s\S]*?(?=\n  reviewProgress\()/)?.[0] || ''
+  assert.match(method, /const userMessageIndex = userMessage \? this\.addMessage\(userMessage\) : -1/)
+  assert.doesNotMatch(method, /messages\.push\(userMessage\)/)
+})
+
+test('local history resumes unfinished persisted progress events', () => {
+  const method = agentPage.match(/async loadHistoryItem\([\s\S]*?(?=\n  async deleteHistoryItem\()/)?.[0] || ''
+  assert.match(method, /void this\.resumeAgentProgress\(\)/)
+})
+
 test('inspection details show the saved inspector, not the record creator', () => {
   assert.match(workTemplate, /巡视监理人员[\s\S]{0,180}detail\.inspector/)
 })

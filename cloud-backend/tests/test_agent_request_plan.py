@@ -194,3 +194,40 @@ def test_degraded_plan_never_infers_record_type_or_write():
     legacy = planner.plan_to_legacy_purpose(plan)
     assert legacy["intent"] == "clarify"
     assert legacy["recommendation"] is None
+
+
+def test_spoken_times_reach_text_only_item_plan_even_when_model_omits_them():
+    from app.services.agent_context import extract_explicit_message_facts
+
+    message = "今天 13 点到 15 点，在一技楼7楼进行巡视"
+    plan = planner.normalize_candidate({
+        "intent": "create_record",
+        "actions": ["record_work"],
+        "record_type": "巡视",
+        "facts": [{"field": "section", "value": "一技楼7楼"}],
+    }, message=message)
+    plan = planner.enrich_plan_facts(
+        plan, extract_explicit_message_facts(message, message_ref="m-time"),
+    )
+
+    item_fields = plan["item_plan"]["items"][0]["fields"]
+    assert item_fields["start_time"]["value"] == "13:00"
+    assert item_fields["end_time"]["value"] == "15:00"
+    assert item_fields["start_time"]["source"] == "user_message"
+
+
+def test_degraded_plan_can_be_enriched_with_explicit_user_times():
+    from app.services.agent_context import extract_explicit_message_facts
+
+    message = "今天上午10点钟到12点钟，在西楼A区进行混凝土浇筑旁站"
+    plan = planner.degraded_plan(attachment_count=1, evidence_count=1, reason="timeout")
+    plan = planner.enrich_plan_facts(
+        plan, extract_explicit_message_facts(message, message_ref="m-degraded"),
+    )
+
+    values = {item["field"]: item["value"] for item in plan["facts"]}
+    assert values["start_time"] == "10:00"
+    assert values["end_time"] == "12:00"
+    assert values["record_date"]
+    assert plan["degraded"] is True
+    assert plan["write_allowed"] is False

@@ -12,7 +12,7 @@ from typing import Any, Iterable
 IDENTITY_FIELDS = ("record_date", "project", "location", "section")
 CONTEXT_FIELDS = (
     "owner_unit", "construction_unit", "supervision_unit", "inspector",
-    "work_content", "weather",
+    "work_content", "weather", "start_time", "end_time",
 )
 RECORD_ACTIONS = {"record_work", "create_hazard"}
 _EMPTY_VALUES = {"", "null", "none", "unknown", "未知", "未识别", "待定", "n/a"}
@@ -26,6 +26,8 @@ _EVIDENCE_CONTEXT_KEYS = {
 }
 _FIELD_LABELS = {
     "record_date": "日期",
+    "start_time": "开始时间",
+    "end_time": "结束时间",
     "project": "项目",
     "location": "地点",
     "section": "工程部位",
@@ -190,6 +192,28 @@ def _field_views(
     return out
 
 
+def _add_context_fields(
+    fields: dict[str, dict[str, Any]],
+    user_fields: dict[str, Any],
+    system_fields: dict[str, Any],
+) -> None:
+    for field in CONTEXT_FIELDS:
+        if field in fields:
+            continue
+        if _usable(user_fields.get(field)):
+            fields[field] = {
+                "value": user_fields[field],
+                "source": "user_message",
+                "status": "user_stated_candidate",
+            }
+        elif _usable(system_fields.get(field)):
+            fields[field] = {
+                "value": system_fields[field],
+                "source": "system_project",
+                "status": "system_configured",
+            }
+
+
 def build_item_plan(
     *,
     facts: Iterable[dict[str, Any]] | None,
@@ -214,12 +238,14 @@ def build_item_plan(
                 "grouping_fields": list(IDENTITY_FIELDS), "write_allowed": False,
             }
         missing = [field for field in ("record_date", "location", "section") if not _usable(fact_map.get(field))]
+        fields = _field_views({}, fact_map, system_fields=system_map)
+        _add_context_fields(fields, fact_map, system_map)
         return {
             "items": [{
                 "id": "item_1",
                 "record_type": record_type,
                 "record_type_confidence": record_type_confidence,
-                "fields": _field_views({}, fact_map, system_fields=system_map),
+                "fields": fields,
                 "evidence_indexes": [],
                 "missing_fields": missing,
                 "confidence": 0.75,
@@ -275,19 +301,7 @@ def build_item_plan(
         fields = _field_views(
             identity, fact_map, group.get("sources"), context, system_map,
         )
-        for field in CONTEXT_FIELDS:
-            if _usable(fact_map.get(field)) and field not in fields:
-                fields[field] = {
-                    "value": fact_map[field],
-                    "source": "user_message",
-                    "status": "user_stated_candidate",
-                }
-            elif _usable(system_map.get(field)) and field not in fields:
-                fields[field] = {
-                    "value": system_map[field],
-                    "source": "system_project",
-                    "status": "system_configured",
-                }
+        _add_context_fields(fields, fact_map, system_map)
         missing = [field for field in ("record_date", "location", "section") if field not in fields]
         issues = []
         for field, value in fields.items():
@@ -315,11 +329,13 @@ def build_item_plan(
 
     plan_issues: list[str] = []
     if unassigned and not groups:
+        fields = _field_views({}, fact_map, system_fields=system_map)
+        _add_context_fields(fields, fact_map, system_map)
         items.append({
             "id": "item_1",
             "record_type": record_type,
             "record_type_confidence": record_type_confidence,
-            "fields": _field_views({}, fact_map, system_fields=system_map),
+            "fields": fields,
             "evidence_indexes": unassigned,
             "notes": [],
             "missing_fields": [field for field in ("record_date", "location", "section") if not _usable(fact_map.get(field))],

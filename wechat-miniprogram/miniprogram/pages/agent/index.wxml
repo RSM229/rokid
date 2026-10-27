@@ -59,6 +59,28 @@
             </view>
             <text>{{item.text}}</text>
           </view>
+          <view wx:if="{{item.progressRequestId}}" class="agent-progress">
+            <view class="agent-progress-head" data-index="{{mi}}" bindtap="toggleAgentProgress">
+              <view class="agent-progress-title-wrap">
+                <text class="agent-progress-title">处理过程</text>
+                <text class="agent-progress-current">{{item.progressHeadline || '任务已接收'}}</text>
+              </view>
+              <view class="agent-progress-meta">
+                <text>{{item.progressEvents.length}} 项 · {{item.progressElapsedSeconds || 0}} 秒</text>
+                <text class="agent-progress-toggle">{{item.progressExpanded ? '收起' : '展开'}}</text>
+              </view>
+            </view>
+            <view wx:if="{{item.progressExpanded}}" class="agent-progress-list">
+              <view wx:for="{{item.progressEvents}}" wx:for-item="progress" wx:key="eventId" class="agent-progress-event {{progress.status}}">
+                <view class="agent-progress-mark"></view>
+                <view class="agent-progress-body">
+                  <text class="agent-progress-event-title">{{progress.title}}</text>
+                  <text wx:if="{{progress.detailText}}" class="agent-progress-detail">{{progress.detailText}}</text>
+                  <text class="agent-progress-time">{{progress.createdAt}}</text>
+                </view>
+              </view>
+            </view>
+          </view>
           <!-- 智能体回执卡：点击进对应列表/详情 -->
           <view wx:if="{{item.cards && item.cards.length}}" class="agent-cards">
             <view class="agent-card" wx:for="{{item.cards}}" wx:for-item="cd" wx:for-index="ci" wx:key="ci"
@@ -77,12 +99,6 @@
             <view class="inline-review-head">
               <text class="inline-review-title">工作记录草稿</text>
               <text class="inline-review-meta">{{item.reviewPlan.evidence.length}} 张图片 · {{item.reviewPlan.events.length}} 个事项</text>
-            </view>
-            <view wx:if="{{item.reviewProgress && item.reviewProgress.length}}" class="review-progress">
-              <view wx:for="{{item.reviewProgress}}" wx:for-item="step" wx:key="label" class="review-progress-step {{step.state}}">
-                <view class="review-progress-dot">{{step.state === 'done' ? '✓' : (step.state === 'current' ? '·' : '')}}</view>
-                <text>{{step.label}}</text>
-              </view>
             </view>
             <text wx:if="{{item.reviewSummary}}" class="inline-review-summary">{{item.reviewSummary}}</text>
             <view wx:if="{{!item.reviewEvents || !item.reviewEvents.length}}" class="inline-review-empty">照片已收到，正在等待你确定用途。可点下面的记录类型，也可继续用下方输入框打字、语音或添加图片。</view>
@@ -332,7 +348,7 @@
           </view>
         </view>
       </block>
-      <view wx:if="{{loading}}" class="message assistant">
+      <view wx:if="{{loading && activeProgressIndex < 0}}" class="message assistant">
         <view class="bubble typing">
           <view class="dot"></view>
           <view class="dot"></view>

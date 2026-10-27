@@ -15,6 +15,7 @@ from app.models.user import Project, User
 from app.models.parallel import ParallelInspection
 from app.models.work_record import WorkRecord, WorkRecordStatus
 from app.services import agent_form_requirements, agent_review_plan, form_registry, record_field_spec, record_fields
+from app.services.time_normalization import parse_local_date, parse_local_datetime
 from app.services.watermark_ocr import match_form_field
 
 RECORD_PERMISSIONS = {
@@ -102,16 +103,7 @@ def _business_problem(form_fields: dict[str, Any]) -> str:
 
 
 def _event_datetime(value: Any, event_date: str) -> datetime | None:
-    if value in (None, ""):
-        return None
-    text = str(value).strip()
-    try:
-        return datetime.fromisoformat(text)
-    except ValueError:
-        try:
-            return datetime.fromisoformat(f"{event_date} {text}")
-        except ValueError:
-            return None
+    return parse_local_datetime(value, event_date)
 
 
 async def execute_confirmed_plan(
@@ -170,9 +162,19 @@ async def execute_confirmed_plan(
         record_type = event.get("record_type") or "待定"
         event_media_ids = [media_by_evidence[item] for item in event["evidence_ids"] if item in media_by_evidence]
         urls = [media_by_id[mid].processed_path or media_by_id[mid].original_path for mid in event_media_ids]
-        record_date = date.fromisoformat(event["date"]) if event.get("date") else None
-        record_date_text = record_date.isoformat() if record_date else ""
         form_requirements = agent_form_requirements.resolve_event_form(plan, event)
+        raw_record_date = (
+            form_requirements.get("values", {}).get("date")
+            or form_requirements.get("values", {}).get("record_date")
+            or event.get("date")
+        )
+        record_date = parse_local_date(raw_record_date) if raw_record_date else None
+        if raw_record_date and record_date is None:
+            raise HTTPException(
+                422,
+                f"事项“{event.get('title') or event['id']}”的业务日期无法识别，请确认日期",
+            )
+        record_date_text = record_date.isoformat() if record_date else ""
         form_code = form_requirements.get("form_code") or record_field_spec.form_for_record_type(record_type)
         if (
             form_requirements.get("missing_fields")
@@ -240,6 +242,17 @@ async def execute_confirmed_plan(
         ).strip()
         if record_fields.is_instruction_only(resolved_content):
             resolved_content = ""
+        inspection_start = _event_datetime(
+            form_fields.get("start_time") or form_fields.get("taken_at"), record_date_text,
+        )
+        inspection_end = _event_datetime(form_fields.get("end_time"), record_date_text)
+        for key, parsed in (("start_time", inspection_start), ("end_time", inspection_end)):
+            if form_fields.get(key) not in (None, "") and parsed is None:
+                raise HTTPException(
+                    422,
+                    f"事项“{event.get('title') or event['id']}”的{key}无法转换成记录时间",
+                )
+        record_fields.validate_times(inspection_start, inspection_end)
         form_spec = form_registry.FORM_BY_CODE.get(form_code)
         if form_spec and form_spec.agent_business_route == "parallel_inspection":
             detail_parts = [
@@ -349,15 +362,15 @@ async def execute_confirmed_plan(
             record_date=record_date,
             weather=str(form_fields.get("weather") or "")[:16] or None,
             worker_count=int(form_fields["worker_count"]) if str(form_fields.get("worker_count") or "").isdigit() else None,
-            inspection_start_time=_event_datetime(form_fields.get("start_time") or form_fields.get("taken_at"), record_date_text),
-            inspection_end_time=_event_datetime(form_fields.get("end_time"), record_date_text),
+            inspection_start_time=inspection_start,
+            inspection_end_time=inspection_end,
             inspection_remark=problem_text[:2000] or None if record_type == "巡视" else None,
             station_project_name=project_name[:128] or None if record_type == "旁站" else None,
             station_content=resolved_content[:2000] or None if record_type == "旁站" else None,
             station_location=str(form_fields.get("section") or form_fields.get("station_part") or resolved_section or resolved_location or "")[:256] or None,
             station_process=str(form_fields.get("station_process") or "")[:256] or None,
-            station_start_time=_event_datetime(form_fields.get("start_time") or form_fields.get("taken_at"), record_date_text),
-            station_end_time=_event_datetime(form_fields.get("end_time"), record_date_text),
+            station_start_time=inspection_start,
+            station_end_time=inspection_end,
             station_conclusion=str(
                 selected_fields.get("conclusion") or selected_fields.get("problems") or ""
             )[:2000] or None,

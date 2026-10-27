@@ -18,6 +18,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
@@ -94,6 +95,15 @@ class RequestPlanRequest(BaseModel):
     history: list[dict] = Field(default_factory=list)
     provider: Optional[str] = None
     model: Optional[str] = None
+
+
+class AgentProgressEventRequest(BaseModel):
+    event_id: str = Field(min_length=1, max_length=80)
+    stage: str = Field(min_length=1, max_length=64)
+    status: str = "completed"
+    title: str = Field(min_length=1, max_length=180)
+    detail: dict[str, Any] = Field(default_factory=dict)
+    terminal: bool = False
 
 
 def _record_form_code(tool: str, args: dict, message: str = "") -> str | None:
@@ -640,6 +650,12 @@ async def _generate_request_plan(
             evidence_count=evidence_count,
             reason=type(exc).__name__,
         )
+        plan = agent_request_plan.enrich_plan_facts(
+            plan,
+            extract_explicit_message_facts(message, message_ref=message),
+            evidence=evidence_items,
+            system_facts=system_facts,
+        )
         return plan, ""
 
 
@@ -677,6 +693,21 @@ async def request_plan(
             supervision_org=project_facts["supervision_org"],
             inspector=user.real_name or "",
         )
+        await agent_runtime.append_progress_event(
+            request_id=request_id,
+            user_id=int(user.id),
+            project_id=getattr(user, "project_id", None),
+            endpoint="/api/agent/request-plan",
+            stage="request_plan",
+            status="running",
+            title="正在调用规划模型，根据用户原话和已提取的图片/文件证据生成候选计划",
+            detail={
+                "image_count": attachment_count,
+                "file_count": max(0, req.file_count),
+                "evidence_count": len(evidence),
+                "model": req.model or "系统选择的模型",
+            },
+        )
         plan, model_id = await _generate_request_plan(
             message=message,
             evidence_summary=req.evidence_summary,
@@ -690,6 +721,33 @@ async def request_plan(
         )
         plan["model"] = model_id
         plan["request_id"] = request_id
+        planned_facts = [
+            {"field": item.get("field"), "value": item.get("value"), "source": item.get("source")}
+            for item in plan.get("facts", []) if isinstance(item, dict)
+        ]
+        await agent_runtime.append_progress_event(
+            request_id=request_id,
+            user_id=int(user.id),
+            project_id=getattr(user, "project_id", None),
+            endpoint="/api/agent/request-plan",
+            stage="request_plan",
+            status="completed",
+            title=(
+                "结构化判断完成："
+                + (str(plan.get("record_type") or "记录类型待确认"))
+                + ("候选" if plan.get("actions") else "，需确认处理用途")
+            ),
+            detail={
+                "intent": plan.get("intent"),
+                "actions": plan.get("actions"),
+                "facts": planned_facts[:32],
+                "conflicts": plan.get("field_conflicts", [])[:16],
+                "clarifications": plan.get("clarifications", [])[:12],
+                "degraded": bool(plan.get("degraded")),
+                "degraded_reason": (plan.get("trace") or {}).get("degraded_reason"),
+                "model": model_id,
+            },
+        )
         await agent_runtime.finish_request(
             request_id=request_id,
             user_id=user.id,
@@ -735,14 +793,23 @@ async def _agent_chat_impl(
     req: AgentChatRequest,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    progress_hook: Any = None,
 ):
     """统一入口：意图路由 + 执行 + 回执。识别不到工具时退化为纯问答。"""
+    async def report_progress(stage: str, status: str, title: str, detail: dict[str, Any] | None = None) -> None:
+        if progress_hook is not None:
+            await progress_hook(stage, status, title, detail or {})
+
     "用户的问题 message 如果有包括在req 否则为空 "
     "用户的问题 message 如果有包括在req 否则为空 "
     message = (req.message or "").strip()
     if not message:
         raise HTTPException(status_code=400, detail="消息不能为空")
 
+    await report_progress(
+        "load_context", "running", "正在读取当前项目资料、会话历史和未完成草稿",
+        {"conversation_id": req.conversation_id or "", "message_length": len(message)},
+    )
     project_id = getattr(user, "project_id", None)
     project = await db.get(Project, project_id) if project_id else None
     project_facts = project_context(project)
@@ -764,6 +831,15 @@ async def _agent_chat_impl(
     # place and activity in separate turns.
     pend_for_context = await agent_tools.get_pending(db, user.id, conversation_id=conversation_id)
     draft_for_context = pend_for_context[1] if pend_for_context else {}
+    await report_progress(
+        "load_context", "completed", "会话上下文已读取",
+        {
+            "history_messages": len(earlier_messages or []),
+            "has_pending_draft": bool(pend_for_context),
+            "pending_tool": pend_for_context[0] if pend_for_context else "",
+            "pending_fields": list(draft_for_context.get("missing") or [])[:24],
+        },
+    )
 
     system = _AGENT_SYSTEM.format(
         catalog=agent_tools.catalog_for_prompt(),
@@ -814,6 +890,10 @@ async def _agent_chat_impl(
     raw = ""
     if not structured_submit:
         try:
+            await report_progress(
+                "intent_model", "running", "正在调用语言模型识别本轮意图并提取字段候选",
+                {"provider": req.provider or "系统路由", "model": req.model or "系统选择", "response_mode": "structured_json"},
+            )
             raw, config = await model_gateway.chat_completion(
                 messages,
                 temperature=0.2,
@@ -823,13 +903,33 @@ async def _agent_chat_impl(
             )
             model_id = config.model_id
             parsed = agent_tools._parse_json_object(raw)
+            await report_progress(
+                "intent_model", "completed", "模型结构化结果已返回，服务端正在按允许的动作和字段合同校验",
+                {
+                    "model": model_id,
+                    "has_json_result": bool(parsed),
+                    "proposed_action": str((parsed or {}).get("intent") or ""),
+                    "proposed_record_type": str((parsed or {}).get("record_type") or ""),
+                    "proposed_fact_fields": list((parsed or {}).get("facts", {}).keys())[:24]
+                    if isinstance((parsed or {}).get("facts"), dict)
+                    else [str(item.get("field") or item.get("name") or "") for item in ((parsed or {}).get("facts") or [])[:24] if isinstance(item, dict)],
+                },
+            )
         except model_gateway.ModelGatewayError as exc:
             # 不支持 JSON 模式的端点：退化为纯问答，聊天不中断
             logger.warning("agent JSON 路由失败，退化纯问答: %s", type(exc).__name__)
             try:
+                await report_progress(
+                    "intent_model", "running", "结构化路由不可用，正在改用普通问答模型",
+                    {"reason": type(exc).__name__},
+                )
                 answer = await _plain_answer(message, req.history, req.provider, req.model, req.mode)
             except model_gateway.ModelGatewayError as exc2:
                 raise HTTPException(status_code=503, detail=str(exc2)) from exc2
+            await report_progress(
+                "intent_model", "completed", "普通问答结果已返回；本轮没有执行业务写入",
+                {"degraded": True},
+            )
             return {"kind": "chat", "tool": None, "reply": answer, "card": None,
                     "cards": [], "actions": [], "need_more": [], "undo": None,
                     "form": None, "model": None, "degraded": True,
@@ -914,11 +1014,45 @@ async def _agent_chat_impl(
     if tool not in agent_tools.TOOL_BY_NAME:
         tool = ""
     fact_args = agent_fact_model.facts_to_args(incoming_plan.get("facts"))
-    args = {**fact_args, **semantic_args}
+    args = {**semantic_args, **fact_args}
     if incoming_plan.get("record_type") and not str(args.get("record_type") or "").strip():
         args["record_type"] = incoming_plan["record_type"]
+    inferred_type = agent_tools._norm_record_type(str(args.get("record_type") or "")) or ""
+    selected_form = agent_tools.record_field_spec.form_for_record_type(
+        inferred_type, agent_tools._is_weida(inferred_type, args, message),
+    ) if inferred_type else None
+    args = agent_tools.apply_explicit_user_facts(
+        args, incoming_plan.get("facts"), selected_form,
+    )
     turn_fact_args = dict(args)
     proposed_record_type = agent_tools._norm_record_type(str(args.get("record_type") or ""))
+    await report_progress(
+        "semantic_validation", "completed",
+        "结构化语义校验完成："
+        + str(incoming_plan.get("record_type") or proposed_record_type or "记录类型待确认"),
+        {
+            "intent": incoming_plan.get("intent"),
+            "action": incoming_plan.get("selected_tool"),
+            "record_type": incoming_plan.get("record_type") or proposed_record_type,
+            "model": model_id,
+            "facts": [
+                {
+                    "field": item.get("field"), "value": item.get("value"),
+                    "source": item.get("source"), "confidence": item.get("confidence"),
+                }
+                for item in (incoming_plan.get("facts") or [])
+                if isinstance(item, dict)
+            ][:32],
+            "conflicts": (incoming_plan.get("field_conflicts") or [])[:16],
+            "clarifications": (incoming_plan.get("clarifications") or [])[:12],
+            "explicit_user_fields": [
+                {"field": item.get("field"), "value": item.get("value")}
+                for item in (incoming_plan.get("facts") or [])
+                if isinstance(item, dict)
+                and item.get("source") == "user_message_deterministic"
+            ][:24],
+        },
+    )
 
     # 上一轮追问留下的草稿（同用户，已落库）：本轮参数合并到草稿上，避免丢字段
     pend = pend_for_context
@@ -964,12 +1098,25 @@ async def _agent_chat_impl(
     # 模型没选工具、但草稿未完成：把这句当「补充回答」单独抽一次参数
     # （明显是提问/找页面的话不抽，避免「用户中途问规范」被当成补字段）
     if not tool and pending_tool and not any(h in message for h in _SUPPLEMENT_SKIP_HINTS):
+        await report_progress(
+            "extract_supplement", "running", "正在把本轮补充内容对照草稿缺项提取为字段候选",
+            {"pending_tool": pending_tool, "missing_fields": list(draft.get("missing") or [])[:24]},
+        )
         extra = await _extract_supplement(message, pending_tool, draft, req.provider, req.model)
         # 命中「仍缺字段」才当补充回答：标签、extra_fields 槽位、或仍缺字段对应的参数名
         if agent_tools.supplement_hits(extra, draft.get("args") or {}, draft.get("missing")):
             tool = pending_tool
             args = {**args, **extra}
             turn_fact_args.update(extra)
+            await report_progress(
+                "extract_supplement", "completed", "补充内容已映射到草稿字段",
+                {"fields": list(extra.keys())[:24]},
+            )
+        else:
+            await report_progress(
+                "extract_supplement", "completed", "本轮内容没有匹配到当前草稿缺项，原草稿保持不变",
+                {"candidate_fields": list(extra.keys())[:24]},
+            )
     # A type choice is intentionally kept as a deterministic transition for
     # the evidence-only draft.  The generic supplement extractor cannot infer
     # a form before record_type exists.
@@ -1037,6 +1184,13 @@ async def _agent_chat_impl(
                     record_type,
                     agent_tools._is_weida(record_type, args, message),
                 ) or ""
+                if not structured_submit:
+                    args = agent_tools.apply_explicit_user_facts(
+                        args, draft.get("facts"), _form,
+                    )
+                    args = agent_tools.apply_explicit_user_facts(
+                        args, incoming_plan.get("facts"), _form,
+                    )
             args = agent_tools.normalize_extra_fields(args, _form)
         elif pending_tool and spec.risk != "read":
             # 用户换成了另一个写操作 → 旧草稿作废（纯查询/问答不清草稿，草稿有 24 小时 TTL）
@@ -1055,6 +1209,10 @@ async def _agent_chat_impl(
             if confirmed:
                 args["_execution_confirmed"] = True
         ctx = agent_tools.ToolContext(db=db, user=user, project_id=project_id, project=project, message=message)
+        await report_progress(
+            "tool_validation", "running", "服务端正在校验工具权限、记录类型和字段完整性",
+            {"tool": tool, "record_type": str(args.get("record_type") or ""), "form": _record_form_code(tool, args, message) or ""},
+        )
         result = await agent_tools.dispatch(ctx, tool, args)
         if result.get("need_more") and tool == pending_tool:
             # 🔴 兜底：用户这句是对上一轮追问的实质性回复，但模型没填进该字段 → 原话直接填入重跑，
@@ -1065,6 +1223,27 @@ async def _agent_chat_impl(
             if refilled is not None:
                 args = refilled
                 result = await agent_tools.dispatch(ctx, tool, args)
+        await report_progress(
+            "tool_validation", "completed", "服务端字段合同校验完成",
+            {
+                "tool": tool,
+                "missing_fields": list(result.get("need_more") or [])[:32],
+                "provided_fields": [
+                    {"field": str(key), "value": value}
+                    for key, value in args.items()
+                    if not str(key).startswith("_")
+                    and key != "extra_fields"
+                    and str(value if value is not None else "").strip()
+                ][:32],
+                "extra_fields": [
+                    {"field": str(key), "value": value}
+                    for key, value in (args.get("extra_fields") or {}).items()
+                    if str(value if value is not None else "").strip()
+                ][:32] if isinstance(args.get("extra_fields"), dict) else [],
+                "created_ids": [item.get("id") for item in (result.get("cards") or []) if isinstance(item, dict) and item.get("id") is not None][:12],
+                "created_id": (result.get("card") or {}).get("id") if isinstance(result.get("card"), dict) else None,
+            },
+        )
         if result.get("need_more"):
             if tool == "create_work_record" and "最终确认" in [str(x) for x in (result.get("need_more") or [])]:
                 args["_awaiting_confirmation"] = True
@@ -1136,11 +1315,13 @@ async def agent_chat(
     db: AsyncSession = Depends(get_db),
 ):
     """Run one agent turn, then persist the exact assistant result for restore."""
+    user_id = int(user.id)
+    project_id = getattr(user, "project_id", None)
     conversation_id = (req.conversation_id or "").strip()[:64] or None
     request_id = await agent_runtime.start_request(
         request_id=req.request_id,
-        user_id=user.id,
-        project_id=getattr(user, "project_id", None),
+        user_id=user_id,
+        project_id=project_id,
         conversation_id=conversation_id,
         endpoint="/api/agent/chat",
         stage="agent_chat",
@@ -1148,12 +1329,38 @@ async def agent_chat(
         provider=req.provider or "",
         model=req.model or "",
     )
+
+    async def progress_hook(stage: str, status: str, title: str, detail: dict[str, Any]) -> None:
+        await agent_runtime.append_progress_event(
+            request_id=request_id,
+            user_id=user_id,
+            project_id=project_id,
+            conversation_id=conversation_id,
+            endpoint="/api/agent/chat",
+            stage=stage,
+            status=status,
+            title=title,
+            detail=detail,
+        )
+
     try:
-        result = await _agent_chat_impl(req, user=user, db=db)
+        result = await _agent_chat_impl(req, user=user, db=db, progress_hook=progress_hook)
     except Exception as exc:
+        await agent_runtime.append_progress_event(
+            request_id=request_id,
+            user_id=user_id,
+            project_id=project_id,
+            conversation_id=conversation_id,
+            endpoint="/api/agent/chat",
+            stage="agent_chat",
+            status="failed",
+            title="Agent 本轮处理失败，未返回成功结果",
+            detail={"error": str(exc)[:400]},
+            terminal=True,
+        )
         await agent_runtime.finish_request(
             request_id=request_id,
-            user_id=user.id,
+            user_id=user_id,
             endpoint="/api/agent/chat",
             stage="agent_chat",
             status="failed",
@@ -1186,6 +1393,8 @@ async def agent_chat(
         lines.append("当前候选优先保留照片水印/EXIF 证据；系统资料和你的描述不会静默覆盖，需在草稿中核对确认。")
         result["field_conflicts"] = conflicts
         result["reply"] = "\n".join(lines) + "\n" + str(result.get("reply") or "").strip()
+    if isinstance(result, dict):
+        result["request_id"] = request_id
     if conversation_id and isinstance(result, dict):
         result["conversation_id"] = conversation_id
         try:
@@ -1199,9 +1408,32 @@ async def agent_chat(
             await db.rollback()
             result["history_saved"] = False
     if isinstance(result, dict):
-        result["request_id"] = request_id
-        plan_result = result.get("request_plan") if isinstance(result.get("request_plan"), dict) else None
         cards = result.get("cards") if isinstance(result.get("cards"), list) else []
+        if not cards and isinstance(result.get("card"), dict):
+            cards = [result["card"]]
+        needs_user = bool(result.get("need_more")) or bool(result.get("form"))
+        await agent_runtime.append_progress_event(
+            request_id=request_id,
+            user_id=user_id,
+            project_id=project_id,
+            conversation_id=conversation_id,
+            endpoint="/api/agent/chat",
+            stage="agent_result",
+            status="waiting" if needs_user else "completed",
+            title=(
+                "当前草稿已整理，等待用户补充或确认"
+                if needs_user else "Agent 本轮处理完成，结果已返回工作台"
+            ),
+            detail={
+                "kind": result.get("kind"),
+                "tool": result.get("tool"),
+                "missing_fields": list(result.get("need_more") or [])[:32],
+                "card_ids": [item.get("id") for item in cards if isinstance(item, dict) and item.get("id") is not None][:12],
+                "model": result.get("model") or req.model or "",
+            },
+            terminal=True,
+        )
+        plan_result = result.get("request_plan") if isinstance(result.get("request_plan"), dict) else None
         record_refs = [
             {"kind": item.get("kind"), "id": item.get("id")}
             for item in cards
@@ -1209,7 +1441,7 @@ async def agent_chat(
         ]
         await agent_runtime.finish_request(
             request_id=request_id,
-            user_id=user.id,
+            user_id=user_id,
             endpoint="/api/agent/chat",
             stage="agent_chat",
             request_plan=plan_result,
@@ -1304,6 +1536,8 @@ async def list_agent_requests(
 @router.get("/requests/{request_id}")
 async def get_agent_request(
     request_id: str,
+    after_sequence: int = 0,
+    progress_only: bool = False,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -1314,7 +1548,53 @@ async def get_agent_request(
         raise HTTPException(404, "请求追踪不存在")
     if row.project_id is not None and row.project_id != getattr(user, "project_id", None):
         raise HTTPException(403, "请求追踪不属于当前项目")
-    return agent_runtime.trace_payload(row)
+    payload = agent_runtime.trace_payload(row, after_sequence=max(0, after_sequence))
+    if progress_only:
+        return {
+            "request_id": payload["request_id"],
+            "status": payload["status"],
+            "current_stage": payload["current_stage"],
+            "progress_events": payload["progress_events"],
+            "latest_progress_sequence": payload["latest_progress_sequence"],
+        }
+    return payload
+
+
+@router.post("/requests/{request_id}/progress")
+async def append_agent_progress(
+    request_id: str,
+    req: AgentProgressEventRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Append an authenticated, bounded progress event for live workbench display."""
+    if req.status not in {"running", "completed", "failed", "waiting", "skipped"}:
+        raise HTTPException(422, "进度状态无效")
+    try:
+        detail_size = len(json.dumps(req.detail, ensure_ascii=False, default=str))
+    except (TypeError, ValueError):
+        raise HTTPException(422, "进度详情格式无效")
+    if detail_size > 16_000:
+        raise HTTPException(413, "进度详情过长")
+    project_id = getattr(user, "project_id", None)
+    existing = await agent_runtime.get_request_trace(
+        db, agent_runtime.normalize_request_id(request_id), int(user.id),
+    )
+    if existing and existing.project_id is not None and existing.project_id != project_id:
+        raise HTTPException(403, "请求追踪不属于当前项目")
+    event = await agent_runtime.append_progress_event(
+        request_id=request_id,
+        user_id=int(user.id),
+        project_id=project_id,
+        endpoint="/api/agent/progress",
+        event_id=req.event_id,
+        stage=req.stage,
+        status=req.status,
+        title=req.title,
+        detail=req.detail,
+        terminal=req.terminal,
+    )
+    return {"event": event}
 
 
 @router.get("/executions/{execution_id}")
@@ -1406,6 +1686,8 @@ async def create_review_plan(
     db: AsyncSession = Depends(get_db),
 ):
     """Create a persistent, unconfirmed multi-event review plan."""
+    user_id = int(user.id)
+    project_id = getattr(user, "project_id", None)
     conversation_id = req.conversation_id.strip()[:64]
     if not conversation_id:
         raise HTTPException(400, "conversation_id 不能为空")
@@ -1414,13 +1696,13 @@ async def create_review_plan(
         req.request_id or req.plan.get("request_id") or request_plan.get("request_id"),
     )
     stored_plan = agent_review_plan.pin_form_contracts({**req.plan, "request_id": request_id})
-    project = await db.get(Project, user.project_id) if user.project_id else None
+    project = await db.get(Project, project_id) if project_id else None
     if project:
         stored_plan["system_project"] = project_context(project)
     await agent_runtime.start_request(
         request_id=request_id,
-        user_id=user.id,
-        project_id=getattr(user, "project_id", None),
+        user_id=user_id,
+        project_id=project_id,
         conversation_id=conversation_id,
         endpoint="/api/agent/review-plans",
         stage="review_plan_save",
@@ -1430,13 +1712,18 @@ async def create_review_plan(
         agent_review_plan.validate_plan(stored_plan)
         await _validate_review_plan_media(db, user, stored_plan)
         existing = (await db.execute(select(AgentReviewPlan).where(
-            AgentReviewPlan.user_id == user.id,
-            AgentReviewPlan.project_id == getattr(user, "project_id", None),
+            AgentReviewPlan.user_id == user_id,
+            AgentReviewPlan.project_id == project_id,
             AgentReviewPlan.conversation_id == conversation_id,
         ).with_for_update())).scalars().first()
         if existing:
             if existing.status != "executed":
-                raise HTTPException(409, "该会话已有整理计划，请读取并修订现有计划")
+                raise HTTPException(409, detail={
+                    "code": "ACTIVE_PLAN_EXISTS",
+                    "message": "该会话已有整理计划，请读取并修订现有计划",
+                    "plan_id": existing.id,
+                    "revision": existing.revision,
+                })
             existing.revision += 1
             existing.status = "draft"
             existing.plan_json = json.dumps(stored_plan, ensure_ascii=False)
@@ -1447,8 +1734,8 @@ async def create_review_plan(
             row = existing
         else:
             row = AgentReviewPlan(
-                user_id=user.id, conversation_id=conversation_id,
-                project_id=getattr(user, "project_id", None),
+                user_id=user_id, conversation_id=conversation_id,
+                project_id=project_id,
                 revision=1, status="draft", plan_json=json.dumps(stored_plan, ensure_ascii=False),
             )
             db.add(row)
@@ -1457,7 +1744,7 @@ async def create_review_plan(
         payload = _review_plan_payload(row)
         await agent_runtime.finish_request(
             request_id=request_id,
-            user_id=user.id,
+            user_id=user_id,
             endpoint="/api/agent/review-plans",
             stage="review_plan_save",
             request_plan=request_plan,
@@ -1471,11 +1758,36 @@ async def create_review_plan(
             review_plan_id=row.id,
         )
         return payload
+    except IntegrityError as exc:
+        await db.rollback()
+        # The row lock cannot lock a row that does not exist. The unique
+        # session index is the final arbiter when two first saves race.
+        raced = (await db.execute(select(AgentReviewPlan).where(
+            AgentReviewPlan.user_id == user_id,
+            AgentReviewPlan.project_id == project_id,
+            AgentReviewPlan.conversation_id == conversation_id,
+        ))).scalars().first()
+        await agent_runtime.finish_request(
+            request_id=request_id,
+            user_id=user_id,
+            endpoint="/api/agent/review-plans",
+            stage="review_plan_save",
+            status="failed",
+            error=exc,
+        )
+        if raced and raced.status != "executed":
+            raise HTTPException(409, detail={
+                "code": "ACTIVE_PLAN_EXISTS",
+                "message": "该会话已有整理计划，请读取并修订现有计划",
+                "plan_id": raced.id,
+                "revision": raced.revision,
+            }) from exc
+        raise
     except Exception as exc:
         await db.rollback()
         await agent_runtime.finish_request(
             request_id=request_id,
-            user_id=user.id,
+            user_id=user_id,
             endpoint="/api/agent/review-plans",
             stage="review_plan_save",
             status="failed",
@@ -1525,12 +1837,14 @@ async def update_review_plan(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    user_id = int(user.id)
+    project_id = getattr(user, "project_id", None)
     row = (await db.execute(select(AgentReviewPlan).where(
-        AgentReviewPlan.id == plan_id, AgentReviewPlan.user_id == user.id,
-    ))).scalars().first()
+        AgentReviewPlan.id == plan_id, AgentReviewPlan.user_id == user_id,
+    ).with_for_update())).scalars().first()
     if not row:
         raise HTTPException(404, "整理计划不存在")
-    if row.project_id != getattr(user, "project_id", None):
+    if row.project_id != project_id:
         raise HTTPException(403, "整理计划不属于当前项目")
     if row.status != "draft":
         raise HTTPException(409, "已确认的整理计划不能修改")
@@ -1552,7 +1866,7 @@ async def update_review_plan(
         raise HTTPException(422, str(exc)) from exc
     await agent_runtime.start_request(
         request_id=request_id,
-        user_id=user.id,
+        user_id=user_id,
         project_id=row.project_id,
         conversation_id=row.conversation_id,
         endpoint="/api/agent/review-plans/{plan_id}",
@@ -1574,7 +1888,7 @@ async def update_review_plan(
         )
         await agent_runtime.finish_request(
             request_id=request_id,
-            user_id=user.id,
+            user_id=user_id,
             endpoint="/api/agent/review-plans/{plan_id}",
             stage="review_plan_save",
             request_plan=stored_request_plan,
@@ -1592,7 +1906,7 @@ async def update_review_plan(
         await db.rollback()
         await agent_runtime.finish_request(
             request_id=request_id,
-            user_id=user.id,
+            user_id=user_id,
             endpoint="/api/agent/review-plans/{plan_id}",
             stage="review_plan_save",
             status="failed",
@@ -1609,12 +1923,14 @@ async def confirm_review_plan(
     db: AsyncSession = Depends(get_db),
 ):
     """Confirm only the exact reviewed revision; formal writes are a later command."""
+    user_id = int(user.id)
+    project_id = getattr(user, "project_id", None)
     row = (await db.execute(select(AgentReviewPlan).where(
-        AgentReviewPlan.id == plan_id, AgentReviewPlan.user_id == user.id,
-    ))).scalars().first()
+        AgentReviewPlan.id == plan_id, AgentReviewPlan.user_id == user_id,
+    ).with_for_update())).scalars().first()
     if not row:
         raise HTTPException(404, "整理计划不存在")
-    if row.project_id != getattr(user, "project_id", None):
+    if row.project_id != project_id:
         raise HTTPException(403, "整理计划不属于当前项目")
     if row.status == "confirmed" and row.confirmed_revision == req.revision:
         return _review_plan_payload(row)
@@ -1636,7 +1952,7 @@ async def confirm_review_plan(
     )
     await agent_runtime.start_request(
         request_id=request_id,
-        user_id=user.id,
+        user_id=user_id,
         project_id=row.project_id,
         conversation_id=row.conversation_id,
         endpoint="/api/agent/review-plans/{plan_id}/confirm",
@@ -1651,7 +1967,7 @@ async def confirm_review_plan(
         await db.refresh(row)
         await agent_runtime.finish_request(
             request_id=request_id,
-            user_id=user.id,
+            user_id=user_id,
             endpoint="/api/agent/review-plans/{plan_id}/confirm",
             stage="review_confirm",
             result={"plan_id": plan_id, "revision": row.confirmed_revision, "status": row.status},
@@ -1661,7 +1977,7 @@ async def confirm_review_plan(
         await db.rollback()
         await agent_runtime.finish_request(
             request_id=request_id,
-            user_id=user.id,
+            user_id=user_id,
             endpoint="/api/agent/review-plans/{plan_id}/confirm",
             stage="review_confirm",
             status="failed",
@@ -1680,8 +1996,9 @@ async def execute_review_plan(
     db: AsyncSession = Depends(get_db),
 ):
     """Execute one confirmed revision with durable, idempotent recovery."""
+    user_id = int(user.id)
     preview = (await db.execute(select(AgentReviewPlan).where(
-        AgentReviewPlan.id == plan_id, AgentReviewPlan.user_id == user.id,
+        AgentReviewPlan.id == plan_id, AgentReviewPlan.user_id == user_id,
     ))).scalars().first()
     if not preview:
         raise HTTPException(404, "整理计划不存在")
@@ -1700,7 +2017,7 @@ async def execute_review_plan(
     execution_id = agent_runtime.review_execution_id(plan_id, req.revision)
     await agent_runtime.start_request(
         request_id=request_id,
-        user_id=user.id,
+        user_id=user_id,
         project_id=project_id,
         conversation_id=preview.conversation_id,
         endpoint="/api/agent/review-plans/{plan_id}/execute",
@@ -1715,7 +2032,7 @@ async def execute_review_plan(
             request_id=request_id,
             flow_type="review_plan_execute",
             scope_id=f"review-plan:{plan_id}",
-            user_id=user.id,
+            user_id=user_id,
             project_id=project_id,
             conversation_id=preview.conversation_id,
             expected_revision=req.revision,
@@ -1730,7 +2047,7 @@ async def execute_review_plan(
             await db.refresh(preview)
             await agent_runtime.finish_request(
                 request_id=request_id,
-                user_id=user.id,
+                user_id=user_id,
                 endpoint="/api/agent/review-plans/{plan_id}/execute",
                 stage="review_execute",
                 result=result,
@@ -1742,7 +2059,7 @@ async def execute_review_plan(
         agent_runtime.mark_execution_running(locked_flow)
         row = (await db.execute(select(AgentReviewPlan).where(
             AgentReviewPlan.id == plan_id,
-            AgentReviewPlan.user_id == user.id,
+            AgentReviewPlan.user_id == user_id,
         ).with_for_update())).scalars().first()
         if not row:
             raise HTTPException(404, "整理计划不存在")
@@ -1757,7 +2074,7 @@ async def execute_review_plan(
         await db.refresh(row)
         await agent_runtime.finish_request(
             request_id=request_id,
-            user_id=user.id,
+            user_id=user_id,
             endpoint="/api/agent/review-plans/{plan_id}/execute",
             stage="review_execute",
             result=result,
@@ -1770,11 +2087,11 @@ async def execute_review_plan(
         if execution_prepared:
             await agent_runtime.mark_execution_failed(
                 execution_id=execution_id, error=exc,
-                user_id=user.id, project_id=project_id,
+                user_id=user_id, project_id=project_id,
             )
         await agent_runtime.finish_request(
             request_id=request_id,
-            user_id=user.id,
+            user_id=user_id,
             endpoint="/api/agent/review-plans/{plan_id}/execute",
             stage="review_execute",
             status="failed",

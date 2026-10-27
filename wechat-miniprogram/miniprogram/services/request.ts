@@ -10,29 +10,42 @@ interface RequestOptions {
 
 export class ApiRequestError extends Error {
   statusCode?: number
+  code?: string
   networkError: boolean
   timedOut: boolean
 
-  constructor(message: string, options: { statusCode?: number; networkError?: boolean; timedOut?: boolean } = {}) {
+  constructor(message: string, options: { statusCode?: number; code?: string; networkError?: boolean; timedOut?: boolean } = {}) {
     super(message)
     this.name = 'ApiRequestError'
     this.statusCode = options.statusCode
+    this.code = options.code
     this.networkError = options.networkError === true
     this.timedOut = options.timedOut === true
   }
 }
 
 function errorMessage(response: WechatMiniprogram.RequestSuccessCallbackResult): string {
-  const data = response.data as { detail?: string; message?: string } | string
+  const data = response.data as { detail?: unknown; message?: string } | string
   if (typeof data === 'string') return data
-  const detail = data?.detail || data?.message
+  const detail = data?.detail
+  if (detail && typeof detail === 'object') {
+    const message = (detail as { message?: unknown }).message
+    if (typeof message === 'string') return message
+  }
   // 本地联调经典坑：127.0.0.1:8000 被其他项目占用时，请求会命中对方
   // 应用的 404（FastAPI 默认响应体 {"detail":"Not Found"}）。原样抛出用户
   // 只看到一句看不懂的英文，这里换成带排查指引的中文提示。
   if (config.useLocalBackend && response.statusCode === 404 && detail === 'Not Found') {
     return `本地后端未响应（${config.apiBaseUrl}）。请确认已启动本地后端，且 8000 端口没有被其他项目占用。`
   }
-  return detail || `请求失败（${response.statusCode}）`
+  return (typeof detail === 'string' ? detail : data?.message) || `请求失败（${response.statusCode}）`
+}
+
+function errorCode(response: WechatMiniprogram.RequestSuccessCallbackResult): string | undefined {
+  const data = response.data as { detail?: unknown } | string
+  if (!data || typeof data === 'string' || !data.detail || typeof data.detail !== 'object') return undefined
+  const code = (data.detail as { code?: unknown }).code
+  return typeof code === 'string' ? code : undefined
 }
 
 export function request<T>(
@@ -71,7 +84,10 @@ export function request<T>(
           session.clear()
           wx.reLaunch({ url: '/pages/login/index' })
         }
-        reject(new ApiRequestError(errorMessage(response), { statusCode: response.statusCode }))
+        reject(new ApiRequestError(errorMessage(response), {
+          statusCode: response.statusCode,
+          code: errorCode(response),
+        }))
       },
       fail(error) {
         const raw = error.errMsg || ''

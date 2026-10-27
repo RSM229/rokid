@@ -94,6 +94,32 @@ def test_confirmed_values_are_authoritative_over_watermark_and_system_values():
     assert "水印项目B" in resolved["field_candidates"]["project_name"]
 
 
+def test_record_column_is_authoritative_for_acceptance_participants():
+    from datetime import date
+    from app.services.agent_form_requirements import resolve_record_form
+
+    record = SimpleNamespace(
+        record_type="验收", record_date=date(2026, 10, 27), created_at=None,
+        acceptance_participants="实际参验人员李工",
+        content_json={"confirmed_fields": {"acceptance_participants": "旧参验人员陈工"}},
+    )
+    resolved = resolve_record_form(record, form_code="acceptance_record")
+
+    assert resolved["values"]["acceptance_participants"] == "实际参验人员李工"
+
+
+def test_acceptance_content_alias_reaches_its_table_field_contract():
+    from app.services.agent_form_requirements import resolve_event_form
+
+    resolved = resolve_event_form({"evidence": []}, {
+        "record_type": "验收",
+        "forms": ["acceptance_record"],
+        "fields": {"acceptance_content": "主体结构钢筋隐蔽验收"},
+    })
+
+    assert resolved["values"]["acceptance_content"] == "主体结构钢筋隐蔽验收"
+
+
 def test_form_contract_fingerprint_covers_definition_and_is_independent_helper():
     from app.services.form_contracts import contract_version
 
@@ -176,13 +202,15 @@ def test_legacy_chat_created_record_persists_form_contract_snapshot():
     args = {
         "record_type": "巡视", "work_content": "临边防护检查",
         "section": "3号楼二层", "record_date": "2026-10-23",
-        "inspection_start_time": "09:00", "inspection_end_time": "10:00",
+        "start_time": "13:00", "end_time": "15:00",
         "weather": "晴", "problems": "符合要求",
     }
     for field in agent_tools.record_field_spec.required_ask_fields(form):
         canonical = field["canonical"]
+        if canonical in {"start_time", "end_time"}:
+            continue  # Deliberately leave only canonical facts for the tool adapter.
         value = {
-            "weather": "晴", "start_time": "09:00", "end_time": "10:00",
+            "weather": "晴",
             "date": "2026-10-23", "record_date": "2026-10-23",
         }.get(canonical)
         if value is None and "数字" in str(field.get("table_type") or ""):
@@ -212,9 +240,13 @@ def test_legacy_chat_created_record_persists_form_contract_snapshot():
     assert result["ok"]
     assert len(db.rows) == 2  # WorkRecord plus its security audit.
     record = db.rows[0]
+    assert record.inspection_start_time.strftime("%H:%M") == "13:00"
+    assert record.inspection_end_time.strftime("%H:%M") == "15:00"
     assert record.content_json["form_code"] == form
     assert record.content_json["form_contract_version"]
     assert record.content_json["confirmed_fields"]["section"] == "3号楼二层"
+    assert record.content_json["confirmed_fields"]["start_time"] == "2026-10-23 13:00"
+    assert record.content_json["confirmed_fields"]["end_time"] == "2026-10-23 15:00"
     assert record.content_json["form_requirements"]["write_allowed"]
 
 
@@ -415,6 +447,110 @@ def test_time_only_value_is_valid_when_record_date_is_separate():
         }},
     })
     assert not any(item["canonical"] == "start_time" for item in result["invalid_fields"])
+
+
+def test_spoken_time_range_is_persisted_identically_in_record_columns_and_contract_snapshot():
+    import asyncio
+    import json
+    from types import SimpleNamespace
+    from app.models.work_record import WorkRecord
+    from app.services import agent_request_plan, record_field_spec
+    from app.services.agent_context import extract_explicit_message_facts
+    from app.services.agent_review_execute import execute_confirmed_plan
+    from app.services.agent_review_plan import pin_form_contracts
+
+    class FakeDb:
+        def __init__(self):
+            self.rows = []
+
+        async def get(self, model, _id):
+            if model.__name__ == "Project":
+                return SimpleNamespace(id=7)
+            return None
+
+        def add(self, row):
+            row.id = len(self.rows) + 1
+            self.rows.append(row)
+
+        async def flush(self):
+            return None
+
+        async def execute(self, *_args, **_kwargs):
+            raise AssertionError("no media query expected")
+
+    message = "2026年10月26日13点到15点，在一技楼7楼进行巡视"
+    facts = extract_explicit_message_facts(message, message_ref="time-range")
+    request_plan = agent_request_plan.enrich_plan_facts(
+        agent_request_plan.normalize_candidate({
+            "intent": "create_record", "actions": ["record_work"],
+            "record_type": "巡视", "facts": [{"field": "section", "value": "一技楼7楼"}],
+        }, message=message),
+        facts,
+    )
+    planned_fields = request_plan["item_plan"]["items"][0]["fields"]
+    assert planned_fields["start_time"]["value"] == "13:00"
+    assert planned_fields["end_time"]["value"] == "15:00"
+
+    form = "gd_b_214_xunshi"
+    field_values = {
+        key: {
+            "value": item["value"], "source": item["source"], "status": item["status"],
+        }
+        for key, item in planned_fields.items()
+        if item.get("value")
+    }
+    field_values.update({"weather": "晴", "work_content": "临边防护检查", "problems": "符合要求"})
+    for field in record_field_spec.required_ask_fields(form):
+        canonical = field["canonical"]
+        if canonical in field_values:
+            continue
+        value = {
+            "date": "2026-10-26", "record_date": "2026-10-26",
+            "section": "一技楼7楼", "start_time": "13:00", "end_time": "15:00",
+            "weather": "晴",
+        }.get(canonical)
+        if value is None and record_field_spec.options_for(field):
+            value = record_field_spec.options_for(field)[0]
+        if value is None and "数字" in str(field.get("table_type") or ""):
+            value = "1"
+        field_values[canonical] = {"value": value or "已确认", "source": "user_message", "status": "user_confirmed"}
+
+    plan = pin_form_contracts({
+        "schema_version": 1,
+        "request_text": message,
+        "evidence": [], "unassigned_ids": [],
+        "system_project": {
+            "project_name": "项目A", "construction_unit": "总包A",
+            "owner_unit": "建设单位A", "supervision_unit": "监理单位A",
+            "supervision_org": "项目监理部",
+        },
+        "events": [{
+            "id": "e1", "title": "巡视记录", "location": "一技楼7楼",
+            "section": "一技楼7楼", "content": "临边防护检查",
+            "date": "2026-10-26", "date_confirmed": True,
+            "evidence_ids": [], "forms": [form],
+            "record_type": "巡视", "record_type_confirmed": True,
+            "record_type_confidence": 1,
+            "entity_fields": {"project_name": "项目A", "construction_unit": "总包A"},
+            "fields": {form: field_values},
+        }],
+    })
+    row = SimpleNamespace(
+        status="confirmed", confirmed_revision=1, revision=1, executed_revision=None,
+        execution_result_json=None, plan_json=json.dumps(plan, ensure_ascii=False),
+        id=31, project_id=7, updated_at=None,
+    )
+    user = SimpleNamespace(id=4, project_id=7, has_permission=lambda _permission: True)
+    db = FakeDb()
+    asyncio.run(execute_confirmed_plan(db, row, user, 1))
+
+    record = next(item for item in db.rows if isinstance(item, WorkRecord))
+    assert record.record_date.isoformat() == "2026-10-26"
+    assert record.inspection_start_time.isoformat(sep=" ", timespec="minutes") == "2026-10-26 13:00"
+    assert record.inspection_end_time.isoformat(sep=" ", timespec="minutes") == "2026-10-26 15:00"
+    assert record.content_json["confirmed_fields"]["start_time"] == "2026-10-26 13:00"
+    assert record.content_json["confirmed_fields"]["end_time"] == "2026-10-26 15:00"
+    assert record.content_json["form_requirements"]["write_allowed"] is True
 
 
 def test_confirmed_parallel_inspection_materializes_its_own_business_record():

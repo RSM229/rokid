@@ -52,6 +52,7 @@ from app.services.agent_context import (
 from app.services import acceptance_checklists
 from app.services.period_report_service import doc_type_for
 from app.services.record_fields import project_fields
+from app.services.time_normalization import parse_local_datetime
 
 logger = logging.getLogger(__name__)
 
@@ -289,21 +290,9 @@ def _normalize_time_text(raw: str) -> str:
 
 
 def _parse_time(value: Any, base: date | None = None) -> datetime | None:
-    """解析「14:30 / 14：30 / 九点半 / 下午三点半 / 2026-10-14 14:30」为 datetime（只取时分，日期用 base）。"""
-    raw = str(value or "").strip()
-    if not raw:
-        return None
-    norm = _normalize_time_text(raw)
-    m = re.search(r"(\d{1,2})\s*[:：.]\s*(\d{1,2})", norm)
-    if not m:
-        return None
-    hour, minute = int(m.group(1)), int(m.group(2))
-    if not (0 <= hour < 24 and 0 <= minute < 60):
-        return None
-    if hour < 12 and any(h in raw for h in _PM_HINTS):
-        hour += 12  # 「下午三点半」→ 15:30
-    day = base or datetime.now().date()
-    return datetime(day.year, day.month, day.day, hour, minute)
+    """Parse time values with the same China-local rules used by form contracts."""
+    anchor = base or datetime.now().date()
+    return parse_local_datetime(value, anchor)
 
 
 def _parse_time_range(raw: Any, base: date | None = None) -> tuple[datetime | None, datetime | None]:
@@ -446,6 +435,46 @@ def _set_field_value(args: dict, field: dict, value: str) -> dict:
         extra.pop(str(key), None)
     extra[slot] = value
     out[_EXTRA_ARG] = extra
+    return out
+
+
+def apply_canonical_form_fields(args: dict, form: str | None) -> dict:
+    """Map cross-cutting canonical facts to the selected form's actual args."""
+    if not form:
+        return args
+    out = dict(args or {})
+    for field in record_field_spec.fields_of(form):
+        canonical = str(field.get("canonical") or "")
+        if not canonical or canonical not in out:
+            continue
+        value = str(out.get(canonical) if out.get(canonical) is not None else "").strip()
+        if value and not _field_value(out, field):
+            out = _set_field_value(out, field, value)
+    return out
+
+
+def apply_explicit_user_facts(
+    args: dict,
+    facts: list[dict[str, Any]] | None,
+    form: str | None,
+) -> dict:
+    """Give deterministic facts from the current user's words precedence over model args."""
+    out = dict(args or {})
+    fields = record_field_spec.fields_of(form) if form else []
+    for fact in facts or []:
+        if not isinstance(fact, dict) or fact.get("source") != "user_message_deterministic":
+            continue
+        canonical = str(fact.get("field") or "").strip()
+        value = str(fact.get("value") if fact.get("value") is not None else "").strip()
+        if not canonical or not value:
+            continue
+        out[canonical] = value
+        field = next((item for item in fields if (
+            str(item.get("canonical") or "") == canonical
+            or str(item.get("arg") or "") == canonical
+        )), None)
+        if field:
+            out = _set_field_value(out, field, value)
     return out
 
 
@@ -872,6 +901,7 @@ async def _create_work_record(ctx: ToolContext, args: dict) -> dict:
     _weida = _is_weida(raw_type, args, ctx.message or "")
     _form = record_field_spec.form_for_record_type(raw_type, _weida) or ""
     if _form:
+        args = apply_canonical_form_fields(args, _form)
         args = normalize_extra_fields(args, _form)
     # 🔧 项目名误当部位兜底：「巡视XX项目…工程部位为YY」常被模型把项目名填进 section、
     # 部位清单进了 work_content。两类信号：① section≈本项目名；② section 以「项目/项目部」
