@@ -54,8 +54,17 @@
         </view>
 
         <view class="card-title" style="margin-top:20rpx;">签认履历</view>
-        <view wx:for="{{signHistory}}" wx:key="index">{{item.label}}：{{item.signer}} · {{item.signed_at}} · {{item.current ? '当前版本' : '历史版本'}}</view>
+        <view wx:for="{{signHistory}}" wx:key="index">
+          <text>{{item.label}}：</text>
+          <text wx:if="{{item.type === 'offline'}}">纸签完成确认人 {{item.confirmed_by}}</text>
+          <text wx:else>电子签认人 {{item.signer}}</text>
+          <text> · {{item.signed_at}} · {{item.current ? '当前版本' : '历史版本'}}</text>
+        </view>
         <view wx:if="{{!signHistory.length}}">尚未签认</view>
+        <view wx:for="{{signSlots}}" wx:key="key" style="margin-top:16rpx;">
+          <view>{{item.label}}：{{item.completed ? (item.completion_type === 'offline' ? '线下签署已确认' : '电子签认已完成') : (item.mode === 'offline' ? '等待打印并手签' : '待签认')}}</view>
+          <button wx:if="{{item.mode === 'offline' && !item.completed && doc.status !== '已归档'}}" class="doc-btn ghost" data-slot="{{item.key}}" bindtap="confirmOfflineSignoff">确认纸质签署已完成</button>
+        </view>
     </view>
 
     <!-- 文件导出：与工作记录详情同款 doc-btn 样式，PDF/Word 并排 -->

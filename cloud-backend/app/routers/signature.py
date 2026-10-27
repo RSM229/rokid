@@ -52,6 +52,10 @@ class SigningModeRequest(BaseModel):
     slot: Optional[str] = None
 
 
+class OfflineSignoffRequest(BaseModel):
+    slot: str
+
+
 class SignatureResponse(BaseModel):
     id: int
     name: str
@@ -158,7 +162,7 @@ async def set_document_signing_mode(
     doc = (await db.execute(select(Document).where(
         Document.id == doc_id,
         Document.project_id == require_project_id(user),
-    ))).scalar_one_or_none()
+    ).with_for_update())).scalar_one_or_none()
     if not doc:
         raise HTTPException(404, "文书不存在")
     if doc.status == DocStatus.ARCHIVED.value:
@@ -180,6 +184,14 @@ async def set_document_signing_mode(
     ).limit(1))
     if current.first():
         raise HTTPException(409, "该版本已有签认，不能更换签署方式")
+    if any(
+        isinstance(row, dict)
+        and row.get("slot") == slot
+        and row.get("revision") == (doc.content_revision or 1)
+        and row.get("status") == "completed"
+        for row in content.get("offline_signoffs") or []
+    ):
+        raise HTTPException(409, "该版本已有线下签署确认，不能更换签署方式")
     signing[slot] = {
         "mode": req.mode,
         "selected_at": datetime.now().isoformat(),
@@ -246,7 +258,7 @@ async def delete_signature(
 @router.get("/documents/{doc_id}/signoffs")
 async def document_signoffs(doc_id: int, all_projects: bool = Query(False, description="公司级账号：可查看其他项目（仅读）"), user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     from app.models.document_signoff import DocumentSignoff
-    from app.services.document_signoffs import SLOTS, slots_for, required_slots_for
+    from app.services.document_signoffs import SLOTS, slots_for, required_slots_for, current_offline_signoffs
     from app.models.user import Project
     doc = await db.get(Document, doc_id)
     if not doc or not can_read_project(doc.project_id, user, all_projects):
@@ -255,6 +267,10 @@ async def document_signoffs(doc_id: int, all_projects: bool = Query(False, descr
     project = await db.get(Project, doc.project_id)
     signing = dict((doc.content or {}).get("signing") or {})
     slot_modes = {key: value.get("mode") for key, value in signing.items() if isinstance(value, dict)}
+    current_electronic = {
+        row.slot for row in history if row.revision == (doc.content_revision or 1)
+    }
+    current_offline = current_offline_signoffs(doc)
     role_labels = {
         ("supervisor", "gdaq_30306_weida"): "监理检查人员",
         ("chief", "gdaq_30306_weida"): "总监理工程师",
@@ -266,13 +282,124 @@ async def document_signoffs(doc_id: int, all_projects: bool = Query(False, descr
         ("supervisor", "gd_b_220_rizhi"): "专业监理工程师",
         ("project_seal", "gd_b_221_yuebao"): "监理单位（盖章）",
     }
+    history_items = [
+        {
+            "slot": signoff.slot,
+            "label": role_labels.get(
+                (signoff.slot, doc.form_code),
+                role_labels.get(
+                    (signoff.slot, doc.doc_type),
+                    SLOTS.get(signoff.slot, (signoff.slot,))[0],
+                ),
+            ),
+            "signer": signoff.signer_name,
+            "signed_at": signoff.signed_at.isoformat(),
+            "revision": signoff.revision,
+            "current": signoff.revision == (doc.content_revision or 1),
+            "type": "electronic",
+            "signature_hash": signoff.signature_hash,
+            "content_hash": signoff.content_hash,
+        }
+        for signoff in history
+    ]
+    for row in (doc.content or {}).get("offline_signoffs") or []:
+        if not isinstance(row, dict):
+            continue
+        slot = str(row.get("slot") or "")
+        history_items.append({
+            "slot": slot,
+            "label": role_labels.get(
+                (slot, doc.form_code),
+                role_labels.get((slot, doc.doc_type), SLOTS.get(slot, (slot,))[0]),
+            ),
+            "confirmed_by": row.get("confirmed_by_name", ""),
+            "signed_at": row.get("confirmed_at", ""),
+            "revision": row.get("revision"),
+            "current": row.get("revision") == (doc.content_revision or 1),
+            "type": "offline",
+            "status": "线下签署已确认" if row.get("status") == "completed" else "等待线下签署",
+        })
     return {
         "revision": doc.content_revision or 1,
-        "slots": [{"key": key, "label": role_labels.get((key, doc.form_code), role_labels.get((key, doc.doc_type), SLOTS[key][0])), "required": key in required_slots_for(doc), "mode": slot_modes.get(key)} for key in slots_for(doc)],
+        "slots": [{
+            "key": key,
+            "label": role_labels.get((key, doc.form_code), role_labels.get((key, doc.doc_type), SLOTS[key][0])),
+            "required": key in required_slots_for(doc),
+            "mode": slot_modes.get(key),
+            "completed": key in current_electronic or key in current_offline,
+            "completion_type": "electronic" if key in current_electronic else "offline" if key in current_offline else None,
+        } for key in slots_for(doc)],
         "project_seal_signature_id": getattr(project, "seal_signature_id", None),
-        "history": [{"slot": s.slot, "label": SLOTS.get(s.slot, (s.slot,))[0], "signer": s.signer_name,
-                     "signed_at": s.signed_at.isoformat(), "revision": s.revision,
-                     "current": s.revision == (doc.content_revision or 1), "signature_hash": s.signature_hash, "content_hash": s.content_hash} for s in history],
+        "history": sorted(history_items, key=lambda row: str(row.get("signed_at") or "")),
+    }
+
+
+@router.post("/documents/{doc_id}/offline-signoff")
+async def confirm_offline_signoff(
+    doc_id: int,
+    req: OfflineSignoffRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Record the user's confirmation that a printed copy was signed by hand."""
+    from app.models.security_audit import SecurityAudit
+    from app.services.document_signoffs import (
+        slots_for, assert_slot_authorized, current_signoffs, current_offline_signoffs,
+    )
+    from app.services.record_fields import now_local, validate_document
+
+    doc = (await db.execute(select(Document).where(
+        Document.id == doc_id,
+        Document.project_id == require_project_id(user),
+    ).with_for_update())).scalar_one_or_none()
+    if not doc:
+        raise HTTPException(404, "文书不存在")
+    if doc.status == DocStatus.ARCHIVED.value:
+        raise HTTPException(409, "已归档文书不能补充线下签署确认")
+    if req.slot not in slots_for(doc):
+        raise HTTPException(400, "该文书没有此签认位置")
+
+    content = dict(doc.content or {})
+    signing = content.get("signing") if isinstance(content.get("signing"), dict) else {}
+    mode = signing.get(req.slot) if isinstance(signing.get(req.slot), dict) else {}
+    if mode.get("mode") != "offline":
+        raise HTTPException(409, "请先将该签认位置设置为线下打印手签")
+    await assert_slot_authorized(db, doc, user, req.slot)
+    if any(row.slot == req.slot for row in await current_signoffs(db, doc)):
+        raise HTTPException(409, "该位置已有电子签认，不能再登记线下签署")
+    if req.slot in current_offline_signoffs(doc):
+        raise HTTPException(409, "该版本的线下签署已经确认")
+    validate_document(doc)
+
+    signed_at = now_local()
+    row = {
+        "slot": req.slot,
+        "mode": "offline",
+        "status": "completed",
+        "revision": doc.content_revision or 1,
+        "confirmed_by_id": user.id,
+        "confirmed_by_name": user.real_name or user.username,
+        "confirmed_at": signed_at.isoformat(),
+    }
+    history = list(content.get("offline_signoffs") or [])
+    history.append(row)
+    content["offline_signoffs"] = history
+    doc.content = content
+    db.add(SecurityAudit(
+        user_id=user.id,
+        username=user.username,
+        action="document_offline_signoff_confirmed",
+        detail=f"doc={doc.id} revision={doc.content_revision or 1} slot={req.slot}",
+    ))
+    await db.commit()
+    return {
+        "doc_id": doc.id,
+        "revision": doc.content_revision or 1,
+        "slot": req.slot,
+        "status": "completed",
+        "confirmed_by": row["confirmed_by_name"],
+        "confirmed_at": row["confirmed_at"],
+        "electronic_signature_created": False,
     }
 
 

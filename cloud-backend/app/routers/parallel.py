@@ -144,7 +144,11 @@ async def update_inspection(pid: int, req: ParallelUpdate, user: User = Depends(
         raise HTTPException(400, "日期、部位、项目、检查记录和人工结论必须有效且非空")
     for key, value in changes.items(): setattr(p, key, value.strip() if isinstance(value, str) else value)
     if doc:
-        doc.content = _content(p, await db.get(Project, p.project_id))
+        content = _content(p, await db.get(Project, p.project_id))
+        for key in ("signing", "offline_signoffs"):
+            if (doc.content or {}).get(key) is not None:
+                content[key] = (doc.content or {})[key]
+        doc.content = content
         doc.status = DocStatus.DRAFT.value
         invalidate_document(doc)
     await db.commit()

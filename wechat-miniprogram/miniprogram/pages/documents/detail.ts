@@ -82,7 +82,7 @@ Page(themed({
     canApprove: false,
     approving: false,
     contentEditor: [] as { key: string; label: string; value: string }[],
-    signSlots: [] as { key: string; label: string; mode?: string }[], signHistory: [] as { slot: string; label: string; signer: string; signed_at: string; revision: number; current: boolean }[],
+    signSlots: [] as { key: string; label: string; mode?: string; completed?: boolean; completion_type?: string | null }[], signHistory: [] as { slot: string; label: string; signer?: string; confirmed_by?: string; signed_at: string; revision: number; current: boolean; type?: string; status?: string }[],
     projectSealId: 0, signatures: [] as { id: number; name: string }[],
     showSign: false, signing: false, signPassword: '', signSlotIndex: 0, signSignatureIndex: 0,
     signingMode: 'uploaded', signingModeIndex: 1,
@@ -133,7 +133,7 @@ Page(themed({
       // S2：user.role 是英文 key，比较必须用 key（用中文会静默永假）
       const canApprove = doc.status === '待审批'
         && (isChiefRole(user?.role) || (user?.permissions || []).includes('document_approve'))
-      const signoffs = await request<{ slots: { key: string; label: string; mode?: string }[]; history: { slot: string; label: string; signer: string; signed_at: string; revision: number; current: boolean }[]; project_seal_signature_id?: number }>(`/documents/${id}/signoffs`)
+      const signoffs = await request<{ slots: { key: string; label: string; mode?: string; completed?: boolean; completion_type?: string | null }[]; history: { slot: string; label: string; signer?: string; confirmed_by?: string; signed_at: string; revision: number; current: boolean; type?: string; status?: string }[]; project_seal_signature_id?: number }>(`/documents/${id}/signoffs`)
       const editableKeys = ['temperature_high', 'temperature_low', 'weather_morning', 'weather_afternoon', 'weather_night', 'construction_progress', 'material_section', 'supervision_section', 'parallel_section', 'acceptance_section', 'other_work_section', 'problems_section', 'meeting_section', 'document_section', 'closure_section', 'report_section', 'misc_section']
       const contentEditor = doc.doc_type === '监理日志' ? editableKeys.map(key => ({ key, label: CONTENT_LABELS[key] || key, value: String(doc.content?.[key] ?? '') })) : []
       this.setData({ doc, fields, images, contentEditor, signSlots: signoffs.slots, signHistory: signoffs.history, projectSealId: signoffs.project_seal_signature_id || 0, hasPdf: Boolean(doc.signed_pdf_path || doc.pdf_path), canApprove, loading: false })
@@ -251,6 +251,28 @@ Page(themed({
     await request(`/documents/${docId}/signing-mode`, {
       method: 'POST', data: { slot, mode },
     })
+  },
+
+  async confirmOfflineSignoff(event: WechatMiniprogram.CustomEvent<{ slot?: string }>) {
+    const doc = this.data.doc
+    const slot = String(event.currentTarget.dataset.slot || '')
+    if (!doc || !slot) return
+    const confirmation = await wx.showModal({
+      title: '确认纸质签署完成',
+      content: '请确认已打印当前版本，并由对应人员完成纸面手写签名。系统只记录你的确认，不会生成电子签名，也不代表已收到纸质原件。',
+      confirmText: '确认已签',
+      confirmColor: '#176b58',
+    })
+    if (!confirmation.confirm) return
+    try {
+      await request(`/documents/${doc.id}/offline-signoff`, {
+        method: 'POST', data: { slot },
+      })
+      wx.showToast({ title: '已记录线下签署', icon: 'success' })
+      await this.loadDoc(doc.id)
+    } catch (error) {
+      wx.showModal({ title: '确认失败', content: (error as Error).message, showCancel: false })
+    }
   },
 
   clearSignatureCanvas() {

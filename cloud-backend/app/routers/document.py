@@ -200,6 +200,9 @@ async def update_document_from_schema(
 
     project = await db.get(Project, project_id)
     new_content = provform_schema.build_content_from_fields(doc.form_code, req.fields, project)
+    for key in ("signing", "offline_signoffs"):
+        if (doc.content or {}).get(key) is not None:
+            new_content[key] = (doc.content or {})[key]
     invalidate_document(doc)
     doc.content = new_content
     if req.title is not None:
@@ -349,7 +352,11 @@ async def update_document(
             raise HTTPException(400, "验收结论须为合格、不合格或待整改")
     if req.content is not None:
         merged = dict(doc.content or {})
-        merged.update({k: v for k, v in req.content.items() if k not in ("review_date", "signoffs", "signed_by", "signed_at")})
+        workflow_keys = {
+            "review_date", "signoffs", "signed_by", "signed_at", "signing",
+            "offline_signoffs", "document_signoffs",
+        }
+        merged.update({k: v for k, v in req.content.items() if k not in workflow_keys})
         merged.pop("review_date", None)
         if any(key in (req.content or {}) for key in ("temperature_high", "temperature_low", "weather_morning", "weather_afternoon", "weather_night")):
             merged["weather_source"] = "人工补填/复核"

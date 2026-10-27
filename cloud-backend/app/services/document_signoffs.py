@@ -78,8 +78,26 @@ async def current_signoffs(db, doc):
     ).order_by(DocumentSignoff.signed_at))).scalars().all())
 
 
+def current_offline_signoffs(doc) -> dict[str, dict]:
+    content = doc.content if isinstance(getattr(doc, "content", None), dict) else {}
+    revision = doc.content_revision or 1
+    rows = content.get("offline_signoffs")
+    if not isinstance(rows, list):
+        return {}
+    return {
+        str(row.get("slot")): row
+        for row in rows
+        if isinstance(row, dict)
+        and row.get("status") == "completed"
+        and row.get("mode") == "offline"
+        and row.get("revision") == revision
+        and row.get("slot")
+    }
+
+
 async def assert_required_signoffs(db, doc):
     signed = {s.slot for s in await current_signoffs(db, doc)}
+    signed.update(current_offline_signoffs(doc))
     missing = required_slots_for(doc) - signed
     missing_groups = [group for group in required_any_slot_groups_for(doc) if not signed.intersection(group)]
     if missing or missing_groups:
