@@ -716,6 +716,20 @@ async def generate_aggregate_doc(
     supervisor_name = signer.real_name or ""
     supervisor_level = signer.supervisor_level or ""
 
+    # 平行检验按【周期区间】汇总（日报那边是单日 target_date）。
+    # inspect_date 存 ISO 字符串，字典序与日期序一致，可直接用字符串比较。
+    parallels = list((await db.execute(
+        select(ParallelInspection).where(
+            ParallelInspection.project_id == project_id,
+            ParallelInspection.inspect_date >= start.isoformat(),
+            ParallelInspection.inspect_date <= end.isoformat(),
+        ).order_by(ParallelInspection.inspect_date)
+    )).scalars().all())
+    parallel_section = "\n".join(
+        f"{p.part} {p.item}：{p.result_detail}，结论：{p.conclusion}，依据：{p.basis}，方法：{p.method or ''}"
+        for p in parallels
+    ) or f"本{'月' if period == 'month' else '周'}无平行检查记录。"
+
     content = {
         "project_name": project.name if project else "",
         "doc_number": "",
@@ -725,8 +739,10 @@ async def generate_aggregate_doc(
         "date_start": start.isoformat(),
         "date_end": end.isoformat(),
         **project_fields(project),
-        "weather_source": ex.get("weather_source", ""),
-        "weather_missing": ex.get("weather_missing", []),
+        # 周报/月报跨多日，天气无单一取值 —— 与下方 temperature/weather_* 字段
+        # 一致留空（此前误引用日报函数的 ex 变量，必然 NameError）。
+        "weather_source": "",
+        "weather_missing": [],
         "parallel_section": parallel_section,
         "supervisor": supervisor_name,
         "supervisor_level": supervisor_level,

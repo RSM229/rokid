@@ -362,6 +362,54 @@ class RecordRepairTests(unittest.IsolatedAsyncioTestCase):
         doc=await self.db.get(Document,result['doc_id'])
         self.assertIn('同源会议数据',doc.content['meeting_section']);self.assertTrue(result['docx_url'])
 
+    async def test_week_and_month_aggregate_render_with_period_parallel_section(self):
+        """🔴 回归：周报/月报此前必然 NameError。
+
+        generate_aggregate_doc 里引用了 `ex`（天气）和 `parallel_section`，
+        但这两个变量只在 generate_supervision_log（日报）中定义 —— day 分支在
+        函数开头提前 return 所以没暴露，week/month 一走到 content 组装就崩。
+        崩点还被外层 try/except 吞进 report["errors"]，导致自动周报/月报
+        长期静默失败、只在日志留痕。
+        """
+        # 10-08 是周四 → 整周为 10-05(一) 至 10-11(日)
+        self.db.add_all([
+            ParallelInspection(project_id=self.p.id,user_id=self.u.id,inspect_date='2026-10-06',
+                               part='A栋三层',item='钢筋保护层',result_detail='偏差 3mm',
+                               conclusion='合格',basis='GB50204',method='实测'),
+            ParallelInspection(project_id=self.p.id,user_id=self.u.id,inspect_date='2026-10-10',
+                               part='B栋基础',item='回弹强度',result_detail='C30 达标',
+                               conclusion='合格',basis='JGJ/T23',method='回弹仪'),
+            # 区间外的记录不应进本周汇总
+            ParallelInspection(project_id=self.p.id,user_id=self.u.id,inspect_date='2026-09-01',
+                               part='上周部位',item='不应出现',result_detail='x',conclusion='合格'),
+        ])
+        await self.db.commit()
+
+        week=await generate_aggregate_doc(self.db,self.p.id,'week','2026-10-08',supervisor=self.u,use_llm=False)
+        week_doc=await self.db.get(Document,week['doc_id'])
+        self.assertEqual(week['form_code'],'gd_b_223_zhoubao')
+        self.assertIn('A栋三层 钢筋保护层',week_doc.content['parallel_section'])
+        self.assertIn('B栋基础 回弹强度',week_doc.content['parallel_section'])
+        self.assertNotIn('不应出现',week_doc.content['parallel_section'])
+        # 跨多日无单一天气，天气类字段应留空而不是崩
+        self.assertEqual(week_doc.content['weather_source'],'')
+        self.assertEqual(week_doc.content['weather_missing'],[])
+        self.assertTrue(week['docx_url'])
+
+        month=await generate_aggregate_doc(self.db,self.p.id,'month','2026-10',supervisor=self.u,use_llm=False)
+        month_doc=await self.db.get(Document,month['doc_id'])
+        self.assertEqual(month['form_code'],'gd_b_221_yuebao')
+        self.assertIn('A栋三层 钢筋保护层',month_doc.content['parallel_section'])
+        # 月区间含 09-01？否 —— month 用 2026-10，9 月记录仍在区间外
+        self.assertNotIn('不应出现',month_doc.content['parallel_section'])
+        self.assertTrue(month['docx_url'])
+
+    async def test_week_aggregate_without_parallel_records_uses_period_wording(self):
+        """无平行检验记录时给出「本周无平行检查记录」而不是残留日报的「当日」措辞。"""
+        result=await generate_aggregate_doc(self.db,self.p.id,'week','2026-10-08',supervisor=self.u,use_llm=False)
+        doc=await self.db.get(Document,result['doc_id'])
+        self.assertIn('本周无平行检查记录',doc.content['parallel_section'])
+
     async def test_notice_word_contains_problem_organization_and_date(self):
         path=render_form('gd_b_215_tongzhi',{'project_name':'回归项目','doc_number':'GD-B-215-TEST','date':'2026-10-08','section':'A栋','to_unit':'施工项目部','subject':'安全检查','content':'发现钢筋问题；要求重新绑扎','problems':'钢筋问题','supervision_org':'真实项目监理机构','requirement':'重新绑扎'})
         words='\n'.join(c.text for t in WordDocument(str(path)).tables for row in t.rows for c in row.cells)
