@@ -1478,6 +1478,119 @@ def resolve_provform_form_code(raw: str) -> str | None:
     return None
 
 
+# 星期中文名：与 form_renderer._WEEKDAY_CN、period_report_service.WEEKDAY_CN 口径一致
+_PROVFORM_WEEKDAY_CN = ("一", "二", "三", "四", "五", "六", "日")
+
+
+def _provform_canon_to_key(form_code: str) -> dict[str, str]:
+    """省统表 schema：canonical content key → schema 字段 key 的反向映射。
+
+    CONTENT_MAP 是「schema key → canonical」，这里反过来，供预填函数按语义
+    （date/weekday/weather）定位到该表实际用的 schema key（如 11_02）。
+    同一 canonical 只保留第一个字段。
+    """
+    from app.services.provform_schema import canonical_key, get_schema
+
+    schema = get_schema(form_code)
+    if not schema:
+        return {}
+    rev: dict[str, str] = {}
+    for sec in schema.get("sections", []) or []:
+        for f in sec.get("fields", []) or []:
+            k = f.get("key")
+            if k:
+                rev.setdefault(canonical_key(form_code, k), k)
+    return rev
+
+
+def prefill_provform_date_weekday(form_code: str, fields: dict) -> dict:
+    """省统表聊天建表：日期/星期是系统可推导字段，不该逼用户口述。
+
+    🔴 2026-10-27：安全监理日志（anquan_jianli_rizhi）等表把「日期」「星期」
+    列为必填，用户即使说全了施工内容/安全检查/处理措施等安全栏目，仍会被
+    validate_values 打回要求补日期、星期（实测）。这两项系统本可自填。
+    这里在 validate 之前，对 canonical=date / weekday 的空栏目预填：
+      - 日期：用户没给 → 填今天（东八区）；给了 → 尊重用户值；
+      - 星期：用户没给 → 按上面确定的日期算中文星期（用户给错日期也不覆盖星期逻辑）。
+
+    通用：按 canonical key（date / weekday）识别字段，不硬编码 11_02/11_03，
+    故凡把日期/星期规范映射为 canonical date/weekday 的省统表都受益（实测：
+    canonical=date 的 9 张表、canonical=weekday 的 2 张表 = 监理日志 + 安全监理日志）。
+    ⚠️ 巡视记录 gd_b_214_xunshi 的日期字段 canonical 是 start_time/end_time（含时分），
+    需用户口述具体时刻，**不**在本函数自动预填范围（否则会把「今天 00:00」错当巡视时间）。
+
+    **不**在此自动填的两项（各有原因）：
+      - 工程名称：属 PROJECT_SYSTEM_KEYS，由 build_content_from_fields 用项目上下文覆盖；
+      - 天气：另见 prefill_provform_weather —— 它需联网，单独拆出、尽力而为。
+    """
+    from app.services.period_report_service import now_cn
+
+    canon_to_key = _provform_canon_to_key(form_code)
+    if not canon_to_key:
+        return dict(fields or {})
+
+    out = dict(fields or {})
+    date_key = canon_to_key.get("date")
+    weekday_key = canon_to_key.get("weekday")
+
+    target_date = now_cn().date()
+    if date_key:
+        given = str(out.get(date_key) or "").strip()
+        if not given:
+            out[date_key] = target_date.isoformat()
+        else:
+            parsed = _parse_date(given)
+            if parsed:
+                target_date = parsed   # 星期按用户实际给的日期算
+    if weekday_key and not str(out.get(weekday_key) or "").strip():
+        out[weekday_key] = _PROVFORM_WEEKDAY_CN[target_date.weekday()]
+    return out
+
+
+async def prefill_provform_weather(ctx: ToolContext, form_code: str, fields: dict) -> dict:
+    """省统表聊天建表：天气尽力预填（联网，尽力而为，不阻塞建表）。
+
+    方案 A（用户 2026-10-27 选定）要求日期/星期/天气都系统预填，把安全监理日志
+    等表从「用户口述 8 个必填字段」降到「只口述真正的安全栏目」。
+
+    与日期/星期不同，天气要联网取实况，故单独拆出并遵循三条底线：
+      1) **只在项目配了经纬度时才尝试**（daily_weather 内部逻辑：无坐标直接返回
+         空 weather + source=待补填），没坐标的项目不产生无谓网络调用；
+      2) **取不到就留空**，绝不塞「预报值/默认值」冒充实况 —— 安全监理日志是
+         法定文书，天气错填有合规风险，宁可让用户补；
+      3) **联网失败/超时不抛**：daily_weather 自带 timeout=8s + 异常降级，这里再
+         包一层 try 兜底，任何异常都退回「不预填天气」，绝不让建表因天气挂掉。
+    用户已在话里说了天气（模型带进 fields[weather_key]）时，尊重用户值不覆盖。
+    """
+    canon_to_key = _provform_canon_to_key(form_code)
+    weather_key = canon_to_key.get("weather")
+    out = dict(fields or {})
+    if not weather_key or str(out.get(weather_key) or "").strip():
+        return out   # 无天气字段，或用户已给 → 不动
+
+    # 日期沿用预填后的结果（可能来自用户口述，也可能是今天），保证天气与日期同一天
+    from app.services.period_report_service import now_cn
+
+    date_key = canon_to_key.get("date")
+    target_date = now_cn().date()
+    if date_key:
+        parsed = _parse_date(str(out.get(date_key) or ""))
+        if parsed:
+            target_date = parsed
+
+    try:
+        from app.services.weather import daily_weather
+
+        ex = await daily_weather(ctx.project, target_date)
+        weather = str((ex or {}).get("weather") or "").strip()
+        # 底线 2：只在拿到真实天气值时才填；空值（含降级/无坐标）保持空白让用户补
+        if weather and str((ex or {}).get("weather_source")) != "待补填":
+            out[weather_key] = weather
+    except Exception as exc:  # noqa: BLE001 - 底线 3：天气失败绝不阻断建表
+        logger.warning("省统表天气预填失败（不影响建表）：%s", exc)
+    return out
+
+
 async def _create_provform_doc(ctx: ToolContext, args: dict) -> dict:
     form_code = str(args.get("form_code") or "").strip()
     if "30308" in form_code or "安全隐患整改通知" in form_code:
@@ -1504,6 +1617,12 @@ async def _create_provform_doc(ctx: ToolContext, args: dict) -> dict:
     schema = provform_schema.get_schema(form_code)
     if not schema:
         return _ok("该表式暂不支持聊天创建，请到「工作记录 → +新建 → 省统表录入」操作。")
+
+    # 🔴 日期/星期是系统可推导字段，在校验前自动预填，别逼用户口述
+    # （见 prefill_provform_date_weekday docstring）。
+    fields = prefill_provform_date_weekday(form_code, fields)
+    # 天气尽力预填（联网、取不到留空、失败不阻断建表，见其 docstring）。
+    fields = await prefill_provform_weather(ctx, form_code, fields)
 
     check = provform_schema.validate_values(form_code, fields)
     if not check.get("ok", False):
@@ -2413,6 +2532,10 @@ TOOLS: tuple[ToolSpec, ...] = (
         "要从零口述填一张表」的场景（如「建一份监理工程师通知单：要求整改脚手架搭设」）；"
         "若用户指代**某条已有记录**（「把这条记录…」）或给了**时间范围**（「今天的/本月」），"
         "应改用 generate_document（它从工作记录或按日/周/月聚合取数，不用用户口述）。"
+        "🔴 日期/星期/天气由系统自动预填（日期取今天、星期随之推算、天气按项目坐标联网取实况，"
+        "取不到则留空），**不要因为缺这几项就追问用户**；用户若主动说了日期或天气则以其为准。"
+        "所以像安全监理日志这类表，只需向用户收齐施工内容、安全检查情况、处理措施、"
+        "隐患整改情况、危大工程状况等**业务栏目**即可。"
         "安全隐患整改通知 GDAQ30308 必须通过 create_hazard_rectification_doc 从隐患主记录生成。",
         {"*form_code": f"表式代码或表名，如 gd_b_215_tongzhi 或「监理工程师通知单」"
                        f"（可选：{'、'.join(n for _c, n in PROVFORM_CHOICES)}）",
