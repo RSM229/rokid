@@ -825,14 +825,20 @@ async def generate_daily_batch(
     }
     async with async_session() as db:
         result = await db.execute(select(Project).order_by(Project.id))
-        projects = list(result.scalars().all())
+        # 🔴 进循环前就把 id/name 解引用成纯数据（不要留 ORM 实例）。
+        # 原写法「for project in projects: pid, pname = project.id, project.name」
+        # 的防护是**无效的**：任何项目失败后内层 `await db.rollback()` 会过期
+        # session 内全部 ORM 实例（expire_on_commit=False 只管 commit，管不到
+        # rollback），于是**下一个** project 读 .id 就触发同步懒加载 →
+        # MissingGreenlet → 整批中断、真正的异常被盖掉。
+        # 生产实证（2026-10-26 日志，相隔 3ms）：
+        #   23:59:50,528 ERROR 项目 1 周报生成失败
+        #   23:59:50,531 WARNING [周期文书] 自动生成异常：greenlet_spawn has not
+        #                  been called … [SQL: SELECT projects … ] [pk_1: 12]
+        projects = [(row.id, row.name) for row in result.scalars().all()]
         report["projects"] = len(projects)
 
-        for project in projects:
-            # 先把主键/名称取成局部变量：一旦后面某步失败并 rollback，ORM 实例的
-            # 属性会过期，此时再读 project.id 会触发同步懒加载，抛出的
-            # MissingGreenlet 会把真正的异常整个盖掉。
-            pid, pname = project.id, project.name
+        for pid, pname in projects:
             creator = await pick_creator(db, pid)
             if creator is None:
                 # 无成员项目（多为自动化测试遗留）不生成：既无人落款，也无人
@@ -903,6 +909,24 @@ async def generate_daily_batch(
     return report
 
 
+# 周期文书守护的失败退避：同日第 N 次失败 → 300 × 2^(N-1) 秒，封顶 1 小时。
+# 🔴 上限的存在是为了终结「每分钟重试到天亮」的风暴（生产实证约 480 次刷屏）。
+_BACKOFF_BASE = 300
+_BACKOFF_CAP = 3600
+
+
+def _next_backoff(today_key: str, prev_date: str | None,
+                  prev_count: int) -> tuple[str, int, float]:
+    """返回 (统计日期, 当日累计失败次数, 本次应 sleep 的秒数)。
+
+    跨天则重置计数（第二天是新的目标日，重新给机会）；
+    同日连续失败则指数退避到 _BACKOFF_CAP 封顶。
+    """
+    count = 1 if prev_date != today_key else prev_count + 1
+    sleep_for = min(_BACKOFF_BASE * (2 ** (count - 1)), _BACKOFF_CAP)
+    return today_key, count, float(sleep_for)
+
+
 async def daily_report_worker() -> None:
     """后台守护：每天设定时间点自动生成**前一天**的监理日志（及周报/月报）。
 
@@ -913,8 +937,9 @@ async def daily_report_worker() -> None:
     - **早上出昨天的稿**：默认 08:00 触发、目标日 = 运行日 − 1。放在次日早上是
       因为下班前才补录的记录要被收进去；若改成当天晚间触发，当日录入的内容
       会赶不上出稿。
-    - **失败不置标记**：只要 report["errors"] 非空就保持重试（间隔放宽到 5 分钟），
-      避免触发时刻恰好赶上数据库抖动而整天不再补。
+    - **失败退避不置标记**：只要 report["errors"] 非空或整批抛异常，就按
+      ``_next_backoff`` 指数退避重试（300s 起、封顶 1h），跨天重置；
+      既避免"数据库抖动就整天不补"，又不会退化成每分钟重试风暴。
     - **不覆盖人工成果**：``force=False`` 只在"当天还没有这份文书"时新建，
       客户端复核/编辑过的草稿不会被定时任务冲掉。
     """
@@ -930,6 +955,12 @@ async def daily_report_worker() -> None:
     )
     await asyncio.sleep(settings.daily_doc_initial_delay)
     last_run: str | None = None
+    # 🔴 失败退避状态：同一天连续失败时递增退避并设上限。
+    # 原实现里外层 except **没有设 sleep_for**，所以异常路径永远走默认 60 秒，
+    # 且 last_run 从不置位 → 生产实证从 23:48 每分钟刷一条到次日 08:00
+    # （约 480 次「周报生成失败」+ 480 条 MissingGreenlet 刷屏）。
+    fail_date: str | None = None
+    fail_count = 0
     while True:
         sleep_for = 60
         try:
@@ -942,14 +973,17 @@ async def daily_report_worker() -> None:
             if settings.daily_doc_auto and due and last_run != today_key:
                 report = await generate_daily_batch()
                 if report["errors"]:
+                    fail_date, fail_count, sleep_for = _next_backoff(
+                        today_key, fail_date, fail_count
+                    )
                     logger.warning(
-                        "[周期文书] %s 自动生成存在失败，5 分钟后重试：%s",
-                        report["date"],
+                        "[周期文书] %s 自动生成存在失败（当日第 %s 次），%s 秒后重试：%s",
+                        report["date"], fail_count, int(sleep_for),
                         report["errors"][:5],
                     )
-                    sleep_for = 300
                 else:
                     last_run = today_key
+                    fail_date, fail_count = None, 0
                     logger.info(
                         "[周期文书] %s 自动生成完成：新建 %s 份 / 已存在 %s 份 / "
                         "无成员跳过 %s 个项目 / 周报 %s / 月报 %s",
@@ -963,5 +997,13 @@ async def daily_report_worker() -> None:
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001
-            logger.warning("[周期文书] 自动生成异常（下个周期重试）：%s", exc)
+            # 🔴 异常路径同样要退避：否则整批崩溃会退化成每分钟重试风暴。
+            day_key = now_cn().isoformat()[:10]
+            fail_date, fail_count, sleep_for = _next_backoff(
+                day_key, fail_date, fail_count
+            )
+            logger.warning(
+                "[周期文书] 自动生成异常（当日第 %s 次，%s 秒后重试）：%s",
+                fail_count, int(sleep_for), exc,
+            )
         await asyncio.sleep(sleep_for)
