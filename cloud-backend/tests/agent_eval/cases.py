@@ -275,8 +275,21 @@ CASES: tuple[dict, ...] = (
         "expect": {
             "tool": "generate_document",
             "args_required": {"record_id": ["128"]},
+            # 🔴 互斥守门：desc 里写了「两者不要同时传」，这条断言就是它的看守。
+            # 若模型既传 record_id 又传 period，_generate_document 会因
+            # period_map 命中而**优先走聚合分支**（1498-1502 行 period 先判），
+            # record_id 被静默忽略 → 生成的是「今日全项目聚合日志」而非「这条记录的表」。
+            "args_forbidden": ["period"],
         },
-        "note": "ToolSpec example + 指代消解。record_id 要从 history 里捞出来。",
+        "note": "ToolSpec example + 指代消解。record_id 要从 history 里捞出来。"
+                "🔴 2026-10-27 修：此前稳定 3/3 失败——模型给 period=day 而不是 record_id=128，"
+                "**不是模型的错，是 ToolSpec desc 把它教错了**：原描述写「按 日/周/月 聚合生成"
+                "监理日志/周报/月报」，把「监理日志」明确归到聚合分支，且 period_map 里"
+                "确实有 \"监理日志\": \"day\"，模型照描述执行完全合理。desc 与 examples 的意图"
+                "自相矛盾且同出一个初始提交（da92996），属从一开始就写错。修法=重写 desc，"
+                "把判据讲成「指代单条记录→record_id / 给时间范围→period」，"
+                "并明示「判据是有没有指代到单条记录，不是文书名叫什么」。"
+                "D 组回归 3/3=100%（D01/D02/D03 未被带偏）。",
     },
     {
         "id": "D05", "group": "省统表文书",
