@@ -442,13 +442,19 @@ def _audit(
     action: str,
     *,
     user: User | None = None,
+    user_id: int | None = None,
     username: str | None = None,
     detail: str | None = None,
     ip: str | None = None,
 ) -> None:
-    """写一条安全审计（随调用方事务提交）。"""
+    """写一条安全审计（随调用方事务提交）。
+
+    🔴 若调用点在此之前可能发生 ``db.rollback()``，``user`` 这个 ORM 实例已被过期，
+    再读 ``user.id`` 会触发同步懒加载 → MissingGreenlet。这种调用点必须改传
+    已解引用的 ``user_id`` / ``username`` 标量（见 batch_import_users）。
+    """
     db.add(SecurityAudit(
-        user_id=getattr(user, "id", None),
+        user_id=user_id if user_id is not None else getattr(user, "id", None),
         username=username or getattr(user, "username", None),
         action=action,
         detail=(detail or None) and detail[:500],
@@ -2497,6 +2503,19 @@ async def batch_import_users(
         # 多企业隔离：项目匹配只在当前企业内进行，避免把同名的外部项目匹配进来
         all_projects = [p for p in all_projects if p.org_id in (None, manager.org_id)]
     can_all = _can_manage_all_projects(manager)
+    # 🔴 进循环前把会用到的 ORM 属性一次性解引用成纯数据。
+    # 逐行独立事务下，任一行失败都会 `await db.rollback()`，而 rollback 会过期
+    # 本 session 内**全部** ORM 实例（`manager` 与 `all_projects` 都来自同一个
+    # Depends(get_db) session，expire_on_commit=False 只管 commit 管不到 rollback）。
+    # 若循环内继续读 `manager.project_id` / `p.name`，下一行就会触发同步懒加载 →
+    # MissingGreenlet → 整个导入请求 500，真正的失败原因被盖掉，
+    # 与「某行失败不影响其它行」的承诺相反。
+    manager_project_id = manager.project_id
+    manager_is_super = manager.is_super_admin()
+    # 收尾审计同样不能读 manager（见下方 _audit 调用处的说明）
+    manager_id = manager.id
+    manager_username = manager.username
+    project_lookup = [(p.id, p.name or "", p.code or "") for p in all_projects]
 
     results: list[dict] = []
     created = 0
@@ -2535,7 +2554,7 @@ async def batch_import_users(
             if normalized not in ORG_ROLES:
                 fail(f"公司级角色「{org_role_text}」无法识别，只能填 超级管理员 / 管理员")
                 continue
-            if not manager.is_super_admin():
+            if not manager_is_super:
                 fail("只有超级管理员可以授予公司级角色")
                 continue
             org_role = normalized
@@ -2565,20 +2584,22 @@ async def batch_import_users(
             fail(f"用户名 {username} 已存在")
             continue
 
-        project_id = manager.project_id
+        project_id = manager_project_id
         if project_text:
+            # 🔴 用循环前解引用好的 project_lookup（纯元组）匹配：
+            # rollback 之后再读 p.name / p.code 会触发同步懒加载而崩溃。
             matched = (
-                [p for p in all_projects if (p.name or "") == project_text]
-                or [p for p in all_projects if project_text in (p.name or "")]
-                or [p for p in all_projects if (p.code or "") == project_text]
+                [t for t in project_lookup if t[1] == project_text]
+                or [t for t in project_lookup if project_text in t[1]]
+                or [t for t in project_lookup if t[2] == project_text]
             )
             if not matched:
                 fail(f"找不到项目「{project_text}」，请填项目全称或编号")
                 continue
-            if not can_all and matched[0].id != manager.project_id:
+            if not can_all and matched[0][0] != manager_project_id:
                 fail(f"非超级管理员只能导入到自己项目，不能导入「{project_text}」")
                 continue
-            project_id = matched[0].id
+            project_id = matched[0][0]
         if project_id is None and not can_all:
             fail("当前账号还没有所属项目，请先选择项目或填写「所属项目」")
             continue
@@ -2634,8 +2655,12 @@ async def batch_import_users(
                         "status": "ok", "detail": "已创建"})
 
     if not dry_run:
+        # 🔴 传已解引用的标量：循环里任一行失败都会 rollback 并过期 manager，
+        # 此处再读 manager.id / manager.username 会触发同步懒加载 → MissingGreenlet，
+        # 导致「导入明明逐行处理完了」却在收尾审计时整个请求 500。
         _audit(
-            db, "batch_import_users", user=manager,
+            db, "batch_import_users",
+            user_id=manager_id, username=manager_username,
             detail=f"批量导入账号 {created} 个，失败 {failed} 个（文件 {file.filename}）",
         )
         await db.commit()
