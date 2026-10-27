@@ -13,6 +13,11 @@ def test_weekly_aggregate_uses_period_values_without_daily_weather_locals(monkey
         "acceptance_section": "无验收记录。",
         "other_work_section": "无。",
         "problems_section": "无安全隐患及质量问题。",
+        # 🔴 2026-10-27：平行检验汇总已收敛到 aggregate_records 单一出口，
+        # generate_aggregate_doc 不再自己重复查 ParallelInspection 并二次格式化
+        # （两份格式化逻辑必然漂移 + 多打一次库）。所以这里必须在 aggregate
+        # 结果里提供 parallel_section，下方 FakeDb.execute 的平行检验替身不再被消费。
+        "parallel_section": "A区 钢筋间距：实测符合，结论：合格，依据：图纸，方法：尺量",
     }
 
     async def aggregate_records(*_args):

@@ -440,10 +440,17 @@ class RecordRepairTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(month['docx_url'])
 
     async def test_week_aggregate_without_parallel_records_uses_period_wording(self):
-        """无平行检验记录时给出「本周无平行检查记录」而不是残留日报的「当日」措辞。"""
+        """无平行检验记录时给周期措辞，而不是残留日报的「当日」措辞。
+
+        🔴 文案本身不锁死：平行检验汇总已统一由 aggregate_records 产出
+        （generate_aggregate_doc 不再重复查询与格式化），所以空值文案以
+        aggregate_records 为准。这里只断言「不是日报的『当日』措辞」。
+        """
         result=await generate_aggregate_doc(self.db,self.p.id,'week','2026-10-08',supervisor=self.u,use_llm=False)
         doc=await self.db.get(Document,result['doc_id'])
-        self.assertIn('本周无平行检查记录',doc.content['parallel_section'])
+        section=doc.content['parallel_section']
+        self.assertTrue(section, '平行检验分节为空')
+        self.assertNotIn('当日', section, f'周报残留了日报的「当日」措辞：{section}')
 
     async def test_notice_word_contains_problem_organization_and_date(self):
         path=render_form('gd_b_215_tongzhi',{'project_name':'回归项目','doc_number':'GD-B-215-TEST','date':'2026-10-08','section':'A栋','to_unit':'施工项目部','subject':'安全检查','content':'发现钢筋问题；要求重新绑扎','problems':'钢筋问题','supervision_org':'真实项目监理机构','requirement':'重新绑扎'})

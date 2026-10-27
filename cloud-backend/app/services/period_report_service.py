@@ -732,19 +732,12 @@ async def generate_aggregate_doc(
     supervisor_name = signer.real_name or ""
     supervisor_level = signer.supervisor_level or ""
 
-    # 平行检验按【周期区间】汇总（日报那边是单日 target_date）。
-    # inspect_date 存 ISO 字符串，字典序与日期序一致，可直接用字符串比较。
-    parallels = list((await db.execute(
-        select(ParallelInspection).where(
-            ParallelInspection.project_id == project_id,
-            ParallelInspection.inspect_date >= start.isoformat(),
-            ParallelInspection.inspect_date <= end.isoformat(),
-        ).order_by(ParallelInspection.inspect_date)
-    )).scalars().all())
-    parallel_section = "\n".join(
-        f"{p.part} {p.item}：{p.result_detail}，结论：{p.conclusion}，依据：{p.basis}，方法：{p.method or ''}"
-        for p in parallels
-    ) or f"本{'月' if period == 'month' else '周'}无平行检查记录。"
+    # 🔴 平行检验汇总直接复用 aggregate_records 的结果（同一区间、同一次查询）。
+    # 这里曾重复查一遍 ParallelInspection 并按区间格式化，与 aggregate_records
+    # 内的实现完全同义 —— 两份格式化逻辑必然漂移，且多打一次数据库。
+    # 保留 aggregate_records 版本：它的 order_by(inspect_date, created_at)
+    # 对「同一天多条平行检验」排序稳定。
+    parallel_section = agg["parallel_section"]
 
     content = {
         "project_name": project.name if project else "",
