@@ -239,9 +239,11 @@ CASES: tuple[dict, ...] = (
         "expect": {
             "tool": "generate_document",
             "args_required": {"period": ["day", "日"]},
-            "tool_forbidden": ["create_work_record"],
+            # 🔴 与 D05 互为反向守门：给了时间范围（「今天的」）→ 必须聚合，
+            # 不能退化成凭空口述建空表（create_provform_doc 会丢掉系统里已有的记录）。
+            "tool_forbidden": ["create_work_record", "create_provform_doc"],
         },
-        "note": "语料③。🔴 高危混淆：不能理解成「新建一条记录」。",
+        "note": "语料③。🔴 高危混淆：不能理解成「新建一条记录」，也不能理解成「凭空建一张空日志表」。",
     },
     {
         "id": "D02", "group": "文书生成",
@@ -280,6 +282,8 @@ CASES: tuple[dict, ...] = (
             # period_map 命中而**优先走聚合分支**（1498-1502 行 period 先判），
             # record_id 被静默忽略 → 生成的是「今日全项目聚合日志」而非「这条记录的表」。
             "args_forbidden": ["period"],
+            # 🔴 指代到具体记录时也不许退化成凭空建空表（会丢掉那条记录的内容）。
+            "tool_forbidden": ["create_provform_doc"],
         },
         "note": "ToolSpec example + 指代消解。record_id 要从 history 里捞出来。"
                 "🔴 2026-10-27 修：此前稳定 3/3 失败——模型给 period=day 而不是 record_id=128，"
@@ -297,8 +301,15 @@ CASES: tuple[dict, ...] = (
         "expect": {
             "tool": "create_provform_doc",
             "args_required": {"form_code": ["通知单", "gd_b_215"]},
+            # 🔴 2026-10-27 加：与 generate_document 的分界此前**无任何断言看守**，
+            # 只靠模型自觉。判据是「有没有现成记录/时间范围可依据」：
+            # 这句是凭空口述内容建一张空表 → create_provform_doc；
+            # 若说「把这条记录…」「今天的/本月…」→ 必须走 generate_document。
+            "tool_forbidden": ["generate_document"],
         },
-        "note": "ToolSpec example 基本盘。",
+        "note": "ToolSpec example 基本盘。🔴 守门 create_provform_doc vs generate_document 边界："
+                "两个工具的 desc 都提到「监理日志/监理月报」等同一批表式名，"
+                "区分点不是表式名，而是「用户有没有可依据的记录或时间范围」。",
     },
     {
         "id": "D06", "group": "省统表文书",

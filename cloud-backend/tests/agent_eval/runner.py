@@ -113,10 +113,24 @@ def extract_system_template(path: Path = AGENT_PY) -> str:
 
 
 def extract_tools(path: Path = TOOLS_PY) -> list[dict]:
-    """复刻 catalog_for_prompt()：从 TOOLS 元组里抠 name/desc/params/examples。
+    """取工具目录（name/desc/params/examples）。
 
-    走 AST 而非 import，所以 agent_tools.py 里那堆 sqlalchemy 依赖不影响提取。
+    🔴 生产模块可 import 时**直接用生产 TOOLS 对象**，不走 AST。
+    原因（2026-10-27 实测踩坑）：AST 路径用 ``ast.literal_eval`` 取 desc，
+    而 f-string 在 AST 里是 ``JoinedStr`` 节点 → literal_eval 抛 ValueError →
+    被 ``except: continue`` **静默跳过整个工具**。当时 create_provform_doc 的
+    desc 改成 f-string（为让表式清单跟随 PROVFORM_CHOICES 动态生成、不再硬编码），
+    提取数就从 14 变 13，而 build_catalog 走的是生产 catalog_for_prompt()，
+    于是「prompt 里有 14 个工具、extract_tools 只报 13 个」这种不一致毫无提示。
+    与 build_catalog 同源原则一致：能 import 生产就用生产。
     """
+    if PROD_CHAIN_OK:
+        return [
+            {"name": t.name, "desc": t.desc, "params": dict(t.params),
+             "examples": tuple(t.examples or ())}
+            for t in _tools_mod.TOOLS
+        ]
+
     tree = ast.parse(path.read_text(encoding="utf-8"))
     tools_node = None
     for node in ast.walk(tree):
@@ -128,6 +142,7 @@ def extract_tools(path: Path = TOOLS_PY) -> list[dict]:
         raise RuntimeError(f"在 {path} 里找不到 TOOLS 定义")
 
     out: list[dict] = []
+    skipped: list[str] = []
     for call in tools_node.elts:
         if not isinstance(call, ast.Call):
             continue
@@ -135,11 +150,19 @@ def extract_tools(path: Path = TOOLS_PY) -> list[dict]:
         args = call.args
         if len(args) < 3:
             continue
+        # 🔴 降级路径下不再静默跳过：literal_eval 失败说明 desc/params 用了
+        # f-string 等非常量写法，必须显式报出来，否则评测集会悄悄少一个工具。
         try:
             name = ast.literal_eval(args[0])
             desc = ast.literal_eval(args[1])
             params = ast.literal_eval(args[2])
-        except (ValueError, SyntaxError):
+        except (ValueError, SyntaxError) as exc:
+            raw_name = "<unknown>"
+            try:
+                raw_name = ast.literal_eval(args[0])
+            except Exception:  # noqa: BLE001
+                pass
+            skipped.append(f"{raw_name}（{type(exc).__name__}，desc/params 可能是 f-string）")
             continue
         examples: tuple = ()
         if len(args) >= 7:
@@ -150,6 +173,12 @@ def extract_tools(path: Path = TOOLS_PY) -> list[dict]:
         out.append({"name": name, "desc": desc, "params": params, "examples": examples})
     if not out:
         raise RuntimeError("TOOLS 提取结果为空，检查 agent_tools.py 结构是否变了")
+    if skipped:
+        raise RuntimeError(
+            "AST 降级提取漏掉工具（生产模块 import 失败 + desc/params 不是常量）："
+            + "；".join(skipped)
+            + f"；已提取 {len(out)} 个。要么修好生产 import，要么把这些字段改回常量。"
+        )
     return out
 
 

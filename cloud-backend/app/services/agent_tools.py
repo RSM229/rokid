@@ -1418,6 +1418,66 @@ async def _recheck_hazard(ctx: ToolContext, args: dict) -> dict:
     )
 
 
+def _provform_name_index() -> list[tuple[str, str]]:
+    """表式名 → form_code 的候选索引（含 CHOICES 友好名、registry 官方名、表号）。"""
+    from app.services.form_registry import FORM_BY_CODE
+
+    pairs: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for code, name in PROVFORM_CHOICES:
+        for alias in (name, getattr(FORM_BY_CODE.get(code), "name", ""),
+                      getattr(FORM_BY_CODE.get(code), "form_number", "")):
+            alias = str(alias or "").strip()
+            if alias and (alias, code) not in seen:
+                seen.add((alias, code))
+                pairs.append((alias, code))
+    return pairs
+
+
+def resolve_provform_form_code(raw: str) -> str | None:
+    """把模型传来的表式说法解析成 form_code；解析不出返回 None。
+
+    🔴 2026-10-27 修：原实现是「按 PROVFORM_CHOICES 顺序做子串匹配 + break」，
+    会把**长名误配到短名**，静默建错文书（不是追问，是建错！）：
+        '安全监理日志'      → gd_b_220_rizhi（监理日志）  ✗ 应为 anquan_jianli_rizhi
+        '危险性较大的…巡视检查记录表' → gd_b_214_xunshi（巡视记录）✗ 应为 gdaq_30306_weida
+    因为 gd_b_220_rizhi 在清单里排在 anquan_jianli_rizhi 之前，
+    而「监理日志」是「安全监理日志」的子串 → 先命中就 break。
+    同时 registry 官方名/常用简称（监理通知单、巡视记录、旁站记录）**全部未识别**。
+
+    现在三级匹配，且**不再依赖清单顺序**：
+      1) 精确等于 code / CHOICES 名 / registry 名 / 表号；
+      2) 候选名是用户话的子串 → 取**最长**候选（「安全监理日志」6字 > 「监理日志」4字，长的赢）；
+      3) 用户话是候选名的子串 → 取**最短**候选（说「监理通知单」命中「监理通知单（质量类）」，
+         而说「监理日志」不会被「安全监理日志」抢走）。
+    """
+    text = str(raw or "").strip()
+    if not text:
+        return None
+    codes = {code for code, _name in PROVFORM_CHOICES}
+    if text in codes:
+        return text
+
+    index = _provform_name_index()
+
+    # 1) 精确
+    for alias, code in index:
+        if alias == text:
+            return code
+
+    # 2) 候选名 ⊂ 用户话：最长优先
+    contained = [(len(alias), code) for alias, code in index if alias in text]
+    if contained:
+        return max(contained)[1]
+
+    # 3) 用户话 ⊂ 候选名：最短优先（最贴近用户所说的范围）
+    containing = [(len(alias), code) for alias, code in index if text in alias]
+    if containing:
+        return min(containing)[1]
+
+    return None
+
+
 async def _create_provform_doc(ctx: ToolContext, args: dict) -> dict:
     form_code = str(args.get("form_code") or "").strip()
     if "30308" in form_code or "安全隐患整改通知" in form_code:
@@ -1428,15 +1488,17 @@ async def _create_provform_doc(ctx: ToolContext, args: dict) -> dict:
     code_map = {code: name for code, name in PROVFORM_CHOICES}
     if not form_code:
         names = "、".join(name for _c, name in PROVFORM_CHOICES[:6])
-        return _need_more(["表式"], f"请说明要建哪张省统表（如：{names} 等 11 类）。")
-    if form_code not in code_map:
-        # 容错：允许模型传中文表名
-        for code, name in PROVFORM_CHOICES:
-            if name and name in form_code:
-                form_code = code
-                break
-        else:
-            return _need_more(["表式"], f"未识别表式「{form_code}」，可选：" + "、".join(code_map.values()))
+        # 🔴 类数必须动态取 len(PROVFORM_CHOICES)，不能硬编码：
+        # 此处原写「等 11 类」，但 30308 被移出清单后实际只有 10 类，
+        # 数字与清单脱钩 → 直接给用户报错数量。
+        return _need_more(
+            ["表式"],
+            f"请说明要建哪张省统表（如：{names} 等 {len(PROVFORM_CHOICES)} 类）。",
+        )
+    resolved = resolve_provform_form_code(form_code)
+    if resolved is None:
+        return _need_more(["表式"], f"未识别表式「{form_code}」，可选：" + "、".join(code_map.values()))
+    form_code = resolved
 
     fields = args.get("fields") if isinstance(args.get("fields"), dict) else {}
     schema = provform_schema.get_schema(form_code)
@@ -2343,8 +2405,17 @@ TOOLS: tuple[ToolSpec, ...] = (
     ),
     ToolSpec(
         "create_provform_doc",
-        "新建普通省统表文书（旁站/平行检验/巡视/监理通知单/验收/监理日志/监理月报/材料台账/危大巡视/安全监理日志）。安全隐患整改通知 GDAQ30308 必须通过 create_hazard_rectification_doc 从隐患主记录生成。",
-        {"*form_code": "表式代码或表名，如 gd_b_215_tongzhi 或「监理工程师通知单」",
+        # 🔴 表式清单用 f-string 从 PROVFORM_CHOICES 动态生成，不再手写 —— 原来手写
+        # 一串表名，清单增删后文案就漂移（曾长期写「11 类」而实际只有 10 类）。
+        f"凭空新建一张省统表空表，内容由用户**当场口述**的字段决定"
+        f"（{'、'.join(n for _c, n in PROVFORM_CHOICES)}）。"
+        "🔴 与 generate_document 的分工：本工具用于「没有现成记录/时间范围可依据、"
+        "要从零口述填一张表」的场景（如「建一份监理工程师通知单：要求整改脚手架搭设」）；"
+        "若用户指代**某条已有记录**（「把这条记录…」）或给了**时间范围**（「今天的/本月」），"
+        "应改用 generate_document（它从工作记录或按日/周/月聚合取数，不用用户口述）。"
+        "安全隐患整改通知 GDAQ30308 必须通过 create_hazard_rectification_doc 从隐患主记录生成。",
+        {"*form_code": f"表式代码或表名，如 gd_b_215_tongzhi 或「监理工程师通知单」"
+                       f"（可选：{'、'.join(n for _c, n in PROVFORM_CHOICES)}）",
          "fields": "字段对象，键用表式字段 key（如 1_01/1_15）", "title": "文书标题（可省略）"},
         "work_record", "write", _create_provform_doc,
         ("建一份监理工程师通知单：要求整改脚手架搭设",),
