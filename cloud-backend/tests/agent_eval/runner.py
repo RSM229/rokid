@@ -63,6 +63,7 @@ BACKEND = HERE.parent.parent          # cloud-backend/
 REPO = BACKEND.parent                 # rokid_glass/
 AGENT_PY = BACKEND / "app" / "routers" / "agent.py"
 TOOLS_PY = BACKEND / "app" / "services" / "agent_tools.py"
+PLAN_PY = BACKEND / "app" / "services" / "agent_request_plan.py"
 COMPOSE = REPO / "docker-compose.yml"
 EXPORTS = Path("D:/rokid/exports")
 
@@ -130,6 +131,35 @@ def extract_tools(path: Path = TOOLS_PY) -> list[dict]:
     return out
 
 
+def _module_level_dict(tree: ast.AST, name: str) -> dict:
+    """抠出模块级 `name: ... = {...}` 或 `name = {...}` 的字面量 dict。"""
+    for node in ast.walk(tree):
+        targets = []
+        if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            targets = [node.target.id]
+        elif isinstance(node, ast.Assign):
+            targets = [t.id for t in node.targets if isinstance(t, ast.Name)]
+        if name in targets:
+            try:
+                return ast.literal_eval(node.value)
+            except (ValueError, SyntaxError):
+                break
+    raise RuntimeError(f"在 agent_request_plan.py 里找不到 {name} 字典字面量")
+
+
+def extract_plan_catalog(path: Path = PLAN_PY) -> tuple[str, str]:
+    """复刻生产端 agent.py:768 的 format 参数：
+    actions = json.dumps(agent_request_plan.action_catalog())   # [{"id": 动作id, **spec}]
+    record_types = json.dumps(agent_request_plan.RECORD_TYPES)
+    同样走 AST 提取（零依赖，与 extract_tools 一致）。"""
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    actions = _module_level_dict(tree, "ACTIONS")
+    record_types = _module_level_dict(tree, "RECORD_TYPES")
+    catalog = [{"id": action_id, **spec} for action_id, spec in actions.items()]
+    return (json.dumps(catalog, ensure_ascii=False),
+            json.dumps(record_types, ensure_ascii=False))
+
+
 def build_catalog(tools: list[dict]) -> str:
     """逐行对齐 agent_tools.catalog_for_prompt() 的输出格式。"""
     blocks = []
@@ -166,7 +196,11 @@ def build_system_prompt(prompt_file: str | None = None,
         origin = f"生产 {AGENT_PY.relative_to(REPO)}"
     if catalog_file:
         origin += f" + catalog={Path(catalog_file).name}"
-    return tmpl.format(catalog=catalog), origin
+    # 🔴 2026-10-27 修：_AGENT_SYSTEM 自 2026-10-16 改版起有三个占位符
+    # （actions / record_types / catalog），此前只喂 catalog → KeyError: 'actions'。
+    # str.format 忽略多余关键字，因此只含 {catalog} 的旧版自定义 prompt 仍可用。
+    actions, record_types = extract_plan_catalog()
+    return tmpl.format(catalog=catalog, actions=actions, record_types=record_types), origin
 
 
 # ---------------------------------------------------------------------------
