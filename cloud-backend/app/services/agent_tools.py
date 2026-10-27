@@ -103,8 +103,11 @@ _PAGE_ALIASES = {
     "知识库管理": "/pages/kb/index",
     "资料库管理": "/pages/kb/index",
     "规范查询": "/pages/knowledge/index",
+    # 🔴 只收「AI巡检」这个精确说法，**不收「巡检」**：
+    # RECORD_TYPES["巡视"].aliases 里「巡检」是巡视记录的同义词，而 _navigate 用
+    # 子串包含匹配，收了就会把「巡检3号楼二层，记一条」劫持到 AI巡检页。
+    # 前端旧指令表当年也特意删过这条（见 git 历史注释），两边口径保持一致。
     "AI巡检": "/pages/inspection/index",
-    "巡检": "/pages/inspection/index",
     "拍照识别": "/pages/capture/index",
     "拍照": "/pages/capture/index",
     "AI隐患识别": "/pages/capture/index?mode=hazard",
