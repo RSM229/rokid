@@ -93,17 +93,52 @@ class RecordRepairTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(c['date'],'2026-10-08')
             if kind=='旁站':self.assertEqual(c['start_time'],'2026-10-08 08:20')
 
+    async def test_acceptance_participants_do_not_become_inspector_identity(self):
+        record=self.rec(
+            '验收',
+            acceptance_participants='施工单位张工、监理单位李工',
+            content_json={'confirmed_fields': {'inspector':'水印检查人员陈宇文'}},
+        )
+        content=_content_from_record(record,self.u,self.p)
+        self.assertEqual(content['acceptance_participants'],'施工单位张工、监理单位李工')
+        self.assertEqual(content['inspector'],'水印检查人员陈宇文')
+
     async def test_station_edit_saves_times_and_refreshes_doc(self):
-        r=self.rec('旁站',station_location='A栋',station_process='混凝土浇筑',station_start_time=datetime(2026,10,8,8), station_end_time=datetime(2026,10,8,9),worker_count=5,content_json={'prov_fields': {'worker_count':'5','material_info':'混凝土C30','qa_onsite':'是','content':'浇筑过程正常'}})
+        r=self.rec('旁站',station_location='A栋',station_process='混凝土浇筑',station_start_time=datetime(2026,10,8,8), station_end_time=datetime(2026,10,8,9),station_content='初始旁站内容',worker_count=5,content_json={'source':'agent_review_plan','prov_fields': {'worker_count':'5','material_info':'混凝土C30','qa_onsite':'是','content':'旧Agent内容','end_time':'2026-10-08 07:00'}})
         self.db.add(r);await self.db.flush()
         doc,_,_=await generate_form_from_record(self.db,self.u,self.p,r)
         await self.db.commit()
-        await work_record.update_work_record(r.id,work_record.UpdateWorkRecordRequest(station_end_time=datetime(2026,10,8,11),treatment='处理措施修订'),self.u,self.db)
+        await work_record.update_work_record(r.id,work_record.UpdateWorkRecordRequest(station_end_time=datetime(2026,10,8,11),station_content='用户修订旁站内容',treatment='处理措施修订'),self.u,self.db)
         await self.db.refresh(r);await self.db.refresh(doc)
         self.assertEqual(r.station_end_time.hour,11)
         self.assertEqual(doc.content['end_time'],'2026-10-08 11:00')
+        self.assertEqual(doc.content['content'],'用户修订旁站内容')
         self.assertIn('处理措施修订',doc.content['problems'])
+        self.assertEqual(r.content_json['record_field_edits']['end_time']['value'],'2026-10-08 11:00')
+        self.assertEqual(r.content_json['record_field_edits']['content']['value'],'用户修订旁站内容')
+        from app.services.agent_form_requirements import resolve_record_form
+        requirements = resolve_record_form(r, self.p, 'gd_b_212_pangzhan')
+        self.assertEqual(requirements['values']['end_time'],'2026-10-08 11:00')
+        self.assertEqual(requirements['values']['content'],'用户修订旁站内容')
         self.assertEqual(doc.content_revision,2)
+        regenerated,_,_=await generate_form_from_record(self.db,self.u,self.p,r)
+        self.assertTrue(regenerated.docx_path)
+        self.assertIn('用户修订旁站内容', '\n'.join(cell.text for table in WordDocument(str(settings.export_dir/Path(regenerated.docx_path).name)).tables for row in table.rows for cell in row.cells))
+
+    async def test_cleared_agent_field_is_not_refilled_by_old_candidate(self):
+        r=self.rec('巡视',content_json={
+            'source':'agent_review_plan',
+            'prov_fields': {'content':'旧Agent巡视内容'},
+            'form_field_candidates': {'content':'旧OCR候选内容'},
+        })
+        self.db.add(r);await self.db.flush()
+        await work_record.update_work_record(r.id,work_record.UpdateWorkRecordRequest(work_content=''),self.u,self.db)
+        await self.db.refresh(r)
+        rendered=_content_from_record(r,self.u,self.p)
+        self.assertEqual(rendered['content'],'')
+        from app.services.agent_form_requirements import resolve_record_form
+        requirements=resolve_record_form(r,self.p,'gd_b_214_xunshi')
+        self.assertIn('content',requirements['missing_fields'])
 
     async def test_reversed_times_and_invalid_result_rejected(self):
         r=self.rec('旁站',station_start_time=datetime(2026,10,8,10),station_end_time=datetime(2026,10,8,11))
@@ -566,6 +601,46 @@ class RecordRepairTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result['revision'], revision)
         self.assertEqual(doc.content_revision, revision)
         self.assertIsNone(doc.signed_pdf_path)
+
+    async def test_offline_signoff_waits_for_explicit_confirmation_and_is_revision_scoped(self):
+        from app.services.document_signoffs import assert_required_signoffs
+
+        doc=Document(
+            project_id=self.p.id,creator_id=self.u.id,doc_type='巡视记录',title='纸质签署',
+            content={'project_name':self.p.name,'construction_unit':'施工单位','date':'2026-10-27','section':'A栋','content':'巡视检查'},
+            status='草稿',
+        )
+        self.db.add(doc);await self.db.commit()
+        await signature.set_document_signing_mode(
+            doc.id, signature.SigningModeRequest(mode='offline', slot='inspector'), self.u, self.db
+        )
+        await document.update_document(
+            doc.id,
+            document.DocUpdateRequest(content={
+                'offline_signoffs':[{'slot':'inspector','mode':'offline','status':'completed','revision':doc.content_revision}],
+                'signing':{'inspector':{'mode':'online'}},
+                'content':'修改后的巡视内容',
+            }),
+            self.u,self.db,
+        )
+        self.assertEqual(doc.content['signing']['inspector']['mode'],'offline')
+        self.assertNotIn('offline_signoffs',doc.content)
+        with self.assertRaises(HTTPException):
+            await assert_required_signoffs(self.db, doc)
+
+        result = await signature.confirm_offline_signoff(
+            doc.id, signature.OfflineSignoffRequest(slot='inspector'), self.u, self.db
+        )
+        self.assertFalse(result['electronic_signature_created'])
+        await assert_required_signoffs(self.db, doc)
+        history = await signature.document_signoffs(doc.id, user=self.u, db=self.db)
+        self.assertEqual(history['slots'][0]['completion_type'],'offline')
+        self.assertEqual(history['history'][0]['type'],'offline')
+
+        from app.services.record_fields import invalidate_document
+        invalidate_document(doc)
+        with self.assertRaises(HTTPException):
+            await assert_required_signoffs(self.db, doc)
 
 
 if __name__=='__main__':

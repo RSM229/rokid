@@ -301,7 +301,6 @@ def _content_from_record(
         "inspector": str(
             business.get("inspector")
             or extracted.get("inspector")
-            or record.acceptance_participants
             or ""
         ),
     }
@@ -391,14 +390,22 @@ def _content_from_record(
     base["system_project_name"] = str(business.get("system_project_name") or "")
     base["project_mismatch"] = bool(business.get("project_mismatch"))
     base["business_field_conflicts"] = business.get("field_conflicts") or {}
-    # 字段表追问收集到的栏目（content_json.prov_fields，键=字段表 canonical）
-    # 文书模板有对应栏位就带出来；已有值的以记录本体为准，不覆盖
+    # Explicit edits are the latest record values. Empty edits are retained as
+    # tombstones so an old OCR/Agent candidate cannot silently refill a field.
+    field_edits = (record.content_json or {}).get("record_field_edits")
+    edited_keys: set[str] = set()
+    if isinstance(field_edits, dict):
+        for key, raw in field_edits.items():
+            value = raw.get("value") if isinstance(raw, dict) else raw
+            base[str(key)] = str(value if value is not None else "").strip()
+            edited_keys.add(str(key))
+
+    # 字段表追问收集到的栏目只补空项；记录列和后续人工修改始终优先。
     prov = (record.content_json or {}).get("prov_fields")
     if isinstance(prov, dict):
-        confirmed_plan = (record.content_json or {}).get("source") == "agent_review_plan"
         for key, value in prov.items():
             text = str(value if value is not None else "").strip()
-            if text and (confirmed_plan or not str(base.get(key) or "").strip()):
+            if text and key not in edited_keys and not str(base.get(key) or "").strip():
                 base[str(key)] = text
     return base
 
@@ -499,6 +506,10 @@ async def generate_form_from_record(
         })
 
     existing = await db.get(Document, record.generated_doc_id) if record.generated_doc_id else None
+    if existing:
+        for key in ("signing", "offline_signoffs"):
+            if (existing.content or {}).get(key) is not None:
+                content[key] = (existing.content or {})[key]
     old_content = {k: v for k, v in (existing.content or {}).items() if k != "review_date"} if existing else None
     if existing and old_content == content and existing.form_code == spec.form_code and existing.docx_path:
         # 单纯查看/再次生成同一内容不能清掉已完成的签认。

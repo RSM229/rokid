@@ -279,6 +279,115 @@ class UpdateWorkRecordRequest(BaseModel):
     station_conclusion: Optional[str] = None
 
 
+def _record_field_edit_snapshot(record: WorkRecord, changed_fields: set[str]) -> dict[str, dict[str, str]]:
+    """Map edited record columns to the canonical form fields they represent."""
+    edits: dict[str, dict[str, str]] = {}
+
+    def text(value: Any) -> str:
+        if isinstance(value, datetime):
+            return value.isoformat(sep=" ", timespec="minutes")
+        if isinstance(value, date):
+            return value.isoformat()
+        return "" if value is None else str(value).strip()
+
+    def put(canonical: str, value: Any, *aliases: str) -> None:
+        row = {"value": text(value), "source": "user_edit", "status": "user_confirmed"}
+        for key in (canonical, *aliases):
+            edits[key] = row
+
+    if "record_date" in changed_fields:
+        put("date", record.record_date, "record_date")
+        if record.record_type == WorkRecordType.WITNESS.value:
+            put("sample_date", record.record_date, "acceptance_date")
+
+    if "section" in changed_fields or "station_location" in changed_fields:
+        if record.record_type != WorkRecordType.STATION.value:
+            if "section" in changed_fields:
+                put("section", record.section, "work_area", "acceptance_section")
+        elif "station_location" in changed_fields or not record.station_location:
+            put("section", record.station_location or record.section, "work_area", "station_part", "station_location")
+
+    if "location" in changed_fields:
+        put("location", record.location, "address")
+    if "weather" in changed_fields:
+        put("weather", record.weather)
+    if "worker_count" in changed_fields:
+        put("worker_count", record.worker_count)
+
+    if record.record_type == WorkRecordType.INSPECTION.value and "work_content" in changed_fields:
+        put("content", record.work_content, "work_content", "inspection_content", "activity")
+    elif record.record_type == WorkRecordType.STATION.value:
+        if "station_content" in changed_fields:
+            put("content", record.station_content or record.work_content, "work_content", "station_content", "activity")
+        elif "work_content" in changed_fields:
+            put("content", record.work_content, "work_content", "station_content", "activity")
+    elif record.record_type == WorkRecordType.ACCEPTANCE.value and (
+        "acceptance_content" in changed_fields or "work_content" in changed_fields
+    ):
+        if "acceptance_content" in changed_fields:
+            value = (record.content_json or {}).get("acceptance_content")
+        else:
+            value = (record.content_json or {}).get("acceptance_content") or record.work_content
+        put("acceptance_content", value, "content", "work_content")
+
+    if record.record_type == WorkRecordType.INSPECTION.value:
+        start_field, end_field = "inspection_start_time", "inspection_end_time"
+    else:
+        start_field, end_field = "station_start_time", "station_end_time"
+    if start_field in changed_fields:
+        put("start_time", getattr(record, start_field), start_field)
+        if record.record_type == WorkRecordType.INSPECTION.value:
+            put("time", getattr(record, start_field) or record.record_date)
+    if end_field in changed_fields:
+        put("end_time", getattr(record, end_field), end_field)
+    if record.record_type == WorkRecordType.INSPECTION.value and "record_date" in changed_fields and not record.inspection_start_time:
+        put("time", record.record_date)
+
+    if changed_fields.intersection({"problems", "inspection_remark"}):
+        if record.record_type == WorkRecordType.INSPECTION.value:
+            value = record.problems if "problems" in changed_fields else (record.problems or record.inspection_remark)
+        else:
+            from app.services.record_fields import problem_text
+            value = problem_text(record)
+        put("problems", value, "problem", "issue", "inspection_remark")
+    if "treatment" in changed_fields:
+        put("treatment", record.treatment, "handling")
+    if "remark" in changed_fields:
+        put("remark", record.remark)
+
+    if record.record_type == WorkRecordType.STATION.value:
+        if "station_process" in changed_fields:
+            put("station_process", record.station_process)
+        if "station_supervision_status" in changed_fields:
+            put("supervision_status", record.station_supervision_status, "station_supervision_status")
+        if "station_conclusion" in changed_fields:
+            put("conclusion", record.station_conclusion, "station_conclusion")
+
+    if record.record_type == WorkRecordType.ACCEPTANCE.value:
+        if "acceptance_type" in changed_fields:
+            put("acceptance_type", (record.content_json or {}).get("acceptance_type"))
+        if "acceptance_participants" in changed_fields:
+            put("acceptance_participants", record.acceptance_participants)
+        if "acceptance_result" in changed_fields:
+            put("acceptance_result", record.acceptance_result)
+        if "acceptance_basis" in changed_fields:
+            put("basis", record.acceptance_basis)
+
+    if record.record_type == WorkRecordType.WITNESS.value:
+        for field, canonical, aliases in (
+            ("witness_material_name", "material_name", ()),
+            ("witness_material_spec", "material_spec", ("spec",)),
+            ("witness_quantity", "quantity", ()),
+            ("witness_unit", "unit", ()),
+            ("witness_cert_no", "cert_no", ("report_no",)),
+            ("witness_accept_result", "acceptance_result", ("accept_result",)),
+        ):
+            if field in changed_fields:
+                put(canonical, getattr(record, field), *aliases)
+
+    return edits
+
+
 @router.post("/create-with-photos")
 async def create_work_record_with_photos(
     record_type: str = Form(...),
@@ -1747,6 +1856,15 @@ async def update_work_record(
             cj['acceptance_content'] = update_data['acceptance_content']
         record.content_json = cj
 
+    field_edits = _record_field_edit_snapshot(record, set(update_data))
+    if field_edits:
+        content_json = dict(record.content_json or {})
+        previous_edits = content_json.get("record_field_edits")
+        if not isinstance(previous_edits, dict):
+            previous_edits = {}
+        content_json["record_field_edits"] = {**previous_edits, **field_edits}
+        record.content_json = content_json
+
     if linked_doc:
         from app.routers.form_doc import _content_from_record, _record_attach_photos
         from app.services.record_fields import project_fields
@@ -1758,6 +1876,9 @@ async def update_work_record(
             if not str(content.get(key) or "").strip():
                 content[key] = value
         content["doc_number"] = (linked_doc.content or {}).get("doc_number", "")
+        for key in ("signing", "offline_signoffs"):
+            if (linked_doc.content or {}).get(key) is not None:
+                content[key] = (linked_doc.content or {})[key]
         linked_doc.content = content
         linked_doc.section = record.section
         linked_doc.location = record.location

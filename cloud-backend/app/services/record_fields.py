@@ -347,10 +347,6 @@ def invalidate_document(doc):
         content = dict(doc.content)
         content.pop("review_date", None)
         doc.content = content
-    if doc.content:
-        content = dict(doc.content)
-        content.pop("review_date", None)
-        doc.content = content
 
 
 def validate_document(doc):
