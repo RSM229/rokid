@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, Form
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import case, delete, or_, select, text, update
+from sqlalchemy import case, delete, func, or_, select, text, update
 from pydantic import BaseModel
 from typing import Optional
 
@@ -259,6 +259,7 @@ async def create_project(
         latitude=req.latitude,
         longitude=req.longitude,
         seal_signature_id=req.seal_signature_id,
+        owner_id=user.id,
 
     )
     db.add(project)
@@ -369,14 +370,10 @@ async def switch_project(
             )
         )
         if member.first() is None:
-            # 2026-10-20：超管授权的跨项目查看，同样允许切入
-            grant = await db.execute(
-                select(ProjectViewGrant.id).where(
-                    ProjectViewGrant.grantee_user_id == user.id,
-                    ProjectViewGrant.project_id == project_id,
-                )
-            )
-            if grant.first() is None:
+            # 2026-10-20：超管授权（按管理员）的跨项目查看，同样允许切入。
+            # 授权粒度是管理员，这里把已授权源管理员展开成其名下项目再判等。
+            granted = await _granted_project_ids(db, user.id)
+            if project_id not in granted:
                 _write_audit(
                     db, user, "project_switch_denied",
                     f"尝试切换到未授权项目 #{project_id} {project.name}", ip,
@@ -398,21 +395,36 @@ async def switch_project(
 
 
 async def _granted_project_ids(db: AsyncSession, user_id: int) -> list[int]:
-    """当前用户被超管授权查看的**额外**项目 id 列表（与成员项目解耦）。"""
-    rows = (
+    """当前用户被超管授权查看的**额外**项目 id 列表（与成员项目解耦）。
+
+    授权粒度是「管理员」：``ProjectViewGrant`` 记录
+    ``(grantee_user_id, grantor_admin_id)``，表示 grantee 可查看 grantor 管理员
+    **名下（创建 / 负责）的全部项目**。此处把已授权的源管理员展开成其名下的
+    项目——严格口径：``projects.owner_id == grantor_admin_id``，即该管理员创建 /
+    负责的项目，而非其作为成员的全部项目。
+    """
+    grantor_rows = (
         await db.execute(
-            select(ProjectViewGrant.project_id).where(
+            select(ProjectViewGrant.grantor_admin_id).where(
                 ProjectViewGrant.grantee_user_id == user_id
             )
+        )
+    ).scalars().all()
+    grantor_ids = [g for g in grantor_rows if g is not None]
+    if not grantor_ids:
+        return []
+    rows = (
+        await db.execute(
+            select(Project.id).where(Project.owner_id.in_(grantor_ids))
         )
     ).scalars().all()
     return list(rows)
 
 
 class ViewGrantRequest(BaseModel):
-    """授权某管理员查看某项目。"""
+    """授权某管理员查看另一个管理员名下的所有项目。"""
     grantee_user_id: int
-    project_id: int
+    grantor_admin_id: int
 
 
 class AdminSetRequest(BaseModel):
@@ -430,13 +442,21 @@ async def list_view_grants(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """授权总览：全部用户（筛管理员）、全部项目、全部授权记录。"""
+    """授权总览：全部用户（筛管理员）、各管理员名下项目数、全部授权记录。"""
     _require_super(user)
     users = (
         await db.execute(select(User).where(User.is_active.is_(True)).order_by(User.id))
     ).scalars().all()
-    projects = (await db.execute(select(Project).order_by(Project.id))).scalars().all()
     grants = (await db.execute(select(ProjectViewGrant))).scalars().all()
+    # 各管理员「创建 / 负责」的项目数（projects.owner_id），用于授权时直观展示
+    owner_counts = (
+        await db.execute(
+            select(Project.owner_id, func.count(Project.id))
+            .where(Project.owner_id.isnot(None))
+            .group_by(Project.owner_id)
+        )
+    ).all()
+    project_counts: dict[int, int] = {uid: c for uid, c in owner_counts}
     return {
         "admins": [
             {
@@ -445,17 +465,14 @@ async def list_view_grants(
                 "username": u.username,
                 "org_role": u.org_role,
                 "project_id": u.project_id,
+                "project_count": project_counts.get(u.id, 0),
             }
             for u in users
-        ],
-        "projects": [
-            {"id": p.id, "name": p.name, "status": p.status or "active"}
-            for p in projects
         ],
         "grants": [
             {
                 "grantee_user_id": g.grantee_user_id,
-                "project_id": g.project_id,
+                "grantor_admin_id": g.grantor_admin_id,
                 "grantor_user_id": g.grantor_user_id,
                 "created_at": g.created_at.isoformat() if g.created_at else None,
             }
@@ -470,21 +487,25 @@ async def create_view_grant(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """授权某管理员查看某项目（幂等）。"""
+    """授权某管理员查看另一个管理员名下的所有项目（幂等）。"""
     _require_super(user)
     target = await db.get(User, req.grantee_user_id)
     if target is None:
-        raise HTTPException(status_code=404, detail="用户不存在")
+        raise HTTPException(status_code=404, detail="被授权人不存在")
     if target.org_role != ORG_ROLE_ADMIN:
         raise HTTPException(status_code=400, detail="被授权人必须是管理员（项目负责人）")
-    project = await db.get(Project, req.project_id)
-    if project is None:
-        raise HTTPException(status_code=404, detail="项目不存在")
+    if req.grantee_user_id == req.grantor_admin_id:
+        raise HTTPException(status_code=400, detail="不能授权管理员查看自己的项目")
+    grantor = await db.get(User, req.grantor_admin_id)
+    if grantor is None:
+        raise HTTPException(status_code=404, detail="源管理员不存在")
+    if grantor.org_role != ORG_ROLE_ADMIN:
+        raise HTTPException(status_code=400, detail="只能授权查看「管理员」名下的项目")
     existing = (
         await db.execute(
             select(ProjectViewGrant).where(
                 ProjectViewGrant.grantee_user_id == req.grantee_user_id,
-                ProjectViewGrant.project_id == req.project_id,
+                ProjectViewGrant.grantor_admin_id == req.grantor_admin_id,
             )
         )
     ).scalar_one_or_none()
@@ -492,7 +513,7 @@ async def create_view_grant(
         db.add(
             ProjectViewGrant(
                 grantee_user_id=req.grantee_user_id,
-                project_id=req.project_id,
+                grantor_admin_id=req.grantor_admin_id,
                 grantor_user_id=user.id,
             )
         )
@@ -502,7 +523,7 @@ async def create_view_grant(
             user_id=user.id,
             username=user.username,
             action="project_view_grant",
-            detail=f"授权 用户#{req.grantee_user_id} 查看项目#{req.project_id}",
+            detail=f"授权 用户#{req.grantee_user_id} 查看管理员#{req.grantor_admin_id} 名下的项目",
         )
     )
     await db.commit()
@@ -515,13 +536,13 @@ async def delete_view_grant(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """撤销某管理员的某项目查看授权。"""
+    """撤销某管理员查看另一个管理员项目的授权。"""
     _require_super(user)
     existing = (
         await db.execute(
             select(ProjectViewGrant).where(
                 ProjectViewGrant.grantee_user_id == req.grantee_user_id,
-                ProjectViewGrant.project_id == req.project_id,
+                ProjectViewGrant.grantor_admin_id == req.grantor_admin_id,
             )
         )
     ).scalar_one_or_none()
@@ -533,7 +554,7 @@ async def delete_view_grant(
             user_id=user.id,
             username=user.username,
             action="project_view_grant_revoke",
-            detail=f"撤销 用户#{req.grantee_user_id} 查看项目#{req.project_id}",
+            detail=f"撤销 用户#{req.grantee_user_id} 查看管理员#{req.grantor_admin_id} 名下的项目",
         )
     )
     await db.commit()
@@ -991,11 +1012,12 @@ async def reopen_project(
 
 # ============ 空壳项目物理删除（2026-10-22） ============
 
-# 这三张表在项目删除时由接口**主动清理**，不计入"有业务数据"的拦截项：
+# 这两张表在项目删除时由接口**主动清理**，不计入"有业务数据"的拦截项：
 #   project_members     —— 创建项目时自动把创建者加为成员，空壳项目必然有 1 条
-#   project_view_grants —— 跨项目查看授权，随项目一起作废
 #   users               —— users.project_id 只是"当前上下文"单值，置空即可
-_CLEANUP_TABLES = {"project_members", "project_view_grants", "users"}
+# 注：project_view_grants（跨项目查看授权）按「管理员」粒度存储，不绑定具体项目，
+#     故项目删除时无需、也不能按 project_id 清理，已从本集合移除。
+_CLEANUP_TABLES = {"project_members", "users"}
 
 # fail-closed 阈值：生产 information_schema 应返回 25+ 张带 project_id 的表。
 # 若扫到的表数少于此，说明判定依据本身失效（库连错/metadata 未加载），
@@ -1180,7 +1202,6 @@ async def delete_project(
         if mu:
             member_names.append(f"{mu.real_name}({mu.username})")
     await db.execute(delete(ProjectMember).where(ProjectMember.project_id == project_id))
-    await db.execute(delete(ProjectViewGrant).where(ProjectViewGrant.project_id == project_id))
     cleared = (
         await db.execute(
             update(User).where(User.project_id == project_id).values(project_id=None)

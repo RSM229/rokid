@@ -331,5 +331,11 @@ class Project(Base):
     )
     # ---- Step 1 结束 ----
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    # 创建 / 负责的管理员（项目负责人）。用于「按管理员授权」时界定
+    # "某管理员名下的项目" = 其创建 / 负责的项目，而非其作为成员的全部项目。
+    owner_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True, index=True,
+        comment="创建 / 负责的管理员",
+    )
 
     users: Mapped[list["User"]] = relationship(back_populates="project")

@@ -506,14 +506,14 @@ export const projectApi = {
 
 // 管理员与跨项目查看授权（仅超管；后端以 is_super_admin 兜底把关）
 export const adminGrantsApi = {
-  // 总览：全部用户 / 全部项目 / 全部授权记录
+  // 总览：全部用户（含各管理员项目数）/ 全部授权记录
   list: () => http.get('/project/view-grants'),
-  // 授权某管理员查看某项目（幂等）
-  grant: (granteeUserId: number, projectId: number) =>
-    http.post('/project/view-grants', { grantee_user_id: granteeUserId, project_id: projectId }),
+  // 授权某管理员查看另一个管理员名下的全部项目（幂等）
+  grant: (granteeUserId: number, grantorAdminId: number) =>
+    http.post('/project/view-grants', { grantee_user_id: granteeUserId, grantor_admin_id: grantorAdminId }),
   // 撤销授权
-  revoke: (granteeUserId: number, projectId: number) =>
-    http.delete('/project/view-grants', { data: { grantee_user_id: granteeUserId, project_id: projectId } }),
+  revoke: (granteeUserId: number, grantorAdminId: number) =>
+    http.delete('/project/view-grants', { data: { grantee_user_id: granteeUserId, grantor_admin_id: grantorAdminId } }),
   // 设为公司级管理员（项目负责人）
   setAdmin: (userId: number) => http.post('/project/admins/set', { user_id: userId }),
   // 取消管理员角色
