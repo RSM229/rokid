@@ -308,6 +308,11 @@ class Project(Base):
     short_name: Mapped[str | None] = mapped_column(String(64), nullable=True, comment="工程名称简称")
     location: Mapped[str | None] = mapped_column(String(256), nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 工程类型：房建 / 市政 / 其他（NULL=未指定）。举牌验收要点匹配按此消歧；
+    # 未设时 agent 回退按项目名/描述关键词推断，再不行让用户点选候选。
+    eng_type: Mapped[str | None] = mapped_column(
+        String(16), nullable=True, comment="工程类型: 房建|市政|其他（NULL=未指定）",
+    )
     # 记录文书的基础资料，未维护的数据不以通用占位冒充。
     construction_unit: Mapped[str | None] = mapped_column(String(256), nullable=True)
     supervision_unit: Mapped[str | None] = mapped_column(String(256), nullable=True)

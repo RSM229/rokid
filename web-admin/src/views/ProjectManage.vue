@@ -154,6 +154,14 @@
         <el-form-item label="项目简称">
           <el-input v-model="form.short_name" placeholder="选填" maxlength="64" />
         </el-form-item>
+        <el-form-item label="工程类型">
+          <el-select v-model="form.eng_type" clearable placeholder="选填（影响举牌验收要点匹配）">
+            <el-option label="房建" value="房建" />
+            <el-option label="市政" value="市政" />
+            <el-option label="其他" value="其他" />
+          </el-select>
+          <span class="form-hint">房建/市政用于验收要点消歧；不选则由项目名推断</span>
+        </el-form-item>
         <el-form-item label="项目地点">
           <el-input v-model="form.location" placeholder="选填" maxlength="128" />
         </el-form-item>
@@ -259,6 +267,7 @@ const form = reactive({
   name: '',
   code: '',
   short_name: '',
+  eng_type: '',
   location: '',
   description: '',
   construction_unit: '', supervision_unit: '', supervision_org: '', acceptance_participants: '', latitude: '', longitude: '', seal_signature_id: null as number | null,
@@ -425,6 +434,7 @@ async function save() {
       name: form.name.trim(),
       code: form.code.trim(),
       short_name: form.short_name.trim() || null,
+      eng_type: form.eng_type || null,
       location: form.location.trim() || null,
       description: form.description.trim() || null,
       construction_unit: form.construction_unit.trim() || null,

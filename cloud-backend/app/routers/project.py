@@ -87,6 +87,7 @@ class CreateProjectRequest(BaseModel):
     name: str
     code: str
     short_name: Optional[str] = None
+    eng_type: Optional[str] = None
     location: Optional[str] = None
     description: Optional[str] = None
     construction_unit: Optional[str] = None
@@ -103,6 +104,7 @@ class UpdateProjectRequest(BaseModel):
     """修改项目基本信息（仅传需要改的字段）"""
     name: Optional[str] = None
     short_name: Optional[str] = None
+    eng_type: Optional[str] = None
     location: Optional[str] = None
     description: Optional[str] = None
     construction_unit: Optional[str] = None
@@ -120,6 +122,7 @@ class ProjectInfo(BaseModel):
     name: str
     code: str
     short_name: Optional[str] = None
+    eng_type: Optional[str] = None
     location: Optional[str] = None
     description: Optional[str] = None
     construction_unit: Optional[str] = None
@@ -149,6 +152,7 @@ def _project_info(project: Project) -> ProjectInfo:
         name=project.name,
         code=project.code,
         short_name=project.short_name,
+        eng_type=project.eng_type,
         location=project.location,
         description=project.description,
         construction_unit=project.construction_unit,
@@ -220,6 +224,9 @@ async def _validate_project_fields(db, user, req, previous=None):
     for key in ("construction_unit", "supervision_unit", "supervision_org"):
         if len(getattr(req, key, None) or "") > 256:
             raise HTTPException(400, "单位名称最多256个字符")
+    eng_type = getattr(req, "eng_type", None)
+    if eng_type not in (None, "", "房建", "市政", "其他"):
+        raise HTTPException(400, "工程类型只能是 房建 / 市政 / 其他")
     if req.seal_signature_id and (previous is None or previous.seal_signature_id != req.seal_signature_id):
         from app.models.signature import Signature
         signature = await db.get(Signature, req.seal_signature_id)
@@ -249,6 +256,7 @@ async def create_project(
         name=req.name,
         code=req.code,
         short_name=req.short_name,
+        eng_type=req.eng_type,
         location=req.location,
         description=req.description,
         org_id=user.org_id,
@@ -303,7 +311,7 @@ async def update_project(
     if not user.has_permission("project_edit"):
         raise HTTPException(403, "需要项目编辑权限")
     await _validate_project_fields(db, user, req, previous=project)
-    for key in ("construction_unit", "supervision_unit", "supervision_org", "acceptance_participants", "latitude", "longitude", "seal_signature_id"):
+    for key in ("eng_type", "construction_unit", "supervision_unit", "supervision_org", "acceptance_participants", "latitude", "longitude", "seal_signature_id"):
         if key in req.model_fields_set:
             value = getattr(req, key)
             setattr(project, key, (value.strip() or None) if isinstance(value, str) else value)

@@ -774,7 +774,14 @@ _PROJECT_KIND_WORDS = {
 
 
 def _project_kind_from(project) -> str | None:
-    """由项目名/描述推断工程类型；推断不出返回 None（歧义词仍走候选点选）。"""
+    """确定项目工程类型；推断不出返回 None（歧义词仍走候选点选）。
+
+    优先取项目显式字段 ``eng_type``（房建/市政），为空再按项目名/描述关键词推断。
+    """
+    if project is not None:
+        explicit = str(getattr(project, "eng_type", "") or "").strip()
+        if explicit in ("房建", "市政"):
+            return explicit
     pname = ""
     if project is not None:
         pname = " ".join(x for x in (
