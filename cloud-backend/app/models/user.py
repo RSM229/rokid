@@ -333,9 +333,11 @@ class Project(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
     # 创建 / 负责的管理员（项目负责人）。用于「按管理员授权」时界定
     # "某管理员名下的项目" = 其创建 / 负责的项目，而非其作为成员的全部项目。
+    # 注：刻意不加 ForeignKey / 无 ORM 关系——否则会与 users.project_id→projects.id
+    # 形成 users↔projects 双外键路径，导致 User.project 关系 AmbiguousForeignKeysError。
+    # owner_id 仅用于授权展开查询（按列过滤），无需 ORM 关系。
     owner_id: Mapped[int | None] = mapped_column(
-        ForeignKey("users.id"), nullable=True, index=True,
-        comment="创建 / 负责的管理员",
+        Integer, nullable=True, comment="创建 / 负责的管理员"
     )
 
     users: Mapped[list["User"]] = relationship(back_populates="project")
