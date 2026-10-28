@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import datetime
+import hashlib
 import os
 
 import openpyxl
@@ -25,10 +26,25 @@ XLSX_CANDIDATES = [
 
 
 def _find_xlsx() -> str:
+    # 可用环境变量 ACCEPTANCE_XLSX 显式指定源表，便于 CI/其他机器复现
+    env = os.environ.get("ACCEPTANCE_XLSX")
+    if env and os.path.exists(env):
+        return env
     for p in XLSX_CANDIDATES:
         if os.path.exists(p):
             return p
-    raise FileNotFoundError("未找到字段表 xlsx：" + " / ".join(XLSX_CANDIDATES))
+    raise FileNotFoundError(
+        "未找到字段表 xlsx（可用 ACCEPTANCE_XLSX 环境变量指定）："
+        + " / ".join(XLSX_CANDIDATES)
+    )
+
+
+def _file_md5(path: str) -> str:
+    h = hashlib.md5()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
 
 
 def norm(v) -> str:
@@ -153,15 +169,22 @@ def _item_words(item: str) -> list[str]:
 
 
 def gen() -> None:
+    src = _find_xlsx()
     rows = build_rows()
+    n_fj = sum(1 for r in rows if r["kind"] == "房建")
+    n_sz = sum(1 for r in rows if r["kind"] == "市政")
     lines: list[str] = []
     lines.append('"""房屋建筑工程 / 市政基础设施工程关键工序、关键部位隐蔽工程实施举牌验收内容清单')
     lines.append("（自动生成，勿手改）。")
     lines.append("")
-    lines.append("数据源：监理通各记录关键字（草稿）.xlsx → 「房建」sheet（附件1，181 条）")
-    lines.append("+「市政」sheet（附件2，139 条）。kind ∈ {房建, 市政}，unit 为市政的单位工程。")
-    lines.append(f"生成时间：{datetime.datetime.now():%Y-%m-%d %H:%M}，总条目数：{len(rows)}。")
-    lines.append("改表后重跑 scripts/gen_acceptance_checklists.py 更新。")
+    lines.append("数据源：监理通各记录关键字（草稿）.xlsx →「房建」sheet（附件1）+「市政」sheet（附件2）。")
+    lines.append(f"源文件：{os.path.basename(src)}  md5={_file_md5(src)}")
+    lines.append("kind ∈ (房建, 市政)；unit 为市政的单位工程，房建为空字符串。")
+    lines.append(
+        f"生成时间：{datetime.datetime.now():%Y-%m-%d %H:%M}，"
+        f"总条目数：{len(rows)}（房建 {n_fj}，市政 {n_sz}）。"
+    )
+    lines.append("改表后重跑 scripts/gen_acceptance_checklists.py 更新；源表 md5 变化即表示需要重新生成。")
     lines.append('"""')
     lines.append("from __future__ import annotations")
     lines.append("")
@@ -177,7 +200,7 @@ def gen() -> None:
     lines.append(_FIXED_TAIL)
     with open(OUT, "w", encoding="utf-8", newline="\n") as f:
         f.write("\n".join(lines) + "\n")
-    print(f"OK 生成 {OUT}，总条目 {len(rows)}（房建 {sum(1 for r in rows if r['kind']=='房建')}，市政 {sum(1 for r in rows if r['kind']=='市政')}）")
+    print(f"OK 生成 {OUT}，总条目 {len(rows)}（房建 {n_fj}，市政 {n_sz}）")
 
     import importlib.util
     spec = importlib.util.spec_from_file_location("acceptance_checklists", OUT)
