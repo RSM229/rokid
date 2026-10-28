@@ -19,6 +19,7 @@ OUT = os.path.join(BACKEND, "app", "services", "acceptance_checklists.py")
 # 微信版优先，本地版兜底
 XLSX_CANDIDATES = [
     r"D:/微信/xwechat_files/wxid_9o7tmwcr5b5d22_c80f/msg/file/2026-10/监理通各记录关键字（草稿）(1).xlsx",
+    r"D:/rokid/rokid/文档/监理通各记录关键字（草稿）(1).xlsx",
     r"D:/rokid/监理通各记录关键字（草稿）(1).xlsx",
 ]
 
