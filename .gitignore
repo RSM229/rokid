@@ -36,6 +36,7 @@ __MACOSX/
 
 # ===== 构建/导出/临时目录 =====
 **/exports/
+**/uploads/
 **/build/
 **/node_modules/
 **/.pytest_cache/
