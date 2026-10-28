@@ -501,10 +501,11 @@ Page(themed({
   /** 当前会话在本地历史里的 id（稳定不变，重复保存=覆盖同一条，避免产生重复历史） */
   currentSessionId: 0,
   inlinePlanSaveQueues: {} as Record<string, Promise<void>>,
+  /** 双击工作台空白处新建对话：上一次背景点击时间戳（同一元素、300ms 内视为双击） */
+  lastWorkbenchTapTime: 0,
 
   data: {
     messages: [] as Message[],
-    userName: '',
     // ima 风格空状态：竖排建议按钮（icon + 文案），点击走 handleActionTap
     // 🔴 needProject：该动作会产生项目级业务数据（现场记录/隐患/监理日志），
     //    无项目用户点了只会被拦，不如一开始就不展示 —— 换成 visibleHeroActions
@@ -647,7 +648,6 @@ Page(themed({
     const savedModel = String(wx.getStorageSync(`gdjl_${config.storageScope}_agent_model`) || 'qwen3.7-max')
     const saved = this.data.models.find(m => m.id === savedModel) || this.data.models[0]
     this.setData({
-      userName: user?.real_name || '监理人员',
       currentModel: saved.id,
       modelName: saved.name,
     })
@@ -4910,6 +4910,22 @@ Page(themed({
     void this.loadPendingDrafts()
     wx.showToast({ title: '已开启新对话', icon: 'none' })
   },
+
+  /** 双击工作台空白处也能新建对话（复用 newChat）。
+   *  背景层的 tap 会冒泡到这里；交互子树（消息气泡/快捷按钮等）已用 catchtap 就地终止冒泡，
+   *  因此冒泡上来的都是真正的空白背景，双击即开新对话，不会误清空会话。 */
+  onWorkbenchTap() {
+    const now = Date.now()
+    if (now - this.lastWorkbenchTapTime < 300) {
+      this.lastWorkbenchTapTime = 0
+      this.newChat()
+    } else {
+      this.lastWorkbenchTapTime = now
+    }
+  },
+
+  /** 仅用于拦截交互子树的 tap 冒泡（catchtap），本身不做任何事 */
+  noop() {},
 
   navigateTo(event: WechatMiniprogram.TouchEvent) {
     const url = event.currentTarget.dataset.url as string

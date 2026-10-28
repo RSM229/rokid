@@ -26,31 +26,31 @@
   <!-- Main Chat Area -->
   <view class="main" style="padding-top: {{statusBarHeight + navBarHeight + (breadcrumb.length > 0 ? 70 : 10)}}px;">
     <!-- 待补全草稿提醒卡已按用户要求移除（2026-10-15）：草稿数据仍落库，聊天内追问补全流程不变 -->
-    <scroll-view class="messages" scroll-y scroll-into-view="bottom" enhanced show-scrollbar="{{false}}">
+    <scroll-view class="messages" scroll-y scroll-into-view="bottom" enhanced show-scrollbar="{{false}}" bindtap="onWorkbenchTap">
       <!-- Hero（ima 风格空状态：大问候语 + 竖排建议按钮） -->
       <view wx:if="{{messages.length <= 1 && !loading}}" class="hero">
-        <view class="hero-greeting">你好，{{userName}}</view>
+        <view class="hero-greeting">你好，我是你的工程项目管理AI智能体</view>
         <!-- 🔴 无项目时的常驻引导条：说清「现在能用什么」+「下一步去哪」，
              取代原来那个必然 403 的「创建新项目」弹窗（该接口仅超管可调用，
              而超管不允许登录小程序 ⇒ 小程序里任何人都建不了项目）。 -->
         <view wx:if="{{noProject}}" class="no-project-tip">
           <text class="no-project-tip-text">你还没有加入项目。规范查询、AI 问答、天气等现在就能用；现场记录需要先加入项目。</text>
-          <view class="no-project-tip-btn" bindtap="goJoinProject">去加入项目</view>
+          <view class="no-project-tip-btn" catchtap="goJoinProject">去加入项目</view>
         </view>
         <view class="hero-actions">
-          <view class="hero-pill" wx:for="{{visibleHeroActions}}" wx:for-item="act" wx:for-index="ai" wx:key="ai" data-command="{{act.command}}" bindtap="handleActionTap">
+          <view class="hero-pill" wx:for="{{visibleHeroActions}}" wx:for-item="act" wx:for-index="ai" wx:key="ai" data-command="{{act.command}}" catchtap="handleActionTap">
             <view class="hero-pill-icon {{act.icon}}"></view>
             <text>{{act.text}}</text>
           </view>
         </view>
-        <view class="review-entry" bindtap="navigateTo" data-url="/pages/work-review/index">
+        <view class="review-entry" catchtap="navigateTo" data-url="/pages/work-review/index">
           <text class="review-entry-title">整理多张现场资料</text>
           <text class="review-entry-detail">核对事项、日期和拟生成记录</text>
           <text class="review-entry-arrow">›</text>
         </view>
       </view>
       <block wx:else>
-        <view wx:for="{{messages}}" wx:for-index="mi" wx:key="index" class="message {{item.role}}" id="msg-{{mi}}">
+        <view wx:for="{{messages}}" wx:for-index="mi" wx:key="index" class="message {{item.role}}" id="msg-{{mi}}" catchtap="noop">
           <view class="message-head">
             <block wx:if="{{item.role === 'assistant'}}">
               <text class="message-role">监理智能体</text>
