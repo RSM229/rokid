@@ -926,7 +926,21 @@ async function confirmDelete() {
     deleteVisible.value = false
     await loadData()
   } catch (error: any) {
-    ElMessage.error(error.response?.data?.detail || '删除失败')
+    const resp = error?.response
+    let msg: string
+    if (!resp) {
+      // 网络层失败：请求根本没收到 HTTP 响应（断网 / nginx 502·504 HTML 页等）
+      msg = '网络异常，删除请求未收到服务器响应，请检查网络后重试'
+    } else if (resp.data?.detail) {
+      // 后端返回的结构化错误（如外键冲突、关联数据清理失败）
+      msg = resp.data.detail
+    } else if (typeof resp.data === 'string' && resp.data.trim()) {
+      // 服务器返回了非 JSON 体（如 nginx 错误页）
+      msg = `删除失败：服务器返回异常（HTTP ${resp.status}），请联系系统管理员`
+    } else {
+      msg = `删除失败（HTTP ${resp.status ?? '未知'}），请稍后重试或联系系统管理员`
+    }
+    ElMessage.error(msg)
   } finally {
     deleteLoading.value = false
   }
