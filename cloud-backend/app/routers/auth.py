@@ -13,7 +13,8 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Reques
 from fastapi.responses import Response
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import delete, func, or_, select, update
+from sqlalchemy import UniqueConstraint, delete, func, or_, select, update
+from sqlalchemy.exc import SQLAlchemyError
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 import jwt
 import openpyxl
@@ -1813,10 +1814,17 @@ async def delete_user(
     if target.is_super_admin() and not manager.is_super_admin():
         raise HTTPException(status_code=403, detail="无权重限删除超级管理员账号")
 
-    await _purge_user_references(db, user_id)
-    await db.delete(target)
-    _audit(db, "user_delete", user=manager, detail=f"删除账号 {target.username}(id={target.id})")
-    await db.commit()
+    try:
+        await _purge_user_references(db, user_id, manager.id)
+        await db.delete(target)
+        _audit(db, "user_delete", user=manager, detail=f"删除账号 {target.username}(id={target.id})")
+        await db.commit()
+    except SQLAlchemyError as exc:
+        await db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=f"删除账号失败：清理关联数据时数据库报错（{type(exc).__name__}），请联系系统管理员",
+        )
     return {"detail": "账号已删除"}
 
 
@@ -1835,24 +1843,55 @@ _OWNERSHIP_TABLES = {
 }
 
 
-async def _purge_user_references(db: AsyncSession, user_id: int) -> None:
+def _col_is_unique(col) -> bool:
+    """判断某列是否承担唯一约束（单列 unique 或复合唯一约束的一部分）。"""
+    if col.unique:
+        return True
+    for constraint in col.table.constraints:
+        if isinstance(constraint, UniqueConstraint) and col in constraint.columns:
+            return True
+    return False
+
+
+async def _purge_user_references(db: AsyncSession, user_id: int, manager_id: int) -> None:
     """删除用户前，解除/清理所有指向 ``users.id`` 的外键引用。
 
-    归属类子表（见 ``_OWNERSHIP_TABLES``）整行删除；其余业务表的 user 外键
-    若可空则置 NULL（保留业务数据，仅解除归属），不可空则整行删除。
+    规则（对应弹窗承诺「业务记录仅解除其归属、予以保留」）：
+    - 归属类子表（见 ``_OWNERSHIP_TABLES``，如项目成员、微信绑定、签章等）
+      整行删除，因为它们以该用户为归属主体；
+    - 业务表的 user 外键：
+        * 可空 → 置 NULL（解除归属、业务记录保留）；
+        * 唯一（1:1 映射，如小程序绑定）→ 整行删除，无法改指他人；
+        * 非空且非唯一（如创建人、上报人）→ 改指执行删除的管理员，
+          在不动表结构的前提下保留业务记录、避免外键悬空。
+    最后由调用方删除用户行本身。
     """
     for table in Base.metadata.tables.values():
         if table.name == "users":
             continue
-        for col in table.columns:
-            if not any(fk.column.table.name == "users" for fk in col.foreign_keys):
-                continue
-            if table.name in _OWNERSHIP_TABLES:
-                await db.execute(delete(table).where(col == user_id))
-            elif col.nullable:
+        user_fk_cols = [
+            col
+            for col in table.columns
+            if any(fk.column.table.name == "users" for fk in col.foreign_keys)
+        ]
+        if not user_fk_cols:
+            continue
+        if table.name in _OWNERSHIP_TABLES:
+            # 归属类：凡引用该用户的行整行清理（多列引用时用 OR 覆盖）
+            await db.execute(
+                delete(table).where(or_(*(col == user_id for col in user_fk_cols)))
+            )
+            continue
+        # 业务类：逐列解除归属，保留业务记录
+        for col in user_fk_cols:
+            if col.nullable:
                 await db.execute(update(table).where(col == user_id).values({col: None}))
-            else:
+            elif _col_is_unique(col):
                 await db.execute(delete(table).where(col == user_id))
+            else:
+                await db.execute(
+                    update(table).where(col == user_id).values({col: manager_id})
+                )
 
 
 def _can_manage_all_projects(user: User) -> bool:
