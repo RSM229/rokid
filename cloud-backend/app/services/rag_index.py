@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import logging
 import os
 import threading
@@ -67,6 +68,12 @@ SOURCE_TYPE_DOCUMENT = "document"
 SOURCE_TYPE_NOTE = "note"
 SOURCE_TYPE_KG = "kg_entity"
 
+# 「危大工程专项施工方案严重缺陷清单」（建办质〔2024〕63 号）80 条红线。
+# 独立 source_type：这是方案审查的**硬性判定标准**（踩中一条即审查不过 / 重大事故隐患），
+# 与一般的规范条文、知识库文档性质不同，检索消费方（方案审查、规范问答）需要能单独锁定它。
+# 语料来自 app/data/severe_defect_checklist.json（结构化 80 条：原文 + 大白话解读）。
+SOURCE_TYPE_SEVERE_DEFECT = "severe_defect"
+
 # 知识图谱实体分两型存放。184 个实体里有 106 个 entity_type = 「监理要点」，
 # 它们是 LLM 从表单模板抽出来的**字段名**（"应急救援准备情况"、"当日存在问题及处理"、
 # "安装/拆卸特种作业人员到位"），本身不承载条款语义；剩下 78 个
@@ -112,6 +119,7 @@ ALL_SOURCE_TYPES = (
     SOURCE_TYPE_DOCUMENT,
     SOURCE_TYPE_NOTE,
     SOURCE_TYPE_KG,
+    SOURCE_TYPE_SEVERE_DEFECT,
 )
 
 # include_kg=False 时要排除的全部 KG 分型
@@ -906,12 +914,59 @@ def _collect_kg_entities(session: Session) -> list[dict]:
     return sources
 
 
+def _collect_severe_defects(session: Session) -> list[dict]:
+    """把「危大工程专项施工方案严重缺陷清单」80 条红线接入语义检索。
+
+    语料是结构化 JSON（app/data/severe_defect_checklist.json），每条缺陷按
+    「分类名 + 条款原文 + 大白话解读」合成一段文本，单独作为一条来源；
+    source_id 用缺陷 id（如 general-01 / lifting-03），稳定可定位。
+    """
+    data_dir = Path(__file__).resolve().parent.parent / "data"
+    checklist_path = data_dir / "severe_defect_checklist.json"
+    if not checklist_path.exists():
+        # 数据文件缺失时报错但不中断其它来源 —— 由 build_all 记入 errors。
+        raise FileNotFoundError(f"严重缺陷清单数据文件不存在：{checklist_path}")
+
+    try:
+        checklist = json.loads(checklist_path.read_text(encoding="utf-8"))
+    except (ValueError, OSError) as exc:
+        raise RuntimeError(f"严重缺陷清单数据读取失败：{exc}") from exc
+
+    items = checklist.get("items") or []
+    cat_map: dict[str, str] = {
+        c["key"]: c["name"] for c in (checklist.get("meta", {}).get("categories") or [])
+    }
+
+    sources: list[dict] = []
+    for item in items:
+        cat = cat_map.get(item.get("category_key"), item.get("category") or "")
+        clause = (item.get("clause") or "").strip()
+        interp = (item.get("interpretation") or "").strip()
+        text = "\n".join(part for part in [
+            f"严重缺陷分类：{cat}",
+            f"条款原文：{clause}",
+            f"大白话解读：{interp}",
+        ] if part)
+        if not text:
+            continue
+        sources.append({
+            "source_type": SOURCE_TYPE_SEVERE_DEFECT,
+            "source_id": item.get("id") or f"{cat}-{item.get('seq')}",
+            "source_name": f"{cat}·严重缺陷{item.get('seq')}",
+            "text": text,
+            "kb_id": None,
+            "project_id": None,
+        })
+    return sources
+
+
 _COLLECTORS = {
     SOURCE_TYPE_KNOWLEDGE: _collect_knowledge_files,
     SOURCE_TYPE_WORK_RECORD: _collect_work_records,
     SOURCE_TYPE_DOCUMENT: _collect_documents,
     SOURCE_TYPE_NOTE: _collect_notes,
     SOURCE_TYPE_KG: _collect_kg_entities,
+    SOURCE_TYPE_SEVERE_DEFECT: _collect_severe_defects,
 }
 
 

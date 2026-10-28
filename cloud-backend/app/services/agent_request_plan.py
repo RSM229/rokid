@@ -107,6 +107,10 @@ ACTIONS: dict[str, dict[str, Any]] = {
         "label": "检索规范", "tool": "query_regulation", "kind": "read",
         "requires_confirmation": False, "attachment_purpose": None,
     },
+    "review_plan_doc": {
+        "label": "审查专项施工方案", "tool": "review_plan_doc", "kind": "read",
+        "requires_confirmation": False, "attachment_purpose": "plan_document",
+    },
     "query_weather": {
         "label": "查询天气", "tool": "query_weather", "kind": "read",
         "requires_confirmation": False, "attachment_purpose": None,

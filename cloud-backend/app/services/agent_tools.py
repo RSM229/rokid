@@ -1996,6 +1996,53 @@ async def _query_regulation(ctx: ToolContext, args: dict) -> dict:
     return _ok("\n".join(lines), data={"count": len(hits)})
 
 
+async def _review_plan_doc(ctx: ToolContext, args: dict) -> dict:
+    """依据「严重缺陷清单」审查专项施工方案（建办质〔2024〕63 号）。"""
+    from app.services import severe_defect_review
+
+    text = str(args.get("content") or args.get("plan_text") or ctx.message or "").strip()
+    if not text:
+        return _need_more(
+            ["方案内容"], "请把专项施工方案正文粘贴给我（或上传方案文件），我按 80 条严重缺陷清单逐条帮你核对。"
+        )
+    work_type = str(args.get("work_type") or "").strip()
+    try:
+        report = await severe_defect_review.review_plan(text, work_type=work_type)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("方案审查失败")
+        return _ok(f"方案审查暂时不可用（{type(exc).__name__}），请稍后重试。")
+
+    if not report.get("ok"):
+        return _ok(report.get("error") or "方案审查未能完成。")
+
+    failed_items = [i for i in report["items"] if i.get("passed") is False]
+    lines = [
+        f"已按严重缺陷清单对照 {report['total_check']} 条适用条款审查，"
+        f"发现严重缺陷 {report['failed']} 条，结论：{report['conclusion']}。",
+        report.get("summary", ""),
+    ]
+    for i, item in enumerate(failed_items[:8], 1):
+        problem = (item.get("problem") or "").strip()
+        lines.append(
+            f"{i}. 【{item.get('category')}】{item.get('clause')}"
+            + (f"\n   → {problem}" if problem else "")
+        )
+    if len(failed_items) > 8:
+        lines.append(f"……其余 {len(failed_items) - 8} 条未通过，见报告详情。")
+    return _ok(
+        "\n".join(line for line in lines if line.strip()),
+        data=report,
+        card={
+            "type": "plan_review",
+            "title": "专项施工方案审查报告",
+            "conclusion": report["conclusion"],
+            "failed": report["failed"],
+            "total": report["total_check"],
+            "items": report["items"],
+        },
+    )
+
+
 async def _query_weather(ctx: ToolContext, args: dict) -> dict:
     target = _parse_date(args.get("date")) or datetime.now().date()
     try:
@@ -2593,6 +2640,16 @@ TOOLS: tuple[ToolSpec, ...] = (
         {"*keyword": "检索关键词", "question": "用户原始问法（可省略）"},
         None, "read", _query_regulation,
         ("模板支撑验收规范怎么要求",),
+    ),
+    ToolSpec(
+        "review_plan_doc",
+        "依据住建部「严重缺陷清单」（建办质〔2024〕63 号，80 条红线）审查危大工程专项施工方案，"
+        "逐条对照给出通过/不通过与整改建议。用户说「审查方案/审方案/按80条/核对严重缺陷/查方案缺什么」"
+        "且提供了方案正文时用。content 放方案全文（用户直接粘贴的文字，或已解析的文档内容）。",
+        {"*content": "方案全文/正文（用户粘贴或文档已解析的文本）",
+         "work_type": "工程类型（基坑/模板/起重/脚手架/拆除/暗挖/幕墙/人工挖孔桩/钢结构，可省略，服务端自动推断）"},
+        "work_record", "read", _review_plan_doc,
+        ("审查这份基坑专项施工方案", "帮我按严重缺陷清单查一下这个方案"),
     ),
     ToolSpec(
         "query_weather",

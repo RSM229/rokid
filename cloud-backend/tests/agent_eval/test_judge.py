@@ -325,13 +325,13 @@ def test_catalog_shape_matches_production():
 
 def test_all_agent_tools_extracted():
     tools = extract_tools()
-    assert len(tools) == 14, f"应提取到 14 个工具，实际 {len(tools)}"
+    assert len(tools) == 15, f"应提取到 15 个工具，实际 {len(tools)}"
     names = {t["name"] for t in tools}
     assert names == {"create_work_record", "create_hazard", "create_hazard_rectification_doc", "create_hazard_reply_doc",
                      "recheck_hazard", "create_provform_doc",
                      "generate_document", "undo_last_action", "query_work_records",
                      "query_hazards", "query_documents", "query_regulation",
-                     "query_weather", "navigate"}
+                     "query_weather", "navigate", "review_plan_doc"}
 
 
 def test_create_work_record_has_30_params():
