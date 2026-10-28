@@ -1,21 +1,21 @@
 <view class="page login-page" style="{{themeStyle}}">
-  <glass-nav-bar title="监理通" left="none" />
+  <glass-nav-bar title="广东建设智慧监理" left="none" />
 
   <view class="brand">
     <view class="brand-mark">监</view>
-    <view class="title">监理通</view>
+    <view class="title">广东建设智慧监理</view>
     <view class="muted">工程监理智能体 · 微信小程序端</view>
   </view>
 
   <view class="card" wx:if="{{!needBind}}">
     <view class="section-title">微信身份登录</view>
-    <view class="muted note">首次使用需要绑定已有监理通账号。</view>
+    <view class="muted note">首次使用需要绑定已有广东建设智慧监理账号。</view>
     <button class="primary action" loading="{{loading}}" bindtap="login">微信登录</button>
   </view>
 
   <view class="card" wx:else>
-    <view class="section-title">绑定监理通账号</view>
-    <view class="muted note">请输入要绑定的监理通账号（用户名 + 密码 + 登记角色）。</view>
+    <view class="section-title">绑定广东建设智慧监理账号</view>
+    <view class="muted note">请输入要绑定的广东建设智慧监理账号（用户名 + 密码 + 登记角色）。</view>
     <input class="field" placeholder="用户名" value="{{username}}" data-field="username" bindinput="onInput" />
     <input class="field" password placeholder="密码" value="{{password}}" data-field="password" bindinput="onInput" />
     <picker mode="selector" range="{{roleLabels}}" value="{{roleIndex}}" bindchange="onRoleChange">

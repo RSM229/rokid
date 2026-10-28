@@ -72,7 +72,7 @@ Page(themed({
   },
   async bind() {
     if (!this.data.username || !this.data.password) {
-      this.setData({ error: '请输入现有监理通账号和密码' })
+      this.setData({ error: '请输入现有广东建设智慧监理账号和密码' })
       return
     }
     this.setData({ loading: true, error: '' })
