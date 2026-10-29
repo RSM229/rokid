@@ -474,11 +474,13 @@ CASES: tuple[dict, ...] = (
         "id": "H01", "group": "纯问答",
         "say": "混凝土浇筑旁站监理的要点有哪些？",
         "expect": {
-            "tool": None,
+            "tool_any_of": ["query_regulation", None],
             "tool_forbidden": ["create_work_record", "generate_document"],
         },
-        "note": "真机 2.1。🔴 含「旁站」「监理」等业务词，但是问知识不是办事。"
-                "误调工具就是典型的「答非所问」。",
+        "note": "真机 2.1。含「旁站」「监理」等业务词，但是问知识不是办事。"
+                "query_regulation 走 RAG 检索（答案有出处、可控），null 则凭模型训练知识直答"
+                "——两条路都能给用户正确答案，与 H03 口径一致（agent.py:395 已把知识/规范类问答导向 query_regulation）。"
+                "仍禁止误调建单/生成类动作工具。",
     },
     {
         "id": "H02", "group": "纯问答",
