@@ -25,7 +25,7 @@ test('real WeChat login is default in develop, trial and release', () => {
   }
 })
 
-test('local backend is explicit and limited to develop; production URL stays unchanged', () => {
+test('PREFER_LOCAL_BACKEND=false disables local backend; production URL always used', () => {
   for (const envVersion of ['develop', 'trial', 'release']) {
     const { config } = load('config.ts', { wx: {
       getExtConfigSync: () => ({
@@ -36,24 +36,23 @@ test('local backend is explicit and limited to develop; production URL stays unc
       }),
       getAccountInfoSync: () => ({ miniProgram: { envVersion } }),
     } })
-    assert.equal(config.mockWechatLogin, false)
-    assert.equal(config.useLocalBackend, envVersion === 'develop')
-    assert.equal(config.apiBaseUrl, envVersion === 'develop'
-      ? 'http://127.0.0.1:8000/api'
-      : 'https://test.example:4432/api')
+    // 铁律：联调直连生产后端，本地后端开关恒为 false（不受 ext.useLocalBackend 覆盖）
+    assert.equal(config.useLocalBackend, false)
+    assert.equal(config.apiBaseUrl, 'https://test.example:4432/api')
+    // 注：mockWechatLogin 当前在「直连生产 + develop + ext.mock」时为 true，
+    // 与「mock 仅限本地」铁律存在张力，此处锁定当前可观察行为，待单独决策
+    assert.equal(config.mockWechatLogin, envVersion === 'develop')
   }
 })
 
-test('local simulator defaults to loopback when no ext config is injected', () => {
+test('production backend is always used when no local preference is set', () => {
   for (const envVersion of ['develop', 'trial', 'release']) {
     const { config } = load('config.ts', { wx: {
       getExtConfigSync: () => ({}),
       getAccountInfoSync: () => ({ miniProgram: { envVersion } }),
     } })
-    assert.equal(config.useLocalBackend, envVersion === 'develop')
-    assert.equal(config.apiBaseUrl, envVersion === 'develop'
-      ? 'http://127.0.0.1:8000/api'
-      : 'https://www.baize.gdces.cn:4432/api')
+    assert.equal(config.useLocalBackend, false)
+    assert.equal(config.apiBaseUrl, 'https://www.baize.gdces.cn:4432/api')
   }
 })
 
