@@ -45,6 +45,14 @@ __MACOSX/
 **/backups/
 **/src.bak/
 
+# ===== 根级 tmp/：只忽略部署载荷与本地运行产物（dev_local.py 等开发脚本保留可提交）=====
+# 注：tmp/sdk/ 由上面「第三方 SDK 二进制」规则覆盖；tmp/exports、tmp/uploads 由导出规则覆盖
+/tmp/deploy_*/
+/tmp/*.b64
+/tmp/*.log
+/tmp/local_dev.db
+/tmp/*.env
+
 # ===== 语言/IDE =====
 __pycache__/
 *.py[cod]
@@ -53,6 +61,9 @@ __pycache__/
 venv/
 .vscode/
 .idea/
+.trae/
+**/.gradle/
+**/local.properties
 wechat-miniprogram/project.private.config.json
 Thumbs.db
 
@@ -68,7 +79,9 @@ Thumbs.db
 *.tgz
 **/gradle-*-all.zip
 
-# ===== 前端构建备份 =====
+# ===== 前端构建产物/备份（本地 build 后上传服务器，不入库）=====
+# web-admin 的 dist、dist_ws、dist_build、dist_ag、dist_auto_*、dist_prev_*、dist_stale_* 等全部变体
+web-admin/dist*/
 **/dist_bak_*/
 **/dist_old_*/
 
