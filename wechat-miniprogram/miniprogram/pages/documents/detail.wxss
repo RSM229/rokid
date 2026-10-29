@@ -14,5 +14,29 @@
 .actions button { margin-bottom: 16rpx; }
 .loading, .empty { padding: 60rpx; text-align: center; color: #6b7c90; font-size: 28rpx; }
 
+.sign-mask { position: fixed; inset: 0; z-index: 100; display: flex; align-items: center; justify-content: center; padding: 28rpx; box-sizing: border-box; background: rgba(13, 29, 43, 0.58); }
+.sign-panel { width: 100%; max-width: 720rpx; max-height: calc(100vh - 56rpx); overflow-y: auto; box-sizing: border-box; padding: 32rpx; border: 1rpx solid #e1e7eb; border-radius: 12rpx; background: #fff; box-shadow: 0 20rpx 64rpx rgba(8, 24, 38, 0.22); }
+.sign-head { display: flex; align-items: flex-start; justify-content: space-between; padding-bottom: 22rpx; border-bottom: 1rpx solid #e8ecef; }
+.sign-title { color: #17324a; font-size: 32rpx; line-height: 1.35; font-weight: 700; }
+.sign-doc-title { max-width: 580rpx; margin-top: 8rpx; overflow: hidden; color: #778694; font-size: 23rpx; line-height: 1.4; text-overflow: ellipsis; white-space: nowrap; }
+.sign-close { width: 54rpx; height: 54rpx; margin: -8rpx -10rpx 0 12rpx; color: #687986; font-size: 46rpx; line-height: 48rpx; text-align: center; }
+.sign-field { margin-top: 22rpx; }
+.sign-label { display: block; margin-bottom: 10rpx; color: #60717f; font-size: 23rpx; }
+.sign-picker-value { display: flex; align-items: center; justify-content: space-between; min-height: 78rpx; box-sizing: border-box; padding: 0 20rpx; border: 1rpx solid #dce4e9; border-radius: 8rpx; background: #f8fafb; color: #20384c; font-size: 27rpx; }
+.sign-chevron { color: #8795a0; font-size: 38rpx; line-height: 1; }
+.signature-entry { display: flex; align-items: center; justify-content: center; min-height: 118rpx; box-sizing: border-box; margin-top: 20rpx; padding: 14rpx 20rpx; border: 2rpx dashed #8fa8b3; border-radius: 8rpx; background: #f8fbfa; }
+.signature-empty { color: #176b58; font-size: 27rpx; font-weight: 600; }
+.signature-preview { width: 78%; height: 100rpx; }
+.signature-state { margin-left: 18rpx; color: #176b58; font-size: 22rpx; white-space: nowrap; }
+.sign-password { height: 80rpx; box-sizing: border-box; margin-top: 22rpx; padding: 0 20rpx; border: 1rpx solid #dce4e9; border-radius: 8rpx; background: #fff; color: #20384c; font-size: 27rpx; }
+.offline-note { margin-top: 22rpx; padding: 18rpx 20rpx; border-left: 4rpx solid #d1a34a; background: #fff9ed; color: #755b2e; font-size: 24rpx; line-height: 1.5; }
+.sign-actions { display: flex; flex-direction: column; gap: 12rpx; margin-top: 26rpx; }
+.sign-actions button { width: 100%; min-height: 82rpx; margin: 0; padding: 0 18rpx; border-radius: 8rpx; font-size: 27rpx; font-weight: 600; line-height: 82rpx; }
+.sign-actions button::after { border: 0; }
+.sign-primary { background: #176b58; color: #fff; }
+.sign-secondary { border: 1rpx solid #c7d4da; background: #fff; color: #314e5b; }
+.sign-cancel { min-height: 68rpx !important; background: #f2f5f6; color: #687986; font-weight: 500 !important; line-height: 68rpx !important; }
+.sign-actions button[disabled] { opacity: 0.56; }
+
 /* 底部按钮统一用全局 .doc-btn / .doc-btn-row（与工作记录详情同款）；
    旧文件卡片 / 折叠样式已随 2026-10-15 内容优先改版移除 */

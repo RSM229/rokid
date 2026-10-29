@@ -34,6 +34,7 @@
     "pages/inspection/index",
     "pages/documents/index",
     "pages/documents/detail",
+    "pages/documents/signature",
     "pages/progress/index",
     "pages/parallel/index",
     "pages/resources/index",

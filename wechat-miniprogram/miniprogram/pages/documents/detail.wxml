@@ -86,18 +86,51 @@
     <text>文书不存在或已删除</text>
   </view>
 
-  <view wx:if="{{showSign}}" style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:100;display:flex;align-items:center;padding:30rpx;box-sizing:border-box;">
-    <view class="card" style="width:100%;">
-      <view class="card-title">签认 / 用章授权</view>
-      <picker range="{{signSlots}}" range-key="label" value="{{signSlotIndex}}" bindchange="onSignSlot"><view style="padding:20rpx;">签认位置：{{signSlots[signSlotIndex].label}}</view></picker>
-      <picker range="{{['在线手写签名','上传电子签名','线下打印手签']}}" value="{{signingModeIndex}}" bindchange="onSigningMode"><view style="padding:20rpx;">签署方式：{{signingMode === 'online' ? '在线手写签名' : (signingMode === 'offline' ? '线下打印手签' : '上传电子签名')}}</view></picker>
-      <canvas wx:if="{{signingMode === 'online'}}" canvas-id="signatureCanvas" width="750" height="260" style="width:100%;height:260rpx;background:#fafafa;border:1rpx solid #ddd;" disable-scroll="true" bindtouchstart="onSignatureTouchStart" bindtouchmove="onSignatureTouchMove" bindtouchend="onSignatureTouchEnd"></canvas>
-      <button wx:if="{{signingMode === 'online'}}" class="doc-btn ghost" bindtap="clearSignatureCanvas">清除重签</button>
-      <picker wx:if="{{signingMode === 'uploaded'}}" range="{{signatures}}" range-key="name" value="{{signSignatureIndex}}" bindchange="onSignSignature"><view style="padding:20rpx;">签名：{{signatures[signSignatureIndex].name || '请先上传个人签名'}}</view></picker>
-      <input wx:if="{{signingMode !== 'offline'}}" password value="{{signPassword}}" bindinput="onSignPassword" placeholder="签认密码" style="padding:20rpx;" />
-      <button loading="{{signing}}" bindtap="confirmSign">确认本人授权签认</button>
-      <button wx:if="{{signingMode === 'uploaded'}}" bindtap="uploadPersonalSignature">从相册上传签名图片</button>
-      <button bindtap="closeSign">取消</button>
+  <view wx:if="{{showSign}}" class="sign-mask" catchtouchmove="preventTouchMove">
+    <view class="sign-panel">
+      <view class="sign-head">
+        <view>
+          <view class="sign-title">签认 / 用章授权</view>
+          <view class="sign-doc-title">{{doc.title || doc.doc_type || '文书'}}</view>
+        </view>
+        <text class="sign-close" bindtap="closeSign">×</text>
+      </view>
+
+      <view class="sign-field">
+        <text class="sign-label">签认位置</text>
+        <picker range="{{signSlots}}" range-key="label" value="{{signSlotIndex}}" bindchange="onSignSlot">
+          <view class="sign-picker-value">{{signSlots[signSlotIndex].label || '请选择'}}<text class="sign-chevron">›</text></view>
+        </picker>
+      </view>
+
+      <view class="sign-field">
+        <text class="sign-label">签署方式</text>
+        <picker range="{{['在线手写签名','上传电子签名','线下打印手签']}}" value="{{signingModeIndex}}" bindchange="onSigningMode">
+          <view class="sign-picker-value">{{signingMode === 'online' ? '在线手写签名' : (signingMode === 'offline' ? '线下打印手签' : '上传电子签名')}}<text class="sign-chevron">›</text></view>
+        </picker>
+      </view>
+
+      <view wx:if="{{signingMode === 'online'}}" class="signature-entry" bindtap="openSignatureCanvas">
+        <image wx:if="{{signatureTempPath}}" class="signature-preview" src="{{signatureTempPath}}" mode="aspectFit" />
+        <view wx:else class="signature-empty">点击此处手写签名</view>
+        <text wx:if="{{signatureTempPath}}" class="signature-state">已完成 · 点击重签</text>
+      </view>
+
+      <view wx:if="{{signingMode === 'uploaded'}}" class="sign-field">
+        <text class="sign-label">个人签名</text>
+        <picker range="{{signatures}}" range-key="name" value="{{signSignatureIndex}}" bindchange="onSignSignature">
+          <view class="sign-picker-value">{{signatures[signSignatureIndex].name || '请先上传个人签名'}}<text class="sign-chevron">›</text></view>
+        </picker>
+      </view>
+
+      <view wx:if="{{signingMode === 'offline'}}" class="offline-note">确认后将记录线下签署方式，不会生成电子签名图片。</view>
+      <input wx:if="{{signingMode !== 'offline'}}" class="sign-password" password value="{{signPassword}}" bindinput="onSignPassword" placeholder="签章使用密码" />
+
+      <view class="sign-actions">
+        <button class="sign-primary" loading="{{signing}}" disabled="{{signing}}" bindtap="confirmSign">{{signingMode === 'offline' ? '确认线下签署方式' : '确认本人授权签认'}}</button>
+        <button wx:if="{{signingMode === 'uploaded'}}" class="sign-secondary" loading="{{uploadingSignature}}" disabled="{{uploadingSignature || signing}}" bindtap="uploadPersonalSignature">从相册上传签名图片</button>
+        <button class="sign-cancel" disabled="{{signing}}" bindtap="closeSign">取消</button>
+      </view>
     </view>
   </view>
 </view>

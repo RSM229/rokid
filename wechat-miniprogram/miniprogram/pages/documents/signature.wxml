@@ -1,0 +1,15 @@
+<view class="signature-page">
+  <view class="signature-header">
+    <button class="signature-header-action" bindtap="cancelSignature">取消</button>
+    <view class="signature-title">手写签名</view>
+    <button class="signature-header-action" bindtap="clearSignature">重写</button>
+  </view>
+
+  <view class="signature-stage">
+    <canvas id="signature-surface" type="2d" class="signature-canvas" disable-scroll="true" bindtouchstart="onSignatureTouchStart" catchtouchmove="onSignatureTouchMove" bindtouchend="onSignatureTouchEnd" bindtouchcancel="onSignatureTouchEnd"></canvas>
+  </view>
+
+  <view class="signature-footer">
+    <button class="signature-confirm" loading="{{exporting}}" disabled="{{exporting}}" bindtap="confirmSignature">确认签名</button>
+  </view>
+</view>
