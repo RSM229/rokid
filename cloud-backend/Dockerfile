@@ -8,6 +8,8 @@
 # 所以改代码走 uvicorn --reload，不需要重新 build 镜像。
 FROM python:3.12-slim
 
+ARG APT_MIRROR=mirrors.tuna.tsinghua.edu.cn
+
 # RapidOCR is not mirrored by Tsinghua; use official PyPI so fresh images include OCR.
 ENV TZ=Asia/Shanghai \
     PIP_INDEX_URL=https://pypi.org/simple \
@@ -15,16 +17,23 @@ ENV TZ=Asia/Shanghai \
     PYTHONDONTWRITEBYTECODE=1
 
 # ffmpeg 用于语音/视频转码；fonts-wqy-zenhei 提供中文字形（水印必须，否则中文变方块）
-RUN apt-get update \
- && apt-get install -y --no-install-recommends ffmpeg fonts-wqy-zenhei \
+# libreoffice-writer：省统表 docx→PDF 必须与 Word 同版式，Linux 下只有 soffice 能做到；
+# 之前镜像没装，导出 PDF / 签认后生成 PDF 全部 501。
+RUN sed -i s@deb.debian.org@${APT_MIRROR}@g /etc/apt/sources.list.d/debian.sources \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends ffmpeg fonts-wqy-zenhei libreoffice-writer \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
+# RapidOCR 已同步到阿里云 PyPI；官方 PyPI 在本项目服务器上只有约 25KB/s。
+# 仅覆盖 pip 命令的索引，避免改动前面的 apt 层缓存。
+ARG PIP_MIRROR=https://mirrors.aliyun.com/pypi/simple/
+
 # 只复制依赖清单：requirements.txt 不变时这一层直接命中缓存，不重装
 COPY requirements.txt /tmp/requirements.txt
-RUN pip install --no-cache-dir dashscope \
- && pip install --no-cache-dir -r /tmp/requirements.txt
+RUN PIP_INDEX_URL=${PIP_MIRROR} pip install --no-cache-dir dashscope \
+ && PIP_INDEX_URL=${PIP_MIRROR} pip install --no-cache-dir -r /tmp/requirements.txt
 
 EXPOSE 8000
 

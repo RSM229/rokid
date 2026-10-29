@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 import re
 import shutil
+import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable
@@ -1444,6 +1445,22 @@ def embed_signoff_image(docx_path: Path, slot: str, image_url: str, form_code: s
                 para.add_run(" ").add_picture(str(image_path), width=Inches(0.9))
                 doc.save(str(docx_path))
                 return True
+
+    # 省统表 16巡视记录.docx 实测 0 处「签字/签名/监理人员」锚点（模板本身漏了签名行），
+    # 而 GD-B-214 纸面表式要求「巡视监理人员（签字）」。模板缺行时不能直接 422 让用户
+    # 无路可走，在末行（问题及处理情况）追加一行右对齐签名栏；只对这张表生效，
+    # 其他表式缺锚点仍返回 False，避免签名被静默放到错误位置。
+    if form_code == "gd_b_214_xunshi" and doc.tables:
+        from docx.enum.text import WD_ALIGN_PARAGRAPH
+
+        tail_cell = doc.tables[0].rows[-1].cells[0]
+        signature_para = tail_cell.add_paragraph()
+        signature_para.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+        signature_para.add_run(f"{roles[0]}（签字）：").add_picture(
+            str(image_path), width=Inches(0.9),
+        )
+        doc.save(str(docx_path))
+        return True
     return False
 
 
@@ -2428,12 +2445,18 @@ def docx_to_pdf(docx_path: Path) -> Path | None:
     soffice = shutil.which("soffice") or shutil.which("libreoffice")
     if soffice:
         import subprocess
-        result = subprocess.run(
-            [soffice, "--headless", "--convert-to", "pdf", "--outdir", str(docx_path.parent), str(docx_path)],
-            capture_output=True, timeout=120,
-        )
-        if result.returncode == 0 and pdf_path.exists():
-            return pdf_path
+        # 每次转换用独立 profile：并发导出时共享 profile 会因实例锁直接失败。
+        profile = tempfile.mkdtemp(prefix="lo-profile-")
+        try:
+            result = subprocess.run(
+                [soffice, f"-env:UserInstallation=file://{profile}", "--headless",
+                 "--norestore", "--convert-to", "pdf", "--outdir", str(docx_path.parent), str(docx_path)],
+                capture_output=True, timeout=120,
+            )
+            if result.returncode == 0 and pdf_path.exists():
+                return pdf_path
+        finally:
+            shutil.rmtree(profile, ignore_errors=True)
     word = None
     document = None
     try:

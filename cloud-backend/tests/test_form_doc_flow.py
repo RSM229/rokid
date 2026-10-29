@@ -310,6 +310,46 @@ def test_sheng_tong_biao_templates_are_blank_source_documents():
     assert checked >= 20
 
 
+def test_xunshi_template_without_signoff_anchor_gets_signature_at_tail(tmp_path):
+    '''生产版 16巡视记录.docx 是 5 行且没有签名栏，签认时应补在问题栏末尾。'''
+    from PIL import Image
+    from docx import Document as ReadDocx
+
+    from app.config import settings
+    from app.services.form_renderer import embed_signoff_image, render_form
+
+    production_kb = (
+        Path(__file__).resolve().parents[2]
+        / 'rokid_glass' / 'rokid_glass' / '知识库'
+    )
+    template = production_kb / '省统表word版' / '16巡视记录.docx'
+    assert template.exists(), f'缺少生产巡视模板：{template}'
+
+    old_root = settings.knowledge_base_path
+    settings.knowledge_base_path = production_kb
+    try:
+        output = render_form('gd_b_214_xunshi', {
+            'project_name': 'TEST-PROJECT', 'doc_number': 'GD-B-214-99999',
+            'section': 'A栋', 'construction_unit': 'TEST-CONTRACTOR',
+            'date': '2026-10-29', 'time': '09:00',
+            'content': 'TEST-CONTENT', 'problems': 'TEST-PROBLEMS',
+        }, tmp_path)
+    finally:
+        settings.knowledge_base_path = old_root
+
+    signature = tmp_path / 'signature.png'
+    Image.new('RGBA', (80, 40), (0, 0, 0, 180)).save(signature)
+    assert embed_signoff_image(
+        output, 'inspector', str(signature), 'gd_b_214_xunshi',
+    )
+
+    document = ReadDocx(str(output))
+    tail = document.tables[0].rows[-1].cells[0]
+    signed = [p for p in tail.paragraphs if '巡视监理人员（签字）' in p.text]
+    assert len(signed) == 1
+    assert signed[0]._p.xpath('.//w:drawing')
+
+
 def test_crane_safety_form_fields_fill_the_matching_word_cells(tmp_path):
     from docx import Document as ReadDocx
     from app.services.form_renderer import render_form
