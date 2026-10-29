@@ -73,8 +73,11 @@ class GenerateFromRecordRequest(BaseModel):
 class AggregateRequest(BaseModel):
     period: Literal["day", "week", "month"]
     date: Optional[str] = None        # day: YYYY-MM-DD；week: 周内任一天；month: YYYY-MM
-    form_code: Optional[str] = None
+    form_code: Optional[str] = None   # day 可传 anquan_jianli_rizhi 生成安全监理日志
     use_llm: bool = True              # 汇总内容是否走 LLM 润色（失败自动降级为规则汇总）
+    # D02：用户当场补充、系统取不到的字段（天气 / 上级质监站检查 / 其他有关事项）。
+    # 键用表字段 key 或 canonical（如 7_12、supervision_check），服务端负责映射到版式槽位。
+    extra_fields: Optional[dict] = None
 
 
 @router.get("/forms")
@@ -623,6 +626,7 @@ async def aggregate_generate(
             use_llm=req.use_llm,
             supervisor=user,
             force=True,
+            extra_fields=req.extra_fields,
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc

@@ -1429,11 +1429,18 @@ def _provform_name_index() -> list[tuple[str, str]]:
     """表式名 → form_code 的候选索引（含 CHOICES 友好名、registry 官方名、表号）。"""
     from app.services.form_registry import FORM_BY_CODE
 
+    # 常用简称补充（registry/CHOICES 里没有的口语说法）：
+    # 「安全日志」→ anquan_jianli_rizhi（D06：prompt 指引用了这个简称，解析不出来
+    # 会静默退化成普通监理日志）。
+    extra_aliases: dict[str, tuple[str, ...]] = {
+        "anquan_jianli_rizhi": ("安全日志", "安全监理日记"),
+    }
     pairs: list[tuple[str, str]] = []
     seen: set[tuple[str, str]] = set()
     for code, name in PROVFORM_CHOICES:
         for alias in (name, getattr(FORM_BY_CODE.get(code), "name", ""),
-                      getattr(FORM_BY_CODE.get(code), "form_number", "")):
+                      getattr(FORM_BY_CODE.get(code), "form_number", ""),
+                      *extra_aliases.get(code, ())):
             alias = str(alias or "").strip()
             if alias and (alias, code) not in seen:
                 seen.add((alias, code))
@@ -1687,12 +1694,29 @@ async def _generate_document(ctx: ToolContext, args: dict) -> dict:
     period_map = {"day": "day", "日": "day", "日志": "day", "监理日志": "day",
                   "week": "week", "周": "week", "周报": "week",
                   "month": "month", "月": "month", "月报": "month"}
+    # form_code 在「聚合生成」与「单条记录生成」两个分支都要用，提到顶部统一定义。
+    # 🔴 归一成 code：模型常传中文表名（「安全监理日志」），而下游 FORM_BY_CODE 与
+    # generate_aggregate_doc 的 code == "anquan_jianli_rizhi" 判断都只认 code，
+    # 不归一会静默退化成普通监理日志（与 2026-10-27 建错文书同类问题）。
+    form_code = str(args.get("form_code") or "").strip() or None
+    if form_code:
+        form_code = resolve_provform_form_code(form_code) or form_code
     if period in period_map:
         from app.services.period_report_service import generate_aggregate_doc
+        # extra_fields（天气/上级检查/其他事项等）透传到聚合文书，先归一到 canonical 键
+        raw_extra = args.get("extra_fields")
+        extra_fields = {}
+        if isinstance(raw_extra, dict):
+            ef_form = form_code or "gd_b_220_rizhi"
+            extra_fields = (
+                normalize_extra_fields({"extra_fields": raw_extra}, ef_form).get("extra_fields") or {}
+            )
         try:
             result = await generate_aggregate_doc(
                 ctx.db, ctx.project_id, period_map[period],
                 str(args.get("date") or "") or None,
+                form_code=form_code or None,
+                extra_fields=extra_fields or None,
                 use_llm=True, supervisor=ctx.user, force=True,
             )
         except (ValueError, RuntimeError) as exc:
@@ -1730,7 +1754,6 @@ async def _generate_document(ctx: ToolContext, args: dict) -> dict:
         return _ok("当前项目还没有工作记录，先在「工作记录 → +新建」建一条，再说「生成监理日志」。")
 
     from app.routers.form_doc import generate_form_from_record
-    form_code = str(args.get("form_code") or "").strip() or None
     try:
         doc, spec, content = await generate_form_from_record(
             ctx.db, ctx.user, ctx.project, record, form_code, None
@@ -2605,13 +2628,23 @@ TOOLS: tuple[ToolSpec, ...] = (
         "②用户给的是**时间范围**（「今天的」「本周」「本月」「10月的」）→ 只传 period（+可选 date），"
         "按日/周/月聚合当天/当周/当月的全部记录成监理日志、周报或月报。"
         "🔴 判据是「有没有指代到单条记录」，不是文书名叫什么：「把这条记录生成监理日志」走①传 record_id；"
-        "「生成今天的监理日志」走②传 period=day。两者不要同时传。",
+        "「生成今天的监理日志」走②传 period=day。两者不要同时传。"
+        "🔴 路径②里「安全监理日志」是**独立表式**（form_code=anquan_jianli_rizhi），"
+        "不要退化成普通监理日志：用户说「生成今天的安全监理日志 / 安全日志」时，"
+        "period=day 且必须同时传 form_code（表名或 code 都可，服务端会归一）。"
+        "🔴 extra_fields 只放**系统取不到、用户当场补充**的字段（如上级/质监站检查情况、"
+        "停水停电等其他有关事项）；日期/星期/天气/记录内容由聚合自动取，**不要**塞进 extra_fields，"
+        "更不要因为缺这些就去追问用户。",
         {"record_id": "路径①：工作记录 id（用户指代某条记录时必填，从前文里取出那个 ID）",
-         "form_code": "指定表式代码（可省略，默认按记录类型选表）",
+         "form_code": "指定表式代码或表名（可省略，默认按记录类型/周期选表）；"
+                      "路径②生成「安全监理日志」时必填 anquan_jianli_rizhi",
          "period": "路径②：聚合周期 day/week/month 或 日/周/月（用户给时间范围时用）",
-         "date": "路径②：聚合基准日期 YYYY-MM-DD（可省略，默认今天）"},
+         "date": "路径②：聚合基准日期 YYYY-MM-DD（可省略，默认今天）",
+         "extra_fields": "路径②可选：用户当场补充、系统取不到的字段，键用表字段 key 或 canonical"
+                         "（如 7_12 上级/质监站检查情况、7_13 其他有关事项、weather 天气）"},
         "work_record", "write", _generate_document,
-        ("把这条记录生成监理日志", "生成今天的监理日志", "生成本月监理月报"),
+        ("把这条记录生成监理日志", "生成今天的监理日志", "生成本月监理月报",
+         "生成今天的安全监理日志"),
     ),
     ToolSpec(
         "undo_last_action",

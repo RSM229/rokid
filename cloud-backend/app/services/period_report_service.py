@@ -371,6 +371,7 @@ async def generate_supervision_log(
     *,
     supervisor: Optional[User] = None,
     extras: dict | None = None,
+    extra_fields: dict | None = None,
     force: bool = True,
 ) -> dict:
     """生成指定项目、指定日期的监理日志（PDF，GD-B-220 版式）。
@@ -612,6 +613,27 @@ async def generate_supervision_log(
         "misc_section": "\n".join(buckets["其他"]) if buckets["其他"] else "  无。",
     }
 
+    # D02：透传 extra_fields（用户在生成日志时显式补充的字段，归一后已是 canonical 键）
+    # weather -> 覆盖当日三时段天气格；supervision_check(7_12 上级/质监站检查) 与
+    # other_section(7_13 其他有关事项) 本就是渲染器 _rizhi_other_lines 读取的键，直接落。
+    extra_fields = _canon_extra_fields(extra_fields, "gd_b_220_rizhi")
+    if extra_fields:
+        w = extra_fields.get("weather")
+        if w:
+            content["weather_morning"] = w
+            content["weather_afternoon"] = w
+            content["weather_night"] = w
+            content["weather_source"] = "人工补充"
+        sc = extra_fields.get("supervision_check")
+        if sc:
+            content["supervision_check"] = str(sc)
+        os_ = extra_fields.get("other_section")
+        if os_:
+            existing = content.get("misc_section") or ""
+            content["misc_section"] = (
+                existing + "\n" + str(os_) if existing and existing != "  无。" else str(os_)
+            )
+
     doc = Document(
         doc_type=DocType.SUPERVISION_LOG.value,
         title=title,
@@ -673,6 +695,288 @@ async def generate_supervision_log(
     }
 
 
+def _canon_extra_fields(extra: dict | None, form_code: str) -> dict:
+    """把 extra_fields 的键归一到 canonical（如 7_12 → supervision_check）。
+
+    🔴 两条入口口径要一致：Agent 工具在 agent_tools 里已归一，但 HTTP
+    /api/form-docs/aggregate 的调用方（web-admin）可能直接传表字段 key（7_12/7_13）。
+    不归一会静默不生效（用户填了却不进文书），所以这里统一兜一道。
+    懒加载 import，避免与 agent_tools 的循环依赖。
+    """
+    if not isinstance(extra, dict) or not extra:
+        return {}
+    try:
+        from app.services.record_field_spec import FORMS
+        fields = FORMS.get(form_code, {}).get("fields") or []
+        mapping = {
+            str(f.get("key")): str(f.get("canonical"))
+            for f in fields
+            if f.get("key") and f.get("canonical")
+        }
+    except Exception:  # noqa: BLE001 - 归一失败不该阻断生成，按原键继续
+        mapping = {}
+    out: dict = {}
+    for k, v in extra.items():
+        if not str(v if v is not None else "").strip():
+            continue
+        canon = mapping.get(str(k), str(k))
+        out.setdefault(canon, v)
+    return out
+
+
+async def generate_safety_log(
+    db: AsyncSession,
+    project_id: int,
+    target_date: date,
+    *,
+    supervisor: Optional[User] = None,
+    force: bool = True,
+    extra_fields: dict | None = None,
+) -> dict:
+    """生成指定项目、指定日期的安全监理日志（anquan_jianli_rizhi 省统表）。
+
+    D06：日聚合此前把「安全监理日志」硬编码成 gd_b_220_rizhi（普通监理日志），
+    根本没有它自己的聚合入口。这里按安全日志的栏目（施工内容 / 安全检查情况 /
+    处理措施 / 施工单位隐患整改情况 / 危险性较大的分部分项工程安全状况 / 其他）
+    聚合当日数据，并复用 fill_anquan_rizhi 渲染。
+    """
+    title = f"安全监理日志_{target_date.isoformat()}"
+    if not force:
+        existing = await _find_existing(
+            db, project_id, title=title, doc_type=doc_type_for("anquan_jianli_rizhi"),
+        )
+        if existing is not None:
+            return {
+                "doc_id": existing.id,
+                "doc_number": (existing.content or {}).get("doc_number", ""),
+                "status": existing.status,
+                "pdf_url": existing.pdf_path,
+                "docx_url": existing.docx_path,
+                "form_code": "anquan_jianli_rizhi",
+                "form_name": "安全监理日志",
+                "skipped": True,
+                "summary": {"reason": "当日安全日志已存在"},
+            }
+
+    day_start = datetime.combine(target_date, datetime.min.time())
+    day_end = datetime.combine(target_date + timedelta(days=1), datetime.min.time())
+
+    records_result = await db.execute(
+        select(WorkRecord).where(
+            and_(
+                WorkRecord.project_id == project_id,
+                or_(WorkRecord.record_date == target_date,
+                    and_(WorkRecord.record_date.is_(None), WorkRecord.created_at >= day_start, WorkRecord.created_at < day_end)),
+            )
+        ).order_by(WorkRecord.created_at)
+    )
+    work_records = records_result.scalars().all()
+
+    hazards_result = await db.execute(
+        select(Hazard).where(
+            and_(Hazard.project_id == project_id, Hazard.created_at >= day_start, Hazard.created_at < day_end)
+        )
+    )
+    hazards = hazards_result.scalars().all()
+
+    rectifications_result = await db.execute(
+        select(RectificationRecord).join(Hazard, Hazard.id == RectificationRecord.hazard_id).where(
+            Hazard.project_id == project_id,
+            or_(and_(RectificationRecord.created_at >= day_start, RectificationRecord.created_at < day_end),
+                and_(RectificationRecord.rectified_at >= day_start, RectificationRecord.rectified_at < day_end),
+                and_(RectificationRecord.recheck_at >= day_start, RectificationRecord.recheck_at < day_end)),
+        )
+    )
+    rectifications = rectifications_result.scalars().all()
+
+    proj_result = await db.execute(select(Project).where(Project.id == project_id))
+    project = proj_result.scalar_one_or_none()
+    project_name = project.name if project else ""
+
+    weekday = WEEKDAY_CN[target_date.weekday()]
+
+    signer = supervisor if supervisor is not None else await pick_creator(db, project_id)
+    if signer is None:
+        raise ValueError(f"项目 {project_id} 下没有成员，无法确定安全监理日志的创建人")
+    supervisor_name = signer.real_name or ""
+
+    # ===== 施工内容 =====
+    content_items = [
+        f"{r.section or ''} {r.location or ''}：{r.work_content}".strip()
+        for r in work_records if r.work_content
+    ]
+    work_content = "\n".join(content_items) if content_items else "当日无施工内容记录。"
+
+    # ===== 安全检查情况（巡视/旁站 + 隐患）=====
+    safety_items = []
+    for r in work_records:
+        if r.record_type in (WorkRecordType.INSPECTION.value, WorkRecordType.STATION.value):
+            place = f"{r.section or ''} {r.location or ''}".strip()
+            safety_items.append(f"{place}：{r.inspection_remark or r.station_content or r.work_content or ''}")
+    for h in hazards:
+        loc = f"{h.section or ''} {h.location or ''}".strip()
+        safety_items.append(f"{loc}：发现{h.top1_risk or '安全隐患'}（{h.risk_category or '安全'}类）")
+    safety_check = "\n".join(safety_items) if safety_items else "当日无安全检查记录。"
+
+    # ===== 处理措施（限期整改/暂时停工/上报建设单位）=====
+    # 🔴 treatment/problems 是 WorkRecord 的字段，Hazard 上没有（Hazard 只有 status/
+    # risk_status/recheck_suggestion）—— 写 h.treatment 会 AttributeError。
+    treatment_items = []
+    for r in work_records:
+        if r.treatment or r.problems:
+            place = f"{r.section or ''} {r.location or ''}".strip()
+            treatment_items.append(f"{place}：{problem_text(r)}".replace("：：", "："))
+    for h in hazards:
+        loc = f"{h.section or ''} {h.location or ''}".strip()
+        desc = h.top1_risk or "安全隐患"
+        suggest = ""
+        for item in (h.recheck_suggestion or []):
+            if isinstance(item, dict):
+                suggest = str(item.get("content") or item.get("text") or "")
+            elif item:
+                suggest = str(item)
+            if suggest:
+                break
+        treatment_items.append(
+            f"{loc}：{desc}，当前状态 {h.status or HazardStatus.REPORTED.value}"
+            + (f"；整改要求：{suggest}" if suggest else "")
+        )
+    for rc in rectifications:
+        hazard = await db.get(Hazard, rc.hazard_id)
+        parts = []
+        if rc.deadline:
+            parts.append(f"限期整改（{rc.deadline.date().isoformat()} 前）")
+        if rc.recheck_remark:
+            parts.append(f"复查意见：{rc.recheck_remark}")
+        if parts:
+            treatment_items.append(
+                f"{getattr(hazard, 'top1_risk', '') or '隐患'}：" + "；".join(parts)
+            )
+    treatment = "\n".join(treatment_items) if treatment_items else "当日无需处理的安全问题。"
+
+    # ===== 施工单位隐患整改情况 =====
+    rectify_items = []
+    for rc in rectifications:
+        hazard = await db.get(Hazard, rc.hazard_id)
+        if rc.recheck_passed is True:
+            status = "复查合格"
+        elif rc.recheck_passed is False:
+            status = "复查不合格"
+        elif rc.rectified_at:
+            status = "已整改待复查"
+        else:
+            status = "整改中"
+        when = rc.rectified_at.date().isoformat() if rc.rectified_at else "未回填"
+        rectify_items.append(
+            f"{getattr(hazard, 'top1_risk', '') or '隐患'}（{getattr(hazard, 'location', '') or ''}）："
+            f"{status}，整改时间 {when}"
+        )
+    for h in hazards:
+        if any(rc.hazard_id == h.id for rc in rectifications):
+            continue
+        rectify_items.append(
+            f"{h.top1_risk or '安全隐患'}（{h.location or ''}）："
+            f"{h.status or HazardStatus.REPORTED.value}，尚未整改"
+        )
+    rectify_status = "\n".join(rectify_items) if rectify_items else "当日无隐患整改事项。"
+
+    # ===== 危险性较大的分部分项工程安全状况 =====
+    weida = [h for h in hazards
+             if "危大" in (h.risk_category or "") or "危大" in (h.top1_risk or "")]
+    hazard_status = (
+        "\n".join(f"{h.location or ''}：{h.top1_risk or ''}" for h in weida)
+        if weida else "当日无危大工程相关安全状况。"
+    )
+
+    # ===== 其他 =====
+    other_items = [
+        f"{r.section or ''} {r.location or ''}：{r.work_content or r.remark or ''}"
+        for r in work_records
+        if r.record_type in ("other", "待定") and (r.work_content or r.remark)
+    ]
+    other = "\n".join(other_items) if other_items else "暂无。"
+
+    from app.services.weather import daily_weather
+    ex = await daily_weather(project, target_date, None)
+    weather = ex.get("weather", "")
+
+    content = {
+        "project_name": project_name,
+        "doc_number": f"GD-AQ-{project_id}-{target_date.strftime('%Y%m%d')}",
+        "date": target_date.isoformat(),
+        "weekday": weekday,
+        "weather": weather,
+        "weather_am": weather,
+        "weather_pm": weather,
+        "weather_night": weather,
+        "content": work_content,
+        "safety_check": safety_check,
+        "treatment": treatment,
+        "rectify_status": rectify_status,
+        "hazard_status": hazard_status,
+        "other": other,
+        "supervisor": supervisor_name,
+        "safety_supervisor": supervisor_name,
+    }
+
+    # extra_fields 透传（安全日志也可用归一后的 canonical 键覆盖，如 weather）
+    extra_fields = _canon_extra_fields(extra_fields, "anquan_jianli_rizhi")
+    if extra_fields:
+        w = extra_fields.get("weather")
+        if w:
+            content["weather"] = w
+            content["weather_am"] = w
+            content["weather_pm"] = w
+            content["weather_night"] = w
+
+    doc = Document(
+        doc_type=doc_type_for("anquan_jianli_rizhi"),
+        title=title,
+        content=content,
+        form_code="anquan_jianli_rizhi",
+        project_id=project_id,
+        creator_id=signer.id,
+        status=DocStatus.DRAFT.value,
+    )
+    db.add(doc)
+    await db.commit()
+    await db.refresh(doc)
+
+    try:
+        docx_out = render_form("anquan_jianli_rizhi", content)
+        doc.docx_path = f"/exports/{docx_out.name}"
+        await db.commit()
+        try:
+            from app.services.docx2pdf import convert_docx_to_pdf
+            pdf_filename = f"doc_{doc.id}_安全监理日志_{target_date.isoformat()}.pdf"
+            pdf_path = settings.export_dir / pdf_filename
+            convert_docx_to_pdf(str(docx_out), str(pdf_path))
+            docx_out.unlink(missing_ok=True)
+            doc.pdf_path = f"/exports/{pdf_filename}"
+            await db.commit()
+        except Exception as exc2:  # noqa: BLE001
+            logger.warning("安全监理日志 PDF 生成失败（文书已入库）：%s", exc2)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("安全监理日志 docx 生成失败（文书已入库）：%s", exc)
+
+    summary = {
+        "work_records": len(work_records),
+        "hazards": len(hazards),
+        "rectifications": len(rectifications),
+    }
+    return {
+        "doc_id": doc.id,
+        "doc_number": content["doc_number"],
+        "status": doc.status,
+        "pdf_url": doc.pdf_path,
+        "docx_url": doc.docx_path,
+        "form_code": "anquan_jianli_rizhi",
+        "form_name": "安全监理日志",
+        "skipped": False,
+        "summary": summary,
+    }
+
+
 async def generate_aggregate_doc(
     db: AsyncSession,
     project_id: int,
@@ -683,6 +987,7 @@ async def generate_aggregate_doc(
     use_llm: bool = True,
     supervisor: Optional[User] = None,
     force: bool = True,
+    extra_fields: dict | None = None,
 ) -> dict:
     """按 日/周/月 聚合生成省统表文书（监理日志/周报/月报 docx）。
 
@@ -697,7 +1002,13 @@ async def generate_aggregate_doc(
         raise ValueError(f"{spec.name} 不是聚合生成类文书")
 
     if period == "day":
-        daily = await generate_supervision_log(db, project_id, start, supervisor=supervisor, force=force)
+        if code == "anquan_jianli_rizhi":
+            return await generate_safety_log(
+                db, project_id, start, supervisor=supervisor, force=force, extra_fields=extra_fields,
+            )
+        daily = await generate_supervision_log(
+            db, project_id, start, supervisor=supervisor, force=force, extra_fields=extra_fields,
+        )
         daily_doc = await db.get(Document, daily["doc_id"])
         docx_file = render_form("gd_b_220_rizhi", daily_doc.content)
         daily_doc.docx_path = f"/exports/{docx_file.name}"
