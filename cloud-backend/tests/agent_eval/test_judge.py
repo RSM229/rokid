@@ -118,11 +118,20 @@ def test_forbidden_tool_detected():
     assert any("禁止的工具" in f for f in fails)
 
 
-def test_h01_knowledge_question_must_not_call_tool():
-    """🔴 H01「旁站监理要点有哪些」是问知识。调了工具 = 典型答非所问。"""
+def test_h01_knowledge_question_must_not_call_action_tool():
+    """🔴 H01「旁站监理要点有哪些」是问知识不是办事。
+
+    2026-10-29 跟进 cases：H01 期望已从硬 tool=null 改为
+    tool_any_of=[query_regulation, None]（与 H03 口径一致，agent.py:395
+    把知识/规范类问答导向 RAG）。所以这里断言的是：
+    - 调**动作类**工具（create_work_record）仍必须被抓（tool_forbidden + 不在可接受集合）；
+    - 失败消息是 tool_any_of/tool_forbidden 口径，不再是旧的「期望不调工具」。
+    """
     ok, fails = _j("H01", {"tool": "create_work_record",
                            "args": {"record_type": "旁站"}, "answer": ""})
-    assert not ok and any("期望不调工具" in f for f in fails)
+    assert not ok, "H01 调 create_work_record 竟然通过了 —— 禁止动作工具的断言失效"
+    assert any("可接受集合" in f or "禁止的工具" in f for f in fails), \
+        f"H01 失败消息未命中 tool_any_of/tool_forbidden 口径：{fails}"
 
 
 def test_a04_project_name_leak_detected():
@@ -409,7 +418,10 @@ def test_gap_cases_have_reason():
     """
     from cases import gap_cases
     gaps = gap_cases()
-    assert gaps, "gap_cases() 返回空 —— 要么用例丢了，要么键名写错了"
+    # 🔴 2026-10-29：不再强制 gaps 非空。原来 `assert gaps` 是防 xfail→gap 改名后
+    # 循环空转的绊线，但 D02/D06 两个缺口修复后 gap 已合法清零，绊线反而误报。
+    # 改为：只要有 gap 用例，就必须识别正确且 note 说明缺口（语义不变）；
+    # 清零本身不是错误 —— 这正是缺口被修掉的证据。
     for c in gaps:
         assert c.get("gap") is True, f"{c['id']} 未被 gap_cases() 正确识别"
         assert "缺口" in c["note"] or "歧义" in c["note"], \

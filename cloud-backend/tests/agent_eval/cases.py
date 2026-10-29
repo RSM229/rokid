@@ -250,16 +250,27 @@ CASES: tuple[dict, ...] = (
         "say": "生成今天的监理日志，天气晴，上级质监站上午来检查未发现问题，其他事项无。",
         "expect": {
             "tool": "generate_document",
-            "args_required": {"period": ["day", "日"]},
+            "args_required": {
+                "period": ["day", "日"],
+                # 🔴 2026-10-29 D02 缺口已修：generate_document 声明了 extra_fields，
+                # 服务端把它映射到监理日志的 weather_morning/afternoon/night（天气）、
+                # supervision_check（7_12 上级/质监站检查）、misc_section（7_13 其他事项），
+                # 三处渲染器早已读取。所以模型**应该**把用户当场补充的「上级质监站检查」
+                # 塞进 extra_fields，而不是丢掉。断言 extra_fields 非空且含「质监站」或「检查」，
+                # 用 args_any_of 表达「或」（_match 是字符串子串，不能直接写"或"）。
+            },
+            # extra_fields 必须出现，且内容含上级检查关键词（质监站/检查 任一）
+            "args_any_of": [
+                {"extra_fields": ["质监站"]},
+                {"extra_fields": ["检查"]},
+            ],
+            "tool_forbidden": ["create_provform_doc", "create_work_record"],
         },
-        "gap": True,
-        "note": "🔴 产品缺口（不是模型的错）：用户额外说了「天气晴」「上级质监站检查未发现问题」"
-                "「其他事项无」这三栏，但 generate_document 的参数只有 "
-                "record_id/form_code/period/date —— **没有 extra_fields**，这些信息无处可传。"
-                "硬约束又明写「args 只能包含该工具声明的参数」，所以模型丢掉它们是"
-                "正确遵守指令。跑分断言 extra_fields 必然失败，单列不计分。"
-                "要修的是后端：给 generate_document 加 extra_fields 参数，"
-                "让天气/上级检查/其他事项能进聚合文书（语料③明确要求这三栏可补）。",
+        "note": "🔴 2026-10-29：D02 缺口已修复（generate_document 加 extra_fields 参数 + "
+                "period_report_service 把它映射进监理日志的天气/上级检查/其他事项三栏）。"
+                "本用例从 gap=True（不计分）转为正式断言：模型应把「上级质监站检查未发现问题」"
+                "传进 extra_fields，服务端落到 supervision_check，渲染进文书。"
+                "用 args_any_of 表达「质监站」或「检查」二选一（_match 是子串匹配）。",
     },
     {
         "id": "D03", "group": "文书生成",
@@ -316,13 +327,27 @@ CASES: tuple[dict, ...] = (
         "say": "生成今天的安全监理日志。",
         "expect": {
             "tool": "generate_document",
-            "args_required": {"period": ["day", "日"]},
+            "args_required": {
+                "period": ["day", "日"],
+                # 🔴 2026-10-29 D06 缺口已修：安全监理日志是独立表式（anquan_jianli_rizhi），
+                # period_report_service.generate_safety_log 是它自己的日聚合 builder，
+                # generate_aggregate_doc 的 day 分支按 form_code 路由。模型说「安全监理日志」
+                # 时必须同时传 form_code（表名或 code 都可，服务端 resolve_provform_form_code
+                # 会归一成 anquan_jianli_rizhi），否则静默退化成普通监理日志 gd_b_220_rizhi。
+                # 断言 form_code 含「安全」或「anquan」（_match 是子串，用 args_any_of 表达或）。
+            },
+            "args_any_of": [
+                {"form_code": ["安全"]},
+                {"form_code": ["anquan"]},
+            ],
+            "tool_forbidden": ["create_provform_doc"],
         },
-        "gap": True,
-        "note": "🔴 已知缺口1（语料文档记录在案）：安全监理日志没有可用生成入口 —— "
-                "generate_document 的聚合分支只认 day/week/month→日志/周报/月报，"
-                "create_provform_doc 又被 validate_values 卡住（11_02~11_09 标 system=True "
-                "却按必填拒绝，实测8条报错）。这条单列，不计入总分。",
+        "note": "🔴 2026-10-29：D06 缺口已修复（period_report_service 新增 generate_safety_log "
+                "日聚合 builder + generate_aggregate_doc day 分支按 form_code 路由 + "
+                "agent.py prompt 与 ToolSpec 都指明安全日志须带 form_code）。"
+                "本用例从 gap=True（不计分）转为正式断言：模型应传 period=day 且 "
+                "form_code 指向安全监理日志（anquan_jianli_rizhi），服务端归一后路由到 "
+                "generate_safety_log，渲出独立的安全监理日志文书，不退化成普通监理日志。",
     },
 
     # =========================================================================
