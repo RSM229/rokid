@@ -1636,7 +1636,10 @@ Page(themed({
       }
       return messageIndex
     } catch (error) {
-      this.addMessage({ role: 'assistant', text: `整理计划创建失败：${(error as Error).message}。已上传的资料不会自动创建业务记录。` })
+      const restored = this.restoreAttachments(images)
+      this.addMessage({ role: 'assistant', text: `整理计划创建失败：${(error as Error).message}。${restored
+        ? `已把 ${restored} 张图片放回输入区，直接回复「继续记录工作」即可重试，不用重新选图。`
+        : '已上传的资料不会自动创建业务记录，请补充后重试。'}` })
       if (requestPlan?.request_id) {
         await this.finishAgentProgress(requestPlan.request_id, 'failed', '待确认草稿保存失败', { error: (error as Error).message })
       }
@@ -1644,6 +1647,28 @@ Page(themed({
     } finally {
       if (manageLoading) this.setData({ loading: false })
     }
+  },
+
+  /**
+   * 草稿保存失败时把本轮图片放回输入区。
+   * 服务端没落库、客户端又已清空 attachments 时，用户下一句「继续记录工作」
+   * 就会变成既没有上下文也没有图片的空转；这里先保住客户端证据。
+   */
+  restoreAttachments(items: Attachment[]): number {
+    if (!items.length) return 0
+    const existingPaths = new Set(this.data.attachments.map(item => item.path))
+    const existingMedia = new Set(
+      this.data.attachments.map(item => item.mediaId).filter(value => value !== undefined),
+    )
+    const restored = items.filter(item =>
+      !existingPaths.has(item.path)
+      && !(item.mediaId !== undefined && existingMedia.has(item.mediaId)))
+    const attachments = [...restored, ...this.data.attachments].slice(0, 9)
+    this.setData({
+      attachments,
+      canSend: Boolean(this.data.input.trim()) || attachments.length > 0,
+    })
+    return Math.min(restored.length, 9)
   },
 
   watermarkDate(value: string): string {

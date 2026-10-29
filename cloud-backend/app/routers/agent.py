@@ -147,6 +147,28 @@ def _generic_fields(missing: list[str], options: dict[str, list[str]]) -> list[d
     return fields
 
 
+def _plan_evidence_count(plan: dict) -> int:
+    """请求计划里已分配/未分配的图片证据数量。"""
+    item_plan = plan.get("item_plan") if isinstance(plan.get("item_plan"), dict) else {}
+    count = len(item_plan.get("unassigned_evidence_indexes") or [])
+    for item in item_plan.get("items") or []:
+        if isinstance(item, dict):
+            count += len(item.get("evidence_indexes") or [])
+    return count
+
+
+def _missing_record_type_reply(has_evidence: bool) -> str:
+    """记录类型待选时的追问文案。
+
+    只有本轮确实带了素材（图片/文件解析文本、水印预填或计划里的证据）才能
+    说“已收到并保留”。否则用户明明没发照片，助手却声称保留，会让人误以为
+    上一次的图片还在上下文里。
+    """
+    if has_evidence:
+        return "我已收到并保留这些图片和已有信息。你想整理成巡视、旁站、验收还是见证记录？"
+    return "这次我还没收到现场照片。先告诉我整理成巡视、旁站、验收还是见证记录，也可以把照片随下一条消息一起发我。"
+
+
 def _attachment_block(label: str = "现场照片（可选）", hint: str = "相册或拍摄，自动加水印") -> dict:
     return {"enabled": True, "label": label, "max": 9, "hint": hint, "picked": []}
 
@@ -171,7 +193,7 @@ def _agent_form(
             "id": "record_type", "kind": "record_type",
             "schema_version": 1, "field_schema": "record_field_spec.v1", "form_code": "",
             "title": "先选记录类型",
-            "hint": "照片和已有信息已保留；选好类型后按对应表格补齐。",
+            "hint": "选好类型后按对应表格补齐；如还没发照片，也可随下一条消息一起上传。",
             "fields": [{
                 "name": "record_type", "label": "记录类型", "control": "select",
                 "key": "record_type", "canonical": "record_type", "definition_source": "agent_action",
@@ -1276,6 +1298,11 @@ async def _agent_chat_impl(
     # performed until the user chooses a target type and completes the form.
     if needs_record_type:
         options = {"记录类型": list(agent_tools.record_field_spec.RECORD_TYPE_TO_FORM)}
+        has_evidence = bool(
+            material or prefill
+            or (incoming_plan.get("evidence") if isinstance(incoming_plan.get("evidence"), list) else None)
+            or _plan_evidence_count(incoming_plan)
+        )
         form = _agent_form(
             "create_work_record", args,
             {"need_more": ["记录类型"], "options": options}, message,
@@ -1283,7 +1310,7 @@ async def _agent_chat_impl(
         )
         return {
             "kind": "action", "tool": "create_work_record",
-            "reply": "我已收到并保留这些图片和已有信息。你想整理成巡视、旁站、验收还是见证记录？",
+            "reply": _missing_record_type_reply(has_evidence),
             "card": None, "cards": [], "actions": [],
             "need_more": ["记录类型"],
             "options": options,
