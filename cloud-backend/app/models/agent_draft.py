@@ -21,9 +21,14 @@
 from datetime import datetime
 
 from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy.dialects.mysql import MEDIUMTEXT
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
+
+# MySQL TEXT 仅 65535 字节，一次多图计划的 UTF-8 JSON 会溢出（1406 Data too long）。
+# 用 variant 而不是直接 MEDIUMTEXT：SQLite/测试库仍按 TEXT 走，避免方言编译失败。
+_LONG_TEXT = Text().with_variant(MEDIUMTEXT(), "mysql")
 
 
 class AgentDraft(Base):
@@ -107,10 +112,10 @@ class AgentReviewPlan(Base):
     conversation_id: Mapped[str] = mapped_column(String(64), nullable=False)
     revision: Mapped[int] = mapped_column(Integer, default=1)
     status: Mapped[str] = mapped_column(String(24), default="draft")
-    plan_json: Mapped[str] = mapped_column(Text, default="{}")
+    plan_json: Mapped[str] = mapped_column(_LONG_TEXT, default="{}")
     confirmed_revision: Mapped[int | None] = mapped_column(Integer, nullable=True)
     executed_revision: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    execution_result_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    execution_result_json: Mapped[str | None] = mapped_column(_LONG_TEXT, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, index=True)
 
 
@@ -137,9 +142,9 @@ class AgentRequestTrace(Base):
     message_excerpt: Mapped[str] = mapped_column(Text, default="")
     provider: Mapped[str] = mapped_column(String(80), default="")
     model: Mapped[str] = mapped_column(String(160), default="")
-    request_plan_json: Mapped[str] = mapped_column(Text, default="{}")
-    stages_json: Mapped[str] = mapped_column(Text, default="[]")
-    result_json: Mapped[str] = mapped_column(Text, default="{}")
+    request_plan_json: Mapped[str] = mapped_column(_LONG_TEXT, default="{}")
+    stages_json: Mapped[str] = mapped_column(_LONG_TEXT, default="[]")
+    result_json: Mapped[str] = mapped_column(_LONG_TEXT, default="{}")
     error_stage: Mapped[str] = mapped_column(String(64), default="")
     error_message: Mapped[str] = mapped_column(Text, default="")
     review_plan_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
@@ -179,7 +184,7 @@ class AgentFlowInstance(Base):
     status: Mapped[str] = mapped_column(String(20), default="RUNNING", index=True)
     stage: Mapped[str] = mapped_column(String(64), default="PREPARED")
     attempts: Mapped[int] = mapped_column(Integer, default=1)
-    result_json: Mapped[str] = mapped_column(Text, default="{}")
+    result_json: Mapped[str] = mapped_column(_LONG_TEXT, default="{}")
     error_message: Mapped[str] = mapped_column(Text, default="")
     started_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, index=True)
