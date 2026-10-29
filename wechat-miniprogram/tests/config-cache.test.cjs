@@ -39,9 +39,11 @@ test('PREFER_LOCAL_BACKEND=false disables local backend; production URL always u
     // 铁律：联调直连生产后端，本地后端开关恒为 false（不受 ext.useLocalBackend 覆盖）
     assert.equal(config.useLocalBackend, false)
     assert.equal(config.apiBaseUrl, 'https://test.example:4432/api')
-    // 注：mockWechatLogin 当前在「直连生产 + develop + ext.mock」时为 true，
-    // 与「mock 仅限本地」铁律存在张力，此处锁定当前可观察行为，待单独决策
-    assert.equal(config.mockWechatLogin, envVersion === 'develop')
+    // 🔴 2026-10-29 决策已定：mockWechatLogin 跟随「mock 仅限本地」铁律 ——
+    // 只在 useLocalBackend=true 且 develop 且 ext.mockWechatLogin=true 时开启。
+    // PREFER_LOCAL_BACKEND=false 时 useLocalBackend 恒 false，故任何环境/ext 下
+    // 直连生产都不会开 mock 登录（旧行为「直连生产+develop 开 mock」是张力，已消除）。
+    assert.equal(config.mockWechatLogin, false)
   }
 })
 

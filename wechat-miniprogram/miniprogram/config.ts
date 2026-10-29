@@ -29,7 +29,6 @@ function envVersion(): 'develop' | 'trial' | 'release' {
 
 const ext = externalConfig()
 const currentEnv = envVersion()
-const isRelease = currentEnv === 'release'
 // 必须是已备案的 HTTPS 域名。微信服务器域名**允许带端口**（官方文档：
 // 「对于 https 域名，可以配置端口，如 https://myserver.com:8080，但配置后只能向
 // https://myserver.com:8080 发起请求，向 myserver.com 或 :9091 请求会失败」），
@@ -67,9 +66,10 @@ export const config = {
   storageScope,
   useLocalBackend,
   // 正式版强制关闭 mock 登录，确保线上一定走真实 wx.login；
-  // 模拟身份必须显式开启，体验版默认走真实微信登录。
+  // 模拟身份必须显式开启，且仅限本地后端联调时使用（铁律：mock 仅限本地）。
+  // 当前 PREFER_LOCAL_BACKEND=false 时 useLocalBackend 恒 false，故直连生产时 mock 一律关闭。
   mockWechatLogin:
-    !useLocalBackend && !isRelease && currentEnv === 'develop' && ext.mockWechatLogin === true,
+    useLocalBackend && currentEnv === 'develop' && ext.mockWechatLogin === true,
   mockWechatCode: ext.mockWechatCode || 'mock:demo-device',
 }
 
