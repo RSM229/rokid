@@ -56,7 +56,7 @@ FORMS: list[FormSpec] = [
     _spec("gd_b_4_yinzhang", "项目印章使用授权书", "6项目印章使用授权书.docx", "sheng_tong_biao", "GD-B-4", "管理类", "manual"),
     _spec("gd_b_5_zhuchang", "驻场人员通知书", "7驻场人员通知书.docx", "sheng_tong_biao", "GD-B-5", "管理类", "manual"),
     _spec("gd_b_6_zhuchang_tz", "驻场人员调整通知书", "8驻场人员调整通知书.docx", "sheng_tong_biao", "GD-B-6", "管理类", "manual"),
-    _spec("gd_b_28_guihua", "监理规划", "9监理规划.docx", "sheng_tong_biao", "GD-B-28", "管理类", "manual"),
+    _spec("gd_b_28_guihua", "监理规划", "9监理规划.docx", "sheng_tong_biao", "GD-B-27", "管理类", "manual"),
     _spec("gd_b_28_xize", "监理实施细则", "10监理细则.docx", "sheng_tong_biao", "GD-B-28", "管理类", "manual"),
     # ---- 审查/指令类（11-13）----
     _spec("gd_b_29_shencha", "项目监理机构审查表", "11监理审查表.docx", "sheng_tong_biao", "GD-B-29", "通知类", "manual", ("acceptance",)),

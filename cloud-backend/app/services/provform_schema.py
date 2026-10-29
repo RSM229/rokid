@@ -466,7 +466,10 @@ SCHEMAS: dict[str, dict] = {
         "signoffs": [{'role': '总监理工程师', 'required': True}]    },
 "gd_b_28_guihua": {
         "form_code": "gd_b_28_guihua",
-        "form_number": "GD-B-28",
+        # 2026-10-29 修正：原始模板《9监理规划.docx》表头为 GD-B-27（说明页 GD-B-27/1），
+        # 原值 GD-B-28 与《10监理细则》撞号，会让两类文书的 doc_number 前缀无法区分。
+        # 注意 schema key 与库数据/前端引用保持 gd_b_28_guihua 不变，只修表号。
+        "form_number": "GD-B-27",
         "name": "监理规划",
         "version": SCHEMA_VERSION,
         "sections": [
