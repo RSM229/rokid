@@ -8,6 +8,7 @@ from typing import Optional
 import hashlib
 import json
 import time
+import asyncio
 from pathlib import Path
 
 from app.config import settings
@@ -1306,7 +1307,7 @@ async def create_notify_doc(
     await db.flush()
 
     try:
-        docx_file = render_form(spec.form_code, content)
+        docx_file = await asyncio.to_thread(render_form, spec.form_code, content)
     except Exception as exc:
         await db.rollback()
         raise HTTPException(status_code=500, detail=f"监理通知单渲染失败：{exc}") from exc
@@ -1454,7 +1455,7 @@ async def create_reply_doc(
     await db.flush()
 
     try:
-        docx_file = render_form(spec.form_code, content)
+        docx_file = await asyncio.to_thread(render_form, spec.form_code, content)
     except Exception as exc:
         await db.rollback()
         raise HTTPException(status_code=500, detail=f"整改回复单渲染失败：{exc}") from exc

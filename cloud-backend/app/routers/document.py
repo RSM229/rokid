@@ -1,6 +1,8 @@
 """监理文书路由 — 8类文书生成/审批/导出，含自动填充、LLM内容生成与PDF导出"""
 from datetime import datetime, date, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Query
+
+import asyncio
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
@@ -622,9 +624,10 @@ async def export_pdf(
                 if candidate.exists():
                     docx_out = candidate
             if docx_out is None:
-                docx_out = render_form(code, _merge_doc_images(doc))
+                # LibreOffice/docx 渲染是秒级重活，放线程池，防阻塞事件循环拖垮全部请求
+                docx_out = await asyncio.to_thread(render_form, code, _merge_doc_images(doc))
                 doc.docx_path = f"/exports/{docx_out.name}"
-            convert_docx_to_pdf(str(docx_out), str(pdf_path))
+            await asyncio.to_thread(convert_docx_to_pdf, str(docx_out), str(pdf_path))
             rendered = True
         except Exception:
             import logging
@@ -669,7 +672,7 @@ async def export_docx(
     code = code or {DocType.RECTIFICATION.value: "gdaq_30308_yinhuan", DocType.NOTICE_QUALITY.value: "gd_b_215_tongzhi", DocType.SUPERVISION_LOG.value: "gd_b_220_rizhi"}.get(doc.doc_type)
     if not code:
         raise HTTPException(400, "该文书暂无Word表式，请使用PDF导出")
-    output = render_form(code, _merge_doc_images(doc))
+    output = await asyncio.to_thread(render_form, code, _merge_doc_images(doc))
     doc.docx_path = f"/exports/{output.name}"
     doc.pdf_path = None
     await db.commit()

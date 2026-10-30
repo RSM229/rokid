@@ -6,6 +6,7 @@
 import hashlib
 import io
 import time
+import asyncio
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -466,7 +467,7 @@ async def sign_document(doc_id: int, req: SignDocumentRequest, user: User = Depe
             output_files.append(stamped_docx)
             if not embed_signoff_image(stamped_docx, slot, signature.image_path, doc.form_code):
                 raise HTTPException(422, "未能在该表式定位对应签认栏，请勿使用错误位置代签")
-            signed_pdf = docx_to_pdf(stamped_docx)
+            signed_pdf = await asyncio.to_thread(docx_to_pdf, stamped_docx)
             if signed_pdf is None:
                 raise HTTPException(501, "当前服务未安装 Word/LibreOffice，无法从已签 Word 生成同版式 PDF")
             output_files.append(signed_pdf)

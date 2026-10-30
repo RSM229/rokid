@@ -651,13 +651,13 @@ async def generate_supervision_log(
     # 任一步失败回退旧的自绘日报版式（文书均已入库，不影响主流程）。
     try:
         from app.services.form_renderer import render_form
-        docx_out = render_form("gd_b_220_rizhi", content)
+        docx_out = await asyncio.to_thread(render_form, "gd_b_220_rizhi", content)
         doc.docx_path = f"/exports/{docx_out.name}"
         await db.commit()
         from app.services.docx2pdf import convert_docx_to_pdf
         pdf_filename = f"doc_{doc.id}_监理日志_{target_date.isoformat()}.pdf"
         pdf_path = settings.export_dir / pdf_filename
-        convert_docx_to_pdf(str(docx_out), str(pdf_path))
+        await asyncio.to_thread(convert_docx_to_pdf, str(docx_out), str(pdf_path))
         docx_out.unlink(missing_ok=True)
         doc.pdf_path = f"/exports/{pdf_filename}"
         await db.commit()
@@ -943,14 +943,14 @@ async def generate_safety_log(
     await db.refresh(doc)
 
     try:
-        docx_out = render_form("anquan_jianli_rizhi", content)
+        docx_out = await asyncio.to_thread(render_form, "anquan_jianli_rizhi", content)
         doc.docx_path = f"/exports/{docx_out.name}"
         await db.commit()
         try:
             from app.services.docx2pdf import convert_docx_to_pdf
             pdf_filename = f"doc_{doc.id}_安全监理日志_{target_date.isoformat()}.pdf"
             pdf_path = settings.export_dir / pdf_filename
-            convert_docx_to_pdf(str(docx_out), str(pdf_path))
+            await asyncio.to_thread(convert_docx_to_pdf, str(docx_out), str(pdf_path))
             docx_out.unlink(missing_ok=True)
             doc.pdf_path = f"/exports/{pdf_filename}"
             await db.commit()
@@ -1010,7 +1010,7 @@ async def generate_aggregate_doc(
             db, project_id, start, supervisor=supervisor, force=force, extra_fields=extra_fields,
         )
         daily_doc = await db.get(Document, daily["doc_id"])
-        docx_file = render_form("gd_b_220_rizhi", daily_doc.content)
+        docx_file = await asyncio.to_thread(render_form, "gd_b_220_rizhi", daily_doc.content)
         daily_doc.docx_path = f"/exports/{docx_file.name}"
         await db.commit()
         return {**daily, "docx_url": daily_doc.docx_path, "form_code": "gd_b_220_rizhi", "form_name": "监理日志"}
@@ -1098,7 +1098,7 @@ async def generate_aggregate_doc(
     # 渲染（先补编号）
     doc.content = {**doc.content, "doc_number": f"{spec.form_number}-{doc.id:04d}"}
     try:
-        docx_file = render_form(spec.form_code, doc.content)
+        docx_file = await asyncio.to_thread(render_form, spec.form_code, doc.content)
     except Exception as exc:
         await db.rollback()
         logger.exception("聚合文书渲染失败")

@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -524,7 +525,7 @@ async def generate_form_from_record(
 
     # 渲染 docx
     try:
-        docx_file = render_form(spec.form_code, content)
+        docx_file = await asyncio.to_thread(render_form, spec.form_code, content)
     except FileNotFoundError as exc:
         raise HTTPException(500, f"模板文件缺失：{exc}") from exc
     except Exception as exc:
@@ -665,7 +666,7 @@ async def export_form_doc(
         if not docx_path.exists():
             raise HTTPException(404, "Word 文件不存在")
         from app.services.form_renderer import docx_to_pdf
-        pdf = docx_to_pdf(docx_path)
+        pdf = await asyncio.to_thread(docx_to_pdf, docx_path)
         if pdf is None:
             raise HTTPException(501, "服务器未安装 Word/LibreOffice，暂不支持 docx→pdf")
         doc.pdf_path = f"/exports/{pdf.name}"

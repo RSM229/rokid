@@ -1,6 +1,9 @@
 """平行检查：必填校验、项目隔离、详情编辑和独立文书生成。"""
 from datetime import date
 from typing import Optional
+
+import asyncio
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, field_validator, ValidationError
 from sqlalchemy import or_, select
@@ -171,7 +174,7 @@ async def generate_document(pid: int, user: User = Depends(get_current_user), db
     content = _content(p, project)
     doc = Document(doc_type="平行检查记录", title=f"平行检查记录_{p.id}", content=content,
                    form_code=p.form_code, project_id=p.project_id, creator_id=p.user_id, status=DocStatus.DRAFT.value)
-    docx = render_form(p.form_code, content)
+    docx = await asyncio.to_thread(render_form, p.form_code, content)
     doc.docx_path = f"/exports/{docx.name}"
     db.add(doc)
     await db.flush()
