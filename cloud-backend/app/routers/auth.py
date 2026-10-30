@@ -46,6 +46,7 @@ from app.models.security_question import (
 )
 from app.services.passwords import pwd_context
 from app.services.sms import get_sms_sender
+from app.services.login_limiter import default_limiter
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -262,16 +263,23 @@ async def _issue_token(user: User, db: AsyncSession, role: str | None = None) ->
     )
 
 
-async def _otp_login(phone: str, code: str, db: AsyncSession) -> TokenResponse:
-    """手机号 + 验证码登录（OTP）。与密码登录二选一。"""
+async def _otp_login(phone: str, code: str, db: AsyncSession, limit_key: str) -> TokenResponse:
+    """手机号 + 验证码登录（OTP）。与密码登录二选一。
+
+    ``limit_key`` 为防爆破限流的键（IP:手机号），任何未成功签发 token 的尝试都计入失败。
+    """
     result = await db.execute(select(User).where(User.phone == phone))
     user = result.scalar_one_or_none()
     if user is None:
+        default_limiter.register_failure(limit_key)
         raise HTTPException(status_code=404, detail="该手机号未注册")
     if user.audit_status != AUDIT_APPROVED:
+        default_limiter.register_failure(limit_key)
         raise HTTPException(status_code=403, detail="账号待审批或未通过，无法登录")
     if not await _verify_sms_code(db, phone, "login", code):
+        default_limiter.register_failure(limit_key)
         raise HTTPException(status_code=400, detail="验证码错误或已过期")
+    default_limiter.reset(limit_key)
     return await _issue_token(user, db, None)
 
 
@@ -1096,8 +1104,24 @@ async def get_available_roles(client: str = Query("web")):
     )
 
 
+def _client_ip(request: Request) -> str:
+    """取真实客户端 IP，兼容反向代理（nginx）透传的 X-Forwarded-For / X-Real-IP。"""
+    fwd = request.headers.get("x-forwarded-for")
+    if fwd:
+        return fwd.split(",")[0].strip()
+    real = request.headers.get("x-real-ip")
+    if real:
+        return real.strip()
+    return request.client.host if request.client else "unknown"
+
+
 @router.post("/login", response_model=TokenResponse)
-async def login(req: LoginRequest, db: AsyncSession = Depends(get_db)):
+async def login(req: LoginRequest, request: Request, db: AsyncSession = Depends(get_db)):
+    # 防爆破：按 (客户端IP, 登录标识) 滑动窗口限流，连续失败超阈值即 429。
+    # 标识用 username 或 phone，账号存否都计入同一 key —— 既拦密码爆破，也防用户枚举。
+    limit_key = f"{_client_ip(request)}:{req.username or req.phone or 'unknown'}"
+    default_limiter.check(limit_key)
+
     # 可选角色 = 项目级岗位 ∪ 公司级角色（Web 管理后台是公司级角色的唯一入口，
     # 与 GET /auth/roles?client=web 的输出保持一致；小程序端走
     # miniprogram_auth._token_response 拦截公司级，不经此处）。
@@ -1109,7 +1133,7 @@ async def login(req: LoginRequest, db: AsyncSession = Depends(get_db)):
     if req.sms_code:
         if not req.phone:
             raise HTTPException(status_code=400, detail="OTP 登录需提供手机号")
-        return await _otp_login(req.phone, req.sms_code, db)
+        return await _otp_login(req.phone, req.sms_code, db, limit_key)
     if not req.username or not req.password:
         raise HTTPException(status_code=400, detail="请提供用户名+密码，或手机号+验证码")
 
@@ -1117,7 +1141,12 @@ async def login(req: LoginRequest, db: AsyncSession = Depends(get_db)):
     user = result.scalar_one_or_none()
 
     if not user or not pwd_context.verify(req.password, user.password_hash):
+        default_limiter.register_failure(limit_key)
         raise HTTPException(status_code=401, detail="用户名或密码错误")
+
+    # 密码正确：清空失败计数（无论后续是否因账号状态/角色被拒，凭证本身是对的，
+    # 误计会污染合法用户的限流窗口）。
+    default_limiter.reset(limit_key)
 
     if not user.is_active:
         raise HTTPException(status_code=403, detail="该账号已被禁用")
