@@ -710,6 +710,17 @@ async def _get_project_or_404(db: AsyncSession, project_id: int) -> Project:
     return project
 
 
+def _require_same_org(user: User, project: Project) -> None:
+    """企业隔离：非空 ``org_id`` 的账号只能操作**本企业**项目。
+
+    ``org_id`` 为空视为本企业历史数据（与 ``auth.export_users`` 的企业隔离口径一致），
+    放行。超管通常 ``org_id`` 为空，天然不受限。用于结项 / 恢复这类公司级动作，
+    防止多企业部署下 A 企业管理员对 B 企业项目「结项/恢复」。
+    """
+    if user.org_id is not None and project.org_id not in (None, user.org_id):
+        raise HTTPException(status_code=403, detail="无权操作其他企业的项目")
+
+
 @router.get("/{project_id}/members")
 async def list_members(
     project_id: int,
@@ -912,6 +923,7 @@ async def complete_project(
     权限：``project_complete``（公司级，默认仅超管）。已结项项目重复调用幂等。
     """
     project = await _get_project_or_404(db, project_id)
+    _require_same_org(user, project)
     current_status = project.status or PROJECT_STATUS_ACTIVE
     if current_status == PROJECT_STATUS_COMPLETED:
         return {
@@ -991,6 +1003,7 @@ async def reopen_project(
     权限同结项：``project_complete``。已在进行中的项目重复调用幂等。
     """
     project = await _get_project_or_404(db, project_id)
+    _require_same_org(user, project)
     current_status = project.status or PROJECT_STATUS_ACTIVE
     if current_status == PROJECT_STATUS_ACTIVE:
         return {
