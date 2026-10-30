@@ -70,7 +70,10 @@
               <el-descriptions-item label="分类">{{ currentItem.category }}</el-descriptions-item>
               <el-descriptions-item label="来源">{{ currentItem.source_file }}</el-descriptions-item>
             </el-descriptions>
-            <div class="detail-content" v-html="currentItem.content"></div>
+            <!-- 正文是文档解析出的纯文本（.detail-content 已设 white-space: pre-wrap
+                 保留换行），不能用 v-html：文档内的 <img onerror> 之类会被当 HTML
+                 执行，形成存储型 XSS（后台令牌存 localStorage，一旦执行即失守）。 -->
+            <div class="detail-content">{{ currentItem.content }}</div>
           </div>
         </el-dialog>
 
