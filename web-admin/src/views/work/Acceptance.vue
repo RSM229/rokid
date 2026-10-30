@@ -121,7 +121,7 @@
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
-import { documentApi, workRecordApi } from '@/api'
+import { documentApi, workRecordApi, downloadFile } from '@/api'
 import { ensureWritableProject } from '@/composables/useAllProjectsGuard'
 
 const records = ref<any[]>([])
@@ -204,7 +204,7 @@ async function downloadForm(row: any) {
   }
   try {
     const result: any = await documentApi.exportPdf(row.generated_doc_id)
-    if (result.pdf_url) window.open(result.pdf_url, '_blank', 'noopener,noreferrer')
+    if (result.pdf_url) downloadFile(result.pdf_url)
   } catch (e: any) { ElMessage.error(e.response?.data?.detail || '下载失败') }
 }
 

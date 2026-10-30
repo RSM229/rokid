@@ -1,5 +1,6 @@
 """台账路由 - 7类台账查询与 Excel/PDF 导出，批量导出/归档/打印"""
 import io
+import re
 import shutil
 import uuid
 from datetime import datetime
@@ -24,6 +25,7 @@ from app.routers.auth import (
     require_project_id,
     project_scope_id,
     can_read_project,
+    _can_manage_all_projects,
 )
 from app.services.ledger_exporter import (
     export_ledger_excel,
@@ -253,12 +255,16 @@ async def export_ledger(
     ledger_name = LEDGER_TYPES.get(ledger_type, ledger_type)
     timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
 
+    # 把项目归属编码进文件名，供下载端点做归属校验（防跨项目越权下载）。
+    # scope=None 表示「全部项目」汇总导出（仅公司级账号），标记为 all。
+    proj_tag = "all" if scope is None else f"p{scope}"
+
     if format == "excel":
-        filename = f"{ledger_name}_{timestamp}.xlsx"
+        filename = f"{ledger_name}_{proj_tag}_{timestamp}.xlsx"
         file_path = settings.export_dir / filename
         export_ledger_excel(records, ledger_type, ledger_name, str(file_path))
     elif format == "pdf":
-        filename = f"{ledger_name}_{timestamp}.pdf"
+        filename = f"{ledger_name}_{proj_tag}_{timestamp}.pdf"
         file_path = settings.export_dir / filename
         export_ledger_pdf(records, ledger_type, ledger_name, str(file_path))
     else:
@@ -277,12 +283,30 @@ async def export_ledger(
 @router.get("/download/{filename}")
 async def download_ledger(
     filename: str,
-    user: dict = Depends(get_current_user),
+    user: User = Depends(get_current_user),
 ):
-    """下载导出的台账文件"""
+    """下载导出的台账文件（按文件名中的项目归属做权限校验）。
+
+    文件名形如 ``安全监理日志_p5_20261030....xlsx``（单项目导出，含 ``_p<id>_``）
+    或 ``文书_all_20261030....pdf``（全部项目导出，含 ``_all_``）。
+    无项目编码的遗留文件名无法判定归属，仅公司级账号可下载，避免越权。
+    """
+    # 防目录穿越：StaticFiles 已移除，这里显式拒绝路径字符
+    if "/" in filename or "\\" in filename or filename.startswith("."):
+        raise HTTPException(status_code=400, detail="非法文件名")
     file_path = settings.export_dir / filename
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="文件不存在")
+    leaf = filename
+    if "_all_" in leaf and not _can_manage_all_projects(user):
+        raise HTTPException(status_code=403, detail="全部项目导出仅公司级账号可下载")
+    pids = [int(m) for m in re.findall(r"_p(\d+)_", leaf)]
+    if pids:
+        if not any(can_read_project(pid, user) for pid in pids):
+            raise HTTPException(status_code=403, detail="无权访问该项目的导出文件")
+    elif not _can_manage_all_projects(user):
+        # 遗留文件名无项目编码，无法校验归属，收紧到公司级账号
+        raise HTTPException(status_code=403, detail="无法判定文件归属，仅公司级账号可下载")
     return FileResponse(path=str(file_path), filename=filename)
 
 

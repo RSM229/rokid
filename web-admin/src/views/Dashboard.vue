@@ -161,7 +161,7 @@
 import { ref, onMounted, nextTick, markRaw } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { workRecordApi, documentApi } from '@/api'
+import { workRecordApi, documentApi, viewFile } from '@/api'
 import {
   ChatDotRound, User, View, CircleCheck, Monitor, Camera, Document,
   Warning, ArrowRight, Plus, EditPen, Reading, Document as DocIcon, Notebook,
@@ -424,7 +424,13 @@ function formatKnowledgeFallback(results: any[] | undefined): string {
 }
 
 function previewImage(src: string) {
-  window.open(src, '_blank')
+  // 本地 /uploads、/exports 路径现需鉴权，走带 token 的 viewFile；
+  // data: / https: 等外链维持原行为直接打开。
+  if (src.startsWith('/')) {
+    viewFile(src).catch(() => window.open(src, '_blank'))
+  } else {
+    window.open(src, '_blank')
+  }
 }
 
 async function detectHazardWithImage(userMsg: string) {
@@ -563,7 +569,7 @@ async function viewLogPdf(docId: number) {
   try {
     const res: any = await documentApi.exportPdf(docId) as any
     if (res.pdf_url) {
-      window.open(res.pdf_url, '_blank')
+      viewFile(res.pdf_url)
     }
   } catch {
     ElMessage.error('PDF导出失败')

@@ -115,7 +115,7 @@
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
-import { workRecordApi } from '@/api'
+import { workRecordApi, viewFile } from '@/api'
 import { ensureWritableProject } from '@/composables/useAllProjectsGuard'
 
 const records = ref<any[]>([])
@@ -197,7 +197,7 @@ async function generateReport(row: any) {
 }
 
 function openReport(url: string) {
-  window.open(url, '_blank', 'noopener,noreferrer')
+  viewFile(url)
 }
 
 async function loadRecords() {

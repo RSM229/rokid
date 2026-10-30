@@ -23,6 +23,7 @@ from app.routers import work_session
 from app.routers import rtc
 from app.routers import provform, meeting, progress, parallel, resources, visa, equipment, archive
 from app.routers import stats_company
+from app.routers import files
 from app.routers import role_permissions
 from app.routers import agent
 from app.services.rtc_service import timeout_worker
@@ -149,8 +150,10 @@ async def attach_perm_version(request, call_next):
         pass
     return response
 
-app.mount("/uploads", StaticFiles(directory=str(settings.upload_dir)), name="uploads")
-app.mount("/exports", StaticFiles(directory=str(settings.export_dir)), name="exports")
+# 注：原 /uploads、/exports 的 StaticFiles 挂载已移除——静态挂载无法做身份认证，
+# 曾导致未登录即可直取任意导出/上传文件（严重越权下载）。改用 app/routers/files.py
+# 的受控端点（同路径、需登录 + 项目归属校验）。/simulator 是纯静态演示页，无敏感数据，
+# 保留挂载。
 app.mount(
     "/simulator",
     StaticFiles(directory=str(APP_DIR / "static"), html=True),
@@ -264,6 +267,10 @@ app.include_router(
     prefix="/api/agent",
     tags=["智能体（聊天即操作）"],
 )
+
+# 受控文件服务：取代原先无鉴权的 /uploads、/exports StaticFiles 挂载
+# （未登录即可直取任意导出/上传文件的严重越权漏洞）。根路径、需登录 + 项目归属校验。
+app.include_router(files.router)
 
 
 @app.get("/health")

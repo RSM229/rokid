@@ -95,7 +95,7 @@ import { ref, reactive, onMounted } from 'vue'
 import { ensureWritableProject } from '@/composables/useAllProjectsGuard'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Search } from '@element-plus/icons-vue'
-import http from '@/api'
+import http, { downloadFile } from '@/api'
 
 const searchKey = ref('')
 const filterType = ref('')
@@ -156,12 +156,12 @@ async function confirmUpload() {
 }
 
 function previewArchive(row: any) {
-  if (row.file_url) window.open(row.file_url, '_blank')
+  if (row.file_url) downloadFile(row.file_url)
   else ElMessage.info('暂无预览文件')
 }
 
 function downloadArchive(row: any) {
-  if (row.file_url) window.open(row.file_url, '_blank')
+  if (row.file_url) downloadFile(row.file_url)
   else ElMessage.info('暂无下载文件')
 }
 

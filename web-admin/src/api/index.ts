@@ -589,4 +589,42 @@ export const modelSettingsApi = {
     http.post<ModelSetting>(`/model-settings/${modelType}/reset`),
 }
 
+/**
+ * 带鉴权的文件下载（取代 window.open(file_url)）。
+ * 后端 /uploads、/exports 已改为受控端点，必须带 Bearer token 才能取文件；
+ * 浏览器 window.open 不会自动带 token，故改用 fetch + blob 触发下载。
+ */
+export async function downloadFile(url: string, filename?: string): Promise<void> {
+  const token = localStorage.getItem('token')
+  const res = await fetch(url, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  })
+  if (!res.ok) throw new Error(`文件下载失败（${res.status}）`)
+  const blob = await res.blob()
+  const objectUrl = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = objectUrl
+  a.download = filename || decodeURIComponent(url.split('/').pop() || 'download')
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(objectUrl)
+}
+
+/**
+ * 带鉴权的文件查看（PDF 等在新标签页打开）。同样需要 Bearer token。
+ */
+export async function viewFile(url: string): Promise<void> {
+  const token = localStorage.getItem('token')
+  const res = await fetch(url, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  })
+  if (!res.ok) throw new Error(`文件打开失败（${res.status}）`)
+  const blob = await res.blob()
+  const objectUrl = URL.createObjectURL(blob)
+  // 新标签页持有该 blob，稍后回收即可
+  setTimeout(() => URL.revokeObjectURL(objectUrl), 60000)
+  window.open(objectUrl, '_blank')
+}
+
 export default http
