@@ -9,7 +9,12 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from app.config import settings, get_cors_origins, check_production_security
+from app.config import (
+    settings,
+    get_cors_origins,
+    check_production_security,
+    check_critical_security,
+)
 from app.routers import auth, hazard, document, knowledge, ledger, watermark, simulator, local_ai
 from app.routers import work_record, task, knowledge_graph, project
 from app.routers import media, miniprogram_auth
@@ -47,6 +52,10 @@ APP_DIR = Path(__file__).resolve().parent
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # 致命项自检：不看 DEBUG 开关，永远执行（DEBUG 漏配无法掩盖认证风险）
+    for issue in check_critical_security():
+        logger.critical(f"[安全检查·致命] {issue}")
+
     # 生产环境安全检查
     security_warnings = check_production_security()
     for w in security_warnings:
@@ -114,6 +123,11 @@ app = FastAPI(
     description="监理行业智能体云端服务",
     version="0.1.0",
     lifespan=lifespan,
+    # 接口文档只在开发态开放：/openapi.json 会完整列出全部端点、参数与权限依赖，
+    # 生产暴露等于给攻击者一份现成的攻击面清单（含内部管理端点）。
+    docs_url="/docs" if settings.debug else None,
+    redoc_url="/redoc" if settings.debug else None,
+    openapi_url="/openapi.json" if settings.debug else None,
 )
 
 _cors_origins = get_cors_origins()

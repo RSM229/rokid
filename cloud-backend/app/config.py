@@ -19,6 +19,11 @@ def _resolve_knowledge_base_path() -> str:
     return str(repo_root)
 
 
+# 仓库内公开的占位密钥。一旦它在生产生效，JWT 即可被任意第三方伪造
+# （payload 全公开、算法已知），等同于认证完全失守，故单列常量便于自检比对。
+STOCK_SECRET_KEY = "gdjl-supervision-secret-change-in-production"
+
+
 class Settings(BaseSettings):
     # 记录日志气象适配器：未配置时明确待补填，不虚构气象值。
     weather_forecast_url: str = ""
@@ -57,7 +62,7 @@ class Settings(BaseSettings):
     )
     # 周报/月报是否走 LLM 润色（失败自动降级为规则汇总）
     daily_doc_use_llm: bool = os.getenv("DAILY_DOC_USE_LLM", "true").lower() == "true"
-    secret_key: str = os.getenv("SECRET_KEY", "gdjl-supervision-secret-change-in-production")
+    secret_key: str = os.getenv("SECRET_KEY", STOCK_SECRET_KEY)
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 1440
     allow_public_registration: bool = (
@@ -255,7 +260,7 @@ def check_production_security() -> list[str]:
             return not normalized or normalized.startswith(("replace", "change-me", "changeme"))
 
         if (
-            settings.secret_key == "gdjl-supervision-secret-change-in-production"
+            settings.secret_key == STOCK_SECRET_KEY
             or missing_or_placeholder(settings.secret_key)
             or len(settings.secret_key) < 32
         ):
@@ -296,3 +301,25 @@ def check_production_security() -> list[str]:
         if missing_or_placeholder(settings.default_stt_api_key):
             warnings.append("DEFAULT_STT_API_KEY 未配置，语音识别不可用")
     return warnings
+
+
+def check_critical_security() -> list[str]:
+    """致命项自检——**不受 DEBUG 开关影响**，每次启动都必须检查。
+
+    背景：``check_production_security()`` 只在 ``debug=False`` 时才真正执行，
+    而 ``debug`` 的默认值就是 True。生产若漏配 ``DEBUG``（compose 里只写业务
+    变量是常见情形），整套生产自检会被静默跳过：JWT 仍用仓库公开的占位密钥
+    签发，任何人读一遍仓库即可伪造超管令牌。此类问题不能依赖"记得配 DEBUG"。
+
+    因此把"一旦成立就等于认证失守"的几项独立出来，无条件告警。
+    """
+    issues: list[str] = []
+    if settings.secret_key == STOCK_SECRET_KEY:
+        issues.append(
+            "SECRET_KEY 仍为仓库公开的占位值，JWT 可被任意伪造（必须设置独立随机密钥）"
+        )
+    elif len(settings.secret_key) < 32:
+        issues.append(f"SECRET_KEY 长度仅 {len(settings.secret_key)}，建议 ≥32 位随机串")
+    if settings.model_config_encryption_key == settings.secret_key:
+        issues.append("MODEL_CONFIG_ENCRYPTION_KEY 与 SECRET_KEY 相同，密钥用途必须隔离")
+    return issues
