@@ -1203,7 +1203,9 @@ async def delete_document(
     # 软删除：标记 is_deleted 进回收站，保留磁盘文件，可恢复；不立即销毁。
     # 与上传对称：删掉的分块必须尽快回收，否则检索会继续召回已删除的文档内容。
     doc.is_deleted = True
-    doc.deleted_at = datetime.utcnow()
+    # 与全库其它时间戳统一用本地时间（datetime.now）；utcnow 在 Py3.12 已废弃，
+    # 且会与其它 DateTime 字段口径不一致（此字段仅用于回收站排序，值仍单调）。
+    doc.deleted_at = datetime.now()
     await db.commit()
     background.add_task(_reindex_knowledge_docs)
     return {"detail": "文档已移入回收站", "id": doc_id}
