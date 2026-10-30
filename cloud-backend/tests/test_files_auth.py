@@ -55,13 +55,16 @@ class FilesAuthTestCase(unittest.TestCase):
         cls._ex9.write_bytes(b"EXPORT-P9")
         cls._ex_all = cls._export_dir / "ledger_all_20261030.xlsx"
         cls._ex_all.write_bytes(b"EXPORT-ALL")
+        # 部署归属编码前的遗留文件：文件名无 _p<id>_ / _all_ 标记，无法判定归属
+        cls._ex_legacy = cls._export_dir / "监理日志台账_20260101.xlsx"
+        cls._ex_legacy.write_bytes(b"EXPORT-LEGACY")
         cls._arc = cls._export_dir / "archives" / "7" / "arc.zip"
         cls._arc.parent.mkdir(parents=True, exist_ok=True)
         cls._arc.write_bytes(b"ARCHIVE-7")
 
     @classmethod
     def tearDownClass(cls):
-        for f in (cls._up, cls._ex5, cls._ex9, cls._ex_all, cls._arc):
+        for f in (cls._up, cls._ex5, cls._ex9, cls._ex_all, cls._ex_legacy, cls._arc):
             try:
                 f.unlink()
             except OSError:
@@ -166,6 +169,17 @@ class FilesAuthTestCase(unittest.TestCase):
         FilesAuthTestCase._captured["user"] = _FakeUser(project_id=5)
         r = self.client.get("/api/ledger/download/..%2f..%2fapp%2fmain.py", headers=self.auth)
         self.assertNotEqual(r.status_code, 200)
+
+    def test_ledger_download_legacy_untagged_allowed_for_any_authed_user(self):
+        # 🔴 一致性回归：遗留文件（无 _p<id>_ / _all_ 标记）此前对普通项目成员返回
+        # 403（仅公司级可下）。应与 /exports/ 受控端点一致——仅要求登录即可下载，
+        # 否则合法用户无法重新下载自己此前导出的文件。
+        FilesAuthTestCase._captured["user"] = _FakeUser(project_id=3)  # 与文件无显式归属关系
+        r = self.client.get(
+            "/api/ledger/download/监理日志台账_20260101.xlsx", headers=self.auth
+        )
+        self.assertEqual(r.status_code, 200)
+        self.assertIn(b"EXPORT-LEGACY", r.content)
 
 
 if __name__ == "__main__":

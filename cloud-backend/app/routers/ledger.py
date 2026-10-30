@@ -289,7 +289,9 @@ async def download_ledger(
 
     文件名形如 ``安全监理日志_p5_20261030....xlsx``（单项目导出，含 ``_p<id>_``）
     或 ``文书_all_20261030....pdf``（全部项目导出，含 ``_all_``）。
-    无项目编码的遗留文件名无法判定归属，仅公司级账号可下载，避免越权。
+    无项目编码的遗留文件名无法判定归属，按纵深防御策略仅要求登录即可下载
+    （与 ``/exports/`` 受控端点一致），不再强制公司级账号——否则合法用户无法
+    重新下载自己此前（部署归属编码前）导出的文件。
     """
     # 防目录穿越：StaticFiles 已移除，这里显式拒绝路径字符
     if "/" in filename or "\\" in filename or filename.startswith("."):
@@ -304,9 +306,9 @@ async def download_ledger(
     if pids:
         if not any(can_read_project(pid, user) for pid in pids):
             raise HTTPException(status_code=403, detail="无权访问该项目的导出文件")
-    elif not _can_manage_all_projects(user):
-        # 遗留文件名无项目编码，无法校验归属，收紧到公司级账号
-        raise HTTPException(status_code=403, detail="无法判定文件归属，仅公司级账号可下载")
+    # 无 _p<id>_ / _all_ 标记的遗留文件名无法判定归属：按纵深防御仅要求登录
+    # （与 /exports/ 受控端点一致），不再强制公司级账号，避免合法用户无法重新
+    # 下载自己此前导出的文件。
     return FileResponse(path=str(file_path), filename=filename)
 
 
