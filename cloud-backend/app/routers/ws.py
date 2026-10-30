@@ -42,9 +42,17 @@ def _register_connection(user_id: int, project_id: int | None, ws: WebSocket) ->
         _user_connections[user_id] = set()
     _user_connections[user_id].add(ws)
     if project_id is not None:
-        if project_id not in _project_users:
-            _project_users[project_id] = set()
-        _project_users[project_id].add(user_id)
+        # 一个用户同一时刻只有一个当前项目（user.project_id 为单值上下文），
+        # 故先把它从其它项目的映射里摘掉，避免切换项目后仍收到旧项目推送。
+        for pid in list(_project_users):
+            if pid == project_id:
+                continue
+            stale = _project_users.get(pid)
+            if stale is not None:
+                stale.discard(user_id)
+                if not stale:
+                    _project_users.pop(pid, None)
+        _project_users.setdefault(project_id, set()).add(user_id)
 
 
 def _unregister_connection(user_id: int, project_id: int | None, ws: WebSocket) -> None:
@@ -54,7 +62,18 @@ def _unregister_connection(user_id: int, project_id: int | None, ws: WebSocket) 
         conns.discard(ws)
         if not conns:
             _user_connections.pop(user_id, None)
-    # project_users 中保留 user_id（可能还有其他连接/会话），不做移除
+    # 该用户已无任何在线连接 → 从所有项目映射中摘除。
+    # 原实现一律保留（注释称"可能还有其他连接"），但"是否还有连接"由
+    # _user_connections 可直接判定：不摘除会让已下线/退出项目的人继续收到
+    # broadcast_to_project 推送（跨项目信息泄露），且 _project_users 只增不减。
+    if user_id not in _user_connections:
+        for pid in list(_project_users):
+            users = _project_users.get(pid)
+            if users is None:
+                continue
+            users.discard(user_id)
+            if not users:
+                _project_users.pop(pid, None)
 
 
 async def _send_ws(ws: WebSocket, message: dict) -> bool:
