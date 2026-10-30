@@ -794,8 +794,16 @@ async def request_plan(
 
 
 @router.post("/recommend-purpose")
-async def recommend_purpose(req: PurposeRecommendRequest):
-    """Suggest a workflow from user intent and evidence; never creates a record."""
+async def recommend_purpose(
+    req: PurposeRecommendRequest,
+    user: User = Depends(get_current_user),
+):
+    """Suggest a workflow from user intent and evidence; never creates a record.
+
+    🔴 必须登录：本接口内部会真实调用大模型（付费），历史上漏了鉴权，
+    等于把「匿名刷额度」的入口开在公网上。小程序调用方本来就带 Bearer，
+    加鉴权不影响正常使用。
+    """
     evidence_count = 1 if req.evidence_summary.strip() else 0
     plan, model_id = await _generate_request_plan(
         message=req.message,
