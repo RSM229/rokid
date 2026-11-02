@@ -561,8 +561,8 @@ Page(themed({
 
     // 回答模型（2026-10-09 改版：输入区左侧「模型」下拉，可切换多个文本大模型；华工走独立供应商）
     models: CHAT_MODELS,
-    currentModel: 'qwen3.7-max',
-    modelName: '通义千问 3.7 Max',
+    currentModel: 'qwen3.8-flash',
+    modelName: '通义千问 3.8 Flash',
     showModelMenu: false,
     showPlusPanel: false,
     /** 待发送附件：图片/文件可多选先挂在这里，补充文字后一次性发送识别 */
@@ -631,7 +631,7 @@ Page(themed({
     })
 
     const user = session.getUser()
-    const savedModel = String(wx.getStorageSync(`gdjl_${config.storageScope}_agent_model`) || 'qwen3.7-max')
+    const savedModel = String(wx.getStorageSync(`gdjl_${config.storageScope}_agent_model`) || 'qwen3.8-flash')
     const saved = this.data.models.find(m => m.id === savedModel) || this.data.models[0]
     this.setData({
       currentModel: saved.id,

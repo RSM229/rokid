@@ -31,26 +31,15 @@ export interface ModelItem {
 
 export const MODEL_CATALOG: ModelItem[] = [
   {
-    id: 'qwen3.7-max',
+    id: 'qwen3.8-flash',
     provider: '',
     providerName: '通义千问',
-    model: 'qwen3.7-max',
-    name: '通义千问 3.7 Max',
-    desc: '最强推理，复杂规范分析',
+    model: 'qwen3.8-flash',
+    name: '通义千问 3.8 Flash',
+    desc: '高速全能，文本/推理/视觉',
     temperature: 0.7,
     badges: ['New'],
     capabilities: ['文本生成', '推理模型', '视觉理解'],
-  },
-  {
-    id: 'qwen3.7-plus',
-    provider: '',
-    providerName: '通义千问',
-    model: 'qwen3.7-plus',
-    name: '通义千问 3.7 Plus',
-    desc: '均衡通用，日常问答',
-    temperature: 0.7,
-    badges: [],
-    capabilities: ['文本生成', '视觉理解'],
   },
   {
     id: 'deepseek-v4.1-flash-1017',
