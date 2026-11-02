@@ -138,6 +138,10 @@ class ProjectInfo(BaseModel):
     # 项目结束时间（结项动作写入；NULL=未结项）
     completed_at: Optional[str] = None
 
+    # 项目负责人（创建 / 负责的管理员；owner_name 为回填的姓名，便于列表直显）
+    owner_id: Optional[int] = None
+    owner_name: Optional[str] = None
+
 
 # Step 5：项目生命周期状态取值（与 Project.status 的 comment 同口径）
 PROJECT_STATUS_ACTIVE = "active"
@@ -167,7 +171,24 @@ def _project_info(project: Project) -> ProjectInfo:
 
         status=project.status or PROJECT_STATUS_ACTIVE,
         completed_at=project.completed_at.isoformat() if project.completed_at else None,
+        owner_id=project.owner_id,
     )
+
+
+async def _fill_owner_names(
+    db: AsyncSession, projects: list[Project], infos: list[ProjectInfo]
+) -> None:
+    """批量回填 owner_name（一次查询；姓名空则退回用户名）。"""
+    owner_ids = {p.owner_id for p in projects if p.owner_id}
+    if not owner_ids:
+        return
+    rows = await db.execute(
+        select(User.id, User.real_name, User.username).where(User.id.in_(owner_ids))
+    )
+    names = {uid: (real or uname) for uid, real, uname in rows.all()}
+    for p, info in zip(projects, infos):
+        if p.owner_id:
+            info.owner_name = names.get(p.owner_id)
 
 
 @router.get("/list", response_model=list[ProjectInfo])
@@ -209,7 +230,9 @@ async def list_projects(
         query = query.where(Project.status == PROJECT_STATUS_ACTIVE)
     result = await db.execute(query)
     projects = result.scalars().all()
-    return [_project_info(p) for p in projects]
+    infos = [_project_info(p) for p in projects]
+    await _fill_owner_names(db, projects, infos)
+    return infos
 
 
 async def _validate_project_fields(db, user, req, previous=None):
@@ -335,6 +358,64 @@ async def update_project(
     await db.commit()
     await db.refresh(project)
     return _project_info(project)
+
+
+class TransferProjectRequest(BaseModel):
+    """项目转让请求：把项目负责人（owner_id）移交给另一位用户"""
+    user_id: int
+
+
+@router.post("/{project_id}/transfer")
+async def transfer_project(
+    project_id: int,
+    req: TransferProjectRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """转让项目负责人（owner_id）。
+
+    权限：仅**超管**或当前**项目负责人本人**（``project.owner_id == user.id``）。
+    owner_id 只是「创建 / 负责」标记（授权展开查询用），**不改变成员权限边界**
+    ——对方若要管理项目，仍须是项目在岗成员（成员关系即授权）。转让时对方
+    不是在岗成员不阻断，但返回 warning 提示去「分配人员」任命岗位。
+    """
+    project = await _get_project_or_404(db, project_id)
+    if not (user.is_super_admin or project.owner_id == user.id):
+        raise HTTPException(status_code=403, detail="仅超级管理员或项目负责人可转让项目")
+    target = await db.get(User, req.user_id)
+    if target is None:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    if project.org_id and target.org_id and target.org_id != project.org_id:
+        raise HTTPException(status_code=400, detail="对方不属于本项目所属企业")
+    if target.id == project.owner_id:
+        raise HTTPException(status_code=400, detail="对方已是项目负责人")
+
+    member = await db.execute(
+        select(ProjectMember).where(
+            ProjectMember.project_id == project.id,
+            ProjectMember.user_id == target.id,
+            ProjectMember.left_at.is_(None),
+        )
+    )
+    warning = None
+    if member.scalar_one_or_none() is None:
+        warning = "对方不是本项目在岗成员，转让后请到「分配人员」中为其任命岗位"
+
+    old_owner_id = project.owner_id
+    project.owner_id = target.id
+    db.add(
+        SecurityAudit(
+            user_id=user.id,
+            username=user.username,
+            action="project_transfer",
+            detail=(
+                f"项目#{project.id}({project.name}) 负责人由 "
+                f"用户#{old_owner_id} 转让给 用户#{target.id}({target.username})"
+            ),
+        )
+    )
+    await db.commit()
+    return {"detail": "ok", "owner_id": project.owner_id, "warning": warning}
 
 
 @router.post("/{project_id}/switch")
