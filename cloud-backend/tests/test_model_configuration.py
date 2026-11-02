@@ -182,6 +182,91 @@ class ModelGatewayContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(content, "模型回复")
         self.assertEqual(returned.model_id, "chat-model")
 
+    async def test_llm_quota_exhaustion_has_actionable_message(self) -> None:
+        config = FakeRuntimeConfig(
+            model_type="llm",
+            provider="测试云",
+            base_url="https://models.example.com/v1",
+            model_id="qwen3.7-max",
+            api_key="private-key",
+        )
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                429,
+                json={
+                    "error": {
+                        "message": (
+                            "Your token-plan 1-month quota has been exhausted. "
+                            "The quota will reset at 11-08 16:00:00 UTC."
+                        ),
+                        "type": "insufficient_quota",
+                        "code": "insufficient_quota",
+                    }
+                },
+            )
+
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(handler)
+        ) as client:
+            with patch(
+                "app.services.model_gateway.get_runtime_model_config",
+                new=AsyncMock(return_value=config),
+            ):
+                from app.services import model_gateway
+                with self.assertRaises(ModelGatewayError) as raised:
+                    await model_gateway.chat_completion(
+                        [{"role": "user", "content": "你好"}],
+                        client=client,
+                    )
+
+        message = str(raised.exception)
+        self.assertIn("额度已用尽", message)
+        self.assertIn("北京时间", message)
+        self.assertNotIn("token-plan", message)
+        self.assertNotIn("private-key", message)
+
+    async def test_vision_quota_exhaustion_names_vision_model(self) -> None:
+        config = FakeRuntimeConfig(
+            model_type="llm",
+            provider="测试云",
+            base_url="https://models.example.com/v1",
+            model_id="qwen3.7-max",
+            api_key="private-key",
+        )
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                429,
+                json={
+                    "error": {
+                        "message": (
+                            "Your token-plan 1-month quota has been exhausted. "
+                            "The quota will reset at 11-08 16:00:00 UTC."
+                        ),
+                        "code": "insufficient_quota",
+                    }
+                },
+            )
+
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(handler)
+        ) as client:
+            with patch(
+                "app.services.model_gateway.get_runtime_model_config",
+                new=AsyncMock(return_value=config),
+            ):
+                from app.services import model_gateway
+                with self.assertRaises(ModelGatewayError) as raised:
+                    await model_gateway.observe_image(
+                        b"\xff\xd8fake-image", client=client
+                    )
+
+        message = str(raised.exception)
+        self.assertIn("图片理解模型额度已用尽", message)
+        self.assertNotIn("token-plan", message)
+        self.assertNotIn("private-key", message)
+
     async def test_generic_tts_returns_binary_audio(self) -> None:
         config = FakeRuntimeConfig(
             model_type="tts",

@@ -8,6 +8,8 @@ import asyncio
 import base64
 import json
 import logging
+import re
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import shutil
 import uuid
@@ -65,6 +67,64 @@ def _provider_override(provider: str | None) -> ModelConfig | None:
             config.model_id = model_id
             return config
     return None
+
+
+_QUOTA_RESET_RE = re.compile(
+    r"reset at\s+(\d{2})-(\d{2})\s+(\d{2}):(\d{2}):(\d{2})\s+UTC", re.I
+)
+
+
+def _quota_reset_beijing(message: str) -> str | None:
+    """Extract the provider's quota reset instant and render it in Beijing time."""
+    match = _QUOTA_RESET_RE.search(message or "")
+    if not match:
+        return None
+    month, day, hour, minute, second = (int(part) for part in match.groups())
+    now = datetime.now(timezone.utc)
+    try:
+        reset = datetime(now.year, month, day, hour, minute, second, tzinfo=timezone.utc)
+        if reset < now - timedelta(days=180):
+            reset = reset.replace(year=now.year + 1)
+        return reset.astimezone(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M")
+    except ValueError:
+        return None
+
+
+def _provider_http_error(response: httpx.Response, subject: str = "文本模型") -> str:
+    """Translate provider HTTP failures into bounded, actionable Chinese text.
+
+    Never surface the provider body or credentials; only classify a small set of
+    common errors and extract the quota reset timestamp when present.
+    """
+    status = int(response.status_code)
+    try:
+        body = response.json()
+    except (ValueError, TypeError):
+        body = {}
+    error = body.get("error") if isinstance(body, dict) else None
+    if not isinstance(error, dict):
+        error = {}
+    fallback = body if isinstance(body, dict) else {}
+    code = str(error.get("code") or fallback.get("code") or "").lower()
+    message = str(error.get("message") or fallback.get("message") or "")
+    haystack = f"{code} {message}".lower()
+
+    if status == 429 and (
+        "insufficient_quota" in haystack
+        or ("quota" in haystack and ("exhaust" in haystack or "insufficient" in haystack))
+    ):
+        reset = _quota_reset_beijing(message)
+        reset_text = f"，预计 {reset}（北京时间）重置" if reset else ""
+        return f"{subject}额度已用尽{reset_text}；请充值或切换模型供应商后重试。"
+    if status == 429:
+        return f"{subject}供应商限流（HTTP 429），请稍后重试。"
+    if status in (401, 403):
+        return f"{subject}鉴权失败（HTTP {status}），请检查模型密钥配置。"
+    if status == 404:
+        return f"{subject}或接口地址不存在（HTTP 404），请检查模型配置。"
+    if status >= 500:
+        return f"{subject}供应商暂时不可用（HTTP {status}），请稍后重试。"
+    return f"{subject}服务调用失败（HTTP {status}）。"
 
 
 def _join_api_path(base_url: str, path: str) -> str:
@@ -142,7 +202,8 @@ async def chat_completion(
             headers={**_headers(config), "Content-Type": "application/json"},
             json=payload,
         )
-        response.raise_for_status()
+        if response.status_code >= 400:
+            raise ModelGatewayError(_provider_http_error(response))
         body = response.json()
         choices = body.get("choices") if isinstance(body, dict) else None
         content = (
@@ -155,9 +216,12 @@ async def chat_completion(
         return content, config
     except ModelGatewayError:
         raise
+    except httpx.TimeoutException as exc:
+        logger.warning("LLM 供应商调用超时: %s", type(exc).__name__)
+        raise ModelGatewayError("文本模型调用超时，请稍后重试。") from exc
     except (httpx.HTTPError, ValueError, TypeError, KeyError) as exc:
         logger.warning("LLM 供应商调用失败: %s", type(exc).__name__)
-        raise ModelGatewayError("文本模型服务调用失败") from exc
+        raise ModelGatewayError("文本模型网络调用失败，请稍后重试。") from exc
     finally:
         if owns_client:
             await http_client.aclose()
@@ -200,7 +264,10 @@ async def observe_image(
             headers={**_headers(config), "Content-Type": "application/json"},
             json=payload,
         )
-        response.raise_for_status()
+        if response.status_code >= 400:
+            raise ModelGatewayError(
+                _provider_http_error(response, "图片理解模型")
+            )
         body = response.json()
         choices = body.get("choices") if isinstance(body, dict) else None
         content = choices[0].get("message", {}).get("content") if choices else None
@@ -211,9 +278,12 @@ async def observe_image(
         return content.strip()
     except ModelGatewayError:
         raise
+    except httpx.TimeoutException as exc:
+        logger.warning("图片理解模型调用超时: %s", type(exc).__name__)
+        raise ModelGatewayError("图片理解模型调用超时，请稍后重试。") from exc
     except (httpx.HTTPError, ValueError, TypeError, KeyError) as exc:
         logger.warning("通用图片理解调用失败: %s", type(exc).__name__)
-        raise ModelGatewayError("通用图片理解暂不可用") from exc
+        raise ModelGatewayError("图片理解模型网络调用失败，请稍后重试。") from exc
     finally:
         if owns_client:
             await http_client.aclose()
@@ -246,7 +316,10 @@ async def detect_hazard(
             data=data,
             files=files,
         )
-        response.raise_for_status()
+        if response.status_code >= 400:
+            raise ModelGatewayError(
+                _provider_http_error(response, "视觉检测模型")
+            )
         body = response.json()
         if not isinstance(body, dict):
             raise ModelGatewayError("视觉模型返回格式错误")
@@ -311,7 +384,10 @@ async def synthesize_speech(
                 headers={**_headers(config), "Content-Type": "application/json"},
                 json=payload,
             )
-        response.raise_for_status()
+        if response.status_code >= 400:
+            raise ModelGatewayError(
+                _provider_http_error(response, "语音合成模型")
+            )
 
         content_type = response.headers.get("content-type", "").lower()
         if "application/json" in content_type:
@@ -600,7 +676,10 @@ async def transcribe_audio(
             data={"model": config.model_id, "language": language},
             files={"file": (Path(filename).name, audio_bytes, content_type)},
         )
-        response.raise_for_status()
+        if response.status_code >= 400:
+            raise ModelGatewayError(
+                _provider_http_error(response, "语音识别模型")
+            )
         body = response.json()
         text = body.get("text") if isinstance(body, dict) else None
         if not isinstance(text, str):
