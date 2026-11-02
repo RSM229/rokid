@@ -499,6 +499,10 @@ export const projectApi = {
   // Step 5：项目生命周期（权限 project_complete，默认仅超管）
   complete: (projectId: number) => http.post(`/project/${projectId}/complete`),
   reopen: (projectId: number) => http.post(`/project/${projectId}/reopen`),
+  // 项目转让（仅超管或项目负责人）：移交负责人标记 owner_id；
+  // 权限边界仍由成员表决定，对方无岗位时后端返回 warning 提示
+  transfer: (projectId: number, userId: number) =>
+    http.post(`/project/${projectId}/transfer`, { user_id: userId }),
   // 空壳项目物理删除（仅超管；后端校验所有 project_id 业务表为空 + 回显项目编号）
   remove: (projectId: number, confirmCode: string) =>
     http.delete(`/project/${projectId}`, { data: { confirm_code: confirmCode } }),

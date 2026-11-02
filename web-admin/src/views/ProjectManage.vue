@@ -87,6 +87,11 @@
             <span :class="row.short_name ? '' : 'dim'">{{ row.short_name || '-' }}</span>
           </template>
         </el-table-column>
+        <el-table-column label="负责人" min-width="90">
+          <template #default="{ row }">
+            <span :class="row.owner_name ? '' : 'dim'">{{ row.owner_name || '-' }}</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="location" label="地点" min-width="150">
           <template #default="{ row }">
             <span :class="row.location ? 'dim' : 'dim'">{{ row.location || '-' }}</span>
@@ -218,6 +223,42 @@
       </template>
     </el-dialog>
 
+    <!-- 项目转让：把负责人（owner_id）移交给另一位用户；成员权限仍由「分配人员」决定 -->
+    <el-dialog v-model="transferVisible" title="转让项目" width="480px">
+      <div v-if="transferring" class="del-target">
+        <div class="del-name">{{ transferring.name }}</div>
+        <div class="del-code">当前负责人：{{ transferring.owner_name || '未设置' }}</div>
+      </div>
+      <el-form label-width="90px">
+        <el-form-item label="新负责人" required>
+          <el-select v-model="transferUserId" filterable placeholder="选择用户" style="width: 100%">
+            <el-option
+              v-for="u in transferCandidates"
+              :key="u.id"
+              :label="`${u.real_name || u.username}（${u.username}）`"
+              :value="u.id"
+              :disabled="u.id === transferring?.owner_id"
+            />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <el-alert
+        type="info"
+        :closable="false"
+        show-icon
+        title="转让后原负责人不再标记为项目负责人；若对方尚无本项目岗位，请到「分配人员」中任命。"
+      />
+      <template #footer>
+        <el-button @click="transferVisible = false">取消</el-button>
+        <el-button
+          type="primary"
+          :loading="transferSaving"
+          :disabled="!transferUserId"
+          @click="confirmTransfer"
+        >确认转让</el-button>
+      </template>
+    </el-dialog>
+
     <!-- 项目成员管理（2026-10-23）：与「用户管理 → 项目成员管理」同一共享弹窗，
          本页「分配人员」直接打开，默认选中行上的项目。传 items（全量项目）而非
          visibleItems，免得弹窗内的项目下拉被页面的筛选/搜索裁剪得只剩一项。 -->
@@ -235,7 +276,7 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowDown, Plus, Refresh, Search } from '@element-plus/icons-vue'
-import { projectApi, signatureApi } from '@/api'
+import { projectApi, signatureApi, authApi } from '@/api'
 import { useAuthStore } from '@/stores/auth'
 import MemberManageDialog from '@/components/MemberManageDialog.vue'
 
@@ -261,6 +302,7 @@ const canComplete = computed(() => auth.hasPermission('project_complete'))
 // 物理删除只给超管（与后端 `_require_super` 同口径，不走权限键）
 const isSuperAdmin = computed(() => String(auth.userInfo?.org_role || '') === 'super_admin')
 const currentProjectId = computed(() => auth.userInfo?.project_id ?? null)
+const myUserId = computed(() => (auth.userInfo as any)?.id ?? null)
 const canEdit = computed(() => auth.hasPermission('project_edit'))
 
 const form = reactive({
@@ -383,6 +425,10 @@ function moreActions(row: any): RowAction[] {
   if (canEdit.value) out.push({ key: 'edit', label: '项目资料' })
   out.push({ key: 'members', label: '分配人员' })
   if (canComplete.value && active) out.push({ key: 'complete', label: '结项' })
+  // 转让项目：仅超管或项目负责人本人（与后端 transfer_project 同口径）
+  if (active && (isSuperAdmin.value || row.owner_id === myUserId.value)) {
+    out.push({ key: 'transfer', label: '转让项目' })
+  }
   if (isSuperAdmin.value && row.id !== currentProjectId.value) {
     out.push({ key: 'delete', label: '删除项目', danger: true, divided: true })
   }
@@ -393,6 +439,7 @@ function handleCommand(cmd: string, row: any) {
   if (cmd === 'edit') return openEdit(row)
   if (cmd === 'members') return goMembers(row)
   if (cmd === 'complete') return completeProject(row)
+  if (cmd === 'transfer') return openTransfer(row)
   if (cmd === 'delete') return openDelete(row)
 }
 
@@ -547,6 +594,43 @@ const deleteCode = ref('')
 // ---- 项目成员管理（2026-10-23）：共享弹窗的目标项目与可见性 ----
 const memberDialogVisible = ref(false)
 const memberTargetId = ref<number | null>(null)
+
+// ---- 项目转让（2026-11-02）：移交负责人标记 owner_id ----
+const transferVisible = ref(false)
+const transferSaving = ref(false)
+const transferring = ref<any | null>(null)
+const transferUserId = ref<number | null>(null)
+const transferCandidates = ref<any[]>([])
+
+async function openTransfer(row: any) {
+  transferring.value = row
+  transferUserId.value = null
+  transferVisible.value = true
+  try {
+    const res: any = await authApi.users()
+    transferCandidates.value = Array.isArray(res) ? res : res?.items || []
+  } catch {
+    transferCandidates.value = []
+    ElMessage.error('加载用户列表失败')
+  }
+}
+
+async function confirmTransfer() {
+  if (!transferring.value || !transferUserId.value) return
+  transferSaving.value = true
+  try {
+    const res: any = await projectApi.transfer(transferring.value.id, transferUserId.value)
+    if (res?.warning) ElMessage.warning(res.warning)
+    ElMessage.success(`项目已转让给「${transferCandidates.value.find((u) => u.id === transferUserId.value)?.real_name || '对方'}」`)
+    transferVisible.value = false
+    transferring.value = null
+    await load()
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || '转让失败')
+  } finally {
+    transferSaving.value = false
+  }
+}
 
 function openDelete(row: any) {
   deleting.value = row
