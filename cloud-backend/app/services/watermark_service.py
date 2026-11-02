@@ -269,6 +269,7 @@ def apply_video_watermark(
                 f"视频水印 ffmpeg 失败（returncode={proc.returncode}）: "
                 f"{proc.stderr.decode('utf-8', errors='ignore')[:500]}"
             )
+            output_path.unlink(missing_ok=True)  # 清理半成品，防孤儿文件占磁盘
             return False
         if not output_path.exists():
             logger.warning("视频水印：输出文件未生成")
@@ -277,9 +278,11 @@ def apply_video_watermark(
         return True
     except subprocess.TimeoutExpired:
         logger.warning("视频水印 ffmpeg 执行超时")
+        output_path.unlink(missing_ok=True)
         return False
     except Exception as exc:
         logger.warning(f"视频水印异常：{exc}")
+        output_path.unlink(missing_ok=True)
         return False
 
 
@@ -387,6 +390,7 @@ async def apply_video_watermark_async(
             proc.kill()
             await proc.wait()
             logger.warning("视频水印 ffmpeg 执行超时")
+            output_path.unlink(missing_ok=True)  # 清理半成品
             return False
 
         if proc.returncode != 0:
@@ -395,6 +399,7 @@ async def apply_video_watermark_async(
                 f"视频水印 ffmpeg 失败（returncode={proc.returncode}）: "
                 f"{stderr.decode('utf-8', errors='ignore')[:500]}"
             )
+            output_path.unlink(missing_ok=True)
             return False
         if not output_path.exists():
             logger.warning("视频水印：输出文件未生成")
@@ -403,6 +408,7 @@ async def apply_video_watermark_async(
         return True
     except Exception as exc:
         logger.warning(f"视频水印异常：{exc}")
+        output_path.unlink(missing_ok=True)
         return False
 
 

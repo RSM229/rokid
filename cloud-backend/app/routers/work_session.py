@@ -345,6 +345,7 @@ async def _voice_create_impl(
         }
 
     # 5. 字段齐全 → 创建记录
+    saved_voice_photo = None
     try:
         kwargs = _build_record_kwargs(work_type, fields, user, project_id)
         record = WorkRecord(**kwargs)
@@ -368,6 +369,7 @@ async def _voice_create_impl(
             save_path.mkdir(parents=True, exist_ok=True)
             file_path = save_path / filename
             file_path.write_bytes(watermarked)
+            saved_voice_photo = file_path  # 记录已落盘路径，失败时清理
             public_path = f"/uploads/inspection/{record.id}/{filename}"
             record.inspection_photos = [public_path]
 
@@ -394,6 +396,12 @@ async def _voice_create_impl(
     except Exception as exc:
         logger.error("voice-create 创建记录失败：%s", exc)
         await db.rollback()
+        # rollback 后清理已写盘的照片，防孤儿文件
+        try:
+            if saved_voice_photo is not None:
+                saved_voice_photo.unlink(missing_ok=True)
+        except Exception:
+            pass
         raise HTTPException(status_code=500, detail=f"创建记录失败：{exc}") from exc
 
 

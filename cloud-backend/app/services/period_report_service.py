@@ -659,6 +659,7 @@ async def generate_supervision_log(
         pdf_path = settings.export_dir / pdf_filename
         await asyncio.to_thread(convert_docx_to_pdf, str(docx_out), str(pdf_path))
         docx_out.unlink(missing_ok=True)
+        doc.docx_path = None  # docx 已删（中间产物），清空悬空引用，防 Word 下载 404
         doc.pdf_path = f"/exports/{pdf_filename}"
         await db.commit()
     except Exception as exc:  # noqa: BLE001
@@ -1105,7 +1106,13 @@ async def generate_aggregate_doc(
         raise RuntimeError(f"文书渲染失败：{exc}") from exc
     doc.docx_path = f"/exports/{docx_file.name}"
     doc.pdf_path = None
-    await db.commit()
+    try:
+        await db.commit()
+    except Exception:
+        # commit 失败：回滚并清理已渲染的 docx，防孤儿文件
+        await db.rollback()
+        docx_file.unlink(missing_ok=True)
+        raise
 
     return {
         "doc_id": doc.id,

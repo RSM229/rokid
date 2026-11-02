@@ -127,6 +127,7 @@ async def upload_signature(
         raise HTTPException(status_code=400, detail="请上传 PNG、JPG 或 WEBP 图片")
 
     img_url = _save_signature_image(image_bytes, user.id, file.filename or "signature.png")
+    img_disk_path = settings.upload_dir / "signatures" / Path(img_url).name
 
     signature = Signature(
         user_id=user.id,
@@ -137,7 +138,13 @@ async def upload_signature(
         is_active=True,
     )
     db.add(signature)
-    await db.commit()
+    try:
+        await db.commit()
+    except Exception:
+        # commit 失败：清理已写盘的签章图片，防孤儿文件
+        await db.rollback()
+        img_disk_path.unlink(missing_ok=True)
+        raise
     await db.refresh(signature)
 
     return SignatureResponse(

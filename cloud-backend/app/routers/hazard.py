@@ -166,6 +166,7 @@ async def _persist_detected_hazard(
         hazard_flag=detection.get("top1_risk") or detection.get("risk_status") or "",
     )
     img_url = _save_image(watermarked, "hazard", filename or "capture.jpg")
+    img_disk_path = settings.upload_dir / Path(img_url).name  # 落盘真实路径，commit 失败时清理
 
     has_hazard = bool(detection.get("has_hazard")) or (
         detection.get("risk_status") == "存在隐患"
@@ -187,7 +188,12 @@ async def _persist_detected_hazard(
                 remark="AI识别：未发现隐患",
             )
         )
-        await db.commit()
+        try:
+            await db.commit()
+        except Exception:
+            await db.rollback()
+            img_disk_path.unlink(missing_ok=True)
+            raise
         return {
             "hazard_id": None,
             "result": detection,
@@ -233,7 +239,12 @@ async def _persist_detected_hazard(
         remark=f"AI识别: {detection.get('top1_risk', '')}",
     )
     db.add(image_record)
-    await db.commit()
+    try:
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        img_disk_path.unlink(missing_ok=True)
+        raise
     await db.refresh(hazard)
 
     # 实时推送：隐患识别命中

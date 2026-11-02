@@ -26,6 +26,8 @@ from app.config import settings
 import os
 import json
 import logging
+import uuid
+from pathlib import Path
 from app.services.record_fields import business_date, now_local, validate_times, validate_record, invalidate_document, ACCEPTANCE_RESULTS
 
 router = APIRouter()
@@ -838,34 +840,43 @@ async def upload_inspection_photos(
         raise HTTPException(404, "记录不存在或无权操作")
 
     project = await db.get(Project, project_id)
+    saved_files = []  # 已落盘的本地路径，失败时统一清理
     saved_paths = []
-    for i, photo in enumerate(photos):
-        # 读取原始图片
-        raw_bytes = await _read_valid_photo(photo)
-        # 添加水印
-        watermarked = await apply_watermark_to_image(
-            image_data=raw_bytes,
-            project_name=project_name or (project.name if project else ""),
-            supervisor=user.real_name,
-            unit_project=unit_project,
-            section=section,
-            work_content=work_content,
-            weather=weather,
-        )
-        # 保存文件
-        filename = f"inspection_{record_id}_{i}_{datetime.now().strftime('%Y%m%d%H%M%S')}.jpg"
-        save_path = settings.upload_dir / "inspection" / str(record_id)
-        os.makedirs(save_path, exist_ok=True)
-        file_path = save_path / filename
-        with open(file_path, "wb") as f:
-            f.write(watermarked)
-        saved_paths.append(f"/uploads/inspection/{record_id}/{filename}")
+    try:
+        for i, photo in enumerate(photos):
+            # 读取原始图片
+            raw_bytes = await _read_valid_photo(photo)
+            # 添加水印
+            watermarked = await apply_watermark_to_image(
+                image_data=raw_bytes,
+                project_name=project_name or (project.name if project else ""),
+                supervisor=user.real_name,
+                unit_project=unit_project,
+                section=section,
+                work_content=work_content,
+                weather=weather,
+            )
+            # 保存文件
+            filename = f"inspection_{record_id}_{i}_{datetime.now().strftime('%Y%m%d%H%M%S')}_{uuid.uuid4().hex[:6]}.jpg"
+            save_path = settings.upload_dir / "inspection" / str(record_id)
+            os.makedirs(save_path, exist_ok=True)
+            file_path = save_path / filename
+            with open(file_path, "wb") as f:
+                f.write(watermarked)
+            saved_files.append(file_path)
+            saved_paths.append(f"/uploads/inspection/{record_id}/{filename}")
 
-    # 更新记录
-    existing_photos = record.inspection_photos or []
-    existing_photos.extend(saved_paths)
-    record.inspection_photos = existing_photos
-    await db.commit()
+        # 更新记录
+        existing_photos = record.inspection_photos or []
+        existing_photos.extend(saved_paths)
+        record.inspection_photos = existing_photos
+        await db.commit()
+    except Exception:
+        # 任一张校验/水印失败或 commit 失败：回滚并删除已写盘的照片，防孤儿文件
+        await db.rollback()
+        for fp in saved_files:
+            Path(fp).unlink(missing_ok=True)
+        raise
 
     return {"detail": f"已上传 {len(saved_paths)} 张照片", "paths": saved_paths}
 
@@ -1199,29 +1210,38 @@ async def upload_witness_photos(
         raise HTTPException(404, "记录不存在或无权操作")
 
     project = await db.get(Project, project_id)
+    saved_files = []  # 已落盘的本地路径，失败时统一清理
     saved_paths = []
-    for i, photo in enumerate(photos):
-        raw_bytes = await _read_valid_photo(photo)
-        watermarked = await apply_watermark_to_image(
-            raw_bytes,
-            project_name=project.name if project else "",
-            supervisor=user.real_name,
-            section=record.section or "",
-            location=record.location or "",
-            work_content=record.witness_material_name or "见证取样",
-        )
-        filename = f"witness_{record_id}_{i}_{datetime.now().strftime('%Y%m%d%H%M%S')}.jpg"
-        save_path = settings.upload_dir / "witness" / str(record_id)
-        os.makedirs(save_path, exist_ok=True)
-        file_path = save_path / filename
-        with open(file_path, "wb") as f:
-            f.write(watermarked)
-        saved_paths.append(f"/uploads/witness/{record_id}/{filename}")
+    try:
+        for i, photo in enumerate(photos):
+            raw_bytes = await _read_valid_photo(photo)
+            watermarked = await apply_watermark_to_image(
+                raw_bytes,
+                project_name=project.name if project else "",
+                supervisor=user.real_name,
+                section=record.section or "",
+                location=record.location or "",
+                work_content=record.witness_material_name or "见证取样",
+            )
+            filename = f"witness_{record_id}_{i}_{datetime.now().strftime('%Y%m%d%H%M%S')}_{uuid.uuid4().hex[:6]}.jpg"
+            save_path = settings.upload_dir / "witness" / str(record_id)
+            os.makedirs(save_path, exist_ok=True)
+            file_path = save_path / filename
+            with open(file_path, "wb") as f:
+                f.write(watermarked)
+            saved_files.append(file_path)
+            saved_paths.append(f"/uploads/witness/{record_id}/{filename}")
 
-    existing = record.witness_photos or []
-    existing.extend(saved_paths)
-    record.witness_photos = existing
-    await db.commit()
+        existing = record.witness_photos or []
+        existing.extend(saved_paths)
+        record.witness_photos = existing
+        await db.commit()
+    except Exception:
+        # 任一张失败或 commit 失败：回滚并删除已写盘照片，防孤儿文件
+        await db.rollback()
+        for fp in saved_files:
+            Path(fp).unlink(missing_ok=True)
+        raise
 
     return {"detail": f"已上传 {len(saved_paths)} 张见证照片", "paths": saved_paths}
 

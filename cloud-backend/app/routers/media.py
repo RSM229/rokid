@@ -437,7 +437,14 @@ async def upload_image(
             else "微信小程序/统一媒体上传"
         ),
     ))
-    await db.commit()
+    try:
+        await db.commit()
+    except Exception:
+        # commit 失败：回滚并清理两张已落盘文件，防孤儿图残留
+        await db.rollback()
+        original.unlink(missing_ok=True)
+        processed.unlink(missing_ok=True)
+        raise
     await db.refresh(record)
     return {
         **_serialize(record),
@@ -510,21 +517,22 @@ async def upload_video(
 
     # 自动调用视频水印服务（异步，不阻塞上传响应）
     watermarked_url: Optional[str] = None
+    watermarked_fs_path: Optional[Path] = None
     try:
         from app.services.watermark_service import apply_video_watermark_async
         project = await db.get(Project, project_id)
-        watermarked_path = _media_dir(MediaType.VIDEO.value) / f"{path.stem}_watermarked.mp4"
+        watermarked_fs_path = _media_dir(MediaType.VIDEO.value) / f"{path.stem}_watermarked.mp4"
         ok = await apply_video_watermark_async(
             input_path=path,
-            output_path=watermarked_path,
+            output_path=watermarked_fs_path,
             project_name=project.name if project else "",
             supervisor=user.real_name,
             location=location or "",
             section=section or "",
             weather=weather or "",
         )
-        if ok and watermarked_path.exists():
-            watermarked_url = _public_path(watermarked_path)
+        if ok and watermarked_fs_path.exists():
+            watermarked_url = _public_path(watermarked_fs_path)
             record.processed_path = watermarked_url
             await db.flush()
     except Exception as exc:
@@ -559,7 +567,15 @@ async def upload_video(
             "视频冗余索引 VideoRecord 建档失败（视频本体已入库，不影响上传结果）：%s", exc
         )
 
-    await db.commit()
+    try:
+        await db.commit()
+    except Exception:
+        # commit 失败：回滚并清理已落盘的原始+水印视频，防孤儿文件（最大 200MB/次）
+        await db.rollback()
+        path.unlink(missing_ok=True)
+        if watermarked_fs_path is not None:
+            watermarked_fs_path.unlink(missing_ok=True)
+        raise
     await db.refresh(record)
     return {**_serialize(record), "idempotent_replay": False}
 

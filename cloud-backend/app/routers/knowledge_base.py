@@ -1073,7 +1073,13 @@ async def upload_document(
     )
     db.add(doc)
     kb.updated_at = datetime.now()
-    await db.commit()
+    try:
+        await db.commit()
+    except Exception:
+        # commit 失败：清理已写盘的文档，防孤儿文件
+        await db.rollback()
+        target.unlink(missing_ok=True)
+        raise
     await db.refresh(doc)
     # 上传即可检索：把这份文档增量编进 RAG 索引（响应之后在后台线程执行）
     background.add_task(_reindex_knowledge_docs)
@@ -1144,7 +1150,13 @@ async def upload_audio_transcript(
     )
     db.add(doc)
     kb.updated_at = datetime.now()
-    await db.commit()
+    try:
+        await db.commit()
+    except Exception:
+        # commit 失败：清理已写盘的转写文本，防孤儿文件
+        await db.rollback()
+        target.unlink(missing_ok=True)
+        raise
     await db.refresh(doc)
     return {**_serialize_doc(doc, user), "text": text, "duration": result.get("duration", 0)}
 

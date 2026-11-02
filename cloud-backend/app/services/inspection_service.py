@@ -6,11 +6,13 @@
 import logging
 import hashlib
 from datetime import datetime
+from pathlib import Path
 from typing import Optional
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.models.hazard import Hazard, HazardStatus
 from app.models.image import ImageRecord
 from app.models.inspection_session import InspectionSession, InspectionStatus
@@ -201,7 +203,17 @@ async def capture_and_detect(
         )
     )
 
-    await db.commit()
+    try:
+        await db.commit()
+    except Exception:
+        # commit 失败：回滚并清理已落盘的取证图，防孤儿文件
+        await db.rollback()
+        if img_url:
+            try:
+                (settings.upload_dir / Path(img_url).name).unlink(missing_ok=True)
+            except Exception:
+                pass
+        raise
 
     # 生成指令：speak_urgent + vibrate
     instruction = {
