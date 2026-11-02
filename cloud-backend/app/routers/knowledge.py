@@ -524,11 +524,22 @@ async def maintain_regulations(
         except RuntimeError as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-        # 同步更新数据库 regulation_chunks 表的 category 字段
+        # 同步更新数据库 regulation_chunks 表的 category 字段；
+        # 失败时把文件移回原分类做补偿，避免文件位置与检索索引长期不一致
         try:
             affected = await update_category_in_db(db, req.name, req.target_category)
-        except Exception:
-            affected = 0
+        except Exception as exc:
+            try:
+                _move_category(req.name, move_result["old_category"])
+            except Exception as rollback_exc:
+                raise HTTPException(
+                    status_code=500,
+                    detail=(
+                        f"数据库更新失败且文件回移也失败：{rollback_exc}；"
+                        f"文件现位于 {move_result['new_category']} 分类，需人工核对"
+                    ),
+                ) from exc
+            raise HTTPException(status_code=500, detail=f"数据库更新失败，文件已移回原分类: {exc}") from exc
         move_result["db_updated_rows"] = affected
         move_result["action"] = "move_category"
         return move_result

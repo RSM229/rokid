@@ -514,34 +514,56 @@ async def batch_archive_ledger(
     if not files:
         raise HTTPException(status_code=404, detail="所选类型均无数据可归档")
 
+    # 归档名安全化：仅取路径末段并过滤为白名单字符，防路径穿越
+    raw_name = req.archive_name.strip()
+    safe_name = re.sub(r"[^0-9A-Za-z\u4e00-\u9fff._-]+", "_", Path(raw_name).name).strip("._")[:120]
+    if not safe_name:
+        raise HTTPException(status_code=400, detail="归档名称含无效字符")
+
+    # 同名查重：同项目同名归档直接拒绝，避免覆盖写导致两条记录指向同一文件
+    dup = await db.execute(
+        select(Archive).where(Archive.project_id == project_id, Archive.name == safe_name)
+    )
+    if dup.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail=f"已存在同名归档「{safe_name}」，请更换名称")
+
     # 归档目录
-    archive_dir = settings.export_dir / "archives" / str(project_id) / req.archive_name.strip()
+    archive_root = (settings.export_dir / "archives" / str(project_id)).resolve()
+    archive_dir = (archive_root / safe_name).resolve()
+    if not archive_dir.is_relative_to(archive_root):
+        raise HTTPException(status_code=400, detail="归档名称非法")
     archive_dir.mkdir(parents=True, exist_ok=True)
 
-    saved_files = []
-    for filename, data in files:
-        file_path = archive_dir / filename
-        file_path.write_bytes(data)
-        saved_files.append(filename)
+    try:
+        saved_files = []
+        for filename, data in files:
+            file_path = archive_dir / filename
+            file_path.write_bytes(data)
+            saved_files.append(filename)
 
-    # 打包一份 zip 便于整体下载
-    zip_bytes = create_zip(files)
-    zip_filename = f"{req.archive_name.strip()}.zip"
-    zip_path = archive_dir / zip_filename
-    zip_path.write_bytes(zip_bytes)
+        # 打包一份 zip 便于整体下载
+        zip_bytes = create_zip(files)
+        zip_filename = f"{safe_name}.zip"
+        zip_path = archive_dir / zip_filename
+        zip_path.write_bytes(zip_bytes)
 
-    # 创建归档记录
-    archive = Archive(
-        project_id=project_id,
-        name=req.archive_name.strip(),
-        file_path=f"/exports/archives/{project_id}/{req.archive_name.strip()}/{zip_filename}",
-        ledger_types_json=req.ledger_types,
-        date_from=_parse_dt(req.date_from),
-        date_to=_parse_dt(req.date_to),
-        created_by=user.id,
-    )
-    db.add(archive)
-    await db.commit()
+        # 创建归档记录
+        archive = Archive(
+            project_id=project_id,
+            name=safe_name,
+            file_path=f"/exports/archives/{project_id}/{safe_name}/{zip_filename}",
+            ledger_types_json=req.ledger_types,
+            date_from=_parse_dt(req.date_from),
+            date_to=_parse_dt(req.date_to),
+            created_by=user.id,
+        )
+        db.add(archive)
+        await db.commit()
+    except Exception:
+        # 落库失败：回滚并清掉已写盘的归档目录，避免孤儿文件
+        await db.rollback()
+        shutil.rmtree(archive_dir, ignore_errors=True)
+        raise
     await db.refresh(archive)
 
     return {
@@ -636,7 +658,19 @@ async def delete_archive(
     if stored_file.is_relative_to(archive_root):
         directory = stored_file.parent
         if directory.exists():
-            shutil.rmtree(directory)
+            # 若仍有其他归档记录指向同一目录（历史同名覆盖遗留），只删本记录的文件
+            siblings = await db.execute(
+                select(func.count(Archive.id)).where(
+                    Archive.project_id == project_id,
+                    Archive.id != archive.id,
+                    Archive.file_path.like(f"%/{directory.name}/%"),
+                )
+            )
+            sibling_count = siblings.scalar() or 0
+            if sibling_count > 0:
+                stored_file.unlink(missing_ok=True)
+            else:
+                shutil.rmtree(directory, ignore_errors=True)
 
     await db.delete(archive)
     await db.commit()
