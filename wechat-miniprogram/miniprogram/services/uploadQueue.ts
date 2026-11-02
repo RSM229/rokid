@@ -2,6 +2,7 @@ import { createIdempotencyKey } from '../utils/idempotency'
 import { config } from '../config'
 import type { UploadFields } from './upload'
 import { UploadError, uploadAudio, uploadImage, uploadVideo } from './upload'
+import { session } from './session'
 
 const QUEUE_KEY = `gdjl_${config.storageScope}_media_upload_queue`
 
@@ -78,25 +79,35 @@ export const uploadQueue = {
     const queue = readQueue()
     const targets = queue.filter((item) => !(skipAudio && item.mediaType === 'audio'))
     const failures = new Map<string, string>()
+    const dropped = new Set<string>() // 成功或不可重试出队的条目 id
     let succeeded = 0
     for (const item of targets) {
+      // 🔴 token 失效后中止：继续循环只会逐项 401 并连环触发整页 reLaunch（队列上限 20）
+      if (!session.getToken()) break
       try {
         await this.uploadOne(item)
         succeeded += 1
+        dropped.add(item.id)
       } catch (error) {
         // 不可重试（文件失效/内容不合规）直接丢弃，避免永久卡在队列里
         if (!(error instanceof UploadError) || error.retryable) {
           failures.set(item.id, (error as Error).message)
+        } else {
+          dropped.add(item.id)
         }
       }
     }
-    writeQueue(
-      queue
-        .filter((item) => failures.has(item.id) || (skipAudio && item.mediaType === 'audio'))
-        .map((item) =>
-          failures.has(item.id) ? { ...item, lastError: failures.get(item.id) } : item,
-        ),
-    )
+    // 🔴 写回前重读最新队列再按 id 合并，不用起始快照整表覆盖：
+    // retryAll 串行耗时可达数分钟，期间 enqueue 的新条目不能丢、remove 的取消项不能复活。
+    // 保留规则：只移除 dropped（本轮成功/不可重试出队）的条目——
+    // 失败的保留（带 lastError），break 中止未处理的保留，新入队/跳过的也原样保留。
+    const latest = readQueue()
+    const merged = latest
+      .filter((item) => !dropped.has(item.id))
+      .map((item) =>
+        failures.has(item.id) ? { ...item, lastError: failures.get(item.id) } : item,
+      )
+    writeQueue(merged)
     return { succeeded, failed: failures.size }
   },
   /** 单项上传；audio 走 STT 转写，返回识别文本 */
