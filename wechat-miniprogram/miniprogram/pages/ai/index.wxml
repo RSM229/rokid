@@ -7,6 +7,13 @@
     <view class="{{mode === 'image' ? 'active' : ''}}" data-mode="image" bindtap="onMode">AI 生图</view>
   </view>
 
+  <view class="model-bar" bindtap="onModelPickerToggle">
+    <view class="model-bar-dot"></view>
+    <text class="model-bar-label">模型</text>
+    <text class="model-bar-name">{{currentModelName}}</text>
+    <text class="model-bar-caret">{{modelPickerVisible ? '▴' : '▾'}}</text>
+  </view>
+
   <!-- 任务报告 -->
   <block wx:if="{{mode === 'task'}}">
     <view class="card">
@@ -53,4 +60,6 @@
       <image class="result-image" src="{{imageUrl}}" mode="widthFix" />
     </view>
   </block>
+
+  <model-picker visible="{{modelPickerVisible}}" models="{{models}}" value="{{currentModelId}}" bind:select="onModelPicked" bind:close="onModelPickerToggle" />
 </view>

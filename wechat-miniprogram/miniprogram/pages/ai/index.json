@@ -2,6 +2,7 @@
   "navigationBarTitleText": "AI 创作",
   "navigationStyle": "custom",
   "usingComponents": {
-    "glass-nav-bar": "/components/glass-nav-bar/index"
+    "glass-nav-bar": "/components/glass-nav-bar/index",
+    "model-picker": "/components/model-picker/index"
   }
 }

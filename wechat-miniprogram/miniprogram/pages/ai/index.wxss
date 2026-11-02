@@ -14,3 +14,23 @@
 .result-title { font-size: 30rpx; font-weight: 700; color: var(--ink-2, #243b55); margin-bottom: 12rpx; }
 .result-body { font-size: 27rpx; color: #334; line-height: 1.7; white-space: pre-wrap; margin-bottom: 16rpx; }
 .result-image { width: 100%; border-radius: 12rpx; }
+
+.model-bar {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  margin-bottom: 16rpx;
+  padding: 16rpx 20rpx;
+  border-radius: 16rpx;
+  background: rgba(255,255,255,0.32);
+  border: 2rpx solid rgba(var(--brand-rgb, 22,119,255), 0.14);
+}
+.model-bar-dot {
+  width: 16rpx;
+  height: 16rpx;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--brand-l, #3b8cff), var(--brand-d, #0b5fd0));
+}
+.model-bar-label { font-size: 25rpx; color: #5c6e84; font-weight: 600; }
+.model-bar-name { flex: 1; font-size: 26rpx; color: var(--ink-2, #243b55); font-weight: 600; }
+.model-bar-caret { font-size: 24rpx; color: #5c6e84; }

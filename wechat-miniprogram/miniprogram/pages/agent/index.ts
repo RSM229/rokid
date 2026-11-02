@@ -9,6 +9,7 @@ import { ensurePrivacy } from '../../utils/privacy'
 import { themed } from '../../utils/theme'
 import { cleanMarkdown } from '../../utils/markdown'
 import { normalizeDateTimeInput, resolveDateTimeRange } from '../../utils/date-time-picker'
+import { MODEL_CATALOG } from '../../services/modelCatalog'
 import { FORM_CODE_BY_LABEL, createReviewPlan, saveReviewPlan, listReviewPlans, confirmReviewPlan, executeReviewPlan, editEvent, editFormField, editEvidenceWatermark, addEvidenceWatermark, confirmPlan, reviewIssues, evidenceTargetConflicts, reviewPlanFromItemPlan, mergeEvents, splitEvidence, releaseEvidence, assignEvidence, addEvent, removeEvent, type ReviewPlan, type RequestPlanItemPlan } from '../../services/work-review'
 
 const INLINE_RECORD_TYPES = ['巡视', '验收', '见证', '旁站', '平行检验', '起重机械安拆检查', '待定']
@@ -447,24 +448,11 @@ function sessionIdFromConversationId(conversationId: string): number {
 // 确定性本地动作（语音记录/拍照识别/查资料/生成日志）仍由空态宫格 heroActions → handleActionTap 直接触发，
 // 零延迟、不经过 LLM。
 
-/** 工作台「模型」下拉可选的大模型清单（2026-10-09 改版：原为千问/华工两供应商，现扩展为多个模型）。
- * 2026-10-09 14:13 按需求精简为「华工 + 千问 3.7」两项系列（共 3 条）。
+/** 工作台「模型」下拉可选的大模型清单。
+ * 统一从 services/modelCatalog 引入（与"智能助手"页共用同一份目录与选择器组件）：
  *  - provider='' 走默认文本大模型端点（阿里云 token-plan），用 model 字段覆盖具体模型名；
  *  - provider='huagong' 走华南理工独立供应商（未配置则后端自动回退默认模型）。 */
-interface ChatModel {
-  id: string
-  name: string
-  desc: string
-  provider: string
-  model: string
-  temperature: number
-}
-
-const CHAT_MODELS: ChatModel[] = [
-  { id: 'qwen3.7-max', name: '通义千问 3.7 Max', desc: '最强推理，复杂规范分析', provider: '', model: 'qwen3.7-max', temperature: 0.7 },
-  { id: 'qwen3.7-plus', name: '通义千问 3.7 Plus', desc: '均衡通用，日常问答', provider: '', model: 'qwen3.7-plus', temperature: 0.7 },
-  { id: 'huagong', name: '华工大模型', desc: '华南理工，视觉/深度', provider: 'huagong', model: '', temperature: 0.6 },
-]
+const CHAT_MODELS = MODEL_CATALOG
 
 /** 工作记录字段候选值：语音里没说清楚的字段，先给常用项让用户点选，不合适再自己填写 */
 const FIELD_SUGGESTIONS: Record<string, string[]> = {
@@ -4968,8 +4956,9 @@ Page(themed({
     this.setData({ showModelMenu: !this.data.showModelMenu })
   },
 
-  selectModel(event: WechatMiniprogram.TouchEvent) {
-    const id = event.currentTarget.dataset.model as string
+  selectModel(event: WechatMiniprogram.TouchEvent | WechatMiniprogram.CustomEvent) {
+    const detail = event.detail as { id?: string }
+    const id = (detail && detail.id) || (event.currentTarget && (event.currentTarget.dataset.model as string))
     const model = this.data.models.find(m => m.id === id)
     if (!model) return
     wx.setStorageSync(`gdjl_${config.storageScope}_agent_model`, model.id)

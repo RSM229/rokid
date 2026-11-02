@@ -29,7 +29,7 @@
     <scroll-view class="messages" scroll-y scroll-into-view="bottom" enhanced show-scrollbar="{{false}}">
       <!-- Hero（ima 风格空状态：大问候语 + 竖排建议按钮） -->
       <view wx:if="{{messages.length <= 1 && !loading}}" class="hero">
-        <view class="hero-greeting">你好，我是你的工程项目管理AI智能体</view>
+        <view class="hero-greeting">您好！今天有什么工作需要我帮您处理?</view>
         <!-- 🔴 无项目时的常驻引导条：说清「现在能用什么」+「下一步去哪」，
              取代原来那个必然 403 的「创建新项目」弹窗（该接口仅超管可调用，
              而超管不允许登录小程序 ⇒ 小程序里任何人都建不了项目）。 -->
@@ -455,17 +455,7 @@
         <view class="send-fab {{canSend ? 'active' : ''}}" bindtap="send">
           <view class="send-fab-ic"></view>
         </view>
-        <view wx:if="{{showModelMenu}}" class="model-mask" bindtap="toggleModelMenu"></view>
-        <view class="model-menu" wx:if="{{showModelMenu}}">
-          <view class="model-menu-item {{currentModel === item.id ? 'active' : ''}}"
-                wx:for="{{models}}" wx:key="id" data-model="{{item.id}}" bindtap="selectModel">
-            <view class="model-menu-row1">
-              <text class="model-menu-name">{{item.name}}</text>
-              <text wx:if="{{currentModel === item.id}}" class="model-menu-check">✓</text>
-            </view>
-            <text class="model-menu-desc">{{item.desc}}</text>
-          </view>
-        </view>
+        <model-picker visible="{{showModelMenu}}" models="{{models}}" value="{{currentModel}}" bind:select="selectModel" bind:close="toggleModelMenu" />
       </view>
     </view>
   </view>

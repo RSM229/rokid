@@ -107,6 +107,7 @@ class AICenterClient:
         messages: list[dict],
         temperature: float = 0.7,
         max_tokens: int = 2048,
+        model: str | None = None,
     ) -> str:
         """LLM 文本生成（通用对话接口）
 
@@ -120,6 +121,8 @@ class AICenterClient:
             messages: OpenAI 格式的消息列表
             temperature: 生成温度
             max_tokens: 最大生成 token 数
+            model: 可选，覆盖默认端点的具体模型名（如 qwen3.7-max）。
+                   仅默认端点生效；独立供应商（如 huagong）忽略。
         Returns:
             生成的文本内容
         """
@@ -128,6 +131,7 @@ class AICenterClient:
                 messages,
                 temperature=temperature,
                 max_tokens=max_tokens,
+                model=model,
             )
             return content
         except model_gateway.ModelGatewayError as exc:

@@ -35,6 +35,7 @@ class TaskRequest(BaseModel):
     prompt: str = Field(min_length=1, max_length=4000)
     kb_id: Optional[int] = None
     save_note: bool = False
+    model: Optional[str] = None
 
 
 class PodcastRequest(BaseModel):
@@ -42,11 +43,13 @@ class PodcastRequest(BaseModel):
     note_id: Optional[int] = None
     kb_id: Optional[int] = None
     question: Optional[str] = Field(default=None, max_length=2000)
+    model: Optional[str] = None
 
 
 class ImageRequest(BaseModel):
     prompt: str = Field(min_length=1, max_length=1000)
     size: str = "1024*1024"
+    model: Optional[str] = None
 
 
 async def _kb_context(db: AsyncSession, user: User, kb_id: int, question: str) -> str:
@@ -90,7 +93,9 @@ async def run_task(
         {"role": "user", "content": user_content},
     ]
     try:
-        content = await ai_client.chat_completion(messages, temperature=0.4, max_tokens=3000)
+        content = await ai_client.chat_completion(
+            messages, temperature=0.4, max_tokens=3000, model=req.model,
+        )
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=503, detail=f"生成失败：{exc}") from exc
 
@@ -150,7 +155,9 @@ async def make_podcast(
         {"role": "user", "content": source[:6000]},
     ]
     try:
-        script = await ai_client.chat_completion(messages, temperature=0.6, max_tokens=1200)
+        script = await ai_client.chat_completion(
+            messages, temperature=0.6, max_tokens=1200, model=req.model,
+        )
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=503, detail=f"生成文案失败：{exc}") from exc
 
