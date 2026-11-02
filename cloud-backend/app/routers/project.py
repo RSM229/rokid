@@ -152,7 +152,9 @@ def _project_info(project: Project) -> ProjectInfo:
         name=project.name,
         code=project.code,
         short_name=project.short_name,
-        eng_type=project.eng_type,
+        # 兼容滚动发布：即使路由先上线、Project 模型尚未同步，列表也不应 500。
+        # 完整功能仍需同时发布模型与数据库迁移；写接口由发布流程保证一致。
+        eng_type=getattr(project, "eng_type", None),
         location=project.location,
         description=project.description,
         construction_unit=project.construction_unit,

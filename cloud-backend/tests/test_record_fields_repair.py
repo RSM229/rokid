@@ -303,7 +303,7 @@ class RecordRepairTests(unittest.IsolatedAsyncioTestCase):
         from sqlalchemy import MetaData
         metadata = MetaData()
         additions = {
-            'projects': {'construction_unit','supervision_unit','supervision_org','acceptance_participants','latitude','longitude','seal_signature_id'},
+            'projects': {'eng_type','construction_unit','supervision_unit','supervision_org','acceptance_participants','latitude','longitude','seal_signature_id'},
             'work_records': {'worker_count','station_process','record_date','inspection_start_time','inspection_end_time','acceptance_participants'},
             'documents': {'content_revision','reviewed_at','reviewed_by'},
             'parallel_inspections': {'method','generated_doc_id'},
@@ -378,10 +378,32 @@ class RecordRepairTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('更新后验收内容',words)
 
     async def test_project_fields_roundtrip(self):
-        await project.update_project(self.p.id,project.UpdateProjectRequest(construction_unit='更正施工单位',supervision_org='项目监理机构',latitude='23.1',longitude='113.2'),self.u,self.db)
+        await project.update_project(self.p.id,project.UpdateProjectRequest(eng_type='房建',construction_unit='更正施工单位',supervision_org='项目监理机构',latitude='23.1',longitude='113.2'),self.u,self.db)
         response=project._project_info(self.p)
-        self.assertEqual(response.construction_unit,'更正施工单位');self.assertEqual(response.latitude,'23.1')
+        self.assertEqual(response.eng_type,'房建');self.assertEqual(response.construction_unit,'更正施工单位');self.assertEqual(response.latitude,'23.1')
         with self.assertRaises(HTTPException):await project.update_project(self.p.id,project.UpdateProjectRequest(latitude='999'),self.u,self.db)
+        with self.assertRaises(HTTPException):await project.update_project(self.p.id,project.UpdateProjectRequest(eng_type='桥梁'),self.u,self.db)
+
+    async def test_project_info_contract_and_stale_model_compatibility(self):
+        # 响应字段必须都在 ORM 上存在，防止再次出现「路由先加了字段、模型没加」。
+        missing=set(project.ProjectInfo.model_fields)-set(Project.__table__.columns.keys())
+        self.assertFalse(missing,f'ProjectInfo 字段缺少 ORM 列: {sorted(missing)}')
+        # 滚动发布时旧 Project 模型可能还没有 eng_type；列表读取必须降级为 None 而不是 500。
+        stale=SimpleNamespace(
+            id=1,name='旧模型项目',code='OLD',short_name=None,location=None,description=None,
+            construction_unit=None,supervision_unit=None,supervision_org=None,
+            acceptance_participants=None,latitude=None,longitude=None,seal_signature_id=None,
+            status='active',completed_at=None,
+        )
+        self.assertIsNone(project._project_info(stale).eng_type)
+
+    async def test_project_lifecycle_rejects_cross_org_operation(self):
+        other=SimpleNamespace(org_id=2)
+        project._require_same_org(SimpleNamespace(org_id=None),other)
+        project._require_same_org(SimpleNamespace(org_id=1),SimpleNamespace(org_id=None))
+        project._require_same_org(SimpleNamespace(org_id=1),SimpleNamespace(org_id=1))
+        with self.assertRaises(HTTPException):
+            project._require_same_org(SimpleNamespace(org_id=1),other)
 
     async def test_signature_slot_role_and_history_preservation(self):
         doc=Document(project_id=self.p.id,creator_id=self.u.id,doc_type='巡视记录',title='巡视',content={'project_name':self.p.name,'date':'2026-10-08','construction_unit':'施工单位','section':'A栋','worker_count':0,'content':'检查'},status='草稿')
