@@ -501,8 +501,6 @@ Page(themed({
   /** 当前会话在本地历史里的 id（稳定不变，重复保存=覆盖同一条，避免产生重复历史） */
   currentSessionId: 0,
   inlinePlanSaveQueues: {} as Record<string, Promise<void>>,
-  /** 双击工作台空白处新建对话：上一次背景点击时间戳（同一元素、300ms 内视为双击） */
-  lastWorkbenchTapTime: 0,
 
   data: {
     messages: [] as Message[],
@@ -1045,6 +1043,7 @@ Page(themed({
         this.setData({ loading: false })
         return
       }
+      let handedOffToSend = false
       try {
         const transcript = await uploadAudio<{ text: string }>(result.tempFilePath)
         if (!transcript.text) throw new Error('没有识别到有效语音')
@@ -1071,8 +1070,18 @@ Page(themed({
           this.setData({ voiceSessionTexts: [...this.data.voiceSessionTexts, transcript.text] })
           wx.showToast({ title: '语音片段已记录', icon: 'success' })
         } else {
-          this.setData({ input: transcript.text })
-          await this.send()
+          this.setData({ input: transcript.text, loading: false })
+          // 🔴 必须先清 loading 再 send：send() 入口用 this.data.loading 做防重入，
+          // onStop 开头置的 loading 是转写态，不清掉会让 send() 直接 return（自锁），
+          // 语音识别完却永远不自动发送（2026-11-02 修复）。
+          // 交接成功后 finally 不再清 loading——AI 回复中的 loading 由 send 下游自管。
+          handedOffToSend = true
+          try {
+            await this.send()
+          } catch (sendErr) {
+            // 发送失败不应被上面的 catch 误判为「上传失败」而把语音重复入队
+            console.warn('语音转写后发送失败', sendErr)
+          }
         }
       } catch (error) {
         // PRD 19.5：录音上传失败进入本地待同步队列，用户可取消或重试
@@ -1085,7 +1094,7 @@ Page(themed({
           showCancel: false,
         })
       } finally {
-        this.setData({ loading: false })
+        if (!handedOffToSend) this.setData({ loading: false })
       }
     })
     recorder.onError((error) => {
@@ -4357,6 +4366,8 @@ Page(themed({
   },
 
   async postWorkForm(type: string, payload: Record<string, any>) {
+    // 🔴 防重入：请求在途中再点一次会重复建单（巡视/旁站 30s+ 很容易连点）
+    if (this.data.workFormSubmitting) return
     this.setData({ workFormSubmitting: true })
     const endpoint = type === 'inspection' ? '/work-record/inspection'
       : type === 'acceptance' ? '/work-record/acceptance'
@@ -4380,6 +4391,8 @@ Page(themed({
   },
 
   async submitDailyLog() {
+    // 🔴 防重入：日志生成 30~60s，连点会生成两份当日监理日志
+    if (this.data.logGenerating) return
     this.setData({ logGenerating: true })
     try {
       const result = await request<{ doc_id: number; work_count: number; hazard_count: number; summary?: { work_records?: number; hazards?: number } }>(
@@ -4428,6 +4441,7 @@ Page(themed({
   async submitTaskForm() {
     const form = this.data.taskForm
     if (!form.title.trim()) { wx.showToast({ title: '请输入任务标题', icon: 'none' }); return }
+    if (this.data.taskSubmitting) return // 🔴 防重入：连点会重复派单
     this.setData({ taskSubmitting: true })
     try {
       await request('/task', {
@@ -4489,6 +4503,7 @@ Page(themed({
   async submitDocForm() {
     const form = this.data.docForm
     if (!form.title.trim()) { wx.showToast({ title: '请输入标题', icon: 'none' }); return }
+    if (this.data.docSubmitting) return // 🔴 防重入：连点会重复建文书
     this.setData({ docSubmitting: true })
     try {
       // 后端 DocCreateRequest.content 为字典，自由文本正文统一放入 details 字段
@@ -4613,6 +4628,7 @@ Page(themed({
     const constructionUnit = form.constructionUnit.trim()
     const supervisionUnit = form.supervisionUnit.trim()
     const isEdit = this.data.projectFormMode === 'edit' && this.data.currentProjectId > 0
+    if (this.data.loading) return // 🔴 防重入：建项目请求慢，连点会创建两个同名项目
     this.setData({ loading: true })
     try {
       if (isEdit) {
@@ -4936,21 +4952,10 @@ Page(themed({
     wx.showToast({ title: '已开启新对话', icon: 'none' })
   },
 
-  /** 双击工作台空白处也能新建对话（复用 newChat）。
-   *  背景层的 tap 会冒泡到这里；交互子树（消息气泡/快捷按钮等）已用 catchtap 就地终止冒泡，
-   *  因此冒泡上来的都是真正的空白背景，双击即开新对话，不会误清空会话。 */
-  onWorkbenchTap() {
-    const now = Date.now()
-    if (now - this.lastWorkbenchTapTime < 300) {
-      this.lastWorkbenchTapTime = 0
-      this.newChat()
-    } else {
-      this.lastWorkbenchTapTime = now
-    }
+  /** 双击底部「工作台」tab 新建对话（tab-bar 组件检测到 300ms 内二次点击已选中的 tab 后抛出）。 */
+  onTabDoubleTap() {
+    this.newChat()
   },
-
-  /** 仅用于拦截交互子树的 tap 冒泡（catchtap），本身不做任何事 */
-  noop() {},
 
   navigateTo(event: WechatMiniprogram.TouchEvent) {
     const url = event.currentTarget.dataset.url as string
@@ -5093,6 +5098,7 @@ Page(themed({
       return
     }
     this.setData({ pendingVoiceRetrying: true, loading: true })
+    let handedOffToSend = false
     try {
       const result = await uploadQueue.retryOne(pending[0].id)
       const text = result?.text || ''
@@ -5101,13 +5107,18 @@ Page(themed({
         this.setData({ voiceSessionTexts: [...this.data.voiceSessionTexts, text] })
         wx.showToast({ title: '语音片段已记录', icon: 'success' })
       } else {
-        this.setData({ input: text })
+        this.setData({ input: text, loading: false })
+        // 🔴 同 onStop：不清 loading 会让 send() 防重入直接 return（自锁）；
+        // 交接后 loading 由 send 下游自管
+        handedOffToSend = true
         await this.send()
       }
     } catch (error) {
+      if (handedOffToSend) this.setData({ loading: false })
       wx.showToast({ title: (error as Error).message, icon: 'none' })
     } finally {
-      this.setData({ pendingVoiceRetrying: false, loading: false })
+      this.setData({ pendingVoiceRetrying: false })
+      if (!handedOffToSend) this.setData({ loading: false })
       this.refreshPendingVoice()
     }
   },

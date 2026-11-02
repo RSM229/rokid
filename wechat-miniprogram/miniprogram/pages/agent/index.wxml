@@ -1,5 +1,5 @@
 <view class="page" style="padding-top: {{statusBarHeight}}px;; {{themeStyle}}">
-  <tab-bar active="agent" />
+  <tab-bar active="agent" bind:doubletap="onTabDoubleTap" />
   <!-- Custom Nav Bar -->
   <view class="nav-bar" style="height: {{statusBarHeight + navBarHeight}}px;">
     <view class="nav-bar-inner" style="height: {{navBarHeight}}px; top: {{statusBarHeight}}px;">
@@ -26,7 +26,7 @@
   <!-- Main Chat Area -->
   <view class="main" style="padding-top: {{statusBarHeight + navBarHeight + (breadcrumb.length > 0 ? 70 : 10)}}px;">
     <!-- 待补全草稿提醒卡已按用户要求移除（2026-10-15）：草稿数据仍落库，聊天内追问补全流程不变 -->
-    <scroll-view class="messages" scroll-y scroll-into-view="bottom" enhanced show-scrollbar="{{false}}" bindtap="onWorkbenchTap">
+    <scroll-view class="messages" scroll-y scroll-into-view="bottom" enhanced show-scrollbar="{{false}}">
       <!-- Hero（ima 风格空状态：大问候语 + 竖排建议按钮） -->
       <view wx:if="{{messages.length <= 1 && !loading}}" class="hero">
         <view class="hero-greeting">你好，我是你的工程项目管理AI智能体</view>
@@ -35,17 +35,17 @@
              而超管不允许登录小程序 ⇒ 小程序里任何人都建不了项目）。 -->
         <view wx:if="{{noProject}}" class="no-project-tip">
           <text class="no-project-tip-text">你还没有加入项目。规范查询、AI 问答、天气等现在就能用；现场记录需要先加入项目。</text>
-          <view class="no-project-tip-btn" catchtap="goJoinProject">去加入项目</view>
+          <view class="no-project-tip-btn" bindtap="goJoinProject">去加入项目</view>
         </view>
         <view class="hero-actions">
-          <view class="hero-pill" wx:for="{{visibleHeroActions}}" wx:for-item="act" wx:for-index="ai" wx:key="ai" data-command="{{act.command}}" catchtap="handleActionTap">
+          <view class="hero-pill" wx:for="{{visibleHeroActions}}" wx:for-item="act" wx:for-index="ai" wx:key="ai" data-command="{{act.command}}" bindtap="handleActionTap">
             <view class="hero-pill-icon {{act.icon}}"></view>
             <text>{{act.text}}</text>
           </view>
         </view>
       </view>
       <block wx:else>
-        <view wx:for="{{messages}}" wx:for-index="mi" wx:key="index" class="message {{item.role}}" id="msg-{{mi}}" catchtap="noop">
+        <view wx:for="{{messages}}" wx:for-index="mi" wx:key="index" class="message {{item.role}}" id="msg-{{mi}}">
           <view class="message-head">
             <block wx:if="{{item.role === 'assistant'}}">
               <text class="message-role">监理智能体</text>
@@ -502,7 +502,7 @@
       </view>
       <view class="panel-actions">
         <button class="btn-cancel" bindtap="cancelProject">取消</button>
-        <button class="btn-submit" loading="{{loading}}" bindtap="submitProject">{{projectFormMode === 'edit' ? '保存修改' : '创建项目'}}</button>
+        <button class="btn-submit" loading="{{loading}}" disabled="{{loading}}" bindtap="submitProject">{{projectFormMode === 'edit' ? '保存修改' : '创建项目'}}</button>
       </view>
     </view>
   </view>
@@ -549,7 +549,7 @@
       </view>
       <view class="panel-actions">
         <button class="btn-cancel" bindtap="closeOverlay">取消</button>
-        <button class="btn-submit" loading="{{logGenerating}}" bindtap="submitDailyLog">生成</button>
+        <button class="btn-submit" loading="{{logGenerating}}" disabled="{{logGenerating}}" bindtap="submitDailyLog">生成</button>
       </view>
     </view>
   </view>
@@ -596,7 +596,7 @@
       </view>
       <view class="panel-actions">
         <button class="btn-cancel" bindtap="closeOverlay">取消</button>
-        <button class="btn-submit" loading="{{taskSubmitting}}" bindtap="submitTaskForm">派单</button>
+        <button class="btn-submit" loading="{{taskSubmitting}}" disabled="{{taskSubmitting}}" bindtap="submitTaskForm">派单</button>
       </view>
     </view>
   </view>
@@ -623,7 +623,7 @@
       </view>
       <view class="panel-actions">
         <button class="btn-cancel" bindtap="closeOverlay">取消</button>
-        <button class="btn-submit" loading="{{docSubmitting}}" bindtap="submitDocForm">保存</button>
+        <button class="btn-submit" loading="{{docSubmitting}}" disabled="{{docSubmitting}}" bindtap="submitDocForm">保存</button>
       </view>
     </view>
   </view>
@@ -751,7 +751,7 @@
           <textarea wx:else class="form-textarea" value="{{workForm[item.key]}}" data-field="{{item.key}}" bindinput="onWorkFormInput" auto-height maxlength="5000" />
         </view>
       </scroll-view>
-      <view class="panel-actions"><button bindtap="closeOverlay">取消</button><button loading="{{workFormSubmitting}}" bindtap="submitWorkForm">保存并生成记录</button></view>
+      <view class="panel-actions"><button bindtap="closeOverlay">取消</button><button loading="{{workFormSubmitting}}" disabled="{{workFormSubmitting}}" bindtap="submitWorkForm">保存并生成记录</button></view>
     </view>
   </view>
 </view>
