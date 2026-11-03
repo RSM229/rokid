@@ -11,12 +11,25 @@ Component({
       { key: 'kb', label: '资料库', icon: 'ic-collection', url: '/pages/kb/index' },
       { key: 'mine', label: '我', icon: 'ic-user', url: '/pages/mine/index' },
     ],
+    /** 双击「当前所在 tab」检测：上一次点击活动 tab 的时间戳（<300ms 视为双击） */
+    lastActiveTabTapTime: 0,
   },
   methods: {
     onTap(e: WechatMiniprogram.TouchEvent) {
       const key = e.currentTarget.dataset.key as string
       const url = e.currentTarget.dataset.url as string
-      if (this.data.active === key) return
+      if (this.data.active === key) {
+        // 已在该 tab 上：双击抛 doubletap 事件（工作台页据此新建对话），单击不做任何事
+        const now = Date.now()
+        if (now - this.data.lastActiveTabTapTime < 300) {
+          this.setData({ lastActiveTabTapTime: 0 })
+          this.triggerEvent('doubletap', { key })
+        } else {
+          this.setData({ lastActiveTabTapTime: now })
+        }
+        return
+      }
+      this.setData({ lastActiveTabTapTime: 0 })
       wx.redirectTo({ url })
     },
   },
