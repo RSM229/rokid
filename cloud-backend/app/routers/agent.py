@@ -850,7 +850,7 @@ async def _agent_chat_impl(
         raise HTTPException(status_code=400, detail="消息不能为空")
 
     await report_progress(
-        "load_context", "running", "正在读取当前项目资料、会话历史和未完成草稿",
+        "load_context", "running", "先看看当前项目的资料、刚才的对话，以及还没填完的草稿",
         {"conversation_id": req.conversation_id or "", "message_length": len(message)},
     )
     project_id = getattr(user, "project_id", None)
@@ -875,7 +875,7 @@ async def _agent_chat_impl(
     pend_for_context = await agent_tools.get_pending(db, user.id, conversation_id=conversation_id)
     draft_for_context = pend_for_context[1] if pend_for_context else {}
     await report_progress(
-        "load_context", "completed", "会话上下文已读取",
+        "load_context", "completed", "已了解项目背景和刚才的对话上下文",
         {
             "history_messages": len(earlier_messages or []),
             "has_pending_draft": bool(pend_for_context),
@@ -934,7 +934,7 @@ async def _agent_chat_impl(
     if not structured_submit:
         try:
             await report_progress(
-                "intent_model", "running", "正在调用语言模型识别本轮意图并提取字段候选",
+                "intent_model", "running", "正在理解你想做什么，并从你的话里抽取关键字段",
                 {"provider": req.provider or "系统路由", "model": req.model or "系统选择", "response_mode": "structured_json"},
             )
             raw, config = await model_gateway.chat_completion(
@@ -947,7 +947,7 @@ async def _agent_chat_impl(
             model_id = config.model_id
             parsed = agent_tools._parse_json_object(raw)
             await report_progress(
-                "intent_model", "completed", "模型结构化结果已返回，服务端正在按允许的动作和字段合同校验",
+                "intent_model", "completed", "已读懂你的意图，正在核对可用的动作和字段",
                 {
                     "model": model_id,
                     "has_json_result": bool(parsed),
@@ -963,14 +963,14 @@ async def _agent_chat_impl(
             logger.warning("agent JSON 路由失败，退化纯问答: %s", type(exc).__name__)
             try:
                 await report_progress(
-                    "intent_model", "running", "结构化路由不可用，正在改用普通问答模型",
+                    "intent_model", "running", "结构化理解暂时不可用，我改用普通问答来回答",
                     {"reason": type(exc).__name__},
                 )
                 answer = await _plain_answer(message, req.history, req.provider, req.model, req.mode)
             except model_gateway.ModelGatewayError as exc2:
                 raise HTTPException(status_code=503, detail=str(exc2)) from exc2
             await report_progress(
-                "intent_model", "completed", "普通问答结果已返回；本轮没有执行业务写入",
+                "intent_model", "completed", "已用普通问答给出回复，本轮没有执行业务写入",
                 {"degraded": True},
             )
             return {"kind": "chat", "tool": None, "reply": answer, "card": None,
@@ -1073,10 +1073,11 @@ async def _agent_chat_impl(
     )
     turn_fact_args = dict(args)
     proposed_record_type = agent_tools._norm_record_type(str(args.get("record_type") or ""))
+    _thought_record_type = str(incoming_plan.get("record_type") or proposed_record_type or "")
     await report_progress(
         "semantic_validation", "completed",
-        "结构化语义校验完成："
-        + str(incoming_plan.get("record_type") or proposed_record_type or "记录类型待确认"),
+        ("我判断本轮要处理的是「" + _thought_record_type + "」")
+        if _thought_record_type else "已梳理出本轮要执行的动作与字段",
         {
             "intent": incoming_plan.get("intent"),
             "action": incoming_plan.get("selected_tool"),
@@ -1146,7 +1147,7 @@ async def _agent_chat_impl(
     # （明显是提问/找页面的话不抽，避免「用户中途问规范」被当成补字段）
     if not tool and pending_tool and not any(h in message for h in _SUPPLEMENT_SKIP_HINTS):
         await report_progress(
-            "extract_supplement", "running", "正在把本轮补充内容对照草稿缺项提取为字段候选",
+            "extract_supplement", "running", "正在把你说的内容，对照草稿里还缺的字段提取出来",
             {"pending_tool": pending_tool, "missing_fields": list(draft.get("missing") or [])[:24]},
         )
         extra = await _extract_supplement(message, pending_tool, draft, req.provider, req.model)
@@ -1156,7 +1157,7 @@ async def _agent_chat_impl(
             args = {**args, **extra}
             turn_fact_args.update(extra)
             await report_progress(
-                "extract_supplement", "completed", "补充内容已映射到草稿字段",
+                "extract_supplement", "completed", "已把你补充的内容填进草稿对应字段",
                 {"fields": list(extra.keys())[:24]},
             )
         else:
@@ -1257,7 +1258,7 @@ async def _agent_chat_impl(
                 args["_execution_confirmed"] = True
         ctx = agent_tools.ToolContext(db=db, user=user, project_id=project_id, project=project, message=message)
         await report_progress(
-            "tool_validation", "running", "服务端正在校验工具权限、记录类型和字段完整性",
+            "tool_validation", "running", "确认要执行的动作，并核对字段是否齐全",
             {"tool": tool, "record_type": str(args.get("record_type") or ""), "form": _record_form_code(tool, args, message) or ""},
         )
         result = await agent_tools.dispatch(ctx, tool, args)
@@ -1473,8 +1474,8 @@ async def agent_chat(
             stage="agent_result",
             status="waiting" if needs_user else "completed",
             title=(
-                "当前草稿已整理，等待用户补充或确认"
-                if needs_user else "Agent 本轮处理完成，结果已返回工作台"
+                "当前草稿已整理，等待你补充或确认"
+                if needs_user else "本轮思考与处理已完成，结果已返回工作台"
             ),
             detail={
                 "kind": result.get("kind"),

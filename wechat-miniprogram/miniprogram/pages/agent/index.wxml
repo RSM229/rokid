@@ -63,14 +63,17 @@
               <view class="bubble-copy-ic"></view>
             </view>
           </view>
-          <view wx:if="{{item.progressRequestId}}" class="agent-progress">
+          <view wx:if="{{item.progressRequestId && (item.progressEvents.length || !item.progressTerminal)}}" class="agent-progress {{item.progressTerminal ? 'done' : 'thinking'}}">
             <view class="agent-progress-head" data-index="{{mi}}" bindtap="toggleAgentProgress">
               <view class="agent-progress-title-wrap">
-                <text class="agent-progress-title">处理过程</text>
-                <text class="agent-progress-current">{{item.progressHeadline || '任务已接收'}}</text>
+                <view class="agent-progress-title-row">
+                  <text class="agent-progress-title">{{item.progressTerminal ? '思考完成' : '思考中'}}</text>
+                  <view wx:if="{{!item.progressTerminal}}" class="thinking-dots"><view class="tdot"></view><view class="tdot"></view><view class="tdot"></view></view>
+                </view>
+                <text class="agent-progress-current">{{item.progressHeadline || (item.progressTerminal ? '已完成本轮思考' : '正在理解你的需求')}}</text>
               </view>
               <view class="agent-progress-meta">
-                <text>{{item.progressEvents.length}} 项 · {{item.progressElapsedSeconds || 0}} 秒</text>
+                <text>{{item.progressEvents.length}} 步 · {{item.progressElapsedSeconds || 0}} 秒</text>
                 <text class="agent-progress-toggle">{{item.progressExpanded ? '收起' : '展开'}}</text>
               </view>
             </view>

@@ -807,7 +807,8 @@ Page(themed({
       const hasTerminalEvent = (response.progress_events || []).some(item => item.terminal === true)
       const activeTurn = activeProgressRequestId === requestId && this.data.loading
       if (hasTerminalEvent || (!activeTurn && response.status && response.status !== 'running')) {
-        this.updateAgentProgressMessage(requestId, message => ({ ...message, progressTerminal: true }))
+        // 思考完成：收起为一行摘要（用户仍可点标题栏回看），避免每轮都留一大块展开的思考过程。
+        this.updateAgentProgressMessage(requestId, message => ({ ...message, progressTerminal: true, progressExpanded: false }))
         if (activeProgressRequestId === requestId) this.stopAgentProgressTimers()
       }
     } catch {
@@ -853,9 +854,10 @@ Page(themed({
     }
     messages[progressIndex] = {
       ...messages[progressIndex], progressRequestId: requestId, progressEvents: [],
-      // 处理过程默认收起（2026-11-03 用户要求）：只露一行摘要「处理过程 + 当前步骤 + N 项 · M 秒」，
-      // 展开与否完全由用户点标题栏决定，事件追加不再自动弹开。历史回读同此策略（见 applyConversationDetail）。
-      progressExpanded: false, progressStartedAt: Date.now(), progressElapsedSeconds: 0,
+      // 「会思考」体验（2026-11-03）：处理过程中自动展开「思考过程」，让用户实时看到推理步骤在跑；
+      // 终态事件到达后由 pollAgentProgress 自动收起为一行摘要（仍可点标题栏回看）。
+      // 历史回读保持收起（见 applyConversationDetail），避免一次性展开一长串旧记录。
+      progressExpanded: true, progressStartedAt: Date.now(), progressElapsedSeconds: 0,
       progressTerminal: false, progressHeadline: title,
     }
     this.setData({ messages, activeProgressIndex: progressIndex, activeProgressRequestId: requestId })
@@ -1236,7 +1238,7 @@ Page(themed({
       loading: true,
     })
     this.beginAgentProgress(requestId, messages.length - 1,
-      `已接收本轮输入：${summary || '文字消息'}`,
+      `收到，我先看看怎么帮你处理`,
       { image_count: images.length, file_count: files.length, text_excerpt: note.slice(0, 500) },
     )
 
@@ -1929,7 +1931,7 @@ Page(themed({
     const userMessageIndex = userMessage ? this.addMessage(userMessage) : -1
     this.setData({ loading: true })
     this.beginAgentProgress(requestId, userMessageIndex,
-      `已收到草稿补充：${reply.slice(0, 80)}`,
+      `收到你的补充，我核对一下草稿`,
       { plan_id: current.serverId || '', revision: current.serverRevision || current.revision,
         text_excerpt: reply.slice(0, 700) },
     )
@@ -3374,7 +3376,7 @@ Page(themed({
     const requestId = newOperationId('agent-chat')
     const messages = [...this.data.messages, userMsg] as Message[]
     this.setData({ messages, loading: true })
-    this.beginAgentProgress(requestId, messages.length - 1, '已接收文字消息，正在读取会话与当前任务状态', {
+    this.beginAgentProgress(requestId, messages.length - 1, '收到，我先理解你的需求', {
       text_excerpt: text.slice(0, 700), conversation_id: conversationIdFor(this.currentSessionId),
     })
 
