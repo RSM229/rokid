@@ -2632,12 +2632,16 @@ Page(themed({
   /** 单张图片视觉识别，返回可读文本 + 原始识别结果（原始结果供落库复用） */
   async detectImageOnce(imagePath: string): Promise<{ text: string; raw: any }> {
     const token = session.getToken()
+    const selectedModel = this.data.models.find(m => m.id === this.data.currentModel)
     const result = await new Promise<any>((resolve, reject) => {
       wx.uploadFile({
         url: `${config.apiBaseUrl}/hazard/detect`,
         filePath: imagePath,
         name: 'image',
-        formData: { prompt: '请识别这张图片中的安全隐患与现场情况' },
+        formData: {
+          prompt: '请识别这张图片中的安全隐患与现场情况',
+          ...(selectedModel?.model ? { model: selectedModel.model } : {}),
+        },
         header: { Authorization: `Bearer ${token}` },
         success: (res) => {
           if (res.statusCode >= 200 && res.statusCode < 300) {
@@ -2658,6 +2662,14 @@ Page(themed({
       let text = `风险状态：${result.risk_status || '存在隐患'}\n风险类别：${result.risk_category || '未分类'}\n主要风险：${result.top1_risk || '未知'}`
       if (result.evidence?.length) text += `\n证据：${result.evidence.join('、')}`
       if (result.recheck_suggestion?.length) text += `\n复查建议：${result.recheck_suggestion.join('、')}`
+      if (result.rectify_plan) text += `\n整改单：${result.rectify_plan}`
+      if (result.matched_regulations?.length) {
+        const regs = (result.matched_regulations as Array<{ title?: string; content_snippet?: string }>)
+          .slice(0, 3)
+          .map((r: { title?: string; content_snippet?: string }) => `${r.title || '规范条款'}：${r.content_snippet || ''}`)
+          .join('；')
+        if (regs) text += `\n适用规范：${regs}`
+      }
       return { text, raw: result }
     }
     return { text: '未识别到明显安全隐患。', raw: result }
@@ -3990,12 +4002,16 @@ Page(themed({
 
     try {
       const token = session.getToken()
+      const selectedModel = this.data.models.find(m => m.id === this.data.currentModel)
       const result = await new Promise<any>((resolve, reject) => {
         wx.uploadFile({
           url: `${config.apiBaseUrl}/hazard/detect`,
           filePath: imagePath,
           name: 'image',
-          formData: { prompt: '请识别这张图片中的安全隐患' },
+          formData: {
+            prompt: '请识别这张图片中的安全隐患',
+            ...(selectedModel?.model ? { model: selectedModel.model } : {}),
+          },
           header: { Authorization: `Bearer ${token}` },
           success: (res) => {
             if (res.statusCode >= 200 && res.statusCode < 300) {
@@ -4012,7 +4028,15 @@ Page(themed({
       if (result.has_hazard || result.risk_status === '存在隐患') {
         answer = `隐患识别结果：\n风险状态：${result.risk_status || '存在隐患'}\n风险类别：${result.risk_category || '未分类'}\n主要风险：${result.top1_risk || '未知'}\n`
         if (result.evidence?.length) answer += `证据：${result.evidence.join('、')}\n`
-        if (result.recheck_suggestion?.length) answer += `复查建议：${result.recheck_suggestion.join('、')}`
+        if (result.recheck_suggestion?.length) answer += `复查建议：${result.recheck_suggestion.join('、')}\n`
+        if (result.rectify_plan) answer += `整改单：${result.rectify_plan}\n`
+        if (result.matched_regulations?.length) {
+          const regs = (result.matched_regulations as Array<{ title?: string; content_snippet?: string }>)
+            .slice(0, 3)
+            .map((r: { title?: string; content_snippet?: string }) => `${r.title || '规范条款'}：${r.content_snippet || ''}`)
+            .join('；')
+          if (regs) answer += `适用规范：${regs}`
+        }
       } else {
         answer = '未识别到明显安全隐患。'
       }

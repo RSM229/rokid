@@ -3,9 +3,9 @@
  *
  * 字段说明：
  *  - id          选择键（唯一）
- *  - provider    后端 provider 键（''=默认文本端点；'huagong'=华南理工独立供应商）
+ *  - provider    后端 provider 键（''=默认文本端点，仅此一种；华工无文本端点，不列入）
  *  - providerName 展示用供应商名（截图左侧那列，如 DeepSeek / 通义千问）
- *  - model       传给后端的 model id（''=沿用系统默认模型）
+ *  - model       传给后端的 model id
  *  - name        友好名称
  *  - shortName   chip 上显示的简短名（避免完整名过长）
  *  - desc        一句话简介
@@ -13,10 +13,12 @@
  *  - badges      角标（截图里的 New / 限时夜间5折 之类）
  *  - capabilities 能力标签（截图右侧：文本生成、推理模型、视觉理解…）
  *
- * ⚠️ 只放后端实际支持的模型。默认端点（provider=''）走阿里云 token-plan 的
- * chat/completions，前端用 model 字段覆盖具体模型名——只要是同一 API 的模型
- * （如通义千问、DeepSeek），填对 model id 即可，无需额外后端配置；
- * 华南理工（provider='huagong'）走独立供应商。
+ * ⚠️ 只放后端实际支持的模型。所有模型走默认端点（provider=''）= 阿里云 token-plan
+ * 的 chat/completions，前端用 model 字段覆盖具体模型名——只要是同一 API 的模型
+ * （如通义千问、DeepSeek），填对 model id 即可，无需额外后端配置。
+ *
+ * 注：安全工识别（隐患识别）不在这份目录里——它由后端 detect_hazard 固定走华工
+ * VLM 专用通道，与文本选择器无关（见 model_gateway._hazard_vlm_config）。
  */
 export interface ModelItem {
   id: string
@@ -55,18 +57,6 @@ export const MODEL_CATALOG: ModelItem[] = [
     temperature: 0.7,
     badges: ['New', '⚡ 限时夜间 5 折'],
     capabilities: ['文本生成', '推理模型', '视觉理解'],
-  },
-  {
-    id: 'huagong',
-    provider: 'huagong',
-    providerName: '华南理工',
-    model: '',
-    name: '华工大模型',
-    shortName: '华工',
-    desc: '华南理工，视觉/深度',
-    temperature: 0.6,
-    badges: [],
-    capabilities: ['文本生成', '视觉理解', '深度分析'],
   },
 ]
 

@@ -3,7 +3,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional
 import hashlib
 import json
@@ -51,6 +51,9 @@ class HazardResult(BaseModel):
     evidence: list[str] = []
     uncertainty: str = ""
     recheck_suggestion: list[str] = []
+    # 规范条款 + 整改单（识别结果深加工）
+    matched_regulations: list[dict] = Field(default_factory=list)
+    rectify_plan: str = ""
 
 
 class RecheckRequest(BaseModel):
@@ -123,12 +126,18 @@ async def _read_valid_image(image: UploadFile) -> bytes:
 async def detect_hazard(
     image: UploadFile = File(...),
     prompt: Optional[str] = Form(None),
+    model: Optional[str] = Form(None),
     user: User = Depends(get_current_user),
 ):
-    """上传图片进行隐患识别（仅识别，不保存）"""
+    """上传图片进行隐患识别（仅识别，不保存）。
+
+    识别固定走华工 VLM；model 可选，传入时命中隐患会额外生成整改单（rectify_plan）。
+    """
     image_bytes = await _read_valid_image(image)
     try:
-        result = await ai_client.detect_hazard(image_bytes, image.filename or "capture.jpg", prompt=prompt)
+        result = await ai_client.detect_hazard(
+            image_bytes, image.filename or "capture.jpg", prompt=prompt, model=model,
+        )
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"AI识别服务异常: {str(e)}")
     return HazardResult(**result)

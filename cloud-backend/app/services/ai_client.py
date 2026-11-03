@@ -17,10 +17,20 @@ logger = logging.getLogger(__name__)
 class AICenterClient:
     """兼容原调用方名称的统一模型客户端。"""
 
-    async def detect_hazard(self, image_bytes: bytes, filename: str = "capture.jpg", prompt: Optional[str] = None) -> dict:
+    async def detect_hazard(
+        self,
+        image_bytes: bytes,
+        filename: str = "capture.jpg",
+        prompt: Optional[str] = None,
+        model: Optional[str] = None,
+    ) -> dict:
         """现场风险识别
 
-        默认调用华工 hazard_vlm_detection，也可在系统设置中更换供应商。
+        识别固定走华工 hazard_vlm_detection（见 model_gateway._hazard_vlm_config）。
+
+        model 参数：可选，用于「识别结果深加工」——命中隐患时，把华工识别结果 +
+        自动匹配的规范条款交给所选文本模型（默认端点）生成整改单（隐患描述 +
+        整改要求 + 复查建议），回填 suggestion / rectify_plan。不影响识别本身。
 
         返回统一格式：
         {
@@ -35,7 +45,9 @@ class AICenterClient:
             "top1_risk": "...",
             "evidence": ["..."],
             "uncertainty": "...",
-            "recheck_suggestion": ["..."]
+            "recheck_suggestion": ["..."],
+            "matched_regulations": [{"title","content_snippet","category","relevance_score"}],
+            "rectify_plan": "整改单文本（深加工，model 传入且命中隐患时）"
         }
         """
         for attempt in range(2):
@@ -45,7 +57,15 @@ class AICenterClient:
                     filename=filename,
                     prompt=prompt,
                 )
-                return self._normalize_hazard_result(result)
+                normalized = self._normalize_hazard_result(result)
+                # 深加工：命中隐患 + 调用方给了文本模型 → 生成整改单（结合规范条款）
+                if normalized.get("has_hazard") and model:
+                    try:
+                        normalized["rectify_plan"] = await self._build_rectify_plan(normalized, model)
+                    except Exception as e:
+                        logger.warning("隐患整改单深加工失败（不影响识别）: %s", e)
+                        normalized["rectify_plan"] = ""
+                return normalized
             except Exception as e:
                 logger.warning("视觉模型第 %s 次调用失败: %s", attempt + 1, type(e).__name__)
                 if attempt == 0:
@@ -55,6 +75,37 @@ class AICenterClient:
         raise RuntimeError(
             "隐患识别不可用：视觉模型调用失败。"
             "请检查系统设置中的 VLLM 参数或供应商服务状态。"
+        )
+
+    async def _build_rectify_plan(self, result: dict, model: str) -> str:
+        """把华工识别结果 + 规范条款交给文本模型，生成整改单（隐患描述/整改要求/复查建议）。"""
+        import json as _json
+
+        regs = result.get("matched_regulations") or []
+        reg_text = "\n".join(
+            f"- {r.get('title', '')}：{r.get('content_snippet', '')}"
+            for r in regs[:5] if r.get("title") or r.get("content_snippet")
+        ) or "（未匹配到具体规范条款）"
+        facts = {
+            "风险状态": result.get("risk_status", ""),
+            "风险类别": result.get("risk_category", ""),
+            "主要风险": result.get("top1_risk", ""),
+            "证据": "；".join(result.get("evidence", [])),
+            "置信度": result.get("uncertainty", ""),
+        }
+        prompt = (
+            "你是监理工程师。根据现场隐患识别结果，生成一份简洁的隐患整改单，"
+            "包含三部分：1）隐患描述（一句话）；2）整改要求（2-3 条，可执行的整改动作并引用适用规范）；"
+            "3）复查建议（如何验证整改到位）。按以下结构输出，不要额外寒暄：\n"
+            f"【隐患描述】\n【整改要求】\n【复查建议】\n\n"
+            f"识别结果：{_json.dumps(facts, ensure_ascii=False)}\n"
+            f"匹配的规范条款：\n{reg_text}"
+        )
+        return await self.chat_completion(
+            [{"role": "user", "content": prompt}],
+            temperature=0.4,
+            max_tokens=900,
+            model=model,
         )
 
     def _normalize_hazard_result(self, raw: dict) -> dict:
@@ -87,6 +138,8 @@ class AICenterClient:
             "recheck_suggestion": raw.get("recheck_suggestion", []),
             # 自动匹配的规范条款（命中隐患时由调用方填充，这里默认空列表）
             "matched_regulations": [],
+            # 整改单（深加工产物，model 传入且命中隐患时由 detect_hazard 填充）
+            "rectify_plan": "",
         }
 
         # 命中隐患时自动匹配规范库条款
