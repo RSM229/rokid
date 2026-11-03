@@ -451,11 +451,15 @@ async def generate_supervision_log(
             continue
         place = f"{r.section or ''} {r.location or ''}".strip()
         progress_items.append(f"{place}：{r.work_content}" if place else str(r.work_content))
-    # 🔴 叙述性监理日报/日记：当用户直接粘贴/口述一段当日工作叙述、且当天无结构化
-    # 工作记录时，把该叙述作为「当日施工进展情况」正文起草进监理日志（替代空日志的
-    # “当日无施工记录。”），避免「无记录就只生成一张空日志」。有记录时仍以聚合为准。
-    if narrative and not progress_items:
-        construction_progress = str(narrative).strip()
+    # 🔴 叙述性监理日报/日记：用户粘贴/口述的当日叙述是「用户认定的事实」，优先级最高。
+    # 当天若同时存在结构化记录，把聚合结果作为「系统记录补充」附在后面——绝不能整段丢弃
+    # 用户原文（2026-11-03 生产事故：10-27 有带水印巡视记录，用户贴的日报被下面这个
+    # `not progress_items` 条件整段忽略，生成的文书与用户所述完全不符）。
+    if narrative:
+        body = str(narrative).strip()
+        if progress_items:
+            body += "\n（系统记录补充：\n" + "\n".join(progress_items) + "\n）"
+        construction_progress = body
     else:
         construction_progress = (
             "\n".join(progress_items) if progress_items else "当日无施工记录。"
@@ -825,11 +829,14 @@ async def generate_safety_log(
     for h in hazards:
         loc = f"{h.section or ''} {h.location or ''}".strip()
         safety_items.append(f"{loc}：发现{h.top1_risk or '安全隐患'}（{h.risk_category or '安全'}类）")
-    # 🔴 叙述性安全监理日志：用户粘贴/口述一段安全监理文字（无系统记录）时，
-    # 把原文作为「安全检查情况」起草素材填入，替代"当日无安全检查记录。"
-    safety_check = "\n".join(safety_items) if safety_items else (
-        narrative if narrative else "当日无安全检查记录。"
-    )
+    # 🔴 叙述性安全监理日志：用户粘贴/口述的安全监理文字优先；同时有系统记录时把
+    # 聚合结果作为补充附后，不丢用户原文（与监理日志同一策略，2026-11-03 统一）。
+    if narrative:
+        safety_check = str(narrative).strip()
+        if safety_items:
+            safety_check += "\n（系统记录补充：\n" + "\n".join(safety_items) + "\n）"
+    else:
+        safety_check = "\n".join(safety_items) if safety_items else "当日无安全检查记录。"
 
     # ===== 处理措施（限期整改/暂时停工/上报建设单位）=====
     # 🔴 treatment/problems 是 WorkRecord 的字段，Hazard 上没有（Hazard 只有 status/
