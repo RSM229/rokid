@@ -364,6 +364,27 @@ CASES: tuple[dict, ...] = (
                 "（建省统表模板）硬校验；修复=路由到 generate_document（period=day），"
                 "日报生成服务拿用户原文起草监理日志正文。断言不许退化成 create_provform_doc。",
     },
+    {
+        "id": "D08", "group": "文书生成",
+        "say": "安全监理日志 10月27日：上午巡查3号楼二层发现临边防护缺失一处，已当场签发整改通知要求整改；下午复查该处已整改到位。现场安全员全天在位，无危大工程作业。",
+        "expect": {
+            "tool": "generate_document",
+            "args_required": {"period": ["day", "日"]},
+            # 🔴 叙述性安全监理日志 → 走日报生成服务起草（form_code=anquan_jianli_rizhi），
+            # 严禁：① 退化成 create_provform_doc（必填项校验会卡成「该表还不能生成」）；
+            # ② 退化成普通监理日志（gd_b_220_rizhi）——必须带 form_code 指向安全日志。
+            "args_any_of": [
+                {"form_code": ["安全"]},
+                {"form_code": ["anquan"]},
+            ],
+            "tool_forbidden": ["create_provform_doc"],
+        },
+        "note": "🔴 2026-11-03 新增（承接 D07）：粘贴一段叙述性安全监理日志，旧逻辑同样会"
+                "被路由到 create_provform_doc 硬报错，或静默退化成普通监理日志。"
+                "修复=路由到 generate_document（period=day）且带 form_code 指向 anquan_jianli_rizhi，"
+                "服务端 generate_safety_log 拿用户原文作为「安全检查情况」起草素材。"
+                "断言双守门：不许退化成 create_provform_doc，且 form_code 必须指向安全日志。",
+    },
 
     # =========================================================================
     # E. 隐患

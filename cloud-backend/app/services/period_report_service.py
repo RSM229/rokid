@@ -740,6 +740,7 @@ async def generate_safety_log(
     supervisor: Optional[User] = None,
     force: bool = True,
     extra_fields: dict | None = None,
+    narrative: str | None = None,
 ) -> dict:
     """生成指定项目、指定日期的安全监理日志（anquan_jianli_rizhi 省统表）。
 
@@ -824,7 +825,11 @@ async def generate_safety_log(
     for h in hazards:
         loc = f"{h.section or ''} {h.location or ''}".strip()
         safety_items.append(f"{loc}：发现{h.top1_risk or '安全隐患'}（{h.risk_category or '安全'}类）")
-    safety_check = "\n".join(safety_items) if safety_items else "当日无安全检查记录。"
+    # 🔴 叙述性安全监理日志：用户粘贴/口述一段安全监理文字（无系统记录）时，
+    # 把原文作为「安全检查情况」起草素材填入，替代"当日无安全检查记录。"
+    safety_check = "\n".join(safety_items) if safety_items else (
+        narrative if narrative else "当日无安全检查记录。"
+    )
 
     # ===== 处理措施（限期整改/暂时停工/上报建设单位）=====
     # 🔴 treatment/problems 是 WorkRecord 的字段，Hazard 上没有（Hazard 只有 status/
@@ -1013,7 +1018,8 @@ async def generate_aggregate_doc(
     if period == "day":
         if code == "anquan_jianli_rizhi":
             return await generate_safety_log(
-                db, project_id, start, supervisor=supervisor, force=force, extra_fields=extra_fields,
+                db, project_id, start, supervisor=supervisor, force=force,
+                extra_fields=extra_fields, narrative=narrative,
             )
         daily = await generate_supervision_log(
             db, project_id, start, supervisor=supervisor, force=force, extra_fields=extra_fields,
