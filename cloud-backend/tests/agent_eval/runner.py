@@ -617,6 +617,8 @@ def resolve_via_production(parsed: dict | None, message: str,
     semantic_args = candidate.get("args") if isinstance(candidate.get("args"), dict) else {}
     if not candidate.get("record_type") and semantic_args.get("record_type"):
         candidate["record_type"] = semantic_args.get("record_type")
+    # 🔴 与生产 agent.py 调同一个函数（素材明示类型兜底），不手抄逻辑。
+    candidate = _plan.apply_material_record_type(candidate, material)
     plan = _plan.normalize_candidate(
         candidate,
         message=message,

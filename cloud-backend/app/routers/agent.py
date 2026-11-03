@@ -389,6 +389,12 @@ args 可以放你已确认的工具参数，但服务端仍会重新抽取、校
 **唯一需要你直接追问的情况**：用户要新建工作记录，但没说清是 巡视 / 旁站 / 验收 / 见证 / 平行检验 哪一类。
 此时仍返回 record_work 动作，record_type 传 null，在 answer 里只问这一个问题；服务端会保留证据。
 
+🔴 但「没说清」只指**用户没口述、素材里也找不到**。如果照片水印 / 公示牌 / 画面文字里已经明确写着类型词
+（如「隐蔽工程验收公示牌」「污水管道基础包封验收」「旁站记录」「见证取样」「平行检验记录」），那就**不算没说清**：
+直接返回 record_work 并填 record_type（record_type_confidence 按明确程度给 0.7~0.95），在 answer 里说明依据
+（「水印写着『隐蔽工程验收公示牌』，按验收整理；要改成别的说一声」）。**绝不允许把你自己已经念出来的类型词
+再拿去问用户**——你已经复述了「施工内容：污水管道基础包封验收」，就不能紧接着问「你想整理成哪一类记录」。
+
 **除此之外，任何字段缺失都不要追问、不要退回普通聊天**——返回对应动作，把你已经听到的填进 facts/args，
 没听到的一律省略。服务端会自动列出缺失栏目并逐项向用户追问，这是既定机制，你不需要代劳。
 
@@ -435,7 +441,7 @@ station_start_time=9:00、station_end_time=12:00、worker_count=10，结论留�
 --------------------------------
 - 「记录今天工作情况 / 今天干了什么 / 记一下今天」= 要留痕。
 - 🔴 **先判文书、再判素材（顺序不能反）**：如果用户这条消息里是一段**完整的监理日报 / 监理日记 / 监理日志叙述正文**（描述当天施工内容与监理工作，且能抽出日期），**无论是否同时附了照片、水印或其它素材**，都按下面「粘贴叙述性监理日报」的规则返回 `generate_document`——照片只作附件保存，**不得因为带了照片就改走 record_work，更不得抽字段让用户逐项确认项目 / 单位 / 人员**。照片与项目资料对不上（水印是别的项目）时，只在回答里提一句「照片水印项目名与当前项目不一致」，不要把它变成待确认项。
-- **图片/水印素材不等于巡视，也不等于任何固定表式**。如果用户没有明确说巡视、旁站、验收、见证、平行检验、材料、日志等目标，返回 record_work + record_type=null，只问一个决定性问题：「你想把这些内容整理成巡视、旁站、验收、见证、平行检验，还是只整理图片？」
+- **图片/水印素材不等于巡视，也不等于任何固定表式**。如果用户没有明确说巡视、旁站、验收、见证、平行检验、材料、日志等目标，**且素材里也找不到类型词**，返回 record_work + record_type=null，只问一个决定性问题：「你想把这些内容整理成巡视、旁站、验收、见证、平行检验，还是只整理图片？」
 - 用户明确说了记录类型时才填写 record_type 并进入记录候选。用户已经在前文说过日期、地点、时间、工作内容的，必须沿用，不得因图片没有识别到而说成缺失。
 - 错误示范（严禁）：直接回一段「今日工作情况结论与建议」，甚至还写「经图片识别」。这是答非所问。
 - 用户明确说「生成今天的监理日志 / 月报」时，才返回 generate_document 动作（args.period=day / month）。
@@ -982,6 +988,10 @@ async def _agent_chat_impl(
     # value as a candidate while the action itself remains catalog-controlled.
     if not semantic_candidate.get("record_type") and semantic_args.get("record_type"):
         semantic_candidate["record_type"] = semantic_args.get("record_type")
+    # 🔴 素材明示类型：照片水印/公示牌上写着「隐蔽工程验收公示牌」这类字样时，
+    # 不再回头问「整理成哪一类记录」。逻辑在 agent_request_plan，跑分器同源调用。
+    semantic_candidate = agent_request_plan.apply_material_record_type(
+        semantic_candidate, material or "")
     semantic_plan = agent_request_plan.normalize_candidate(
         semantic_candidate,
         message=message,

@@ -284,6 +284,61 @@ def _unique_clarifications(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
+# 🔴 素材明示记录类型：照片水印 / 公示牌 / 画面文字里经常直接写着业务类型
+# （「隐蔽工程验收公示牌」「污水管道基础包封验收」「旁站记录」「见证取样」）。
+# 这不是「类型不明」，是类型印在照片上——不该再回头问用户「整理成哪一类」。
+# 顺序有意为之：验收 / 见证 / 旁站 优先于巡视，防止「旁站、验收照片被静默归成
+# 巡视」（2026-10-21 e3a8bc8 的反转理由）。只在模型没给类型时补空，不覆盖模型判断。
+_MATERIAL_RECORD_TYPE_HINTS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("平行检验", ("平行检验", "平行检查")),
+    ("旁站", ("旁站记录", "旁站监理", "旁站")),
+    ("见证", ("见证取样", "见证记录", "见证人", "见证")),
+    ("验收", ("隐蔽工程验收", "验收公示牌", "验收记录", "分部工程验收",
+             "竣工验收", "包封验收", "验收")),
+    ("巡视", ("巡视记录", "巡视检查", "安全巡视", "巡视")),
+)
+
+
+def record_type_from_material(material: str) -> str:
+    """从素材文本里取记录类型；找不到返回空串。"""
+    text = str(material or "")
+    if not text:
+        return ""
+    for record_type, keywords in _MATERIAL_RECORD_TYPE_HINTS:
+        if any(keyword in text for keyword in keywords):
+            return record_type
+    return ""
+
+
+def apply_material_record_type(candidate: dict[str, Any], material: str) -> dict[str, Any]:
+    """素材里明示了记录类型就补进候选（只补空，不新增动作）。
+
+    生产（agent.py）与跑分器（tests/agent_eval/runner.py）都调用这一处，
+    避免评分层手抄逻辑后与生产漂移。
+    """
+    if not isinstance(candidate, dict) or not material:
+        return candidate
+    if candidate.get("record_type"):
+        return candidate
+    action_ids: set[str] = set()
+    raw_actions = candidate.get("actions")
+    if isinstance(raw_actions, list):
+        for item in raw_actions:
+            action_ids.add(str(item.get("id") if isinstance(item, dict) else item or ""))
+    mapped = INTENT_ACTIONS.get(str(candidate.get("intent") or ""))
+    if mapped:
+        action_ids.add(mapped)
+    if "record_work" not in action_ids:
+        return candidate
+    hinted = record_type_from_material(material)
+    if not hinted:
+        return candidate
+    out = dict(candidate)
+    out["record_type"] = hinted
+    out.setdefault("record_type_confidence", 0.8)
+    return out
+
+
 def normalize_candidate(
     candidate: dict[str, Any] | None,
     *,
