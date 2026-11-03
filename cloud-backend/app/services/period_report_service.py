@@ -452,14 +452,13 @@ async def generate_supervision_log(
         place = f"{r.section or ''} {r.location or ''}".strip()
         progress_items.append(f"{place}：{r.work_content}" if place else str(r.work_content))
     # 🔴 叙述性监理日报/日记：用户粘贴/口述的当日叙述是「用户认定的事实」，优先级最高。
-    # 当天若同时存在结构化记录，把聚合结果作为「系统记录补充」附在后面——绝不能整段丢弃
-    # 用户原文（2026-11-03 生产事故：10-27 有带水印巡视记录，用户贴的日报被下面这个
-    # `not progress_items` 条件整段忽略，生成的文书与用户所述完全不符）。
+    # 有叙述时**只用叙述**，不再把系统结构化记录聚合成「（系统记录补充：…）」追加进去——
+    # 那是正式文书，出现「系统记录补充」字样不合理，且与用户原文内容重复
+    # （2026-11-03 用户明确要求去掉）。
+    # 历史背景：10-27 曾因 `narrative and not progress_items` 条件把用户原文整段忽略，
+    # 生成的文书与用户所述完全不符；现在保留「叙述优先」，只去掉追加块。
     if narrative:
-        body = str(narrative).strip()
-        if progress_items:
-            body += "\n（系统记录补充：\n" + "\n".join(progress_items) + "\n）"
-        construction_progress = body
+        construction_progress = str(narrative).strip()
     else:
         construction_progress = (
             "\n".join(progress_items) if progress_items else "当日无施工记录。"
@@ -829,12 +828,10 @@ async def generate_safety_log(
     for h in hazards:
         loc = f"{h.section or ''} {h.location or ''}".strip()
         safety_items.append(f"{loc}：发现{h.top1_risk or '安全隐患'}（{h.risk_category or '安全'}类）")
-    # 🔴 叙述性安全监理日志：用户粘贴/口述的安全监理文字优先；同时有系统记录时把
-    # 聚合结果作为补充附后，不丢用户原文（与监理日志同一策略，2026-11-03 统一）。
+    # 🔴 叙述性安全监理日志：用户粘贴/口述的安全监理文字优先，且**只用叙述**——
+    # 与监理日志同一策略，不再追加「（系统记录补充：…）」（2026-11-03 用户要求去掉）。
     if narrative:
         safety_check = str(narrative).strip()
-        if safety_items:
-            safety_check += "\n（系统记录补充：\n" + "\n".join(safety_items) + "\n）"
     else:
         safety_check = "\n".join(safety_items) if safety_items else "当日无安全检查记录。"
 
