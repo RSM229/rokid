@@ -563,6 +563,7 @@ Page(themed({
     models: CHAT_MODELS,
     currentModel: 'qwen3.8-flash',
     modelName: '通义千问 3.8 Flash',
+    modelShortName: 'Qwen3.8 Flash',
     showModelMenu: false,
     showPlusPanel: false,
     /** 待发送附件：图片/文件可多选先挂在这里，补充文字后一次性发送识别 */
@@ -4962,7 +4963,7 @@ Page(themed({
     const model = this.data.models.find(m => m.id === id)
     if (!model) return
     wx.setStorageSync(`gdjl_${config.storageScope}_agent_model`, model.id)
-    this.setData({ currentModel: model.id, modelName: model.name, showModelMenu: false })
+    this.setData({ currentModel: model.id, modelName: model.name, modelShortName: model.shortName, showModelMenu: false })
     this.addMessage({ role: 'assistant', text: `已切换为「${model.name}」模型。` })
   },
 

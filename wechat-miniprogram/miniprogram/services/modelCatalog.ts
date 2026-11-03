@@ -7,6 +7,7 @@
  *  - providerName 展示用供应商名（截图左侧那列，如 DeepSeek / 通义千问）
  *  - model       传给后端的 model id（''=沿用系统默认模型）
  *  - name        友好名称
+ *  - shortName   chip 上显示的简短名（避免完整名过长）
  *  - desc        一句话简介
  *  - temperature 该模型的推荐温度
  *  - badges      角标（截图里的 New / 限时夜间5折 之类）
@@ -23,6 +24,7 @@ export interface ModelItem {
   providerName: string
   model: string
   name: string
+  shortName: string
   desc: string
   temperature: number
   badges: string[]
@@ -36,6 +38,7 @@ export const MODEL_CATALOG: ModelItem[] = [
     providerName: '通义千问',
     model: 'qwen3.8-flash',
     name: '通义千问 3.8 Flash',
+    shortName: 'Qwen3.8 Flash',
     desc: '高速全能，文本/推理/视觉',
     temperature: 0.7,
     badges: ['New'],
@@ -47,6 +50,7 @@ export const MODEL_CATALOG: ModelItem[] = [
     providerName: 'DeepSeek',
     model: 'deepseek-v4.1-flash-1017',
     name: 'DeepSeek V4.1 Flash',
+    shortName: 'DeepSeek V4.1',
     desc: '高速推理，文本/视觉全能',
     temperature: 0.7,
     badges: ['New', '⚡ 限时夜间 5 折'],
@@ -58,6 +62,7 @@ export const MODEL_CATALOG: ModelItem[] = [
     providerName: '华南理工',
     model: '',
     name: '华工大模型',
+    shortName: '华工',
     desc: '华南理工，视觉/深度',
     temperature: 0.6,
     badges: [],

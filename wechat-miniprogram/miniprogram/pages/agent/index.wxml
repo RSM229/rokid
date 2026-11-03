@@ -446,7 +446,7 @@
         <view class="flex-spacer"></view>
         <view class="model-chip" bindtap="toggleModelMenu">
           <view class="scope-chip-icon ic-model"></view>
-          <text class="scope-chip-label">模型</text>
+          <text class="scope-chip-label">{{modelShortName}}</text>
           <text class="scope-chip-caret">{{showModelMenu ? '▴' : '▾'}}</text>
         </view>
         <!-- 麦克风：按住说话、松手结束（与输入框一致；touchcancel 也按松手处理，避免滑出丢话） -->

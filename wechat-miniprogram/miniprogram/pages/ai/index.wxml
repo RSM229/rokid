@@ -10,7 +10,7 @@
   <view class="model-bar" bindtap="onModelPickerToggle">
     <view class="model-bar-dot"></view>
     <text class="model-bar-label">模型</text>
-    <text class="model-bar-name">{{currentModelName}}</text>
+    <text class="model-bar-name">{{currentModelShortName}}</text>
     <text class="model-bar-caret">{{modelPickerVisible ? '▴' : '▾'}}</text>
   </view>
 

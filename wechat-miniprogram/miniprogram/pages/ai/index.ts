@@ -20,6 +20,7 @@ Page(themed({
     models: MODEL_CATALOG,
     currentModelId: MODEL_CATALOG[0].id,
     currentModelName: MODEL_CATALOG[0].name,
+    currentModelShortName: MODEL_CATALOG[0].shortName,
     modelPickerVisible: false,
 
     kbs: [] as KbOption[],
@@ -51,7 +52,7 @@ Page(themed({
     this.audioCtx = wx.createInnerAudioContext()
     const savedId = String(wx.getStorageSync(AI_MODEL_KEY) || MODEL_CATALOG[0].id)
     const saved = findModel(savedId)
-    this.setData({ currentModelId: saved.id, currentModelName: saved.name })
+    this.setData({ currentModelId: saved.id, currentModelName: saved.name, currentModelShortName: saved.shortName })
     this.loadKbs()
   },
 
@@ -62,7 +63,7 @@ Page(themed({
     const id = (event.detail as { id: string }).id
     const model = findModel(id)
     wx.setStorageSync(AI_MODEL_KEY, model.id)
-    this.setData({ currentModelId: model.id, currentModelName: model.name, modelPickerVisible: false })
+    this.setData({ currentModelId: model.id, currentModelName: model.name, currentModelShortName: model.shortName, modelPickerVisible: false })
   },
 
   async loadKbs() {
