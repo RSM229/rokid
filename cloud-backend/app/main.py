@@ -20,7 +20,7 @@ from app.routers import work_record, task, knowledge_graph, project
 from app.routers import media, miniprogram_auth
 from app.routers import signature, inspection, ws
 from app.routers import acceptance_template, wechat_notice
-from app.routers import knowledge_base, note, ai_extras
+from app.routers import knowledge_base, note
 from app.routers import omni
 from app.routers import model_settings
 from app.routers import form_doc
@@ -182,7 +182,6 @@ app.include_router(document.router, prefix="/api/document", tags=["监理文书"
 app.include_router(knowledge.router, prefix="/api/knowledge", tags=["知识库"])
 app.include_router(knowledge_base.router, prefix="/api/kb", tags=["个人/共享知识库"])
 app.include_router(note.router, prefix="/api/notes", tags=["笔记"])
-app.include_router(ai_extras.router, prefix="/api/ai", tags=["AI扩展"])
 app.include_router(ledger.router, prefix="/api/ledger", tags=["台账管理"])
 app.include_router(watermark.router, prefix="/api/watermark", tags=["水印服务"])
 app.include_router(simulator.router, prefix="/api", tags=["眼镜端模拟器"])
