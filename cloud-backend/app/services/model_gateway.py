@@ -135,6 +135,21 @@ def _join_api_path(base_url: str, path: str) -> str:
     return base + suffix
 
 
+def _hazard_vlm_config() -> ModelConfig:
+    """隐患识别专用 VLM 配置：强制走华工 hazard_vlm_detection 通道（2026-11-03）。
+
+    与通用 vlm 配置（DEFAULT_VLM_*，可被环境变量覆盖）解耦。隐患识别是
+    安全攸关功能，必须固定走华工——不允许环境变量把它悄悄换到别的供应商；
+    配置缺失直接报错，绝不静默回退（避免隐患漏检）。
+    """
+    config = ModelConfig("vlm")
+    config.provider = "华工"
+    config.api_key = getattr(settings, "huagong_vlm_token", "") or ""
+    config.base_url = getattr(settings, "huagong_vlm_url", "") or ""
+    config.model_id = "hazard_vlm_detection"
+    return config
+
+
 def _is_aliyun(config: ModelConfig) -> bool:
     provider = config.provider.lower()
     host = (urlsplit(config.base_url).hostname or "").lower()
@@ -296,7 +311,7 @@ async def detect_hazard(
     prompt: str | None = None,
     client: httpx.AsyncClient | None = None,
 ) -> dict:
-    config = await get_runtime_model_config("vlm")
+    config = _hazard_vlm_config()
     _require_available(config)
     options = config.options
     parameters = {"prompt": prompt} if prompt else {}
