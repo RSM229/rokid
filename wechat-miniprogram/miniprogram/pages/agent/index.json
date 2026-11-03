@@ -3,7 +3,6 @@
   "navigationStyle": "custom",
   "usingComponents": {
     "tab-bar": "/components/tab-bar/index",
-    "date-time-picker": "/components/date-time-picker/index",
-    "model-picker": "/components/model-picker/index"
+    "date-time-picker": "/components/date-time-picker/index"
   }
 }

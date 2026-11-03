@@ -1,4 +1,4 @@
-<view class="page" style="padding-top: {{statusBarHeight}}px;; {{themeStyle}}">
+<view class="page" style="padding-top: {{statusBarHeight}}px;; {{themeStyle}}" bindtap="onPageTap">
   <tab-bar active="agent" bind:doubletap="onTabDoubleTap" />
   <!-- Custom Nav Bar -->
   <view class="nav-bar" style="height: {{statusBarHeight + navBarHeight}}px;">
@@ -443,10 +443,26 @@
       <view class="input-card-row">
         <view class="round-btn round-btn-lg ic-plus-g" bindtap="togglePlusPanel"></view>
         <view class="flex-spacer"></view>
-        <view class="model-chip" bindtap="toggleModelMenu">
-          <view class="scope-chip-icon ic-model"></view>
-          <text class="scope-chip-label">{{modelShortName}}</text>
-          <text class="scope-chip-caret">{{showModelMenu ? '▴' : '▾'}}</text>
+        <view class="model-anchor">
+          <!-- catchtap：阻断冒泡到页面根，否则打开瞬间被 onPageTap 反向关闭（事件冒泡先于 setData 生效） -->
+          <view class="model-chip" catchtap="toggleModelMenu">
+            <view class="scope-chip-icon ic-model"></view>
+            <text class="scope-chip-label">{{modelShortName}}</text>
+            <text class="scope-chip-caret">{{showModelMenu ? '▴' : '▾'}}</text>
+          </view>
+          <!-- 🔴 气泡菜单：absolute 锚定在按钮正上方，永不漂移。
+               菜单项 bindtap 直达 selectModel；selectModel 先把 showModelMenu 置 false，
+               再冒泡到根 onPageTap 时已是 false，不会二次翻转（setData 异步，读到的仍是新值前的旧值也无害） -->
+          <view class="model-menu" wx:if="{{showModelMenu}}">
+            <view class="model-menu-item {{currentModel === item.id ? 'active' : ''}}"
+                  wx:for="{{models}}" wx:key="id" data-model="{{item.id}}" bindtap="selectModel">
+              <view class="model-menu-row1">
+                <text class="model-menu-name">{{item.name}}</text>
+                <text wx:if="{{currentModel === item.id}}" class="model-menu-check">✓</text>
+              </view>
+              <text class="model-menu-desc">{{item.providerName}} · {{item.model}}</text>
+            </view>
+          </view>
         </view>
         <!-- 麦克风：按住说话、松手结束（与输入框一致；touchcancel 也按松手处理，避免滑出丢话） -->
         <view wx:if="{{!input && !attachments.length}}" class="round-btn {{recording ? 'ic-stop recording' : 'ic-mic'}}"
@@ -454,7 +470,6 @@
         <view class="send-fab {{canSend ? 'active' : ''}}" bindtap="send">
           <view class="send-fab-ic"></view>
         </view>
-        <model-picker visible="{{showModelMenu}}" models="{{models}}" value="{{currentModel}}" bind:select="selectModel" bind:close="toggleModelMenu" />
       </view>
     </view>
   </view>
