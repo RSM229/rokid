@@ -853,7 +853,9 @@ Page(themed({
     }
     messages[progressIndex] = {
       ...messages[progressIndex], progressRequestId: requestId, progressEvents: [],
-      progressExpanded: true, progressStartedAt: Date.now(), progressElapsedSeconds: 0,
+      // 处理过程默认收起（2026-11-03 用户要求）：只露一行摘要「处理过程 + 当前步骤 + N 项 · M 秒」，
+      // 展开与否完全由用户点标题栏决定，事件追加不再自动弹开。历史回读同此策略（见 applyConversationDetail）。
+      progressExpanded: false, progressStartedAt: Date.now(), progressElapsedSeconds: 0,
       progressTerminal: false, progressHeadline: title,
     }
     this.setData({ messages, activeProgressIndex: progressIndex, activeProgressRequestId: requestId })
