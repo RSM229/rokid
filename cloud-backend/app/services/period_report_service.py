@@ -594,6 +594,20 @@ async def generate_supervision_log(
     supervisor_name = signer.real_name or ""
     supervisor_level = signer.supervisor_level or ""
 
+    # 🔴 叙述模式收口：用户粘贴/口述了完整日志正文时，文书只呈现用户所述，其余栏目一律
+    # 回到模板默认语，不再把系统结构化记录（含照片水印 OCR 文本「现场水印显示…」）混进去
+    # ——2026-11-03 用户两次指出「还是有其他不是我输入的文字」。
+    # 需要合并系统记录时走「不贴正文、直接生成今天的监理日志」的聚合路径。
+    if narrative:
+        material_section = "当日无材料进场及见证取样。"
+        supervision_section = "当日无旁站及巡视记录。"
+        acceptance_section = "当日无验收记录。"
+        other_section = "无。"
+        problems_section = "当日无安全隐患及质量问题。"
+        parallel_section = "当日无平行检查记录。"
+        for _bucket in buckets:
+            buckets[_bucket] = []
+
     content = {
         "project_name": project_name,
         "doc_number": f"GD-JL-{project_id}-{target_date.strftime('%Y%m%d')}",

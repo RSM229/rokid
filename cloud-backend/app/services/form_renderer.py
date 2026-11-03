@@ -2228,14 +2228,15 @@ def _fill_by_schema_labels(doc: DocxDocument, form_code: str, data: dict) -> Non
                     if not lc:
                         continue
                     if lc.startswith(compact) or compact.startswith(lc):
+                        # 🔴 只认标签右侧「紧邻的那个单元格」，不能一路往后找第一个空单元格：
+                        # 紧邻值格已被专用填充器填好时（如监理日志 R1「日期」值格），原实现会
+                        # 越界写到下一栏——实测把 date 写进了「气温」格（2026-11-03 用户截图）。
                         target = None
                         for candidate in cells[index + 1:]:
                             if _same_cell(candidate, cell):
                                 continue
-                            target_text = _cell_text(candidate).strip()
-                            if not target_text:
-                                target = candidate
-                                break
+                            target = candidate
+                            break
                         if target is not None and not _cell_text(target).strip():
                             _set_cell_text(target, val)
                         break
