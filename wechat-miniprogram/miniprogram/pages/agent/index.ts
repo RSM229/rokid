@@ -1168,7 +1168,7 @@ Page(themed({
       return
     }
 
-    const userMsg: Message = { role: 'user', text }
+    const userMsg: Message = { role: 'user', text, timeText: formatMessageTime() }
     this.setData({ input: '', canSend: false })
 
     // 确定性本地动作：「返回主页」精确匹配 → 重置会话（其余自然语言交后端智能体）
@@ -1223,6 +1223,7 @@ Page(themed({
       role: 'user',
       text: note || `请识别这${summary}`,
       images: images.map(i => i.path),
+      timeText: formatMessageTime(),
     }
     const messages = [...this.data.messages, userMsg] as Message[]
     this.setData({
@@ -2345,7 +2346,7 @@ Page(themed({
     const purpose = String(event.currentTarget.dataset.purpose || '')
     if (!purpose || this.data.loading) return
     this.setData({ loading: true })
-    void this.applyReviewPurposeReply(index, purpose, { role: 'user', text: purpose })
+    void this.applyReviewPurposeReply(index, purpose, { role: 'user', text: purpose, timeText: formatMessageTime() })
       .finally(() => this.setData({ loading: false }))
   },
 
@@ -3235,7 +3236,7 @@ Page(themed({
       }
 
       this.setData({ loading: true })
-      const messages = [...this.data.messages, { role: 'user', text: summary || form.title }] as Message[]
+      const messages = [...this.data.messages, { role: 'user', text: summary || form.title, timeText: formatMessageTime() }] as Message[]
       const history = messages.slice(-7, -1)
         .filter(message => message.role === 'user' || message.role === 'assistant')
         .map(message => ({ role: message.role, text: message.text }))
@@ -3321,7 +3322,7 @@ Page(themed({
     this.setData({
       breadcrumb: [],
       hazardMode: false,
-      messages: [...this.data.messages, userMsg, { role: 'assistant', text: '已返回主页' }],
+      messages: [...this.data.messages, userMsg, { role: 'assistant', text: '已返回主页', timeText: formatMessageTime() }],
     })
     this.currentSessionId = 0
     this.initMessages()
@@ -3347,11 +3348,11 @@ Page(themed({
         ).join('\n')
       }
       this.setData({
-        messages: [...this.data.messages, { role: 'assistant', text: answer || '未找到相关知识' }],
+        messages: [...this.data.messages, { role: 'assistant', text: answer || '未找到相关知识', timeText: formatMessageTime() }],
       })
     } catch (error) {
       this.setData({
-        messages: [...this.data.messages, { role: 'assistant', text: `查询失败：${(error as Error).message}` }],
+        messages: [...this.data.messages, { role: 'assistant', text: `查询失败：${(error as Error).message}`, timeText: formatMessageTime() }],
       })
     } finally {
       this.setData({ loading: false })
@@ -3534,7 +3535,7 @@ Page(themed({
       success: async (res) => {
         const paths = (res.tempFiles || []).map(f => f.tempFilePath).filter(Boolean)
         if (!paths.length) return
-        this.addMessage({ role: 'user', images: paths, text: `为记录 #${recordId} 补充 ${paths.length} 张照片` })
+        this.addMessage({ role: 'user', images: paths, text: `为记录 #${recordId} 补充 ${paths.length} 张照片`, timeText: formatMessageTime() })
         wx.showLoading({ title: '上传中...', mask: true })
         const { ok, failed, lastError } = await this.uploadPhotosToRecord(recordId, paths)
         wx.hideLoading()
@@ -3604,7 +3605,7 @@ Page(themed({
 
   async generateRecordFromFile(filename: string, content: string) {
     const brief = content.slice(0, 3000)
-    const userMsg: Message = { role: 'user', text: `导入文件《${filename}》，请根据文件内容生成对应的工作记录` }
+    const userMsg: Message = { role: 'user', text: `导入文件《${filename}》，请根据文件内容生成对应的工作记录`, timeText: formatMessageTime() }
     const messages = [...this.data.messages, userMsg] as Message[]
     this.setData({ messages, loading: true })
     try {
@@ -3648,7 +3649,7 @@ Page(themed({
       })
     } catch (error) {
       this.setData({
-        messages: [...messages, { role: 'assistant', text: `生成失败：${(error as Error).message}` }],
+        messages: [...messages, { role: 'assistant', text: `生成失败：${(error as Error).message}`, timeText: formatMessageTime() }],
       })
     } finally {
       this.setData({ loading: false })
@@ -3682,7 +3683,7 @@ Page(themed({
     if (command.startsWith('agent-chip:')) {
       const value = command.slice('agent-chip:'.length)
       if (!value || this.data.loading) return
-      this.handleLlmChat(value, { role: 'user', text: value })
+      this.handleLlmChat(value, { role: 'user', text: value, timeText: formatMessageTime() })
       return
     }
     // 工作记录卡「补充照片」：选图 → /media/images 挂到该记录
@@ -3835,7 +3836,7 @@ Page(themed({
   /** 空状态③ 查资料库：不再弹范围选择，直接提示输入问题（2026-10-09） */
   askScopeFromChat() {
     this.setData({
-      messages: [...this.data.messages, { role: 'assistant', text: '请输入要查询的规范或资料问题，我来为你检索资料库：' }],
+      messages: [...this.data.messages, { role: 'assistant', text: '请输入要查询的规范或资料问题，我来为你检索资料库：', timeText: formatMessageTime() }],
     })
   },
 
@@ -4009,7 +4010,7 @@ Page(themed({
   async sendImage() {
     if (!this.data.pendingImage) return
     const imagePath = this.data.pendingImage
-    const userMsg: Message = { role: 'user', text: '请识别这张图片中的隐患', image: imagePath }
+    const userMsg: Message = { role: 'user', text: '请识别这张图片中的隐患', image: imagePath, timeText: formatMessageTime() }
     this.setData({ pendingImage: '', messages: [...this.data.messages, userMsg], loading: true })
 
     try {
@@ -4053,11 +4054,11 @@ Page(themed({
         answer = '未识别到明显安全隐患。'
       }
       this.setData({
-        messages: [...this.data.messages, { role: 'assistant', text: answer }],
+        messages: [...this.data.messages, { role: 'assistant', text: answer, timeText: formatMessageTime() }],
       })
     } catch (error) {
       this.setData({
-        messages: [...this.data.messages, { role: 'assistant', text: `识别失败：${(error as Error).message}` }],
+        messages: [...this.data.messages, { role: 'assistant', text: `识别失败：${(error as Error).message}`, timeText: formatMessageTime() }],
       })
     } finally {
       this.setData({ loading: false })
@@ -4067,8 +4068,8 @@ Page(themed({
   /** 语音拍照自动创建工作记录 — 进入语音会话 */
   startVoiceWorkSession(photoPath: string) {
     const userMsg: Message = photoPath
-      ? { role: 'user', text: '用这张照片记录现场工作', image: photoPath }
-      : { role: 'user', text: '语音记录现场工作' }
+      ? { role: 'user', text: '用这张照片记录现场工作', image: photoPath, timeText: formatMessageTime() }
+      : { role: 'user', text: '语音记录现场工作', timeText: formatMessageTime() }
     this.setData({
       showPlusPanel: false,
       voiceSessionActive: true,
@@ -4406,6 +4407,7 @@ Page(themed({
         messages: [...this.data.messages, {
           role: 'assistant',
           text: `${type === 'inspection' ? '巡视' : type === 'acceptance' ? '验收' : type === 'station' ? '旁站' : '见证'}记录已创建`,
+          timeText: formatMessageTime(),
         }],
       })
     } catch (error) {
@@ -4435,6 +4437,7 @@ Page(themed({
         messages: [...this.data.messages, {
           role: 'assistant',
           text: `监理日志已生成（文书ID: ${result.doc_id}），包含 ${workCount} 条工作记录、${hazardCount} 条隐患记录。`,
+          timeText: formatMessageTime(),
         }],
       })
     } catch (error) {
@@ -4476,7 +4479,7 @@ Page(themed({
       wx.showToast({ title: '派单成功', icon: 'success' })
       this.setData({ showTaskForm: false })
       this.setData({
-        messages: [...this.data.messages, { role: 'assistant', text: `任务「${form.title}」已派发` }],
+        messages: [...this.data.messages, { role: 'assistant', text: `任务「${form.title}」已派发`, timeText: formatMessageTime() }],
       })
     } catch (error) {
       wx.showToast({ title: (error as Error).message, icon: 'none' })
@@ -4542,6 +4545,7 @@ Page(themed({
         messages: [...this.data.messages, {
           role: 'assistant',
           text: `监理文书「${form.title}」已创建（ID: ${result.doc_id}）`,
+          timeText: formatMessageTime(),
         }],
       })
     } catch (error) {
@@ -4721,8 +4725,8 @@ Page(themed({
         projectSummary: description || name,
         messages: [
           ...this.data.messages,
-          { role: 'user', text: `创建项目：${name}` },
-          { role: 'assistant', text: `项目「${result.name}」已创建成功！现在可以开始工作了。` },
+          { role: 'user', text: `创建项目：${name}`, timeText: formatMessageTime() },
+          { role: 'assistant', text: `项目「${result.name}」已创建成功！现在可以开始工作了。`, timeText: formatMessageTime() },
         ],
       })
     } catch (error) {
@@ -4991,6 +4995,14 @@ Page(themed({
   // 输入卡左侧的模型下拉（千问 / 华工）
   toggleModelMenu() {
     this.setData({ showModelMenu: !this.data.showModelMenu })
+  },
+
+  // 页面根 bindtap：点气泡外任意处关闭模型菜单（无条件关闭而非 toggle，
+  // 否则冒泡到菜单项/按钮时会把刚关掉的面板又翻转打开；滚动是 touch 事件不受影响）
+  onPageTap() {
+    if (this.data.showModelMenu) {
+      this.setData({ showModelMenu: false })
+    }
   },
 
   selectModel(event: WechatMiniprogram.TouchEvent | WechatMiniprogram.CustomEvent) {
