@@ -118,12 +118,12 @@ function progressEventView(raw: Record<string, unknown>): AgentProgressEventView
   }
 }
 
-/** 对话时间戳：沿用备案助手的「YYYY-MM-DD HH:mm:ss」展示。 */
+/** 对话时间戳：参考截图样式，用「HH:mm」短格式（2026-11-03 改）。 */
 function formatMessageTime(value?: string | number | Date): string {
   const date = value == null ? new Date() : new Date(value)
   if (Number.isNaN(date.getTime())) return ''
   const pad = (part: number) => String(part).padStart(2, '0')
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+  return `${pad(date.getHours())}:${pad(date.getMinutes())}`
 }
 
 /** 把一次处理的进度轨迹合并进最终助手回复，保持「步骤在正文前」。 */
