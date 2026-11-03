@@ -1,83 +1,29 @@
-<view class="page tab-host" style="{{themeStyle}}">
+<view class="page tab-host {{source === 'ledger' ? 'is-ledger' : ''}}" style="{{themeStyle}}">
   <glass-nav-bar title="规范文书" left="back">
-    <view slot="right" wx:if="{{selectedFilter !== 'ledger'}}" class="nav-select-btn" bindtap="toggleSelectMode">{{selectMode ? '取消' : '选择'}}</view>
+    <view slot="right" wx:if="{{source === 'doc'}}" class="nav-select-btn" bindtap="toggleSelectMode">{{selectMode ? '取消' : '选择'}}</view>
   </glass-nav-bar>
   <tab-bar active="" />
 
-  <!-- ==================== 文书模式 ==================== -->
-  <view wx:if="{{selectedFilter !== 'ledger'}}">
-    <view class="search-bar">
-      <input class="search-field" value="{{keyword}}" placeholder="搜索文书标题/区域/类型" bindinput="onKeywordInput" confirm-type="search" />
-    </view>
-    <view class="filter-tabs">
-      <view
-        class="filter-tab {{selectedFilter === item.key ? 'active' : ''}}"
-        wx:for="{{filters}}"
-        wx:key="key"
-        data-key="{{item.key}}"
-        bindtap="selectFilter"
-      >{{item.label}}</view>
-    </view>
-
-    <scroll-view scroll-x class="cat-scroll" show-scrollbar="{{false}}">
-      <view class="cat-tabs">
-        <view class="cat-tab {{docCategory ? '' : 'active'}}" data-key="" bindtap="selectDocCategory">全部文书</view>
-        <view
-          class="cat-tab {{docCategory === item.key ? 'active' : ''}}"
-          wx:for="{{docCategories}}"
-          wx:key="key"
-          data-key="{{item.key}}"
-          bindtap="selectDocCategory">{{item.label}}</view>
-      </view>
-    </scroll-view>
-
-    <view class="active-cat" wx:if="{{docCategoryLabel}}">
-      <text class="active-cat-text">当前：{{docCategoryLabel}}</text>
-      <text class="active-cat-clear" bindtap="clearDocCategory">清除</text>
-    </view>
-
-    <view class="empty" wx:if="{{empty && !loading}}">
-      <text>{{docCategoryLabel ? '暂无' + docCategoryLabel : '暂无监理文书'}}</text>
-    </view>
-
-    <view wx:else>
-      <view class="card item file-item {{selectMode && selected[item.id] ? 'checking' : ''}}" wx:for="{{list}}" wx:key="id" data-id="{{item.id}}" bindtap="onItemTap" bindlongpress="onItemLongPress">
-        <view wx:if="{{selectMode}}" class="doc-check {{selected[item.id] ? 'on' : ''}}">✓</view>
-        <view class="doc-file-icon type-badge">{{item.badge}}</view>
-        <view class="doc-file-info">
-          <view class="doc-file-name">{{item.title || item.doc_type || '文书'}}{{item.hasPdf ? '.pdf' : '.docx'}}</view>
-          <view class="doc-file-sub">
-            <text wx:if="{{item.doc_type}}">{{item.doc_type}}</text>
-            <text wx:if="{{item.status}}"> · {{item.status}}</text>
-            <text wx:if="{{item.section || item.location}}"> · {{item.section || ''}}{{item.location || ''}}</text>
-            <text wx:if="{{item.created_at}}"> · {{item.created_at}}</text>
-          </view>
-        </view>
-        <view wx:if="{{!selectMode}}" class="doc-file-detail" catchtap="openDetail" data-id="{{item.id}}">详情</view>
-      </view>
-    </view>
-
-    <view class="loading" wx:if="{{loading}}">加载中...</view>
-
-    <!-- 多选操作栏：批量提交审批 / 删除 -->
-    <view wx:if="{{selectMode}}" class="select-bar">
-      <view class="select-all" bindtap="selectAll">{{allSelected ? '全不选' : '全选'}}</view>
-      <view class="select-action {{selectedCount ? '' : 'disabled'}}" bindtap="batchSubmit">提交{{selectedCount ? ' ' + selectedCount : ''}}</view>
-      <view class="select-action danger {{selectedCount ? '' : 'disabled'}}" bindtap="batchDelete">删除{{selectedCount ? ' ' + selectedCount : ''}}</view>
-    </view>
+  <!-- 搜索栏（共用）：文书=本地即时过滤；台账=键盘「搜索」确认后服务端检索 -->
+  <view class="search-bar">
+    <input class="search-field" value="{{keyword}}" placeholder="搜索标题/区域/类型" bindinput="onKeywordInput" bindconfirm="onSearchConfirm" confirm-type="search" />
   </view>
 
-  <!-- ==================== 台账模式 ==================== -->
-  <view wx:if="{{selectedFilter === 'ledger'}}" class="ledger-view">
-    <view class="toolbar">
-      <view class="title">台账</view>
-      <view class="toolbar-right">
-        <view class="filter-btn" bindtap="openFilter">
-          {{activeFilterCount ? '筛选已选 ' + activeFilterCount : '筛选'}} ▾
-        </view>
-      </view>
+  <!-- 统一类型 tab：文书分类 + 整改通知单/待审批 + 台账，同一条栏 -->
+  <scroll-view scroll-x class="cat-scroll" show-scrollbar="{{false}}">
+    <view class="cat-tabs">
+      <view
+        wx:for="{{typeTabs}}"
+        wx:key="key"
+        class="cat-tab {{activeType === item.key ? 'active' : ''}}"
+        data-key="{{item.key}}"
+        bindtap="selectType"
+      >{{item.label}}</view>
     </view>
+  </scroll-view>
 
+  <!-- 台账子类型 + 筛选入口（仅「台账」页签显示） -->
+  <view wx:if="{{source === 'ledger'}}" class="ledger-sub-row">
     <scroll-view scroll-x class="type-tabs-scroll" show-scrollbar="{{false}}">
       <view class="type-tabs">
         <view
@@ -88,86 +34,99 @@
           bindtap="selectLedgerType">{{item.label}}</view>
       </view>
     </scroll-view>
+    <view class="filter-btn" bindtap="openFilter">{{activeFilterCount ? '筛选 ' + activeFilterCount : '筛选'}} ▾</view>
+  </view>
 
-    <view wx:if="{{loading && !records.length}}" class="empty">正在加载台账…</view>
-    <view wx:elif="{{!records.length}}" class="empty">当前条件下暂无台账记录</view>
+  <!-- 空态 -->
+  <view class="empty" wx:if="{{empty && !loading}}">
+    <text>{{source === 'ledger' ? '当前条件下暂无台账记录' : (activeTabLabel === '全部文书' ? '暂无监理文书' : '暂无' + activeTabLabel)}}</text>
+  </view>
 
-    <view
-      wx:for="{{records}}"
-      wx:key="id"
-      class="card ledger-card"
-      data-id="{{item.id}}"
-      bindtap="onCardTap">
-
-      <!-- 影像 / 隐患 -->
-      <block wx:if="{{item.image_url}}">
+  <!-- 统一列表：影像/隐患=带图卡片，其余（文书 + 文书类台账）=文件行 -->
+  <block wx:else>
+    <block wx:for="{{items}}" wx:key="id">
+      <!-- 影像 / 隐患（带图） -->
+      <view wx:if="{{item.image_url}}" class="card ledger-card" data-id="{{item.id}}" bindtap="onCardTap">
         <image class="photo" src="{{item.image_url}}" mode="aspectFill" data-url="{{item.image_url}}" catchtap="preview"></image>
         <view class="ledger-content">
           <view class="head">
-            <view class="ledger-title">{{item.title || item.top1_risk || item.risk_category || '现场影像'}}</view>
+            <view class="ledger-title">{{item.title}}</view>
             <view class="status {{item.status === '已整改' ? 'ok' : ''}}">{{item.status || ''}}</view>
           </view>
           <view class="muted">{{item.section || ''}} {{item.location || ''}}</view>
           <view wx:if="{{item.hazard_id}}" class="hazard-link" data-id="{{item.hazard_id}}" catchtap="openHazard">关联隐患 #{{item.hazard_id}}</view>
           <view class="muted">{{item.created_at}}</view>
         </view>
-      </block>
+      </view>
 
-      <!-- 文书类台账 -->
-      <block wx:if="{{!item.image_url}}">
-        <view class="ledger-content">
-          <view class="head">
-            <view class="ledger-title">{{item.title || ('台账记录 #' + item.id)}}</view>
-            <view class="status {{item.status === '已提交' ? 'ok' : ''}}">{{item.status || ''}}</view>
+      <!-- 文件行：监理文书 / 文书类台账记录，共用一套卡片 -->
+      <view
+        wx:else
+        class="card item file-item {{selectMode && source === 'doc' && selected[item.id] ? 'checking' : ''}}"
+        data-id="{{item.id}}"
+        bindtap="onRowTap"
+        bindlongpress="onItemLongPress">
+        <view wx:if="{{selectMode && source === 'doc'}}" class="doc-check {{selected[item.id] ? 'on' : ''}}">✓</view>
+        <view class="doc-file-icon type-badge">{{item.badge}}</view>
+        <view class="doc-file-info">
+          <view class="doc-file-name">{{item.title || item.doc_type || '文书'}}{{item._ledger ? '' : (item.hasPdf ? '.pdf' : '.docx')}}</view>
+          <view class="doc-file-sub">
+            <text wx:if="{{!item._ledger && item.doc_type}}">{{item.doc_type}}</text>
+            <text wx:if="{{item._ledger && item.doc_number}}">编号：{{item.doc_number}}</text>
+            <text wx:if="{{item.status}}"> · {{item.status}}</text>
+            <text wx:if="{{item.section || item.location}}"> · {{item.section || ''}}{{item.location || ''}}</text>
+            <text wx:if="{{item.created_at}}"> · {{item.created_at}}</text>
           </view>
-          <view wx:if="{{item.doc_number}}" class="doc-number">编号：{{item.doc_number}}</view>
-          <view class="muted">{{item.section || ''}} {{item.location || ''}}</view>
-          <view class="muted">{{item.created_at}}</view>
         </view>
-      </block>
-    </view>
+        <view wx:if="{{!selectMode}}" class="doc-file-detail" catchtap="openDetail" data-id="{{item.id}}">详情</view>
+      </view>
+    </block>
 
+    <view class="loading" wx:if="{{loading}}">加载中...</view>
     <view wx:if="{{loadingMore}}" class="load-more">加载中…</view>
-    <view wx:if="{{!hasMore && records.length}}" class="load-more">已加载全部</view>
+    <view wx:if="{{source === 'ledger' && !hasMore && items.length}}" class="load-more">已加载全部</view>
 
-    <!-- 台账筛选弹窗 -->
-    <view wx:if="{{showFilter}}" class="mask" bindtap="closeFilter"></view>
-    <view wx:if="{{showFilter}}" class="sheet">
-      <view class="sheet-head">
-        <view class="title">筛选台账</view>
-        <text class="close" bindtap="closeFilter">×</text>
-      </view>
-      <view class="filter-field">
-        <text class="filter-label">开始日期</text>
-        <picker mode="date" value="{{ledgerStartDate}}" bindchange="onStartDateChange">
-          <view class="picker-value {{ledgerStartDate ? '' : 'placeholder'}}">{{ledgerStartDate || '请选择'}}</view>
-        </picker>
-      </view>
-      <view class="filter-field">
-        <text class="filter-label">结束日期</text>
-        <picker mode="date" value="{{ledgerEndDate}}" bindchange="onEndDateChange">
-          <view class="picker-value {{ledgerEndDate ? '' : 'placeholder'}}">{{ledgerEndDate || '请选择'}}</view>
-        </picker>
-      </view>
-      <view class="filter-field">
-        <text class="filter-label">区域</text>
-        <input class="filter-input" value="{{ledgerSection}}" placeholder="如：1号楼" bindinput="onLedgerInput" data-field="ledgerSection" />
-      </view>
-      <view class="filter-field">
-        <text class="filter-label">关键词</text>
-        <input class="filter-input" value="{{ledgerKeyword}}" placeholder="标题 / 位置 / 编号" bindinput="onLedgerInput" data-field="ledgerKeyword" />
-      </view>
-      <view class="sheet-actions">
-        <button bindtap="resetLedgerFilter">重置</button>
-        <button class="primary" bindtap="applyLedgerFilter">确定</button>
-      </view>
+    <!-- 多选操作栏（仅文书）：批量提交审批 / 删除 -->
+    <view wx:if="{{selectMode && source === 'doc'}}" class="select-bar">
+      <view class="select-all" bindtap="selectAll">{{allSelected ? '全不选' : '全选'}}</view>
+      <view class="select-action {{selectedCount ? '' : 'disabled'}}" bindtap="batchSubmit">提交{{selectedCount ? ' ' + selectedCount : ''}}</view>
+      <view class="select-action danger {{selectedCount ? '' : 'disabled'}}" bindtap="batchDelete">删除{{selectedCount ? ' ' + selectedCount : ''}}</view>
     </view>
+  </block>
 
-    <!-- 导出工具条 -->
-    <view class="export-bar">
-      <view class="export-btn" data-format="excel" bindtap="exportLedger">导出 Excel</view>
-      <view class="export-btn" data-format="pdf" bindtap="exportLedger">导出 PDF</view>
+  <!-- 台账筛选弹窗（日期/区域；关键词用顶部搜索栏） -->
+  <view wx:if="{{showFilter}}" class="mask" bindtap="closeFilter"></view>
+  <view wx:if="{{showFilter}}" class="sheet">
+    <view class="sheet-head">
+      <view class="title">筛选台账</view>
+      <text class="close" bindtap="closeFilter">×</text>
     </view>
+    <view class="filter-field">
+      <text class="filter-label">开始日期</text>
+      <picker mode="date" value="{{ledgerStartDate}}" bindchange="onStartDateChange">
+        <view class="picker-value {{ledgerStartDate ? '' : 'placeholder'}}">{{ledgerStartDate || '请选择'}}</view>
+      </picker>
+    </view>
+    <view class="filter-field">
+      <text class="filter-label">结束日期</text>
+      <picker mode="date" value="{{ledgerEndDate}}" bindchange="onEndDateChange">
+        <view class="picker-value {{ledgerEndDate ? '' : 'placeholder'}}">{{ledgerEndDate || '请选择'}}</view>
+      </picker>
+    </view>
+    <view class="filter-field">
+      <text class="filter-label">区域</text>
+      <input class="filter-input" value="{{ledgerSection}}" placeholder="如：1号楼" bindinput="onLedgerInput" data-field="ledgerSection" />
+    </view>
+    <view class="sheet-actions">
+      <button bindtap="resetLedgerFilter">重置</button>
+      <button class="primary" bindtap="applyLedgerFilter">确定</button>
+    </view>
+  </view>
+
+  <!-- 导出工具条（仅台账） -->
+  <view wx:if="{{source === 'ledger'}}" class="export-bar">
+    <view class="export-btn" data-format="excel" bindtap="exportLedger">导出 Excel</view>
+    <view class="export-btn" data-format="pdf" bindtap="exportLedger">导出 PDF</view>
   </view>
 
   <!-- 签认 / 用章授权弹窗（长按文件「签认」触发） -->

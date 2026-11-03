@@ -6,11 +6,26 @@ import { themed } from '../../utils/theme'
 const RECT_DOC_TYPE = '安全隐患整改通知单'
 const IMAGE_TYPE = 'image'
 
-const FILTERS = [
-  { key: 'all', label: '全部' },
-  { key: 'rect', label: '整改通知单' },
-  { key: 'pending', label: '待审批' },
-  { key: 'ledger', label: '台账' },
+/** 统一类型 tab：文书分类、整改通知单/待审批、台账收进同一条筛选栏。
+ * 数据仍各走各的（kind=doc 走 /document/list，kind=ledger 走 /ledger/list），渲染层合一。 */
+interface TypeTab {
+  key: string
+  label: string
+  kind: 'doc' | 'ledger'
+  docType: string
+  status: string
+}
+
+const TYPE_TABS: TypeTab[] = [
+  { key: 'all', label: '全部文书', kind: 'doc', docType: '', status: '' },
+  { key: 'xunshi', label: '巡视记录', kind: 'doc', docType: '巡视记录', status: '' },
+  { key: 'pangzhan', label: '旁站记录', kind: 'doc', docType: '旁站记录', status: '' },
+  { key: 'jianzheng', label: '见证记录', kind: 'doc', docType: '见证取样记录', status: '' },
+  { key: 'yanshou', label: '验收记录', kind: 'doc', docType: '验收记录', status: '' },
+  { key: 'daiding', label: '待定记录', kind: 'doc', docType: '', status: '' },
+  { key: 'rect', label: '整改通知单', kind: 'doc', docType: RECT_DOC_TYPE, status: '' },
+  { key: 'pending', label: '待审批', kind: 'doc', docType: '', status: '待审批' },
+  { key: 'ledger', label: '台账', kind: 'ledger', docType: '', status: '' },
 ]
 
 /**
@@ -72,6 +87,8 @@ interface LedgerTypeItem {
 }
 
 interface LedgerRecord {
+  // 索引签名：让 LedgerRecord 可直接并入统一的 Record<string, unknown>[] 列表
+  [key: string]: unknown
   id: number
   // 记录来源台账（决定点击后的跳转目标）
   _kind?: 'image' | 'hazard' | 'doc'
@@ -103,21 +120,19 @@ interface LedgerRecord {
 
 Page(themed({
   data: {
-    list: [] as Record<string, unknown>[],
+    // 统一列表：文书与台账记录共用一个渲染数组（方案A 合二为一）
+    items: [] as Record<string, unknown>[],
     _allList: [] as Record<string, unknown>[],
-    filters: FILTERS,
-    selectedFilter: 'all',
+    typeTabs: TYPE_TABS,
+    activeType: 'all',
+    source: 'doc' as 'doc' | 'ledger',
+    activeTabLabel: '全部文书',
     loading: false,
     empty: false,
     keyword: '',
-    // 现场记录文书分类（巡视/旁站/见证/验收/待定）
-    docCategories: DOC_CATEGORIES,
-    docCategory: '',
-    docCategoryLabel: '',
     // 台账
     ledgerTypes: [] as LedgerTypeItem[],
     ledgerIndex: 0,
-    records: [] as LedgerRecord[],
     showFilter: false,
     ledgerKeyword: '',
     ledgerSection: '',
@@ -148,17 +163,31 @@ Page(themed({
     projectSealId: 0,
   },
 
+  /** 切换统一类型 tab：同步 source / 标签，并清掉跨源残留状态 */
+  applyType(key: string) {
+    const tab = TYPE_TABS.find((item) => item.key === key) || TYPE_TABS[0]
+    this.setData({
+      activeType: tab.key,
+      source: tab.kind,
+      activeTabLabel: tab.label,
+      keyword: '',
+      ledgerKeyword: '',
+      selectMode: false,
+      selected: {},
+      selectedCount: 0,
+      allSelected: false,
+    })
+  },
+
   onLoad(options: { tab?: string; type?: string }) {
     if (options && options.tab === 'ledger') {
-      this.setData({ selectedFilter: 'ledger' })
+      this.applyType('ledger')
       return
     }
     // 从侧边栏「工作文书」子项进来：type = xunshi/pangzhan/jianzheng/yanshou/daiding
     if (options && options.type) {
-      const cat = DOC_CATEGORIES.find((item) => item.key === options.type)
-      if (cat) {
-        this.setData({ docCategory: cat.key, docCategoryLabel: cat.label, selectedFilter: 'all' })
-      }
+      const tab = TYPE_TABS.find((item) => item.key === options.type)
+      if (tab) this.applyType(tab.key)
     }
   },
 
@@ -167,7 +196,7 @@ Page(themed({
       wx.reLaunch({ url: '/pages/login/index' })
       return
     }
-    if (this.data.selectedFilter === 'ledger') {
+    if (this.data.source === 'ledger') {
       this.ensureLedger()
     } else {
       this.loadDocs()
@@ -175,37 +204,20 @@ Page(themed({
   },
 
   onPullDownRefresh() {
-    const task = this.data.selectedFilter === 'ledger' ? this.reloadLedger() : this.loadDocs()
+    const task = this.data.source === 'ledger' ? this.reloadLedger() : this.loadDocs()
     task.finally(() => wx.stopPullDownRefresh())
   },
 
   onReachBottom() {
-    if (this.data.selectedFilter === 'ledger') this.loadMoreLedger()
+    if (this.data.source === 'ledger') this.loadMoreLedger()
   },
 
-  selectDocCategory(event: WechatMiniprogram.TouchEvent) {
+  /** 统一类型 tab 点击：文书分类 / 整改通知单 / 待审批 / 台账 同一条栏 */
+  selectType(event: WechatMiniprogram.TouchEvent) {
     const key = String(event.currentTarget.dataset.key || '')
-    const cat = DOC_CATEGORIES.find((item) => item.key === key)
-    this.setData({
-      docCategory: cat?.key || '',
-      docCategoryLabel: cat?.label || '',
-      selectedFilter: 'all',
-      keyword: '',
-    })
-    this.loadDocs()
-  },
-
-  clearDocCategory() {
-    this.setData({ docCategory: '', docCategoryLabel: '', selectedFilter: 'all' })
-    this.loadDocs()
-  },
-
-  selectFilter(event: WechatMiniprogram.TouchEvent) {
-    const key = event.currentTarget.dataset.key as string
-    if (key === this.data.selectedFilter) return
-    // 分类与状态筛选互斥，切换状态时清掉分类
-    this.setData({ selectedFilter: key, docCategory: '', docCategoryLabel: '' })
-    if (key === 'ledger') {
+    if (key === this.data.activeType) return
+    this.applyType(key)
+    if (this.data.source === 'ledger') {
       this.ensureLedger()
     } else {
       this.loadDocs()
@@ -216,14 +228,22 @@ Page(themed({
 
   onKeywordInput(event: WechatMiniprogram.Input) {
     this.setData({ keyword: event.detail.value })
-    this.applyLocalFilter()
+    // 文书=本地即时过滤；台账=等服务端，键盘「搜索」确认后再请求
+    if (this.data.source === 'doc') this.applyLocalFilter()
+  },
+
+  /** 台账模式：搜索框确认后按关键词向服务端检索 */
+  onSearchConfirm() {
+    if (this.data.source !== 'ledger') return
+    this.setData({ ledgerKeyword: this.data.keyword.trim() })
+    this.reloadLedger()
   },
 
   applyLocalFilter() {
     const keyword = this.data.keyword.trim().toLowerCase()
     const base = this.data._allList as Record<string, unknown>[]
     if (!keyword) {
-      this.setData({ list: base, empty: base.length === 0 })
+      this.setData({ items: base, empty: base.length === 0 })
       return
     }
     const items = base.filter((item) =>
@@ -231,42 +251,48 @@ Page(themed({
         .filter((v) => typeof v === 'string')
         .some((v) => (v as string).toLowerCase().includes(keyword)),
     )
-    this.setData({ list: items, empty: items.length === 0 })
+    this.setData({ items, empty: items.length === 0 })
   },
 
   async loadDocs() {
     this.setData({ loading: true })
     try {
-      const cat = DOC_CATEGORIES.find((item) => item.key === this.data.docCategory)
+      const tab = TYPE_TABS.find((item) => item.key === this.data.activeType)
       let params = ''
-      if (cat?.docType) {
-        // 巡视/旁站/见证/验收：后端按 doc_type 精确过滤
-        params = `?doc_type=${encodeURIComponent(cat.docType)}`
-      } else if (this.data.selectedFilter === 'rect') {
-        params = `?doc_type=${encodeURIComponent(RECT_DOC_TYPE)}`
-      } else if (this.data.selectedFilter === 'pending') {
-        params = `?status=${encodeURIComponent('待审批')}`
+      if (tab?.docType) {
+        // 巡视/旁站/见证/验收/整改通知单：后端按 doc_type 精确过滤
+        params = `?doc_type=${encodeURIComponent(tab.docType)}`
+      } else if (tab?.status) {
+        // 待审批：后端按 status 过滤
+        params = `?status=${encodeURIComponent(tab.status)}`
       }
       const result = await request<unknown[] | { items: unknown[] }>(`/document/list${params}`)
-      let items = (Array.isArray(result) ? result : (result.items || [])) as Record<string, unknown>[]
+      let docs = (Array.isArray(result) ? result : (result.items || [])) as Record<string, unknown>[]
       // 待定记录：不归属任何已知文书类型的文书（待定工作记录本身按设计不生成文书，
       // 所以此分类通常为空 —— 监理日志/周报/通知单等有自己归宿的文书不再混进来）
-      if (cat && !cat.docType) {
-        items = items.filter((item) => !KNOWN_DOC_TYPES.includes(String(item.doc_type || '')))
+      if (this.data.activeType === 'daiding') {
+        docs = docs.filter((item) => !KNOWN_DOC_TYPES.includes(String(item.doc_type || '')))
       }
-      items = items.map(decorateDocBadge)
+      const items = docs.map(decorateDocBadge)
       this.setData({ _allList: items })
       this.applyLocalFilter()
     } catch {
-      this.setData({ list: [], _allList: [], empty: true })
+      this.setData({ items: [], _allList: [], empty: true })
     } finally {
       this.setData({ loading: false })
     }
   },
 
+  /** 「详情」按钮：台账记录按来源路由（隐患→隐患页，影像→预览），文书→文书详情 */
   openDetail(event: WechatMiniprogram.TouchEvent) {
-    const id = event.currentTarget.dataset.id
-    if (id) wx.navigateTo({ url: `/pages/documents/detail?id=${id}` })
+    const id = Number(event.currentTarget.dataset.id || 0)
+    if (!id) return
+    const item = this.data.items.find((row) => Number(row.id) === id)
+    if (item && item._ledger) {
+      this.routeLedgerRecord(item as unknown as LedgerRecord)
+      return
+    }
+    wx.navigateTo({ url: `/pages/documents/detail?id=${id}` })
   },
 
   /** 列表文件行：直接打开文书内容——有 PDF 直开 PDF，否则导出 Word 打开 */
@@ -277,7 +303,7 @@ Page(themed({
   },
 
   openDocFileById(id: number) {
-    const doc = this.data.list.find((item) => Number(item.id) === id)
+    const doc = this.data.items.find((item) => Number(item.id) === id)
     if (doc && doc.pdf_path) this.openPdfDoc(id)
     else this.openWordDoc(id)
   },
@@ -326,19 +352,24 @@ Page(themed({
     this.setData({ selectMode, selected: {}, selectedCount: 0, allSelected: false })
   },
 
-  /** 多选模式下点条目=勾选；普通模式=打开文件内容 */
-  onItemTap(event: WechatMiniprogram.TouchEvent) {
+  /** 行卡点击：多选模式=勾选；台账记录=按来源路由；文书=直接打开文件内容 */
+  onRowTap(event: WechatMiniprogram.TouchEvent) {
+    const id = Number(event.currentTarget.dataset.id || 0)
+    if (!id) return
+    const item = this.data.items.find((row) => Number(row.id) === id)
+    if (item && item._ledger) {
+      if (!this.data.selectMode) this.routeLedgerRecord(item as unknown as LedgerRecord, event)
+      return
+    }
     if (!this.data.selectMode) {
       this.openDocFile(event)
       return
     }
-    const id = Number(event.currentTarget.dataset.id || 0)
-    if (!id) return
     const selected = { ...this.data.selected }
     if (selected[id]) delete selected[id]
     else selected[id] = true
     const count = Object.keys(selected).length
-    this.setData({ selected, selectedCount: count, allSelected: count === this.data.list.length && count > 0 })
+    this.setData({ selected, selectedCount: count, allSelected: count === this.data.items.length && count > 0 })
   },
 
   selectAll() {
@@ -347,16 +378,17 @@ Page(themed({
       return
     }
     const selected: Record<number, boolean> = {}
-    this.data.list.forEach((item) => { selected[Number(item.id)] = true })
-    this.setData({ selected, selectedCount: this.data.list.length, allSelected: true })
+    this.data.items.forEach((item) => { selected[Number(item.id)] = true })
+    this.setData({ selected, selectedCount: this.data.items.length, allSelected: true })
   },
 
-  /** 长按文件：按当前状态给操作菜单（打开 / 签认 / 提交审批 / 删除 / 详情） */
+  /** 长按文件：按当前状态给操作菜单（打开 / 签认 / 提交审批 / 删除 / 详情）；台账记录不响应 */
   onItemLongPress(event: WechatMiniprogram.TouchEvent) {
     if (this.data.selectMode) return
     const id = Number(event.currentTarget.dataset.id || 0)
     if (!id) return
-    const doc = this.data.list.find((item) => Number(item.id) === id)
+    const doc = this.data.items.find((item) => Number(item.id) === id)
+    if (!doc || doc._ledger) return
     const status = String(doc?.status || '')
     const actions: string[] = ['打开文件']
     const handlers: Array<() => void> = [() => this.openDocFileById(id)]
@@ -474,7 +506,7 @@ Page(themed({
   // ---- 签认 / 用章（长按「签认」触发） ----
 
   async openSignFor(id: number) {
-    const doc = this.data.list.find((item) => Number(item.id) === id)
+    const doc = this.data.items.find((item) => Number(item.id) === id)
     try {
       const [signoffs, signatures] = await Promise.all([
         request<{ slots: { key: string; label: string }[]; history: unknown[]; project_seal_signature_id?: number }>(`/documents/${id}/signoffs`),
@@ -586,7 +618,7 @@ Page(themed({
   selectLedgerType(event: WechatMiniprogram.TouchEvent) {
     const index = Number(event.currentTarget.dataset.index)
     if (index === this.data.ledgerIndex) return
-    this.setData({ ledgerIndex: index, records: [], page: 1 })
+    this.setData({ ledgerIndex: index, items: [], page: 1, hasMore: false })
     this.reloadLedger()
   },
 
@@ -595,7 +627,7 @@ Page(themed({
     try {
       const records = await this.fetchLedgerPage(1)
       this.setData({
-        records,
+        items: records,
         empty: records.length === 0,
         hasMore: records.length === this.data.pageSize,
         page: 1,
@@ -613,7 +645,7 @@ Page(themed({
     try {
       const records = await this.fetchLedgerPage(this.data.page + 1)
       this.setData({
-        records: [...this.data.records, ...records],
+        items: [...this.data.items, ...records],
         hasMore: records.length === this.data.pageSize,
         page: this.data.page + 1,
       })
@@ -646,6 +678,10 @@ Page(themed({
     const items = (result.records || []).map((item) => ({
       ...item,
       _kind: kind,
+      _ledger: true,
+      badge: kind === 'hazard' ? '隐患' : kind === IMAGE_TYPE ? '影像' : '台账',
+      title: item.title
+        || (kind === 'hazard' ? item.top1_risk || item.risk_category || '隐患记录' : `台账记录 #${item.id}`),
       image_url: absoluteMediaUrl(item.watermarked_path || item.image_path || ''),
     }))
     if (type === IMAGE_TYPE) {
@@ -694,6 +730,7 @@ Page(themed({
       ledgerStartDate: '',
       ledgerEndDate: '',
       activeFilterCount: 0,
+      keyword: '',
     })
   },
 
@@ -752,22 +789,23 @@ Page(themed({
   },
 
   // ---- 台账列表点击 ----
-  onCardTap(event: WechatMiniprogram.TouchEvent) {
-    const id = Number(event.currentTarget.dataset.id || 0)
-    if (!id) return
-    const record = this.data.records.find((item) => item.id === id)
-    if (!record) return
-    // 隐患台账必须走隐患详情：隐患 id 与文书 id 是两套独立序列，
-    // 走文书详情会串到另一条文书的记录上。
+
+  /** 台账记录路由：隐患→隐患详情；影像→预览；文书类→文书详情。
+   * 隐患/影像的 id 与文书 id 是两套独立序列，走文书详情会串号，必须分流。 */
+  routeLedgerRecord(record: LedgerRecord, event?: WechatMiniprogram.TouchEvent) {
+    const id = Number(record.id)
     if (record._kind === 'hazard') {
       wx.navigateTo({ url: `/pages/hazards/index?id=${id}` })
       return
     }
     if (record.image_url) {
-      this.preview(event)
+      if (event) {
+        this.preview(event)
+      } else {
+        wx.previewImage({ urls: [record.image_url] })
+      }
       return
     }
-    // 影像台账的 id 同样与文书 id 不同源：无配图时不能落到文书详情，否则会串号
     if (record._kind === 'image') {
       wx.showToast({ title: '该影像暂无图片', icon: 'none' })
       return
@@ -775,9 +813,18 @@ Page(themed({
     wx.navigateTo({ url: `/pages/documents/detail?id=${id}` })
   },
 
+  /** 带图台账卡片点击 */
+  onCardTap(event: WechatMiniprogram.TouchEvent) {
+    const id = Number(event.currentTarget.dataset.id || 0)
+    if (!id) return
+    const record = this.data.items.find((item) => Number(item.id) === id)
+    if (!record) return
+    this.routeLedgerRecord(record as unknown as LedgerRecord, event)
+  },
+
   preview(event: WechatMiniprogram.TouchEvent) {
     const current = String(event.currentTarget.dataset.url || '')
-    const urls = this.data.records.map((item) => item.image_url || '').filter(Boolean)
+    const urls = this.data.items.map((item) => String(item.image_url || '')).filter(Boolean)
     if (!urls.length) return
     wx.previewImage({ current: current || urls[0], urls })
   },
