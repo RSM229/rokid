@@ -1738,7 +1738,9 @@ async def _generate_document(ctx: ToolContext, args: dict) -> dict:
                 use_llm=True, supervisor=ctx.user, force=True,
                 narrative=narrative,
             )
-        except (ValueError, RuntimeError) as exc:
+        except (ValueError, RuntimeError, OSError) as exc:
+            # OSError 覆盖 TemplateNotFoundError(FileNotFoundError)：模板缺失时给可读提示，
+            # 而不是让异常冒到 dispatch 被报成「执行…时出错：TemplateNotFoundError」。
             return _ok(f"聚合生成失败：{exc}。可到「省统表录入」核对记录后重试。")
         doc_id = result.get("doc_id")
         await _audit(ctx.db, ctx.user, "agent_write", {

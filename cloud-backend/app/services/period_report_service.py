@@ -1026,9 +1026,16 @@ async def generate_aggregate_doc(
             narrative=narrative,
         )
         daily_doc = await db.get(Document, daily["doc_id"])
-        docx_file = await asyncio.to_thread(render_form, "gd_b_220_rizhi", daily_doc.content)
-        daily_doc.docx_path = f"/exports/{docx_file.name}"
-        await db.commit()
+        # 🔴 这里的二次渲染只为了额外挂一份 docx（PDF 已由 generate_supervision_log 产出）。
+        # 模板缺失时必须只丢 docx 附件、不能让整张文书判失败：2026-11-03 生产缺
+        # 21监理日志-房建新.docx 时抛 TemplateNotFoundError（FileNotFoundError 子类），
+        # 工具层只捕 ValueError/RuntimeError，结果整单被报成「执行…时出错」。
+        try:
+            docx_file = await asyncio.to_thread(render_form, "gd_b_220_rizhi", daily_doc.content)
+            daily_doc.docx_path = f"/exports/{docx_file.name}"
+            await db.commit()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("监理日志 docx 附件生成失败（文书与 PDF 已入库，跳过 docx）：%s", exc)
         return {**daily, "docx_url": daily_doc.docx_path, "form_code": "gd_b_220_rizhi", "form_name": "监理日志"}
 
     title = spec.default_title.format(date=start.isoformat(), period=period_label) or (
