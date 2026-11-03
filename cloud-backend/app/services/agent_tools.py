@@ -1711,6 +1711,17 @@ async def _generate_document(ctx: ToolContext, args: dict) -> dict:
             extra_fields = (
                 normalize_extra_fields({"extra_fields": raw_extra}, ef_form).get("extra_fields") or {}
             )
+        # 🔴 叙述性监理日报/日记：把用户原文作为起草素材透传给日报生成服务，
+        # 当天无结构化记录时也能落成带正文的监理日志，而不是空日志。
+        # 仅在「监理日志/日记类表单」且「原文为较长叙述（非短指令）」时生效，
+        # 避免污染正常「生成今天的监理日志」等指令或周/月报聚合路径。
+        _code_for_narrative = form_code or "gd_b_220_rizhi"
+        _is_rizhi = (
+            "日志" in _code_for_narrative
+            or "日记" in _code_for_narrative
+            or _code_for_narrative in ("gd_b_220_rizhi", "anquan_jianli_rizhi")
+        )
+        narrative = ctx.message if (_is_rizhi and len(ctx.message or "") > 40) else None
         try:
             result = await generate_aggregate_doc(
                 ctx.db, ctx.project_id, period_map[period],
@@ -1718,6 +1729,7 @@ async def _generate_document(ctx: ToolContext, args: dict) -> dict:
                 form_code=form_code or None,
                 extra_fields=extra_fields or None,
                 use_llm=True, supervisor=ctx.user, force=True,
+                narrative=narrative,
             )
         except (ValueError, RuntimeError) as exc:
             return _ok(f"聚合生成失败：{exc}。可到「省统表录入」核对记录后重试。")

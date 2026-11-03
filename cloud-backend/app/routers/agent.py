@@ -438,7 +438,8 @@ station_start_time=9:00、station_end_time=12:00、worker_count=10，结论留�
 - 用户明确说了记录类型时才填写 record_type 并进入记录候选。用户已经在前文说过日期、地点、时间、工作内容的，必须沿用，不得因图片没有识别到而说成缺失。
 - 错误示范（严禁）：直接回一段「今日工作情况结论与建议」，甚至还写「经图片识别」。这是答非所问。
 - 用户明确说「生成今天的监理日志 / 月报」时，才返回 generate_document 动作（args.period=day / month）。
-- 「安全监理日志 / 安全日志」是**独立表式**，不是普通监理日志：返回 generate_document 时 period=day 且必须同时带 args.form_code="anquan_jianli_rizhi"，否则会被静默生成成普通监理日志。"""
+- 「安全监理日志 / 安全日志」是**独立表式**，不是普通监理日志：返回 generate_document 时 period=day 且必须同时带 args.form_code="anquan_jianli_rizhi"，否则会被静默生成成普通监理日志。
+- 🔴 用户**直接粘贴 / 口述一段叙述性「监理日报 / 监理日记 / 监理日志」文字**（描述当天施工与监理工作，而非点名某张省统表）时，也返回 generate_document 动作：args 填 period="day"，并从文字里抽出日期写进 args.date（如「10月27日」→ "2026-10-27"）；若是安全监理日志再带 form_code="anquan_jianli_rizhi"。🔴 **严禁在此场景返回 create_provform_doc**——那是新建省统表模板，会被必填项校验卡成「该表还不能生成」；监理日志由日报生成服务聚合 / 起草，你不需要抽任何字段，用户原文会作为起草素材自动带入。"""
 
 
 # ---------------------------------------------------------------------------

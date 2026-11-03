@@ -349,6 +349,21 @@ CASES: tuple[dict, ...] = (
                 "form_code 指向安全监理日志（anquan_jianli_rizhi），服务端归一后路由到 "
                 "generate_safety_log，渲出独立的安全监理日志文书，不退化成普通监理日志。",
     },
+    {
+        "id": "D07", "group": "文书生成",
+        "say": "沙盛四路项目10月27日监理日报：k500至550路段电缆沟槽开挖及垫层浇筑，施工人员4人，现场安全员在位，天气晴。",
+        "expect": {
+            "tool": "generate_document",
+            "args_required": {"period": ["day", "日"]},
+            # 🔴 叙述性监理日报/日记 → 走日报生成服务起草，严禁退化成 create_provform_doc。
+            # 旧逻辑会把叙述文字当「建省统表」指令，被必填项校验卡成「该表还不能生成」。
+            "tool_forbidden": ["create_provform_doc"],
+        },
+        "note": "🔴 2026-11-03 新增（用户实测反馈）：粘贴一段叙述性监理日报，智能体回"
+                "「该表还不能生成：必填项不能为空」。根因=被路由到 create_provform_doc"
+                "（建省统表模板）硬校验；修复=路由到 generate_document（period=day），"
+                "日报生成服务拿用户原文起草监理日志正文。断言不许退化成 create_provform_doc。",
+    },
 
     # =========================================================================
     # E. 隐患

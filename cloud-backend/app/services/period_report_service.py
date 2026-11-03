@@ -373,6 +373,7 @@ async def generate_supervision_log(
     extras: dict | None = None,
     extra_fields: dict | None = None,
     force: bool = True,
+    narrative: str | None = None,
 ) -> dict:
     """生成指定项目、指定日期的监理日志（PDF，GD-B-220 版式）。
 
@@ -450,9 +451,15 @@ async def generate_supervision_log(
             continue
         place = f"{r.section or ''} {r.location or ''}".strip()
         progress_items.append(f"{place}：{r.work_content}" if place else str(r.work_content))
-    construction_progress = (
-        "\n".join(progress_items) if progress_items else "当日无施工记录。"
-    )
+    # 🔴 叙述性监理日报/日记：当用户直接粘贴/口述一段当日工作叙述、且当天无结构化
+    # 工作记录时，把该叙述作为「当日施工进展情况」正文起草进监理日志（替代空日志的
+    # “当日无施工记录。”），避免「无记录就只生成一张空日志」。有记录时仍以聚合为准。
+    if narrative and not progress_items:
+        construction_progress = str(narrative).strip()
+    else:
+        construction_progress = (
+            "\n".join(progress_items) if progress_items else "当日无施工记录。"
+        )
 
     # ===== 2. 当日监理工作情况 =====
     witness_records = [
@@ -989,6 +996,7 @@ async def generate_aggregate_doc(
     supervisor: Optional[User] = None,
     force: bool = True,
     extra_fields: dict | None = None,
+    narrative: str | None = None,
 ) -> dict:
     """按 日/周/月 聚合生成省统表文书（监理日志/周报/月报 docx）。
 
@@ -1009,6 +1017,7 @@ async def generate_aggregate_doc(
             )
         daily = await generate_supervision_log(
             db, project_id, start, supervisor=supervisor, force=force, extra_fields=extra_fields,
+            narrative=narrative,
         )
         daily_doc = await db.get(Document, daily["doc_id"])
         docx_file = await asyncio.to_thread(render_form, "gd_b_220_rizhi", daily_doc.content)
