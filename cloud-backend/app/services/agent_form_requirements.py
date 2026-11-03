@@ -49,6 +49,10 @@ _IGNORED_REQUIRED_AUTO = {"doc_number", "serial_no"}
 _MULTILINE = {"content", "problems", "treatment", "remark", "requirement", "acceptance_content"}
 _EMPTY = {"", "null", "none", "unknown", "未知", "未识别", "待定", "n/a"}
 
+# 参建单位/项目身份字段：多来源不一致时按「用户明说 > 当前项目 > 水印」裁决，
+# 不再让用户逐项勾选（2026-11-03 用户要求「少输入、智能体帮忙思考」）。
+PROJECT_PARTY_FIELDS = {"project_name", "construction_unit", "supervision_unit", "supervision_org", "owner_unit"}
+
 
 def _text(value: Any) -> str:
     if isinstance(value, bool):
@@ -149,6 +153,14 @@ def resolve_event_form(
 
     # Evidence is the objective default. Explicit event selections are applied
     # after it, so a user's confirmed choice can replace a watermark candidate.
+
+    # 2026-11-03 当前项目优先于照片水印：先把参建单位/项目字段按当前项目写入，
+    # 水印 add() 遇到已存在值会跳过，显式用户选择仍会无条件覆盖（用户明说优先）。
+    for _pf in PROJECT_PARTY_FIELDS:
+        _pv = _text(system_project.get(_pf))
+        if _usable(_pv):
+            add(_pf, _pv, "system_project", "system_configured")
+
     evidence_by_id = {
         str(item.get("id")): item
         for item in (plan or {}).get("evidence", [])
@@ -227,6 +239,7 @@ def resolve_event_form(
     missing: list[str] = []
     missing_labels: list[str] = []
     conflicts: list[dict[str, Any]] = []
+    auto_resolutions: list[dict[str, Any]] = []
     invalid_fields: list[dict[str, str]] = []
     contract = form_contracts.contract_for(form_code)
     for spec in contract["fields"]:
@@ -258,9 +271,13 @@ def resolve_event_form(
         distinct_candidates = list(dict.fromkeys(item["value"] for item in candidates))
         user_resolved = source in {"user_message", "user_confirmed"} or status == "user_confirmed"
         if len(distinct_candidates) > 1 and not user_resolved:
-            conflicts.append({
+            # 2026-11-03 自动裁决：不再阻断建档。value 已按优先级
+            # （用户明说 > 当前项目 > 水印）采用其一，其余候选留在 candidates
+            # 供用户事后点选修改。
+            auto_resolutions.append({
                 "canonical": canonical,
                 "label": _text(spec.get("label")) or canonical,
+                "chosen": value,
                 "candidates": candidates,
             })
 
@@ -316,6 +333,7 @@ def resolve_event_form(
             "status": status or ("filled" if value else "missing"),
             "missing": required and not _usable(value),
             "conflict": any(item["canonical"] == canonical for item in conflicts),
+            "auto_resolved": any(item["canonical"] == canonical for item in auto_resolutions),
             "candidates": candidates,
         }
         if value:
@@ -381,6 +399,7 @@ def resolve_event_form(
         "missing_labels": list(dict.fromkeys(missing_labels)),
         "conflicts": conflicts,
         "conflict_labels": [item["label"] for item in conflicts],
+        "auto_resolutions": auto_resolutions,
         "invalid_fields": invalid_fields,
         "invalid_labels": [item["label"] for item in invalid_fields],
         "materialization_error": materialization_error,
@@ -547,10 +566,10 @@ def enrich_event(plan: dict[str, Any] | None, event: dict[str, Any]) -> dict[str
     enriched = dict(event)
     resolved = resolve_event_form(plan, event)
     record_type = str(event.get("record_type") or "待定")
+    # 2026-11-03 去除“记录类型需用户确认”门禁：类型一旦被判定（非待定），
+    # 智能体即据当前候选直接建档，无需用户逐项点选“确认采用”。
     if record_type == "待定":
         status = "needs_record_type"
-    elif event.get("record_type_confirmed") is not True:
-        status = "needs_user_confirmation"
     elif (
         resolved["missing_fields"] or resolved["conflicts"] or resolved["invalid_fields"]
         or resolved.get("materialization_error")
@@ -562,10 +581,6 @@ def enrich_event(plan: dict[str, Any] | None, event: dict[str, Any]) -> dict[str
         *(
             [{"kind": "record_type", "canonical": "record_type", "label": "请确认工作记录类型"}]
             if record_type == "待定" else []
-        ),
-        *(
-            [{"kind": "user_confirmation", "canonical": "record_type", "label": f"请确认采用“{record_type}”记录类型"}]
-            if record_type != "待定" and event.get("record_type_confirmed") is not True else []
         ),
         *(
             {"kind": "missing", "canonical": canonical, "label": label}
@@ -598,7 +613,7 @@ def enrich_event(plan: dict[str, Any] | None, event: dict[str, Any]) -> dict[str
         "content": _text(event.get("content")),
         "fields": resolved["values"],
         "blockers": blockers,
-        "generation_allowed": bool(resolved["write_allowed"] and event.get("record_type_confirmed") is True),
+        "generation_allowed": bool(resolved["write_allowed"]),
     }
     enriched["record_draft"] = record_draft
     enriched["form_code"] = resolved["form_code"]

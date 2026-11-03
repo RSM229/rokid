@@ -112,15 +112,6 @@ def review_issues(plan: dict[str, Any]) -> list[str]:
             issues.append(f"事项 {i} 缺少工作描述或资料")
         if str(event.get("record_type") or "待定") == "待定":
             issues.append(f"事项 {i} 请选择工作记录类型")
-        elif event.get("record_type_confirmed") is not True:
-            issues.append(f"事项 {i} 的记录类型“{event.get('record_type')}”是 Agent 建议，请由用户确认或修改")
-        labels = {
-            "project_name": "项目", "owner_unit": "建设单位", "construction_unit": "施工单位",
-            "supervision_unit": "监理单位", "supervision_org": "项目监理机构",
-            "inspector": "检查人员", "location": "地点", "section": "施工部位",
-        }
-        for field in event.get("unresolved_conflicts") or []:
-            issues.append(f"事项 {i} 的{labels.get(field, field)}存在多个候选值，请先选择")
         resolved = agent_form_requirements.resolve_event_form(plan, event)
         selected_forms = [str(item) for item in (event.get("forms") or []) if str(item)]
         if len(selected_forms) > 1:

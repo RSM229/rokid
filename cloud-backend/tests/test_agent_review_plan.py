@@ -62,7 +62,9 @@ def test_empty_evidence_text_only_event_still_requires_form_fields():
     assert any("验收记录还需补充" in issue for issue in issues)
 
 
-def test_conflicting_watermark_values_block_confirmation_until_user_resolves_them():
+def test_conflicting_watermark_values_auto_resolve_without_blocking():
+    from app.services.agent_form_requirements import resolve_event_form
+
     plan = base_plan()
     plan["evidence"] = [
         {"id": "p1", "watermark_items": [{"label": "工程项目名称", "value": "项目A"}]},
@@ -71,14 +73,15 @@ def test_conflicting_watermark_values_block_confirmation_until_user_resolves_the
     plan["unassigned_ids"] = []
     plan["events"][0]["evidence_ids"] = ["p1", "p2"]
     issues = review_plan.review_issues(plan)
-    assert any("工程项目名称有多个水印候选值" in issue for issue in issues)
-
-    plan["events"][0]["fields"] = {
-        "acceptance_record": {
-            "project_name": {"value": "项目A", "source": "user_message", "status": "user_confirmed"},
-        },
-    }
-    assert not any("多个水印候选值" in issue for issue in review_plan.review_issues(plan))
+    # 2026-11-03 自动裁决：不再产出“多个水印候选值，请确认采用”阻断项。
+    assert not any("多个水印候选值" in issue for issue in issues)
+    # 智能体据当前项目/水印自动采用其一，候选保留供事后点选。
+    resolved = resolve_event_form(plan, plan["events"][0])
+    assert resolved["conflicts"] == []
+    assert any(
+        ar["canonical"] == "project_name" and ar["chosen"] in {"项目A", "项目B"}
+        for ar in resolved["auto_resolutions"]
+    )
 
 
 def test_form_specific_fields_must_be_objects():
@@ -101,22 +104,23 @@ def test_pending_record_type_must_be_resolved_before_confirmation():
     assert any("请选择工作记录类型" in issue for issue in review_plan.review_issues(plan))
 
 
-def test_agent_record_type_candidate_requires_explicit_user_confirmation():
+def test_agent_record_type_candidate_no_longer_requires_explicit_confirmation():
     plan = base_plan()
     plan["events"][0]["record_type_confirmed"] = False
     issues = review_plan.review_issues(plan)
-    assert any("是 Agent 建议，请由用户确认或修改" in issue for issue in issues)
+    # 2026-11-03 去除“记录类型为 Agent 建议，请确认”门禁：类型判定后即可建档。
+    assert not any("是 Agent 建议" in issue for issue in issues)
 
 
-def test_unresolved_entity_conflict_blocks_server_confirmation():
+def test_unresolved_entity_conflict_no_longer_blocks_server_confirmation():
     plan = base_plan()
     plan["events"][0]["evidence_ids"].append("p2")
     plan["unassigned_ids"] = []
     plan["events"][0]["unresolved_conflicts"] = ["project_name", "construction_unit"]
     review_plan.validate_plan(plan)
     issues = review_plan.review_issues(plan)
-    assert any("项目存在多个候选值" in issue for issue in issues)
-    assert any("施工单位存在多个候选值" in issue for issue in issues)
+    # 2026-11-03 冲突自动裁决：unresolved_conflicts 不再产生“存在多个候选值，请先选择”阻断。
+    assert not any("存在多个候选值" in issue for issue in issues)
 
 
 def test_pinned_form_contract_is_stable_and_schema_changes_require_review():

@@ -178,10 +178,11 @@ test('confirm does not require a form or manual date; any later edit invalidates
   assert.equal(plan.confirmedRevision, null)
 })
 
-test('Agent type recommendation cannot be confirmed until the user selects a record type', () => {
+test('Agent type recommendation no longer blocks confirmation', () => {
   let plan = model.createExample(4)
   plan = model.editEvent(plan, plan.events[0].id, { recordType: '巡视', recordTypeConfidence: 0.96 })
-  assert.match(model.reviewIssues(plan)[0], /请由你确认或修改/)
+  // 2026-11-03 去除“记录类型为 Agent 建议，请确认”门禁：类型判定后即可建档。
+  assert.ok(!model.reviewIssues(plan).some(issue => issue.includes('请由你确认或修改')))
   plan = chooseRecordTypes(plan)
   assert.equal(model.reviewIssues(plan).length, 0)
 })
@@ -254,7 +255,7 @@ test('server item plan is adapted without re-grouping and keeps every evidence i
   assert.equal(plan.evidence.length, 3)
 })
 
-test('entity conflicts survive the item-plan adapter and block confirmation until selected', () => {
+test('entity conflicts auto-resolve and keep candidates for later edit', () => {
   const evidence = [{ id: 'p1', image: 'p1.jpg', observedDate: '2026-10-09', section: '安全巡视', note: '' }]
   const plan = model.reviewPlanFromItemPlan({
     items: [{
@@ -263,29 +264,31 @@ test('entity conflicts survive the item-plan adapter and block confirmation unti
         record_date: { value: '2026-10-09', source: 'watermark', status: 'evidence_extracted' },
         section: { value: '安全巡视', source: 'watermark', status: 'evidence_extracted' },
         project: {
-          value: '广东省中西医结合应急救治中心项目', source: 'watermark', status: 'conflict',
+          value: '广东省中西医结合应急救治中心项目', source: 'watermark', status: 'evidence_extracted',
           candidates: ['广东省中西医结合应急救治中心项目', '111'],
         },
         construction_unit: {
-          value: '广州一建建设集团有限公司', source: 'watermark', status: 'conflict',
+          value: '广州一建建设集团有限公司', source: 'watermark', status: 'evidence_extracted',
           candidates: ['广州一建建设集团有限公司', '系统施工单位'],
         },
       },
-      evidence_indexes: [0], missing_fields: [], issues: ['项目存在多个候选值'],
+      evidence_indexes: [0], missing_fields: [], issues: [],
     }],
     unassigned_evidence_indexes: [], issues: [],
   }, evidence, '记录这个工作')
   assert.equal(plan.events[0].entityFields.project_name, '广东省中西医结合应急救治中心项目')
   assert.equal(plan.events[0].entityFields.construction_unit, '广州一建建设集团有限公司')
+  // 候选值保留供用户事后点选
   assert.deepEqual(plan.events[0].fieldCandidates.project_name, ['广东省中西医结合应急救治中心项目', '111'])
-  assert.deepEqual(plan.events[0].unresolvedConflicts.sort(), ['construction_unit', 'project_name'])
-  let confirmed = chooseRecordTypes(plan)
-  assert.ok(model.reviewIssues(confirmed).some(issue => issue.includes('项目存在多个候选值')))
-  confirmed = model.editEvent(confirmed, 'item_1', {
-    entityFields: { ...confirmed.events[0].entityFields, project_name: '111' },
-    unresolvedConflicts: confirmed.events[0].unresolvedConflicts.filter(field => field !== 'project_name'),
-  })
+  // 2026-11-03 自动裁决：冲突不再进入 unresolvedConflicts，不再阻断确认。
+  assert.deepEqual(plan.events[0].unresolvedConflicts, [])
+  const confirmed = chooseRecordTypes(plan)
   assert.ok(!model.reviewIssues(confirmed).some(issue => issue.includes('项目存在多个候选值')))
+  // 用户仍可在事项中改成系统值
+  const edited = model.editEvent(confirmed, 'item_1', {
+    entityFields: { ...confirmed.events[0].entityFields, project_name: '111' },
+  })
+  assert.equal(edited.events[0].entityFields.project_name, '111')
 })
 
 test('removing an event releases its evidence without deleting photos', () => {

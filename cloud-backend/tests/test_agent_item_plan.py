@@ -67,7 +67,7 @@ def test_text_only_record_uses_user_facts_and_never_writes():
     assert plan["write_allowed"] is False
 
 
-def test_system_profile_and_watermark_units_remain_visible_conflict_candidates():
+def test_system_profile_and_watermark_units_auto_resolve_with_candidates_visible():
     plan = build_item_plan(
         facts=[],
         evidence=[{
@@ -92,14 +92,26 @@ def test_system_profile_and_watermark_units_remain_visible_conflict_candidates()
         ],
     )
     fields = plan["items"][0]["fields"]
-    assert fields["project"]["value"] == "广东省中西医结合应急救治中心项目"
-    assert fields["project"]["status"] == "conflict"
+    # 参建单位字段：当前项目资料优先于照片水印（用户明说 > 当前项目 > 水印）。
+    assert fields["project"]["value"] == "111"
+    assert fields["project"]["status"] == "system_configured"
+    assert fields["project"]["auto_resolved"] is True
     assert set(fields["project"]["candidates"]) == {"广东省中西医结合应急救治中心项目", "111"}
-    assert fields["construction_unit"]["value"] == "广州一建建设集团有限公司"
-    assert fields["construction_unit"]["status"] == "conflict"
-    assert fields["inspector"]["status"] == "conflict"
+    assert fields["construction_unit"]["value"] == "系统施工单位"
+    assert fields["construction_unit"]["status"] == "system_configured"
+    assert fields["construction_unit"]["auto_resolved"] is True
+    # 非参建单位字段（检查人员）仍按水印优先，多候选自动裁决但保留候选。
+    assert fields["inspector"]["value"] == "陈宇文"
+    assert fields["inspector"]["status"] == "evidence_extracted"
+    assert fields["inspector"]["auto_resolved"] is True
+    # 仅来自水印、无冲突的字段。
     assert fields["owner_unit"]["value"] == "广州市南沙区建设中心"
-    assert any("项目存在多个候选值" in issue for issue in plan["items"][0]["issues"])
+    # 多来源不一致不再标 conflict 阻断，改为 auto_resolved，且不产生待确认 issue。
+    assert all(
+        not isinstance(f, dict) or f.get("status") != "conflict"
+        for f in fields.values()
+    )
+    assert not any("项目存在多个候选值" in issue for issue in plan["items"][0]["issues"])
 
 
 def test_watermark_identity_wins_over_user_but_generic_vision_does_not():
@@ -121,7 +133,11 @@ def test_watermark_identity_wins_over_user_but_generic_vision_does_not():
     assert fields["record_date"]["value"] == "2026-10-19"
     assert fields["record_date"]["source"] == "watermark"
     assert fields["section"]["value"] == "3号楼二层"
-    assert any("图片水印/EXIF" in issue for issue in watermark_plan["items"][0]["issues"])
+    # 与用户叙述不一致时仍按客观水印采用，但不再生成“待确认”阻断项；
+    # 候选值保留供用户事后点选。
+    assert fields["record_date"]["auto_resolved"] is True
+    assert set(fields["record_date"]["candidates"]) == {"2026-10-18", "2026-10-19"}
+    assert not any("需用户确认" in issue for issue in watermark_plan["items"][0]["issues"])
 
     vision_plan = build_item_plan(
         facts=facts,

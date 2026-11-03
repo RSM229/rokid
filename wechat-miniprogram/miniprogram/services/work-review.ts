@@ -294,6 +294,7 @@ function fromServerPlan(result: ReviewPlanResponse): ReviewPlan {
           status: String(field?.status || ''),
           missing: field?.missing === true,
           conflict: field?.conflict === true,
+          autoResolved: field?.auto_resolved === true,
           validationError: String(field?.validation_error || ''),
           candidates: Array.isArray(field?.candidates) ? field.candidates.map((candidate: any) => ({
             value: String(candidate?.value || ''),
@@ -941,27 +942,14 @@ export function reviewIssues(plan: ReviewPlan): string[] {
     if (!event.title.trim()) issues.push(`事项 ${i + 1} 缺少名称`)
     if (!event.evidenceIds.length && !event.content.trim()) issues.push(`事项 ${i + 1} 缺少工作描述或资料`)
     if (!event.recordType || event.recordType === '待定') issues.push(`事项 ${i + 1} 请选择工作记录类型`)
-    else if (event.recordTypeConfirmed !== true) issues.push(`事项 ${i + 1} 的记录类型“${event.recordType}”是 Agent 建议，请由你确认或修改`)
-    for (const field of event.unresolvedConflicts || []) {
-      const label = ({
-        project_name: '项目', owner_unit: '建设单位', construction_unit: '施工单位',
-        supervision_unit: '监理单位', supervision_org: '项目监理机构', inspector: '检查人员',
-        location: '地点', section: '施工部位',
-      } as Record<string, string>)[field] || field
-      issues.push(`事项 ${i + 1} 的${label}存在多个候选值，请先选择`)
-    }
     const missingLabels = (event.formFields || [])
       .filter(field => field.required && field.missing)
       .map(field => field.label)
     if (missingLabels.length) {
       issues.push(`事项 ${i + 1} 还需补充：${[...new Set(missingLabels)].join('、')}`)
     }
-    const conflictLabels = (event.formFields || [])
-      .filter(field => field.conflict)
-      .map(field => field.label)
-    if (conflictLabels.length) {
-      issues.push(`事项 ${i + 1} 的${[...new Set(conflictLabels)].join('、')}存在多个水印候选值，请先选择`)
-    }
+    // 2026-11-03 冲突自动裁决：多候选值不再阻断，智能体直接采用其一，
+    // 候选保留在字段上供用户事后点选更改，不再生成“请先选择”阻断项。
   })
   return issues
 }

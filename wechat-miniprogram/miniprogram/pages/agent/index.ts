@@ -1583,7 +1583,7 @@ Page(themed({
         const source = conflict.preferred_source === 'watermark_or_exif' || conflict.preferred_source === 'watermark'
           ? '照片水印/EXIF' : conflict.preferred_source === 'system_project'
             ? '系统项目资料' : conflict.preferred_source === 'user_profile' ? '登录用户资料' : '你的描述'
-        return `${conflict.label || label[conflict.field] || conflict.field}存在不一致（${candidates.join('；') || '候选值不同'}）。当前建议先采用${source}的“${String(conflict.preferred_value || '未知')}”，请在下面事项中点选确认。`
+        return `${conflict.label || label[conflict.field] || conflict.field}存在不一致（${candidates.join('；') || '候选值不同'}）。已按${source}的“${String(conflict.preferred_value || '未知')}”自动填写，如需修改可在事项中点选更改。`
       })
       const itemPlan: RequestPlanItemPlan = requestPlan?.item_plan || {
         items: [], candidate_count: 0,

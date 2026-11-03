@@ -14,6 +14,9 @@ CONTEXT_FIELDS = (
     "owner_unit", "construction_unit", "supervision_unit", "inspector",
     "work_content", "weather", "start_time", "end_time",
 )
+# 参建单位/项目身份字段：多来源不一致时按「用户明说 > 当前项目 > 水印」裁决，
+# 不再让用户逐项勾选（2026-11-03 用户要求「少输入、智能体帮忙思考」）。
+PROJECT_PARTY_FIELDS = {"project", "owner_unit", "construction_unit", "supervision_unit", "supervision_org"}
 RECORD_ACTIONS = {"record_work", "create_hazard"}
 _EMPTY_VALUES = {"", "null", "none", "unknown", "未知", "未识别", "待定", "n/a"}
 _OBJECTIVE_SOURCES = {"watermark", "exif", "watermark_or_exif"}
@@ -149,8 +152,11 @@ def _field_views(
             "status": status,
         }
         if len({_text(value).lower() for value in values}) > 1:
-            field_view["status"] = "conflict"
+            # 2026-11-03 用户要求「不要我自己填表格 / 少输入」：多来源不一致不再标
+            # conflict 让人逐项勾选。由 Agent 直接裁决（采用哪个见 value/source），
+            # 其余候选留在 candidates 里供事后点选修改，不再阻断建档。
             field_view["candidates"] = values
+            field_view["auto_resolved"] = True
         out[field] = field_view
 
     for field in IDENTITY_FIELDS:
@@ -159,19 +165,39 @@ def _field_views(
         system_value = system_fields.get(field)
         evidence_source = _text(sources.get(field)) or "evidence"
         objective_evidence = evidence_source in _OBJECTIVE_SOURCES
-        if evidence_value and (objective_evidence or not _usable(user_value)):
-            add_view(
-                field, evidence_value, evidence_source,
-                "evidence_extracted" if objective_evidence else "vision_observed",
-                user_value, system_value,
-            )
-        elif _usable(user_value):
-            add_view(
-                field, user_value, "user_message", "user_stated_candidate",
-                evidence_value, system_value,
-            )
-        elif _usable(system_value):
-            add_view(field, system_value, "system_project", "system_configured")
+        if field in PROJECT_PARTY_FIELDS:
+            # 项目身份字段：用户明说 > 当前项目 > 水印（防止跨项目照片污染归属）。
+            if _usable(user_value):
+                add_view(
+                    field, user_value, "user_message", "user_stated_candidate",
+                    evidence_value, system_value,
+                )
+            elif _usable(system_value):
+                add_view(
+                    field, system_value, "system_project", "system_configured",
+                    evidence_value,
+                )
+            elif evidence_value:
+                add_view(
+                    field, evidence_value, evidence_source,
+                    "evidence_extracted" if objective_evidence else "vision_observed",
+                    system_value,
+                )
+        else:
+            # 其余字段维持原优先级：客观水印 > 用户 > 系统。
+            if evidence_value and (objective_evidence or not _usable(user_value)):
+                add_view(
+                    field, evidence_value, evidence_source,
+                    "evidence_extracted" if objective_evidence else "vision_observed",
+                    user_value, system_value,
+                )
+            elif _usable(user_value):
+                add_view(
+                    field, user_value, "user_message", "user_stated_candidate",
+                    evidence_value, system_value,
+                )
+            elif _usable(system_value):
+                add_view(field, system_value, "system_project", "system_configured")
     for field, candidate in (context_fields or {}).items():
         if field in out:
             continue
@@ -179,14 +205,23 @@ def _field_views(
         value = _text(candidate.get("value")) if isinstance(candidate, dict) else ""
         source = _text(candidate.get("source")) if isinstance(candidate, dict) else ""
         evidence_values = [_text(item) for item in (values or []) if _text(item)]
-        if value or evidence_values:
+        if _usable(user_fields.get(field)):
+            add_view(
+                field, user_fields.get(field), "user_message", "user_stated_candidate",
+                value or (evidence_values[0] if evidence_values else ""),
+            )
+        elif field in PROJECT_PARTY_FIELDS and _usable(system_fields.get(field)):
+            # 参建单位字段：当前项目优先于照片水印。
+            add_view(
+                field, system_fields.get(field), "system_project", "system_configured",
+                value or (evidence_values[0] if evidence_values else ""),
+            )
+        elif value or evidence_values:
             add_view(
                 field, value or evidence_values[0], source or "watermark",
                 "evidence_extracted", *evidence_values[1:],
                 user_fields.get(field), system_fields.get(field),
             )
-        elif _usable(user_fields.get(field)):
-            add_view(field, user_fields.get(field), "user_message", "user_stated_candidate")
         elif _usable(system_fields.get(field)):
             add_view(field, system_fields.get(field), "system_project", "system_configured")
     return out

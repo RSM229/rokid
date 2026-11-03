@@ -178,11 +178,12 @@
                     <text wx:if="{{formField.conflict}}" class="inline-review-conflict">待确认</text>
                     <text wx:elif="{{formField.missing}}" class="inline-review-conflict">待补</text>
                     <text wx:elif="{{formField.validationError}}" class="inline-review-conflict">格式待修正</text>
+                    <text wx:elif="{{formField.autoResolved}}" class="inline-review-source-tag">已自动填写·可改</text>
                     <text wx:elif="{{formField.source === 'watermark'}}" class="inline-review-source-tag">水印识别</text>
                     <text wx:elif="{{formField.value}}" class="inline-review-source-tag">已填写</text>
                   </view>
                   <text wx:if="{{formField.validationError}}" class="inline-review-source">{{formField.validationError}}</text>
-                  <view wx:if="{{formField.conflict && formField.candidates.length}}" class="inline-review-chip-row form-option-row">
+                  <view wx:if="{{formField.candidates.length}}" class="inline-review-chip-row form-option-row">
                     <view wx:for="{{formField.candidates}}" wx:for-item="candidate" wx:for-index="candidateIndex" wx:key="candidateIndex" class="inline-review-chip {{formField.value === candidate.value ? 'selected' : ''}}" data-index="{{mi}}" data-id="{{event.id}}" data-form-code="{{event.formCode}}" data-field="{{formField.canonical}}" data-value="{{candidate.value}}" bindtap="chooseInlineReviewFormOption">采用 {{candidate.value}}</view>
                   </view>
                   <date-time-picker wx:if="{{formField.control === 'datetime-local'}}" value="{{formField.value}}" reference-date="{{event.date}}" reference-enabled="{{formField.required}}" disabled="{{formField.readonly}}" data-index="{{mi}}" data-id="{{event.id}}" data-form-code="{{event.formCode}}" data-field="{{formField.canonical}}" bind:change="changeInlineReviewDateTime" />
