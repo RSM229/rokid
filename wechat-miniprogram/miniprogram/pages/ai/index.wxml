@@ -3,8 +3,6 @@
 
   <view class="tabs">
     <view class="{{mode === 'task' ? 'active' : ''}}" data-mode="task" bindtap="onMode">任务报告</view>
-    <view class="{{mode === 'podcast' ? 'active' : ''}}" data-mode="podcast" bindtap="onMode">播客</view>
-    <view class="{{mode === 'image' ? 'active' : ''}}" data-mode="image" bindtap="onMode">AI 生图</view>
   </view>
 
   <view class="model-bar" bindtap="onModelPickerToggle">
@@ -32,32 +30,6 @@
       <view class="result-title">{{taskTitle}}</view>
       <view class="result-body">{{taskContent}}</view>
       <button class="btn-green" size="mini" bindtap="saveTaskNote">保存为笔记</button>
-    </view>
-  </block>
-
-  <!-- 播客 -->
-  <block wx:if="{{mode === 'podcast'}}">
-    <view class="card">
-      <view class="field-label">播客素材（或从笔记/资料库稍后扩展）</view>
-      <textarea class="ta" value="{{podcastText}}" data-field="podcastText" placeholder="粘贴一段内容，AI 会改写成口播文案并合成语音" bindinput="onInput" auto-height maxlength="6000" />
-      <button class="btn-primary btn-full" loading="{{podcasting}}" bindtap="runPodcast">生成播客</button>
-    </view>
-    <view wx:if="{{podcastScript}}" class="card">
-      <view class="result-title">口播文案</view>
-      <view class="result-body">{{podcastScript}}</view>
-      <button wx:if="{{podcastAudio}}" class="btn-green" size="mini" bindtap="playPodcast">▶ 播放语音</button>
-    </view>
-  </block>
-
-  <!-- 生图 -->
-  <block wx:if="{{mode === 'image'}}">
-    <view class="card">
-      <view class="field-label">画面描述</view>
-      <textarea class="ta" value="{{imagePrompt}}" data-field="imagePrompt" placeholder="如：施工现场塔吊与安全网，写实风格" bindinput="onInput" auto-height maxlength="800" />
-      <button class="btn-primary btn-full" loading="{{imaging}}" bindtap="runImage">生成图片</button>
-    </view>
-    <view wx:if="{{imageUrl}}" class="card">
-      <image class="result-image" src="{{imageUrl}}" mode="widthFix" />
     </view>
   </block>
 

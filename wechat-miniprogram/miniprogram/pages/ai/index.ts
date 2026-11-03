@@ -1,6 +1,6 @@
 import { request } from '../../services/request'
 import { session } from '../../services/session'
-import { absoluteMediaUrl, config } from '../../config'
+import { config } from '../../config'
 import { getCached, CACHE_KEYS } from '../../services/cache'
 import { MODEL_CATALOG, findModel } from '../../services/modelCatalog'
 import { themed } from '../../utils/theme'
@@ -15,7 +15,7 @@ const AI_MODEL_KEY = `gdjl_${config.storageScope}_ai_model`
 
 Page(themed({
   data: {
-    mode: 'task' as 'task' | 'podcast' | 'image',
+    mode: 'task' as 'task',
 
     models: MODEL_CATALOG,
     currentModelId: MODEL_CATALOG[0].id,
@@ -31,25 +31,13 @@ Page(themed({
     taskTitle: '',
     taskContent: '',
     running: false,
-
-    podcastText: '',
-    podcastScript: '',
-    podcastAudio: '',
-    podcasting: false,
-
-    imagePrompt: '',
-    imageUrl: '',
-    imaging: false,
   },
-
-  audioCtx: null as WechatMiniprogram.InnerAudioContext | null,
 
   onLoad() {
     if (!session.getToken()) {
       wx.reLaunch({ url: '/pages/login/index' })
       return
     }
-    this.audioCtx = wx.createInnerAudioContext()
     const savedId = String(wx.getStorageSync(AI_MODEL_KEY) || MODEL_CATALOG[0].id)
     const saved = findModel(savedId)
     this.setData({ currentModelId: saved.id, currentModelName: saved.name, currentModelShortName: saved.shortName })
@@ -79,7 +67,7 @@ Page(themed({
   },
 
   onMode(event: WechatMiniprogram.TouchEvent) {
-    this.setData({ mode: event.currentTarget.dataset.mode as 'task' | 'podcast' | 'image' })
+    this.setData({ mode: event.currentTarget.dataset.mode as 'task' })
   },
 
   onKbChange(event: WechatMiniprogram.PickerChange) {
@@ -126,56 +114,6 @@ Page(themed({
       wx.showToast({ title: '已保存到笔记', icon: 'success' })
     } catch (error) {
       wx.showToast({ title: (error as Error).message, icon: 'none' })
-    }
-  },
-
-  async runPodcast() {
-    const text = this.data.podcastText.trim()
-    if (!text) { wx.showToast({ title: '请输入播客素材', icon: 'none' }); return }
-    const model = findModel(this.data.currentModelId).model
-    this.setData({ podcasting: true, podcastScript: '', podcastAudio: '' })
-    wx.showLoading({ title: '生成中...', mask: true })
-    try {
-      const res = await request<{ script: string; audio_url: string }>('/ai/podcast', {
-        method: 'POST',
-        data: { text, model },
-        timeout: 180000,
-      })
-      wx.hideLoading()
-      this.setData({ podcastScript: res.script, podcastAudio: absoluteMediaUrl(res.audio_url) })
-    } catch (error) {
-      wx.hideLoading()
-      wx.showToast({ title: (error as Error).message, icon: 'none' })
-    } finally {
-      this.setData({ podcasting: false })
-    }
-  },
-
-  playPodcast() {
-    if (!this.data.podcastAudio || !this.audioCtx) return
-    this.audioCtx.src = this.data.podcastAudio
-    this.audioCtx.play()
-  },
-
-  async runImage() {
-    const prompt = this.data.imagePrompt.trim()
-    if (!prompt) { wx.showToast({ title: '请输入画面描述', icon: 'none' }); return }
-    const model = findModel(this.data.currentModelId).model
-    this.setData({ imaging: true, imageUrl: '' })
-    wx.showLoading({ title: '绘制中...', mask: true })
-    try {
-      const res = await request<{ image_url: string }>('/ai/image', {
-        method: 'POST',
-        data: { prompt, model },
-        timeout: 180000,
-      })
-      wx.hideLoading()
-      this.setData({ imageUrl: absoluteMediaUrl(res.image_url) })
-    } catch (error) {
-      wx.hideLoading()
-      wx.showToast({ title: (error as Error).message, icon: 'none' })
-    } finally {
-      this.setData({ imaging: false })
     }
   },
 }))
