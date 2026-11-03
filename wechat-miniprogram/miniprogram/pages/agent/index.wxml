@@ -62,7 +62,10 @@
               <image wx:for="{{item.images}}" wx:for-item="img" wx:key="*this" class="msg-image-grid"
                      src="{{img}}" mode="aspectFill" data-url="{{img}}" bindtap="previewImageUrl" />
             </view>
-            <text>{{item.text}}</text>
+            <text wx:if="{{item.text}}" class="bubble-text" user-select="{{true}}">{{item.text}}</text>
+            <view wx:if="{{item.text}}" class="bubble-copy" data-index="{{mi}}" catchtap="copyMessage">
+              <text class="bubble-copy-ic">⧉</text><text class="bubble-copy-txt">复制</text>
+            </view>
           </view>
           <view wx:if="{{item.progressRequestId}}" class="agent-progress">
             <view class="agent-progress-head" data-index="{{mi}}" bindtap="toggleAgentProgress">

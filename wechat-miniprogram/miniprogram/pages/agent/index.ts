@@ -3994,6 +3994,18 @@ Page(themed({
     wx.previewImage({ current: url, urls: [url] })
   },
 
+  /** 一键复制某条对话气泡的文字内容到剪贴板 */
+  copyMessage(event: WechatMiniprogram.TouchEvent) {
+    const idx = Number(event.currentTarget.dataset.index)
+    const msg = this.data.messages[idx]
+    const text = (msg && msg.text ? String(msg.text) : '').trim()
+    if (!text) {
+      wx.showToast({ title: '没有可复制的文字', icon: 'none' })
+      return
+    }
+    wx.setClipboardData({ data: text })
+  },
+
   async sendImage() {
     if (!this.data.pendingImage) return
     const imagePath = this.data.pendingImage

@@ -588,3 +588,9 @@
 .agent-progress-event.completed .agent-progress-event-title { color: #65737d; }
 .agent-progress-detail { color: #7d8992; font-size: 20rpx; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
 .agent-progress-time { align-self: flex-start; color: #a1aab1; font-size: 18rpx; }
+
+/* 气泡内一键复制按钮（2026-11-03 新增） */
+.bubble-copy { display: flex; justify-content: flex-end; align-items: center; gap: 6rpx; margin-top: 12rpx; }
+.bubble-copy:active { opacity: .55; }
+.bubble-copy-ic, .bubble-copy-txt { font-size: 22rpx; line-height: 1; color: #0f6e52; }
+.message.user .bubble-copy-ic, .message.user .bubble-copy-txt { color: #13795b; }
