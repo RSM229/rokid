@@ -1646,7 +1646,14 @@ async def _create_provform_doc(ctx: ToolContext, args: dict) -> dict:
         detail = "；".join(
             f"{e.get('label') or e.get('key')}（{e.get('message')}）" for e in errs[:6]
         )
-        return _need_more(labels or ["必填项"], "该表还不能生成：" + (detail or "缺少必填项"))
+        # 🔴 换脑子：抽不出必填项不再「该表还不能生成」硬报错，改为协作式追问——
+        # 告诉用户还差哪些栏，并邀请把现场/叙述文字直接发来由系统代填（WorkBuddy 式对话）。
+        missing_summary = "、".join(labels[:8]) if labels else "必填项"
+        return _need_more(
+            labels or ["必填项"],
+            f"「{schema.get('name')}」还差这几栏：{missing_summary}。"
+            f"你可以直接把现场情况或记录文字发给我，我帮你填进去；或者逐条告诉我补上。",
+        )
 
     content = provform_schema.build_content_from_fields(
         form_code, fields, project_fields(ctx.project)

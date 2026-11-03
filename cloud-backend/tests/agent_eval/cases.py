@@ -385,6 +385,20 @@ CASES: tuple[dict, ...] = (
                 "服务端 generate_safety_log 拿用户原文作为「安全检查情况」起草素材。"
                 "断言双守门：不许退化成 create_provform_doc，且 form_code 必须指向安全日志。",
     },
+    {
+        "id": "D09", "group": "文书生成",
+        "say": "旁站记录：3号楼二层梁板混凝土浇筑，11月2日14:00到18:00，塌落度检测合格，监理见证取样一组。",
+        "expect": {
+            "tool_forbidden": ["create_provform_doc"],
+            # 🔴 叙述性省统表文字（旁站）未点名表式 → 严禁退化成 create_provform_doc
+            # （必填项校验会卡成「该表还不能生成」）。按意图分流：要留痕→record_work，
+            # 要出文书→generate_document。此处只锁「不许进建表」，不强制具体动作。
+        },
+        "note": "🔴 2026-11-03 新增（承接 D07/D08「其他脑子也要换」）：粘贴一段旁站记录"
+                "叙述文字（未明确点名表式），旧逻辑可能误路由到 create_provform_doc 硬校验。"
+                "prompt 总守门规定：叙述性省统表文字严禁进 create_provform_doc，按意图走"
+                "record_work / generate_document / chat。本用例只断言不许退化成建表。",
+    },
 
     # =========================================================================
     # E. 隐患
