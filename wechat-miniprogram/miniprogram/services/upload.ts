@@ -14,12 +14,20 @@ export class UploadError extends Error {
   }
 }
 
-export function friendlyServerError(statusCode: number): string {
+/**
+ * 把服务端错误映射成对用户友好的提示。
+ * 401/413/429 等单独给出明确文案；502/503/504 多为视觉模型（VLM）网关暂时不可用；
+ * 其余 5xx 归为「服务器暂时不可用」。优先回传服务端 detail，避免直接暴露「HTTP 502」这类让人摸不着头脑的报错。
+ */
+export function friendlyServerError(statusCode: number, detail?: string): string {
   if (statusCode === 401) return '登录已失效，请重新登录'
   if (statusCode === 413) return '图片超过大小限制，请选择较小的图片'
   if (statusCode === 429) return '请求过于频繁，请稍后重试'
+  if (statusCode === 502 || statusCode === 503 || statusCode === 504) {
+    return '视觉模型服务暂时不可用，请稍后重试'
+  }
   if (statusCode >= 500) return '服务器暂时不可用，请稍后重试'
-  return `上传失败（HTTP ${statusCode}）`
+  return detail || `上传失败（HTTP ${statusCode}）`
 }
 
 function upload<T>(
@@ -65,7 +73,7 @@ function upload<T>(
           const retryable = response.statusCode === 408
             || response.statusCode === 429
             || response.statusCode >= 500
-          reject(new UploadError(detail || `上传失败（${response.statusCode}）`, retryable))
+          reject(new UploadError(friendlyServerError(response.statusCode, detail), retryable))
         }
       },
       fail(error) {
