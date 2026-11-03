@@ -13,8 +13,10 @@ Component({
     },
     onSelect(event: WechatMiniprogram.TouchEvent) {
       const id = event.currentTarget.dataset.id as string
+      // 只抛 select，由父页面在 select 处理中关闭面板（agent 的 selectModel
+      // 与 ai 的 onModelPicked 都会把面板 visible 置 false）。若这里再抛 close，
+      // 会与父页面 toggle 类关闭逻辑叠加，把刚关闭的面板又打开（需二次点击）。
       this.triggerEvent('select', { id })
-      this.triggerEvent('close')
     },
     onCopy(event: WechatMiniprogram.TouchEvent) {
       const model = event.currentTarget.dataset.model as string

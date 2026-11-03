@@ -62,7 +62,7 @@ Page(themed({
     const id = (event.detail as { id: string }).id
     const model = findModel(id)
     wx.setStorageSync(AI_MODEL_KEY, model.id)
-    this.setData({ currentModelId: model.id, currentModelName: model.name })
+    this.setData({ currentModelId: model.id, currentModelName: model.name, modelPickerVisible: false })
   },
 
   async loadKbs() {
