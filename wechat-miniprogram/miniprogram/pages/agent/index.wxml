@@ -64,7 +64,7 @@
             </view>
             <text wx:if="{{item.text}}" class="bubble-text" user-select="{{true}}">{{item.text}}</text>
             <view wx:if="{{item.text}}" class="bubble-copy" data-index="{{mi}}" catchtap="copyMessage">
-              <text class="bubble-copy-ic">⧉</text><text class="bubble-copy-txt">复制</text>
+              <view class="bubble-copy-ic"></view>
             </view>
           </view>
           <view wx:if="{{item.progressRequestId}}" class="agent-progress">
