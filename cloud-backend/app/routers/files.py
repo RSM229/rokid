@@ -19,15 +19,41 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 
 from app.config import settings
 from app.models.user import User
-from app.routers.auth import can_read_project, get_current_user
+from app.routers.auth import can_read_project, get_user_from_token
+from app.db import get_db
+from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter()
+
+
+# 🔴 小程序 <image>/wx.previewImage 只能带 query、带不了 Authorization 头。
+# 生产 /uploads 是受控端点（强制登录），图片标签拿不到 token 就被 401 → 图片全空白
+# （2026-11-04 用户反馈「又看不到图片」）。这里接受 query 里的 access_token，
+# 与 header 二选一，都过 get_user_from_token + attach_effective_permissions（与原
+# get_current_user 同权限口径，can_read_project 依赖 effective_permissions）。
+async def _user_from_file_request(
+    request: Request,
+    access_token: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    header = (request.headers.get("Authorization") or "").strip()
+    if header.lower().startswith("bearer "):
+        header = header[7:].strip()
+    token = header or (access_token or "").strip()
+    if not token:
+        raise HTTPException(status_code=401, detail="未提供访问凭证")
+    user = await get_user_from_token(token, db)
+    from app.services.permissions import attach_effective_permissions
+
+    user = await attach_effective_permissions(user, db)
+    return user
 
 
 def _safe_resolve(base: Path, rest: str) -> Path:
@@ -42,12 +68,12 @@ def _safe_resolve(base: Path, rest: str) -> Path:
 @router.get("/uploads/{rest:path}")
 async def serve_upload(
     rest: str,
-    user: User = Depends(get_current_user),
+    user: User = Depends(_user_from_file_request),
 ):
     """受控返回用户上传文件（巡检照片、图纸、签章、文书原图等）。
 
-    要求登录；具体项目的归属隔离为后续 per-category 清单增强项，本版本先关闭
-    最严重的「未登录即可读取任意文件」漏洞。
+    要求登录（Authorization header 或 ?access_token= 二选一，供小程序
+    <image> 标签使用）；具体项目的归属隔离为后续 per-category 清单增强项。
     """
     path = _safe_resolve(settings.upload_dir, rest)
     if not path.is_file():
@@ -58,7 +84,7 @@ async def serve_upload(
 @router.get("/exports/{rest:path}")
 async def serve_export(
     rest: str,
-    user: User = Depends(get_current_user),
+    user: User = Depends(_user_from_file_request),
 ):
     """受控返回导出/归档文件。
 

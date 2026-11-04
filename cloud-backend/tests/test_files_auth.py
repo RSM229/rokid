@@ -70,10 +70,12 @@ class FilesAuthTestCase(unittest.TestCase):
             except OSError:
                 pass
 
-    # ---- 鉴权依赖模拟：无 Authorization 头即 401 ----
+    # ---- 鉴权依赖模拟：无 Authorization 头且无 ?access_token= 即 401 ----
     @staticmethod
-    def _fake_get_current_user(request: Request):
-        if not request.headers.get("authorization"):
+    def _fake_user_from_file_request(request: Request, access_token: str = None):
+        has_header = bool(request.headers.get("authorization"))
+        has_query = bool(access_token)
+        if not (has_header or has_query):
             raise HTTPException(status_code=401, detail="no token")
         return FilesAuthTestCase._captured["user"]
 
@@ -83,12 +85,19 @@ class FilesAuthTestCase(unittest.TestCase):
 
     def setUp(self):
         import app.routers.files as F
+        from app.routers.auth import get_current_user
 
-        app.dependency_overrides[F.get_current_user] = self._fake_get_current_user
+        # 图片 <image> 标签只能带 query、带不了 Authorization 头（2026-11-04 修复）：
+        # 受控文件端点改用 _user_from_file_request，同时接受 header 与 ?access_token=。
+        app.dependency_overrides[F._user_from_file_request] = self._fake_user_from_file_request
+        # /ledger/download 等其它端点仍依赖 auth.get_current_user，一并打桩，
+        # 否则无真实 token 时这些用例会先被 401 拦掉。
+        app.dependency_overrides[get_current_user] = self._fake_user_from_file_request
         self._patcher = patch.object(F, "can_read_project", self._fake_can_read)
         self._patcher.start()
         self.client = TestClient(app)
         self.auth = {"Authorization": "Bearer test"}
+        self.query_auth = {"access_token": "test"}
 
     def tearDown(self):
         self._patcher.stop()
@@ -180,6 +189,31 @@ class FilesAuthTestCase(unittest.TestCase):
         )
         self.assertEqual(r.status_code, 200)
         self.assertIn(b"EXPORT-LEGACY", r.content)
+
+
+# ---- 《image》 标签带不了 Authorization 头：?access_token= 通道（2026-11-04）----
+    def test_upload_query_token_allowed(self):
+        FilesAuthTestCase._captured["user"] = _FakeUser(project_id=5)
+        r = self.client.get("/uploads/t_up.xlsx", params=self.query_auth)
+        self.assertEqual(r.status_code, 200)
+        self.assertIn(b"UPLOAD-SECRET", r.content)
+
+    def test_export_query_token_allowed(self):
+        FilesAuthTestCase._captured["user"] = _FakeUser(project_id=5)
+        r = self.client.get("/exports/ledger_p5_20261030.xlsx", params=self.query_auth)
+        self.assertEqual(r.status_code, 200)
+        self.assertIn(b"EXPORT-P5", r.content)
+
+    def test_query_token_without_header_allowed(self):
+        FilesAuthTestCase._captured["user"] = _FakeUser(project_id=7)
+        r = self.client.get("/exports/archives/7/arc.zip", params=self.query_auth)
+        self.assertEqual(r.status_code, 200)
+
+    def test_upload_no_credentials_rejected(self):
+        """/uploads 永远不许匿名读：无 header 也无 query token → 401。"""
+        FilesAuthTestCase._captured["user"] = _FakeUser(project_id=5)
+        r = self.client.get("/uploads/t_up.xlsx", params={"foo": "bar"})
+        self.assertEqual(r.status_code, 401)
 
 
 if __name__ == "__main__":
