@@ -41,6 +41,19 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _is_mechanical_reply(text: str) -> bool:
+    """判断模型 answer 是否机械（只是标签式清单，如「还需要补充：验收类型」）。
+
+    自然话术（含转述与引导，即使以「还差一项」开头）保留；纯标签清单退回工具话术。
+    """
+    t = str(text or "").strip()
+    if not t:
+        return True
+    stripped = re.sub(r"^(请补充|还需要补充|缺少|缺失|还差|待补充)[：:、 ]*", "", t)
+    stripped = re.sub(r"[、，,。;；\s「」『』（）()·\-—]", "", stripped)
+    return len(stripped) <= 6
+
+
 class AgentChatRequest(BaseModel):
     message: str
     request_id: Optional[str] = None
@@ -401,6 +414,8 @@ args 可以放你已确认的工具参数，但服务端仍会重新抽取、校
 
 **除此之外，任何字段缺失都不要追问、不要退回普通聊天**——返回对应动作，把你已经听到的填进 facts/args，
 没听到的一律省略。服务端会自动列出缺失栏目并逐项向用户追问，这是既定机制，你不需要代劳。
+- 🔴 回答的行文：answer 必须先**自然接住用户这句**——把本句已确认的事实（如「验收结论=合格」）简短转述，再只问缺失字段中最该填的一个（只点栏目名，不列填空清单、不写死选项），并让用户知道可以跳过。例：用户答「合格」→ answer：「收到，验收结论记『合格』。还差一项：这是哪类验收（隐蔽工程／检验批／进场验收／分项分部）？不方便的话也可以先跳过，稍后补。」。
+- 🔴 你的 answer 是这条消息的**主角**，服务端兜底文案只在没有可用 answer 时才出现；不要把机械的「还需要补充：XX」塞进 answer。
 
 错误示范（严禁）：用户说「记一条旁站：屋面防水卷材铺贴，9:00 到 12:00，10人」，
 你因为「没有旁站结论」而返回 chat 动作去追问结论 —— 这是错的。
@@ -412,7 +427,7 @@ station_start_time=9:00、station_end_time=12:00、worker_count=10，结论留�
 其他硬约束
 ----------
 - args 只能包含该工具声明的参数；拿不准的参数不要编造，省略即可（服务端会追问缺失项）。
-- 🔴 追问必须**一次只问一个字段**（按表格栏目顺序：部位→时间→问题……），严禁一口气列出多个问题；用户答完一栏再问下一栏。
+- 🔴 追问**仍然要一次只问一个字段**（服务端主导的逐栏口径不变）：需要你在 answer 里接话时，就只问最该填的那一个（如「还差验收类型，是隐蔽工程／检验批／进场验收／分项分部哪种？」），不要一口气列出多个问题；用户答完一栏服务端会再问下一栏。
 - section（工程部位/施工区域）只填**用户明确说出来的**具体施工部位（如「3号楼二层东侧临边」）。🔴 上面括号里的字只是示意格式，**不是候选值**：用户没说部位就留空，服务端会追问；严禁按规范/经验列举（例如把「临边洞口防护、高处作业、卸料平台、起重吊装、移动操作平台、模板支撑体系」这类检查项清单当成部位填进来）。用户句中的项目名称（如「巡视XX项目」）也不要填进 section。
 - 🔴 用户只回了记录类型（如只答「巡视」「旁站」「验收」）时，**除 record_type 外一个字段都不要填**：不准按经验补部位、工作内容、时间、天气、人数。留空由服务端逐栏追问，编造的字段会直接写进正式文书。
 - content（工作内容）只写用户说过的内容；不要把隐患识别结果、检查项清单、规范条目搬进来。
@@ -1299,6 +1314,15 @@ async def _agent_chat_impl(
         if result.get("need_more"):
             if tool == "create_work_record" and "最终确认" in [str(x) for x in (result.get("need_more") or [])]:
                 args["_awaiting_confirmation"] = True
+            # 🔴 追问气泡以「模型自然接话」为主：need_more 时优先用 LLM 的 answer
+            # 当主气泡文案（自然接话、不重复标签；bold 规则串只出现在表单里），
+            # 模板 reply 只在 answer 缺失/过于机械时才兜底。两者绝不叠加，避免机械感。
+            _model_answer = str((parsed or {}).get("answer") or "").strip()
+            _tool_reply = str(result.get("reply") or "").strip()
+            if _model_answer and not _is_mechanical_reply(_model_answer):
+                result["reply"] = _model_answer
+            elif _tool_reply:
+                result["reply"] = _tool_reply
             await agent_tools.stash_pending(
                 db, user.id, tool,
                 {**args, "_prefill": prefill}

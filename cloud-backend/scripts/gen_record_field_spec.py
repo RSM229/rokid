@@ -523,7 +523,7 @@ def question_for(field: dict) -> str:
     canon = field.get("canonical") or ""
     if canon in QUESTION_OVERRIDES:
         return QUESTION_OVERRIDES[canon]
-    return "请补充" + str(field.get("label") or canon) + "："
+    return "还差一项：" + str(field.get("label") or canon) + "（可直接填写，也可说「跳过」）。"
 
 
 def options_for(field: dict) -> list[str]:

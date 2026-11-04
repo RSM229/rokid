@@ -157,8 +157,16 @@ def _ok(reply: str, **kw) -> dict:
 def _need_more(missing: list[str], reply: str = "",
                options: dict[str, list[str]] | None = None) -> dict:
     """参数不足：回追问话术；options 提供可点选的候选值（前端渲染成 chips）。"""
-    tip = reply or ("还需要补充：" + "、".join(missing))
-    return {"ok": False, "reply": tip, "card": None, "cards": [], "actions": [],
+    if not reply:
+        labels = [str(x) for x in (missing or [])]
+        if len(labels) == 1:
+            reply = (f"还差一项：请补充「{labels[0]}」；不用填也没关系，直接说跳过。")
+        elif labels:
+            reply = ("还有几项待补充（" + "、".join(labels)
+                     + "）；可以一次说完，也可以说「跳过」继续。")
+        else:
+            reply = "请补充缺失信息。"
+    return {"ok": False, "reply": reply, "card": None, "cards": [], "actions": [],
             "need_more": missing, "options": options or {}, "undo": None, "data": {}}
 
 
@@ -595,6 +603,22 @@ def apply_form_values(args: dict, form: str | None, values: dict | None) -> dict
 _ACCEPT_CANDS_KEY = "_accept_cands"        # 隐藏键：候选 item→points（存草稿，落库前清洗）
 _ACCEPT_CANDS_ORDER = "_accept_cands_order"
 _ACCEPT_FORM_CACHE: dict | None = None
+_ACCEPTANCE_TYPES = ("隐蔽工程", "检验批", "进场验收", "分项分部")
+
+
+def _infer_acceptance_type(text: str) -> str:
+    """从素材/正文里保守推断验收类型（只认写死的四类词，取命中第一个）。
+
+    「隐蔽工程验收公示牌」「钢筋隐蔽验收」→ 隐蔽工程；「检验批质量验收」→ 检验批。
+    只用于文本里*明确出现*类型词的情形——整体仍优先保留用户可说、可改。
+    """
+    t = str(text or "")
+    if not t:
+        return ""
+    for kind in _ACCEPTANCE_TYPES:
+        if kind in t:
+            return kind
+    return ""
 
 
 def _acceptance_content_field() -> dict | None:
@@ -605,6 +629,18 @@ def _acceptance_content_field() -> dict | None:
         _ACCEPT_FORM_CACHE = form.get("fields") or []
     for f in _ACCEPT_FORM_CACHE:
         if f.get("canonical") == "acceptance_content":
+            return f
+    return None
+
+
+def _acceptance_type_field() -> dict | None:
+    """acceptance_record 里 canonical=acceptance_type 的字段定义（缓存）。"""
+    global _ACCEPT_FORM_CACHE
+    if _ACCEPT_FORM_CACHE is None:
+        form = record_field_spec.FORMS.get("acceptance_record") or {}
+        _ACCEPT_FORM_CACHE = form.get("fields") or []
+    for f in _ACCEPT_FORM_CACHE:
+        if f.get("canonical") == "acceptance_type":
             return f
     return None
 
@@ -1055,6 +1091,17 @@ async def _create_work_record(ctx: ToolContext, args: dict) -> dict:
                 direct = acceptance_checklists.strong_match(ctx.message or "", prefer_kind=prefer)
                 if direct:
                     args = _set_field_value(args, acc_field, str(direct["points"]))
+        # 验收类型上下文预填：素材/原话里已出现明确类型词（如「隐蔽工程验收公示牌」
+        # 「检验批质量验收」）时直接填入，不再重复追问（2026-11-04 用户反馈「一点也不智能体」）。
+        # 只预填写死枚举里明确出现的词；推断不出仍走逐栏追问。
+        acc_type_field = _acceptance_type_field()
+        if acc_type_field and not _field_value(args, acc_type_field):
+            acc_src = " ".join(x for x in (
+                str(ctx.message or ""), content, section, str(args.get("location") or "")
+            ) if str(x or "").strip())
+            inferred = _infer_acceptance_type(acc_src)
+            if inferred:
+                args = _set_field_value(args, acc_type_field, inferred)
 
     # 字段表驱动的追问：表上「由系统生成=否」且用户还没说的字段，按栏目顺序**一次只问一栏**。
     # “跳过”只允许跳过非必填栏；合同声明的必填字段、冲突和格式错误不能被跳过。
@@ -2592,7 +2639,8 @@ TOOLS: tuple[ToolSpec, ...] = (
          "station_start_time": "旁站开始时间 HH:MM", "station_end_time": "旁站结束时间 HH:MM",
          "acceptance_result": "验收结果：合格/不合格/待整改（验收记录）",
          "acceptance_participants": "参验单位及人员（验收记录）", "acceptance_basis": "检验依据（验收记录）",
-         "witness_material_name": "材料名称（见证记录）", "witness_material_spec": "规格型号（见证记录）",
+         "witness_material_name": "材料名称（见证记录）：名称与规格分开填，这里只填名称本身，如「钢筋」",
+         "witness_material_spec": "规格型号（见证记录）：型号/牌号/直径/等级，如「HRB400 Φ25」；用户说了就拆出来单独填，别并进材料名",
          "witness_quantity": "取样数量（见证记录）", "witness_unit": "计量单位（见证记录）",
          "witness_cert_no": "合格证/检测报告编号（见证记录）",
          "hazard_type": "危大工程名称/类型（危大巡视，如「落地式钢管脚手架工程-一般危大工程」；含类型名会据此带出检查表）",
