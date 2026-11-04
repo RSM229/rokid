@@ -402,10 +402,14 @@ export async function fetchReviewFormSchema(formCode: string): Promise<ReviewFor
   return request<ReviewFormSchema>(`/provform/schemas/${formCode}`)
 }
 
-export async function createReviewPlan(conversationId: string, plan: ReviewPlan, requestId?: string): Promise<ReviewPlan> {
+export async function createReviewPlan(conversationId: string, plan: ReviewPlan, requestId?: string, images?: string[]): Promise<ReviewPlan> {
   try {
     const result = await request<ReviewPlanResponse>('/agent/review-plans', {
-      method: 'POST', data: { conversation_id: conversationId, plan: toServerPlan(plan), request_id: requestId || plan.requestId },
+      method: 'POST', data: {
+        conversation_id: conversationId, plan: toServerPlan(plan),
+        request_id: requestId || plan.requestId,
+        images: (images || []).filter(Boolean),
+      },
     })
     return fromServerPlan(result)
   } catch (error) {

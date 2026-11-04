@@ -2135,10 +2135,20 @@ async def _navigate(ctx: ToolContext, args: dict) -> dict:
 _PENDING_TTL = timedelta(hours=24)
 async def record_conversation_message(db: AsyncSession, user_id: Any,
                                       conversation_id: str | None,
-                                      message: str) -> list[dict[str, str]]:
-    """Persist a display turn and keep a bounded raw trail for model context."""
+                                      message: str,
+                                      images: list[str] | None = None) -> list[dict[str, str]]:
+    """Persist a display turn and keep a bounded raw trail for model context.
+
+    ``images``（可选）是随消息上传后的服务端媒体地址（相对路径即可），
+    只进展示历史（content_json），不进模型上下文——模型读的是素材文字转述，
+    不需要图片 URL。
+    """
     if not user_id or not conversation_id:
         return []
+    display_images = [
+        str(url).strip() for url in (images or [])
+        if isinstance(url, str) and str(url).strip()
+    ][:9]
     stmt = select(AgentConversationMemory).where(
         AgentConversationMemory.user_id == int(user_id),
         AgentConversationMemory.conversation_id == conversation_id,
@@ -2163,6 +2173,7 @@ async def record_conversation_message(db: AsyncSession, user_id: Any,
         role="user", created_at=datetime.now(),
         content_json=json.dumps({
             "role": "user", "text": str(message or "").strip(),
+            **({"images": display_images} if display_images else {}),
             "at": datetime.now().isoformat(timespec="seconds"),
         }, ensure_ascii=False),
     ))

@@ -55,6 +55,8 @@ class AgentChatRequest(BaseModel):
     # 随消息附带的素材（图片识别结果 / 文件解析文本 / 水印），由前端先把图交给视觉模型
     # 再拼成文字；服务端模型本身看不到图片，只能读这段素材。
     material: Optional[str] = None
+    # 随消息上传图片的服务端媒体地址（仅用于展示历史回看；模型上下文不收）
+    images: list[str] = Field(default_factory=list)
     # 素材里已确定的结构化字段（如照片水印的拍摄时间/地点/天气），建记录时直接并入 args
     prefill: dict = Field(default_factory=dict)
     # 聊天内表单一次提交：字段名 → 值。有它就不再让模型抽参，直接按字段表回填。
@@ -300,6 +302,8 @@ class ReviewPlanCreate(BaseModel):
     conversation_id: str
     plan: dict[str, Any]
     request_id: Optional[str] = None
+    # 随请求上传图片的服务端媒体地址；用于把用户这轮发言（含图）落进展示历史
+    images: list[str] = Field(default_factory=list)
 
 
 class ReviewPlanUpdate(BaseModel):
@@ -866,7 +870,7 @@ async def _agent_chat_impl(
     prefill = req.prefill if isinstance(req.prefill, dict) else {}
     conversation_id = (req.conversation_id or "").strip()[:64] or None
     earlier_messages = await agent_tools.record_conversation_message(
-        db, user.id, conversation_id, message
+        db, user.id, conversation_id, message, images=req.images
     )
 
     # Load durable draft context before the routing model runs.  Recent chat
@@ -1761,6 +1765,17 @@ async def create_review_plan(
         stage="review_plan_save",
         message=stored_plan.get("request_text") or "",
     )
+    # 带 attachments 建记录的这轮不走 /agent/chat，用户消息（含图）必须在这里落进
+    # 展示历史，否则「查看历史记录」看不到这条消息和照片。落库失败不阻断建计划。
+    if str(stored_plan.get("request_text") or "").strip() or req.images:
+        try:
+            await agent_tools.record_conversation_message(
+                db, user_id, conversation_id,
+                str(stored_plan.get("request_text") or ""),
+                images=req.images,
+            )
+        except Exception:  # noqa: BLE001 - 历史落库失败不能挡记录整理
+            logger.warning("persist review-plan user turn failed", exc_info=True)
     try:
         agent_review_plan.validate_plan(stored_plan)
         await _validate_review_plan_media(db, user, stored_plan)

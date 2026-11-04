@@ -967,9 +967,13 @@ Page(themed({
     if (raw.role === 'assistant' && response && typeof response === 'object') {
       return this.agentReplyToMessage(response)
     }
+    const rawImages = Array.isArray(raw.images)
+      ? raw.images.filter((u: any) => typeof u === 'string' && u.trim()).slice(0, 9) as string[]
+      : []
     return {
       role: raw.role === 'assistant' ? 'assistant' : 'user',
       text: String(raw.text || ''),
+      images: rawImages.length ? rawImages.map(u => absoluteMediaUrl(u)) : undefined,
       timeText: raw.created_at || raw.createdAt ? formatMessageTime(raw.created_at || raw.createdAt) : undefined,
     }
   },
@@ -988,7 +992,8 @@ Page(themed({
         progressExpanded: false, progressStartedAt: Date.now(), progressTerminal: false,
       }
     }
-    const visibleMessages = messages.filter(message => Boolean(message.text || message.cards?.length || message.agentForm))
+    const visibleMessages = messages.filter(message =>
+      Boolean(message.text || message.images?.length || message.cards?.length || message.agentForm))
     if (!visibleMessages.length) return
     this.currentSessionId = sessionIdFromConversationId(detail.conversation_id)
     this.setData({
@@ -1241,6 +1246,7 @@ Page(themed({
       `收到，我先看看怎么帮你处理`,
       { image_count: images.length, file_count: files.length, text_excerpt: note.slice(0, 500) },
     )
+    const userMsgIndex = messages.length - 1
 
     const blocks: string[] = []
     /** 每张图的原始识别结果：聊天里只展示结论，落库时复用同一份结论（不再调一次视觉模型） */
@@ -1310,10 +1316,20 @@ Page(themed({
               observation: observationResult.observation, error: observationResult.error || '',
             },
           )
-          return { path: img.path, wm, observation: observationResult.observation }
+          return { path: img.path, wm, observation: observationResult.observation, url: uploaded?.url || '' }
         }))
         watermarks.push(...results.map(result => result.wm))
         observations.push(...results.map(result => result.observation))
+        // 历史回看需要持久化地址：把用户消息里的本地临时路径换成服务端 URL，
+        // 否则重进会话/查看历史时本地路径失效，照片就「丢」了。
+        const uploadedUrls = results.map(result => result.url).filter(Boolean) as string[]
+        if (uploadedUrls.length) {
+          const updated = [...this.data.messages]
+          if (updated[userMsgIndex]?.role === 'user') {
+            updated[userMsgIndex] = { ...updated[userMsgIndex], images: uploadedUrls.map(absoluteMediaUrl) }
+            this.setData({ messages: updated })
+          }
+        }
         results.forEach((res, i) => {
           const wmLine = this.formatWatermark(res.wm)
           const observationLine = res.observation ? `【图片内容观察】${res.observation}` : ''
@@ -1604,7 +1620,10 @@ Page(themed({
           evidence_count: evidence.length, conflicts: requestPlan?.field_conflicts || [],
           clarifications: requestPlan?.clarifications || [] },
       )
-      const saved = await createReviewPlan(conversationId, plan, requestPlan?.request_id)
+      const saved = await createReviewPlan(
+        conversationId, plan, requestPlan?.request_id,
+        images.map(image => image.remoteUrl).filter((u): u is string => Boolean(u)),
+      )
       const issueList = reviewIssues(saved)
       const messageIndex = this.addMessage({
         role: 'assistant',
@@ -2878,6 +2897,7 @@ Page(themed({
           material: material || undefined,
           prefill,
           history,
+          images: images.map(i => i.remoteUrl).filter(Boolean),
           mode: this.data.mode,
           request_plan: requestPlan,
           provider: selModel?.provider || undefined,
@@ -2972,7 +2992,8 @@ Page(themed({
         }
       }
     }
-    const missing = result.need_more && result.need_more.length
+    // 主气泡已含追问/接话文案时不再重复「还需要补充：」小字标签（2026-11-04）
+    const missing = result.need_more && result.need_more.length && !(result.reply && result.reply.trim())
       ? `还需要补充：${result.need_more.join('、')}`
       : undefined
     const recommendations = result.recommendations || []

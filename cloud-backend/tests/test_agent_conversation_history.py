@@ -54,6 +54,34 @@ class AgentConversationHistoryTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNone(await agent_tools.get_conversation_detail(db, 11, "wx-100"))
             self.assertIsNotNone(await agent_tools.get_conversation_detail(db, 22, "wx-200"))
 
+    async def test_images_are_persisted_for_display_but_not_model_context(self):
+        """图片 URL 只进展示历史（历史回看能看到照片），不进模型上下文。"""
+        from sqlalchemy import select
+
+        async with self.session_factory() as db:
+            await agent_tools.record_conversation_message(
+                db, 33, "wx-photo", "记录今天的工作",
+                images=["/api/media/12/file", "", "http://x/y.jpg"],
+            )
+            # 只有图没有文字也要能落库（用户只发照片不说话）
+            await agent_tools.record_conversation_message(db, 33, "wx-photo", "", images=["/api/media/13/file"])
+            await db.commit()
+
+            detail = await agent_tools.get_conversation_detail(db, 33, "wx-photo")
+            self.assertIsNotNone(detail)
+            self.assertEqual(detail["messages"][0]["images"], ["/api/media/12/file", "http://x/y.jpg"])
+            self.assertEqual(detail["messages"][0]["text"], "记录今天的工作")
+            self.assertEqual(detail["messages"][1]["images"], ["/api/media/13/file"])
+            self.assertEqual(detail["messages"][1]["text"], "")
+
+            memory = (await db.execute(select(AgentConversationMemory).where(
+                AgentConversationMemory.user_id == 33,
+                AgentConversationMemory.conversation_id == "wx-photo",
+            ))).scalars().first()
+            self.assertIsNotNone(memory)
+            trail = __import__("json").loads(memory.messages_json or "[]")
+            self.assertTrue(all("images" not in item for item in trail))
+
     async def test_legacy_memory_is_visible_when_message_table_is_empty(self):
         async with self.session_factory() as db:
             db.add(AgentConversationMemory(
