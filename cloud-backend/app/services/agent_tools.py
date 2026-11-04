@@ -1116,7 +1116,8 @@ async def _create_work_record(ctx: ToolContext, args: dict) -> dict:
             if concl:
                 args = _set_field_value(args, acc_concl_field, concl)
 
-    # 字段表驱动的追问：表上「由系统生成=否」且用户还没说的字段，按栏目顺序**一次只问一栏**。
+    # 字段表驱动的追问：表上「由系统生成=否」且用户还没说的字段，**一次性**把可枚举项
+    # 以候选 chips 呈现、自由文本项列入待补清单，用户一轮点完/改完即可确认生成。
     # “跳过”只允许跳过非必填栏；合同声明的必填字段、冲突和格式错误不能被跳过。
     assist = assist_fields(record_type, is_weida)
     missing = [
@@ -1127,32 +1128,53 @@ async def _create_work_record(ctx: ToolContext, args: dict) -> dict:
     ]
     required_missing = [f for f in missing if bool(f.get("required"))]
     if missing and (required_missing or not _wants_skip(ctx.message)):
-        field = missing[0]
-        label = str(field.get("label") or field.get("canonical") or "")
-        options: dict[str, list[str]] = {}
-        enum = record_field_spec.options_for(field)
-        # 验收要点：命中多条 → 候选追问（B，2026-10-16），可点选或直接回复要点名/编号
-        if record_type == "验收" and field.get("canonical") == "acceptance_content":
+        # 验收要点多候选：保留原有 B 逻辑（命中多条 → 候选点选），优先于通用合并
+        acc_content_field = next(
+            (f for f in missing
+             if record_type == "验收" and f.get("canonical") == "acceptance_content"), None)
+        if acc_content_field:
             acc_query = _acceptance_query(section, content,
                                           str(args.get("location") or ""), ctx.message or "")
             prefer = _project_kind_from(ctx.project)
             cands = _acceptance_candidates(acc_query, prefer_kind=prefer) if acc_query else []
             if cands:
                 args = _acceptance_hide_candidates(args, cands)
-                options[label] = [
-                    f"{'[房建]' if c.get('kind') == '房建' else '[市政]'}"
-                    f"{i}. {c['item']}（{c['div']}）" for i, c in enumerate(cands, 1)
-                ]
-                options["可跳过"] = ["跳过，直接创建"]
+                label = str(acc_content_field.get("label") or acc_content_field.get("canonical") or "")
+                options = {
+                    label: [
+                        f"{'[房建]' if c.get('kind') == '房建' else '[市政]'}"
+                        f"{i}. {c['item']}（{c['div']}）" for i, c in enumerate(cands, 1)
+                    ],
+                    "可跳过": ["跳过，直接创建"],
+                }
                 return _need_more(
                     [label],
                     "验收要点不唯一，选一个（或直接回复要点名）：",
                     options=options,
                 )
-        if enum:
-            options[label] = enum
+        # 通用合并：本轮所有缺字段的可枚举候选一次性带出（前端渲染成 chips），
+        # 自由文本项（无枚举，如施工部位）列入待补清单由用户直接填/说。
+        labels: list[str] = []
+        options: dict[str, list[str]] = {}
+        freetext: list[str] = []
+        for field in missing:
+            label = str(field.get("label") or field.get("canonical") or "")
+            labels.append(label)
+            enum = record_field_spec.options_for(field)
+            if field.get("canonical") == "acceptance_type":
+                # 受控枚举（隐蔽工程/检验批/进场验收/分项分部），从源头灭掉模型口误
+                enum = list(_ACCEPTANCE_TYPES)
+            if enum:
+                options[label] = enum
+            else:
+                freetext.append(label)
         options["可跳过"] = ["跳过，直接创建"]
-        return _need_more([label], record_field_spec.question_for(field), options=options)
+        if freetext:
+            reply = ("还差几项待补全：上方可点选的先点；" + "、".join(freetext)
+                     + " 直接说或填即可。不方便也能先跳过。")
+        else:
+            reply = "还差几项待补全，上方已给出可选项，点选或回复均可；不方便也能先跳过。"
+        return _need_more(labels, reply, options=options)
 
     # 旧聊天入口也必须经过同一份版本化合同。这里不让可选栏阻断旧有
     # “跳过”体验，但必填、冲突、格式错误与新整理计划保持完全相同的门槛。
