@@ -3026,7 +3026,9 @@ Page(themed({
     } : undefined)
     const agentForm: AgentForm | undefined = sourceForm ? {
       ...sourceForm,
-      expanded: sourceForm.expanded === true,
+      // 🔴 新追问默认收起（2026-11-04 用户反馈「怎么还要填表」）：表格是「当前这一问」的快捷填写，
+      // 不是要用户逐项填的整张表。展开态只保留用户主动点开的。
+      expanded: false,
       fields: (sourceForm.fields || []).map((field, index, fields) => {
         const recommendation = recommendations.find(item => (
           item.field === field.name || item.field === field.label || item.field === field.canonical
