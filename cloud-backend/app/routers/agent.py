@@ -272,18 +272,29 @@ def _agent_form(
         }
 
     if result.get("need_more"):
+        # 🔴 「补齐信息」只呈现当前这一栏，与气泡里的追问对齐（2026-11-04 用户反馈
+        # 「怎么还要填表」）：后端一次只问一栏，表单却把全部缺失字段摊成整张表，
+        # 体感就是「填表」。其余缺失栏仍留在草稿里，答完一栏下一轮再出现。
+        pending_labels = [str(x) for x in (result.get("need_more") or [])]
         fields = agent_tools.missing_field_views(args, form_code) if form_code else []
+        if fields and pending_labels:
+            fields = [v for v in fields if str(v.get("label") or "") in pending_labels]
+            fields = fields[:1]  # 兜底：即使命中多个也只渲染当前这一栏
         if not fields:
-            fields = _generic_fields(missing, options)
+            # 没有字段表/没有命中时退回原来的通用列表，保证能填
+            fields = agent_tools.missing_field_views(args, form_code) if form_code else []
+            if not fields:
+                fields = _generic_fields(missing, options)
         filled = agent_tools.filled_field_views(args, form_code) if form_code else []
         record_type = agent_tools._norm_record_type(str(args.get("record_type") or "")) or ""
         has_required = any(field.get("required") for field in fields)
+        first_label = str(fields[0].get("label") or "") if fields else "信息"
         return {
             "id": f"{tool}:{form_code or 'form'}",
             "kind": "work_record" if form_code else "form",
             "schema_version": 1, "field_schema": "record_field_spec.v1", "form_code": form_code or "",
-            "title": f"{record_type}记录 · 补齐信息" if record_type else "补齐信息",
-            "hint": "带「必填」的填完即可保存；其余留空也能提交。" if has_required
+            "title": f"还差「{first_label}」" if fields else (f"{record_type}记录 · 补齐信息" if record_type else "补齐信息"),
+            "hint": "直接在聊天里回复我即可，不用逐项填表；也可以点开填写。" if fields
                     else "都可以留空，直接提交也行。",
             "fields": fields,
             "filled": filled,

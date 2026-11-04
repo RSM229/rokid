@@ -1102,6 +1102,19 @@ async def _create_work_record(ctx: ToolContext, args: dict) -> dict:
             inferred = _infer_acceptance_type(acc_src)
             if inferred:
                 args = _set_field_value(args, acc_type_field, inferred)
+        # 验收结论兜底回填：模型把「合格/不合格」收进 acceptance_result，
+        # 而验收表对应栏是「监理验收结论」（2026-11-04 用户反馈「答了怎么还问」——
+        # 验收表没有 acceptance_result 栏，不映射就会漏掉用户已经给的结论）。
+        acc_concl_field = next(
+            (f for f in record_field_spec.ask_fields("acceptance_record")
+             if f.get("canonical") == "supervision_conclusion"), None)
+        if acc_concl_field and not _field_value(args, acc_concl_field):
+            concl = str(args.get("acceptance_result") or "").strip()
+            if not concl:
+                concl = next(
+                    (h for h in _NO_ISSUE_HINTS if h in (ctx.message or "")), "") or ""
+            if concl:
+                args = _set_field_value(args, acc_concl_field, concl)
 
     # 字段表驱动的追问：表上「由系统生成=否」且用户还没说的字段，按栏目顺序**一次只问一栏**。
     # “跳过”只允许跳过非必填栏；合同声明的必填字段、冲突和格式错误不能被跳过。
