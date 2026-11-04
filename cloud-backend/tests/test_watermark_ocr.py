@@ -46,7 +46,7 @@ parser_cases = [
     (["113.2956,23.0974"], {"lat": 23.0974, "lon": 113.2956}),
     (["天气:雷阵雨"], {"weather": "雷阵雨"}),
     (["记录人:王五"], {"inspector": "王五"}),
-    (["施工区域：西楼外脚手架搭设"], {"work_area": "西楼外脚手架搭设"}),
+    (["施工区域：西楼外脚手架搭设"], {"section": "西楼外脚手架搭设"}),
     (["危大名称脚手架工程"], {"hazard_name": "脚手架工程"}),
     (["检查人员：刘幸、陈宇文"], {"inspector": "刘幸、陈宇文"}),
     (["监理：刘幸"], {"inspector": "刘幸"}),
@@ -54,7 +54,7 @@ parser_cases = [
     (["拍摄时间：2026.10.0915:48"], {"taken_at": "2026-10-09T15:48:00"}),
     (["检查人员", "陈宇文"], {"inspector": "陈宇文"}),
     (["地点:", "广州市南沙区·广东省中医院南沙", "医院(装修中)"], {"location": "广州市南沙区·广东省中医院南沙"}),
-    (["施工区域:西楼十一层A区混凝土浇筑旁站"], {"work_area": "西楼十一层A区混凝土浇筑旁站"}),
+    (["施工区域:西楼十一层A区混凝土浇筑旁站"], {"section": "西楼十一层A区混凝土浇筑旁站"}),
     (["施工区域:西楼十一层A区混凝土浇筑旁站"], {"location": None}),
     ([
         "广东省中西医结合应急救治", "中心项目", "珠江监理", "施工区域：安全巡视",
@@ -63,7 +63,7 @@ parser_cases = [
         "监理单位：广州珠江监理咨询集团有限公司", "施工单位：广州一建建设集团有限公司",
     ], {"project_name": "广东省中西医结合应急救治中心项目", "inspector": "陈宇文"}),
     (["项目名称：海珠湾工程", "施工区域：西楼A区", "危大工程名称：脚手架", "检查人员：张三", "拍摄时间：2026-10-18 09:30", "地点：西楼", "建设单位：甲公司", "监理单位：乙公司", "施工单位：丙公司", "备注：复查东侧", "备注二：补充材料"], {
-        "project_name": "海珠湾工程", "work_area": "西楼A区", "hazard_name": "脚手架", "inspector": "张三",
+        "project_name": "海珠湾工程", "section": "西楼A区", "hazard_name": "脚手架", "inspector": "张三",
         "taken_at": "2026-10-18T09:30:00", "location": "西楼",
         "owner_unit": "甲公司", "supervision_unit": "乙公司", "construction_unit": "丙公司",
     }),
@@ -107,5 +107,28 @@ for name, lines, expect_subset in CASES:
         if not match:
             ok = False
             print(f"[FAIL] {k}: 期望含 {v!r}，实得 {got!r}")
+
+# 🔴 2026-11-04 用户明令：图片「单位工程」「施工区域」属施工部位（section），
+# 不再当项目名/独立 work_area —— 验收表单的「验收部位」要靠它预填。
+# 多个部位标签都归 section，按出现顺序取第一个命中值（不覆盖）。
+extract_cases = [
+    (
+        ["单位工程:污水管道基础包封", "施工区域:ss-w44至ss-w-43"],
+        {"section": "污水管道基础包封"},
+    ),
+    (
+        ["施工区域:西楼A区"],
+        {"section": "西楼A区"},
+    ),
+]
+for idx, (lines, expect_subset) in enumerate(extract_cases):
+    fields = parse_watermark_fields(lines)
+    ok &= bool(fields.get("section"))
+    ok &= "work_area" not in fields
+    ok &= bool(fields.get("project_name")) is False
+    for k, v in expect_subset.items():
+        got = fields.get(k, "")
+        ok &= (v in got) if isinstance(got, str) else False
+    print(f"\n== extract_case{idx} == section={fields.get('section')} project_name={fields.get('project_name')} work_area={fields.get('work_area')}")
 
 print("\nRESULT:", "ALL PASS" if ok else "HAS FAILURES")

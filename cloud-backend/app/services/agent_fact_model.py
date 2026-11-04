@@ -354,7 +354,14 @@ def detect_source_conflicts(
             (index for index, source in enumerate(sources) if _objective_source(source)),
             None,
         )
-        if objective_index is not None:
+        # 🔴 2026-11-04 用户明令：项目名称以当前项目（system）为主——
+        # 只有证据/用户描述识别到「不同」项目名才需要确认（needs_confirmation）；
+        # 系统未配置项目名时，水印识别到的才作为确认候选。
+        if field == "project" and _usable_value(system_value):
+            preferred_value = system_value
+            preferred_source = "system_project"
+            resolution = "system_value_preferred_pending_confirmation"
+        elif objective_index is not None:
             preferred_value = observed[objective_index]
             preferred_source = sources[objective_index] or "watermark_or_exif"
             resolution = "evidence_value_preferred_pending_confirmation"

@@ -26,7 +26,8 @@ RECORD_PERMISSIONS = {
 WATERMARK_FIELD_ALIASES = {
     "项目": "project_name", "项目名称": "project_name", "工程名称": "project_name", "建设项目": "project_name",
     "建设单位名称": "owner_unit", "施工单位名称": "construction_unit", "监理单位名称": "supervision_unit",
-    "施工区域": "work_area", "区域": "work_area", "施工部位": "section", "部位": "section",
+    # 🔴 2026-11-04 用户明令：图片里的「单位工程」「施工区域」属于施工部位（section）
+    "施工区域": "section", "区域": "section", "单位工程": "section", "施工部位": "section", "部位": "section",
     "地点": "location", "位置": "location", "地址": "location",
     "拍摄时间": "taken_at", "时间": "taken_at", "日期": "taken_at", "天气": "weather",
     "检查人员": "inspector", "拍摄人": "inspector", "记录人": "inspector", "人员": "inspector",

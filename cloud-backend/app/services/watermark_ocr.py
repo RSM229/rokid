@@ -95,7 +95,10 @@ _ADDR_RE = re.compile(
 # 任意其它标签都不会丢，会原样进入 labeled_items。
 _SEMANTIC_ALIASES = {
     "项目": "project_name", "工程": "project_name", "项目名称": "project_name",
-    "工程名称": "project_name", "建设项目": "project_name", "单位工程": "project_name",
+    "工程名称": "project_name", "建设项目": "project_name", "工程名称简称": "project_name",
+    # 🔴 2026-11-04 用户明确：「单位工程」「施工区域」是施工部位，不是项目名/独立区域
+    "单位工程": "section", "单位工程名称": "section",
+    "施工区域": "section", "施工区域名称": "section",
     "位置": "location", "地点": "location", "地址": "location",
     "施工地点": "location", "拍摄地点": "location",
     "拍摄时间": "taken_at", "拍照时间": "taken_at", "时间": "taken_at",
@@ -109,11 +112,10 @@ _SEMANTIC_ALIASES = {
     "见证人": "inspector", "验收人员": "inspector",
     "建设单位": "owner_unit", "施工单位": "construction_unit", "监理单位": "supervision_unit",
     "建设单位名称": "owner_unit", "施工单位名称": "construction_unit",
-    "施工区域名称": "work_area",
-    "部位": "section", "施工部位": "section", "施工区域": "work_area",
+    "部位": "section", "施工部位": "section",
     "危大名称": "hazard_name", "危大工程名称": "hazard_name",
     "备注": "remark",
-    "项目简称": "project_name", "工程名称简称": "project_name",
+    "项目简称": "project_name",
 }
 
 # 无冒号时，靠「标签后缀」判断下一行是否为值。只是排版启发式，不是字段白名单。

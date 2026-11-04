@@ -91,7 +91,10 @@ def test_system_project_and_profile_values_are_non_destructive_conflict_candidat
         ],
     )
     by_field = {item["field"]: item for item in conflicts}
-    assert by_field["project"]["preferred_value"] == "广东省中西医结合应急救治中心项目"
+    # 🔴 2026-11-04 用户明令：项目名以当前项目（system）为主，识别到不同才确认。
+    # 这里水印「广东省中西医结合…」与系统「111」不一致 → 仍须确认，但首选值为系统项目。
+    assert by_field["project"]["preferred_value"] == "111"
+    assert by_field["project"]["preferred_source"] == "system_project"
     assert set(by_field["project"]["options"]) == {"111", "广东省中西医结合应急救治中心项目"}
     assert by_field["construction_unit"]["system_value"] == "系统施工单位"
     assert by_field["inspector"]["preferred_source"] == "watermark"
