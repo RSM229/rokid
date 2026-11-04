@@ -75,6 +75,30 @@ export const config = {
 
 export function absoluteMediaUrl(path: string): string {
   if (!path) return ''
-  if (/^https?:\/\//.test(path)) return path
-  return config.apiBaseUrl.replace(/\/api$/, '') + path
+  // 已是完整 URL（可能带着历史缓存的旧/缺失 token）：刷新受控路径上的 access_token，其余原样
+  if (/^https?:\/\//.test(path)) return refreshMediaToken(path)
+  const base = config.apiBaseUrl.replace(/\/api$/, '')
+  const url = base + path
+  // 🔴 生产 /uploads 是受控端点（b206ae3 安全加固：必须登录）。
+  // 小程序 <image>/wx.previewImage 只能带 query、带不了 Authorization 头，
+  // 否则图片被 401 挡掉 → 看不到图（2026-11-04 用户反馈「又看不到图片」）。
+  // 这里给受控路径补上当前 access_token。懒读 storage 避免与 session.ts 循环依赖。
+  if (path.startsWith('/uploads/') || path.startsWith('/exports/')) {
+    const token = wx.getStorageSync(`gdjl_${storageScope}_access_token`) || ''
+    if (token) return `${url}${url.includes('?') ? '&' : '?'}access_token=${encodeURIComponent(token)}`
+  }
+  return url
+}
+
+/** 历史缓存的图片 URL 可能带着旧 token（过期/重登后失效）：把受控路径上的
+ *  access_token 参数刷新为当前 token，其余原样返回。 */
+export function refreshMediaToken(url: string): string {
+  if (!url) return ''
+  if (!/^https?:\/\//.test(url)) return url
+  const token = wx.getStorageSync(`gdjl_${storageScope}_access_token`) || ''
+  const clean = url.replace(/[?&]access_token=[^&]*/g, '')
+  if (!token || !(/^https?:\/\//.test(clean) && (clean.includes('/uploads/') || clean.includes('/exports/')))) {
+    return clean
+  }
+  return `${clean}${clean.includes('?') ? '&' : '?'}access_token=${encodeURIComponent(token)}`
 }
