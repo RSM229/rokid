@@ -73,7 +73,8 @@
                 <text class="agent-progress-current">{{item.progressHeadline || (item.progressTerminal ? '已完成本轮思考' : '正在理解你的需求')}}</text>
               </view>
               <view class="agent-progress-meta">
-                <text>{{item.progressEvents.length}} 步 · {{item.progressElapsedSeconds || 0}} 秒</text>
+                <text wx:if="{{item.progressEvents.length}}">{{item.progressEvents.length}} 步 · {{item.progressElapsedSeconds || 0}} 秒</text>
+                <text wx:else>{{item.progressTerminal ? '已处理' : '整理中'}}</text>
                 <text class="agent-progress-toggle">{{item.progressExpanded ? '收起' : '展开'}}</text>
               </view>
             </view>

@@ -3667,7 +3667,8 @@ Page(themed({
           text: result.reply || '生成失败：智能体未返回内容',
           cards,
           actions,
-          hint: result.need_more && result.need_more.length
+          // 主气泡已含追问/接话文案时不再重复「还需要补充：」小字标签（2026-11-04）
+          hint: result.need_more && result.need_more.length && !(result.reply && result.reply.trim())
             ? `还需要补充：${result.need_more.join('、')}`
             : undefined,
         }],
