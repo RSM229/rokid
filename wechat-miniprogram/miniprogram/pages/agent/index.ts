@@ -2863,7 +2863,9 @@ Page(themed({
       out.record_date = `${matched[1]}-${matched[2].padStart(2, '0')}-${matched[3].padStart(2, '0')}`
     }
     if (fields.location) out.location = fields.location
-    if (fields.section) out.section = fields.section
+    // 🔴 2026-11-04 用户明令：图片里的「单位工程」「施工区域」属于施工部位（section）。
+    // 服务端 OCR 已把这两个标签归入 section；此处兜底兼容旧数据里的 work_area。
+    out.section = String(fields.section || fields.work_area || fields.unit_project || '').trim()
     if (fields.weather) out.weather = fields.weather
     return out
   },
