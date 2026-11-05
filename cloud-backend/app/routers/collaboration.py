@@ -1,7 +1,7 @@
 """Unified project collaboration inbox for the mini program."""
 import hashlib
 import json
-from datetime import datetime
+from datetime import date, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db import get_db
 from app.models.collaboration import CollaborationEvent, CollaborationFollower, CollaborationItem
 from app.models.document import Document
+from app.models.notification import Notification
 from app.models.project_member import ProjectMember
 from app.models.user import User
 from app.models.work_record import WorkRecord
@@ -40,7 +41,13 @@ class ResolveRequest(BaseModel):
 
 class TransferRequest(BaseModel):
     recipient_id: int
+    cc_recipient_ids: list[int] = Field(default_factory=list, max_length=50)
     detail: str = Field(default="", max_length=2000)
+    client_request_id: str | None = Field(default=None, max_length=128)
+
+
+class RemindRequest(BaseModel):
+    note: str = Field(default="", max_length=200)
 
 
 ACTION_LABELS = {
@@ -52,6 +59,7 @@ ACTION_LABELS = {
     "canceled": "撤回/失效",
     "transferred": "转派",
     "cc_added": "新增抄送",
+    "reminded": "催办",
 }
 
 STATUS_LABELS = {
@@ -67,6 +75,123 @@ ACTION_TYPE_LABELS = {
     "process": "请处理",
     "track": "抄送跟踪",
 }
+
+TERMINAL_STATUSES = ("completed", "canceled", "transferred")
+REMIND_COOLDOWN_SECONDS = 10 * 60
+
+
+def _parse_deadline(value: str | None) -> str | None:
+    if not value:
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    try:
+        return date.fromisoformat(text).isoformat()
+    except ValueError as exc:
+        raise HTTPException(400, "截止日期必须使用 YYYY-MM-DD 格式") from exc
+
+
+def _deadline_fields(item: CollaborationItem) -> tuple[str | None, str, str, int | None]:
+    raw = (item.metadata_json or {}).get("deadline")
+    if not raw:
+        return None, "none", "", None
+    try:
+        due = date.fromisoformat(str(raw))
+    except ValueError:
+        return str(raw), "none", "", None
+    if item.status in TERMINAL_STATUSES:
+        return due.isoformat(), "closed", "", None
+    delta = (due - date.today()).days
+    if delta < 0:
+        return due.isoformat(), "overdue", f"已逾期 {-delta} 天", delta
+    if delta == 0:
+        return due.isoformat(), "due_today", "今天截止", 0
+    return due.isoformat(), "normal", f"截止 {due.isoformat()}", delta
+
+
+def _source_label(item: CollaborationItem) -> str:
+    key = item.source_key or ""
+    if key.startswith("manual:transfer:"):
+        return "转派"
+    if key.startswith("manual:"):
+        return "人工发起"
+    if key.startswith("workflow"):
+        return "流程自动"
+    return "系统"
+
+
+def _viewer_role(item: CollaborationItem, viewer_id: int | None, follower_ids: set[int]) -> str:
+    if viewer_id == item.sender_id:
+        return "sender"
+    if viewer_id == item.recipient_id:
+        return "recipient"
+    if viewer_id in follower_ids:
+        return "follower"
+    return "observer"
+
+
+def _remind_state(item: CollaborationItem) -> tuple[bool, str | None]:
+    if item.mode != "action" or item.status != "pending":
+        return False, None
+    raw = (item.metadata_json or {}).get("last_reminded_at")
+    if not raw:
+        return True, None
+    try:
+        last = datetime.fromisoformat(str(raw))
+    except ValueError:
+        return True, None
+    next_at = last + timedelta(seconds=REMIND_COOLDOWN_SECONDS)
+    if datetime.now() >= next_at:
+        return True, None
+    return False, next_at.isoformat()
+
+
+async def _notify(
+    db: AsyncSession,
+    user_ids: list[int | None],
+    *,
+    title: str,
+    body: str,
+    event_type: str,
+    item: CollaborationItem,
+    actor_id: int | None = None,
+) -> None:
+    payload = json.dumps({
+        "item_id": item.id,
+        "project_id": item.project_id,
+        "object_type": item.object_type,
+        "object_id": item.object_id,
+        "status": item.status,
+        "route": f"/pages/todo/index?item_id={item.id}",
+    }, ensure_ascii=False)
+    now = datetime.now().timestamp()
+    for user_id in dict.fromkeys(int(value) for value in user_ids if value):
+        if actor_id is not None and user_id == int(actor_id):
+            continue
+        db.add(Notification(
+            user_id=user_id,
+            title=title,
+            body=body,
+            event_type=event_type,
+            payload=payload,
+            ts=now,
+        ))
+
+
+async def _locked_item(
+    db: AsyncSession, item_id: int, project_id: int
+) -> CollaborationItem | None:
+    return (
+        await db.execute(
+            select(CollaborationItem)
+            .where(
+                CollaborationItem.id == item_id,
+                CollaborationItem.project_id == project_id,
+            )
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
 
 
 async def _require_project_member(db: AsyncSession, user: User, project_id: int) -> None:
@@ -136,13 +261,18 @@ async def _serialize(db: AsyncSession, item: CollaborationItem, viewer_id: int |
     followers = (await db.execute(
         select(CollaborationFollower).where(CollaborationFollower.item_id == item.id)
     )).scalars().all()
-    follower_ids = [row.user_id for row in followers]
+    follower_ids = {row.user_id for row in followers}
     follower_users = (await db.execute(
-        select(User).where(User.id.in_(follower_ids or [-1]))
+        select(User).where(User.id.in_(follower_ids or {-1}))
     )).scalars().all()
+    follower_by_id = {row.id: row for row in follower_users}
+    follower_rows = {row.user_id: row for row in followers}
     read_at = item.read_at
     if viewer_id and viewer_id != item.recipient_id:
-        read_at = next((row.read_at for row in followers if row.user_id == viewer_id), None)
+        read_at = follower_rows[viewer_id].read_at if viewer_id in follower_rows else None
+    deadline, deadline_state, deadline_label, days_until_due = _deadline_fields(item)
+    metadata = item.metadata_json or {}
+    can_remind, remind_available_at = _remind_state(item) if viewer_id == item.sender_id else (False, None)
     return {
         "id": item.id,
         "project_id": item.project_id,
@@ -152,10 +282,20 @@ async def _serialize(db: AsyncSession, item: CollaborationItem, viewer_id: int |
         "recipient_name": recipient.real_name if recipient else "未知",
         "cc_recipient_names": [row.real_name for row in follower_users],
         "cc_names_text": "、".join(row.real_name for row in follower_users),
+        "cc_recipients": [
+            {
+                "id": user_id,
+                "real_name": follower_by_id[user_id].real_name if user_id in follower_by_id else "未知",
+                "read_at": follower_rows[user_id].read_at.isoformat() if follower_rows[user_id].read_at else None,
+            }
+            for user_id in sorted(follower_ids)
+        ],
+        "viewer_role": _viewer_role(item, viewer_id, follower_ids),
         "mode": item.mode,
         "mode_label": _mode_label(item, viewer_id),
         "object_type": item.object_type,
         "object_id": item.object_id,
+        "object_label": "工作记录" if item.object_type == "work_record" else "工作文书",
         "action_type": item.action_type,
         "is_signoff": item.action_type.startswith("signoff:"),
         "status": item.status,
@@ -166,17 +306,34 @@ async def _serialize(db: AsyncSession, item: CollaborationItem, viewer_id: int |
         ),
         "title": item.title,
         "description": item.description or "",
-        "metadata": item.metadata_json or {},
+        "metadata": metadata,
+        "deadline": deadline,
+        "deadline_state": deadline_state,
+        "deadline_label": deadline_label,
+        "days_until_due": days_until_due,
+        "source": _source_label(item),
+        "resolution": metadata.get("resolution") or "",
+        "completed_by_id": metadata.get("resolved_by_id"),
+        "completed_by_name": metadata.get("resolved_by_name") or "",
+        "last_reminded_at": metadata.get("last_reminded_at"),
+        "last_reminder_note": metadata.get("last_reminder_note") or "",
         "read_at": read_at.isoformat() if read_at else None,
-        "can_cancel": bool(
-            viewer_id == item.sender_id and item.mode == "action"
+        "is_read": bool(read_at),
+        "can_resolve": bool(
+            viewer_id == item.recipient_id and item.mode == "action"
             and item.action_type == "process" and item.status == "pending"
+        ),
+        "can_cancel": bool(
+            viewer_id == item.sender_id and item.status == "pending"
             and item.source_key.startswith("manual:")
+            and (item.mode == "cc" or item.action_type == "process")
         ),
         "can_transfer": bool(
             viewer_id == item.recipient_id and item.mode == "action"
             and item.action_type == "process" and item.status == "pending"
         ),
+        "can_remind": can_remind,
+        "remind_available_at": remind_available_at,
         "created_at": item.created_at.isoformat() if item.created_at else None,
         "completed_at": item.completed_at.isoformat() if item.completed_at else None,
     }
@@ -184,54 +341,90 @@ async def _serialize(db: AsyncSession, item: CollaborationItem, viewer_id: int |
 
 @router.get("/inbox")
 async def inbox(
-    view: str = Query("action", pattern="^(action|cc|sent|done)$"),
+    view: str = "action",
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    status: str | None = None,
+    object_type: str | None = None,
+    keyword: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
 ):
+    if view not in {"action", "cc", "sent", "done", "tasks"}:
+        raise HTTPException(400, "view 仅支持 action/cc/sent/done/tasks")
+    if status and status not in {"pending", "tracking", "completed", "canceled", "transferred"}:
+        raise HTTPException(400, "status 不是有效的协作状态")
+    if object_type and object_type not in {"work_record", "document"}:
+        raise HTTPException(400, "object_type 仅支持 work_record/document")
+    limit = min(max(limit, 1), 100)
+    offset = max(offset, 0)
     project_id = require_project_id(user)
     await _require_project_member(db, user, project_id)
-    query = select(CollaborationItem).where(CollaborationItem.project_id == project_id)
-    if view == "action":
-        query = query.where(
-            CollaborationItem.recipient_id == user.id,
-            CollaborationItem.mode == "action",
-            CollaborationItem.status == "pending",
-            _existing_object_clause(),
-        )
-    elif view == "cc":
-        follows = exists(select(CollaborationFollower.id).where(
-            CollaborationFollower.item_id == CollaborationItem.id,
-            CollaborationFollower.user_id == user.id,
-        ))
+    follows = exists(select(CollaborationFollower.id).where(
+        CollaborationFollower.item_id == CollaborationItem.id,
+        CollaborationFollower.user_id == user.id,
+    ))
+    base = [CollaborationItem.project_id == project_id]
+    action_conditions = base + [
+        CollaborationItem.recipient_id == user.id,
+        CollaborationItem.mode == "action",
+        CollaborationItem.status == "pending",
+        _existing_object_clause(),
+    ]
+    cc_conditions = base + [or_(
+        and_(CollaborationItem.recipient_id == user.id, CollaborationItem.mode == "cc"),
+        follows,
+    )]
+    sent_conditions = base + [CollaborationItem.sender_id == user.id]
+    done_conditions = base + [
+        CollaborationItem.recipient_id == user.id,
+        CollaborationItem.mode == "action",
+        CollaborationItem.status.in_(TERMINAL_STATUSES),
+    ]
+    conditions = {
+        "action": action_conditions,
+        "cc": cc_conditions,
+        "sent": sent_conditions,
+        "done": done_conditions,
+        "tasks": action_conditions,
+    }[view]
+    query = select(CollaborationItem).where(and_(*conditions))
+    if status and view not in {"action", "tasks"}:
+        query = query.where(CollaborationItem.status == status)
+    if object_type:
+        query = query.where(CollaborationItem.object_type == object_type)
+    normalized_keyword = (keyword or "").strip().lower()
+    if normalized_keyword:
         query = query.where(or_(
-            and_(CollaborationItem.recipient_id == user.id, CollaborationItem.mode == "cc"),
-            follows,
+            func.lower(CollaborationItem.title).contains(normalized_keyword),
+            func.lower(CollaborationItem.description).contains(normalized_keyword),
         ))
-    elif view == "done":
-        query = query.where(
-            CollaborationItem.recipient_id == user.id,
-            CollaborationItem.mode == "action",
-            CollaborationItem.status.in_(["completed", "canceled", "transferred"]),
-        )
-    else:
-        query = query.where(CollaborationItem.sender_id == user.id)
     if view == "done":
         query = query.order_by(
             CollaborationItem.completed_at.desc(), CollaborationItem.id.desc()
         )
     else:
-        query = query.order_by(CollaborationItem.created_at.desc())
-    rows = (await db.execute(query.limit(200))).scalars().all()
-    pending = await db.scalar(
-        select(func.count(CollaborationItem.id)).where(
-            CollaborationItem.project_id == project_id,
-            CollaborationItem.recipient_id == user.id,
-            CollaborationItem.mode == "action",
-            CollaborationItem.status == "pending",
-            _existing_object_clause(),
-        )
-    )
-    task_pending = await db.scalar(
+        query = query.order_by(CollaborationItem.created_at.desc(), CollaborationItem.id.desc())
+    page_size = limit
+    fetched = (await db.execute(
+        query.offset(offset).limit(page_size + 1)
+    )).scalars().all()
+    has_more = len(fetched) > page_size
+    rows = fetched[:page_size]
+
+    action_count = int(await db.scalar(
+        select(func.count(CollaborationItem.id)).where(and_(*action_conditions))
+    ) or 0)
+    cc_count = int(await db.scalar(
+        select(func.count(CollaborationItem.id)).where(and_(*cc_conditions))
+    ) or 0)
+    sent_count = int(await db.scalar(
+        select(func.count(CollaborationItem.id)).where(and_(*sent_conditions))
+    ) or 0)
+    done_count = int(await db.scalar(
+        select(func.count(CollaborationItem.id)).where(and_(*done_conditions))
+    ) or 0)
+    task_pending = int(await db.scalar(
         select(func.count(TaskAssignment.id)).where(
             TaskAssignment.project_id == project_id,
             TaskAssignment.assignee_id == user.id,
@@ -241,7 +434,14 @@ async def inbox(
                 TaskStatus.IN_PROGRESS.value,
             ]),
         )
-    )
+    ) or 0)
+    task_total = int(await db.scalar(
+        select(func.count(TaskAssignment.id)).where(
+            TaskAssignment.project_id == project_id,
+            TaskAssignment.assignee_id == user.id,
+        )
+    ) or 0)
+
     task_query = select(TaskAssignment).where(
         TaskAssignment.project_id == project_id,
         TaskAssignment.assignee_id == user.id,
@@ -250,6 +450,15 @@ async def inbox(
     task_senders = {
         row.id: row.real_name
         for row in (await db.execute(select(User).where(User.id.in_([t.assigner_id for t in tasks] or [-1])))).scalars().all()
+    }
+    counts = {
+        "action": action_count + task_pending,
+        "collaboration_action": action_count,
+        "task_pending": task_pending,
+        "cc": cc_count,
+        "sent": sent_count,
+        "done": done_count,
+        "tasks": task_total,
     }
     return {
         "items": [await _serialize(db, row, user.id) for row in rows],
@@ -261,7 +470,10 @@ async def inbox(
              "location": row.location, "section": row.section, "created_at": row.created_at.isoformat()}
             for row in tasks
         ],
-        "pending_count": int(pending or 0) + int(task_pending or 0),
+        "pending_count": counts["action"],
+        "counts": counts,
+        "has_more": has_more,
+        "next_offset": offset + len(rows) if has_more else None,
     }
 
 
@@ -295,6 +507,9 @@ async def create_item(
     project_id = require_project_id(user)
     await _require_project_member(db, user, project_id)
     obj = await _business_object(db, project_id, req.object_type, req.object_id)
+    title = req.title.strip()
+    if not title:
+        raise HTTPException(400, "事项标题不能为空")
     if req.mode not in {"action", "cc"}:
         raise HTTPException(400, "mode 仅支持 action/cc")
     if req.mode == "cc" and req.action_type != "process":
@@ -334,7 +549,8 @@ async def create_item(
     if isinstance(obj, Document) and obj.creator_id != user.id and not user.has_permission("document_approve"):
         raise HTTPException(403, "无权发起该文书的协作")
     action_type = "process"
-    metadata = {"deadline": req.deadline} if req.deadline else {}
+    deadline = _parse_deadline(req.deadline)
+    metadata = {"deadline": deadline} if deadline else {}
     if req.mode == "action" and req.action_type == "signoff":
         if not isinstance(obj, Document) or not req.signoff_slot:
             raise HTTPException(400, "文书签认待办必须关联文书和签认位置")
@@ -377,9 +593,9 @@ async def create_item(
             "mode": req.mode,
             "action_type": req.action_type,
             "signoff_slot": req.signoff_slot,
-            "title": req.title.strip(),
+            "title": title,
             "description": req.description.strip(),
-            "deadline": req.deadline,
+            "deadline": deadline,
         }
         request_fingerprint = hashlib.sha256(
             json.dumps(
@@ -420,7 +636,7 @@ async def create_item(
         object_id=req.object_id,
         action_type=action_type if req.mode == "action" else "track",
         status="pending" if req.mode == "action" else "tracking",
-        title=req.title.strip(),
+        title=title,
         description=req.description.strip() or None,
         metadata_json=metadata,
         source_key=source_key,
@@ -433,6 +649,27 @@ async def create_item(
         db.add(CollaborationEvent(
             item_id=item.id, actor_id=user.id, action="cc_added", detail=str(cc_id)
         ))
+    if item.mode == "action":
+        await _notify(
+            db, [item.recipient_id],
+            title="你有一个待处理事项",
+            body=f"{user.real_name} 请你处理「{item.title}」",
+            event_type="collaboration_assigned", item=item, actor_id=user.id,
+        )
+    else:
+        await _notify(
+            db, [item.recipient_id],
+            title="你有一个跟踪事项",
+            body=f"{user.real_name} 邀请你跟踪「{item.title}」",
+            event_type="collaboration_cc", item=item, actor_id=user.id,
+        )
+    if cc_ids:
+        await _notify(
+            db, cc_ids,
+            title="你收到一个抄送事项",
+            body=f"{user.real_name} 抄送了「{item.title}」",
+            event_type="collaboration_cc", item=item, actor_id=user.id,
+        )
     await db.commit()
     return {"item": await _serialize(db, item, user.id), "idempotent": False}
 
@@ -523,32 +760,38 @@ async def resolve(
 ):
     project_id = require_project_id(user)
     await _require_project_member(db, user, project_id)
-    item = await db.get(CollaborationItem, item_id)
-    if not item or item.project_id != project_id or item.recipient_id != user.id:
+    item = await _locked_item(db, item_id, project_id)
+    if not item or item.recipient_id != user.id:
         raise HTTPException(404, "协作事项不存在或无权处理")
     if item.mode != "action" or item.action_type != "process":
         raise HTTPException(400, "该事项必须通过对应业务动作处理")
+    if item.status == "completed":
+        return {"detail": "事项已完成", "status": "completed", "idempotent": True}
     if item.status != "pending":
         raise HTTPException(409, "该事项已经处理")
+    now = datetime.now()
+    note = req.detail.strip() or "已完成"
     item.status = "completed"
-    item.completed_at = datetime.now()
-    db.add(CollaborationEvent(item_id=item.id, actor_id=user.id, action="resolved", detail=req.detail.strip() or None))
-    from app.models.notification import Notification
-    db.add(Notification(
-        user_id=item.sender_id,
+    item.completed_at = now
+    item.metadata_json = {
+        **(item.metadata_json or {}),
+        "resolution": note,
+        "resolved_by_id": user.id,
+        "resolved_by_name": user.real_name,
+        "resolved_at": now.isoformat(),
+    }
+    db.add(CollaborationEvent(item_id=item.id, actor_id=user.id, action="resolved", detail=note))
+    followers = (await db.execute(select(CollaborationFollower).where(
+        CollaborationFollower.item_id == item.id
+    ))).scalars().all()
+    await _notify(
+        db, [item.sender_id, *[row.user_id for row in followers]],
         title="协作事项已完成",
         body=f"{user.real_name} 已完成「{item.title}」",
-        event_type="collaboration_completed",
-        payload=json.dumps({
-            "item_id": item.id,
-            "object_type": item.object_type,
-            "object_id": item.object_id,
-            "status": item.status,
-        }, ensure_ascii=False),
-        ts=datetime.now().timestamp(),
-    ))
+        event_type="collaboration_completed", item=item, actor_id=user.id,
+    )
     await db.commit()
-    return {"detail": "处理事项已完成", "status": item.status}
+    return {"detail": "处理事项已完成", "status": item.status, "idempotent": False}
 
 
 @router.post("/{item_id}/cancel")
@@ -560,20 +803,79 @@ async def cancel_item(
 ):
     project_id = require_project_id(user)
     await _require_project_member(db, user, project_id)
-    item = await db.get(CollaborationItem, item_id)
-    if not item or item.project_id != project_id or item.sender_id != user.id:
+    item = await _locked_item(db, item_id, project_id)
+    if not item or item.sender_id != user.id:
         raise HTTPException(404, "协作事项不存在或无权撤回")
-    if item.mode != "action" or item.action_type != "process" or not item.source_key.startswith("manual:"):
-        raise HTTPException(400, "仅发起的人工处理事项可以撤回")
-    if item.status != "pending":
+    if not item.source_key.startswith("manual:") or not (
+        item.mode == "cc" or item.action_type == "process"
+    ):
+        raise HTTPException(400, "仅发起的人工事项可以撤回")
+    if item.status == "canceled":
+        return {"detail": "事项已撤回", "status": "canceled", "idempotent": True}
+    if item.status != "pending" and item.status != "tracking":
         raise HTTPException(409, "该事项已处理，不能撤回")
+    now = datetime.now()
+    note = req.detail.strip() or "发起人已撤回事项"
     item.status = "canceled"
-    item.completed_at = datetime.now()
-    db.add(CollaborationEvent(
-        item_id=item.id, actor_id=user.id, action="canceled", detail=req.detail.strip() or None
-    ))
+    item.completed_at = now
+    item.metadata_json = {
+        **(item.metadata_json or {}),
+        "canceled_by_id": user.id,
+        "canceled_by_name": user.real_name,
+        "canceled_at": now.isoformat(),
+        "cancel_reason": note,
+    }
+    db.add(CollaborationEvent(item_id=item.id, actor_id=user.id, action="canceled", detail=note))
+    followers = (await db.execute(select(CollaborationFollower).where(
+        CollaborationFollower.item_id == item.id
+    ))).scalars().all()
+    await _notify(
+        db, [item.recipient_id, *[row.user_id for row in followers]],
+        title="协作事项已撤回",
+        body=f"{user.real_name} 撤回了「{item.title}」",
+        event_type="collaboration_canceled", item=item, actor_id=user.id,
+    )
     await db.commit()
-    return {"detail": "事项已撤回", "status": item.status}
+    return {"detail": "事项已撤回", "status": item.status, "idempotent": False}
+
+
+@router.post("/{item_id}/remind")
+async def remind_item(
+    item_id: int,
+    req: RemindRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    project_id = require_project_id(user)
+    await _require_project_member(db, user, project_id)
+    item = await _locked_item(db, item_id, project_id)
+    if not item or item.sender_id != user.id:
+        raise HTTPException(404, "协作事项不存在或无权催办")
+    if item.mode != "action" or item.status != "pending":
+        raise HTTPException(409, "仅待处理的协作事项可以催办")
+    can_remind, next_at = _remind_state(item)
+    if not can_remind:
+        friendly = next_at[11:16] if next_at else "稍后"
+        raise HTTPException(429, f"催办过于频繁，请在 {friendly} 后再试")
+    now = datetime.now()
+    note = req.note.strip() or "请尽快处理"
+    item.metadata_json = {
+        **(item.metadata_json or {}),
+        "last_reminded_at": now.isoformat(),
+        "last_reminder_note": note,
+    }
+    db.add(CollaborationEvent(item_id=item.id, actor_id=user.id, action="reminded", detail=note))
+    await _notify(
+        db, [item.recipient_id],
+        title="协作事项催办",
+        body=f"{user.real_name} 催办了「{item.title}」：{note}",
+        event_type="collaboration_reminded", item=item, actor_id=user.id,
+    )
+    await db.commit()
+    return {
+        "detail": "已提醒处理人",
+        "next_available_at": (now + timedelta(seconds=REMIND_COOLDOWN_SECONDS)).isoformat(),
+    }
 
 
 @router.post("/{item_id}/transfer")
@@ -585,13 +887,37 @@ async def transfer_item(
 ):
     project_id = require_project_id(user)
     await _require_project_member(db, user, project_id)
-    item = await db.get(CollaborationItem, item_id)
-    if not item or item.project_id != project_id or item.recipient_id != user.id:
+    item = await _locked_item(db, item_id, project_id)
+    if not item or item.recipient_id != user.id:
         raise HTTPException(404, "协作事项不存在或无权转派")
-    if item.mode != "action" or item.action_type != "process" or item.status != "pending":
+    if item.mode != "action" or item.action_type != "process":
         raise HTTPException(409, "仅待处理的人工事项可以转派")
     if req.recipient_id == user.id:
         raise HTTPException(400, "转派对象不能是自己")
+    cc_ids = list(dict.fromkeys(int(value) for value in req.cc_recipient_ids))
+    now = datetime.now()
+    if req.client_request_id:
+        digest = hashlib.sha256(req.client_request_id.strip().encode("utf-8")).hexdigest()
+        replacement_key = f"manual:transfer:{item.id}:request:{digest}"
+    else:
+        replacement_key = f"manual:transfer:{item.id}:{now.timestamp()}"
+    existing = (await db.execute(
+        select(CollaborationItem).where(CollaborationItem.source_key == replacement_key)
+    )).scalar_one_or_none()
+    if existing is not None:
+        if existing.recipient_id != req.recipient_id:
+            raise HTTPException(409, "同一转派请求编号对应了不同接收人")
+        stored_cc_ids = set((existing.metadata_json or {}).get("transfer_cc_ids") or [])
+        if stored_cc_ids != set(cc_ids):
+            raise HTTPException(409, "同一转派请求编号对应了不同抄送人")
+        return {
+            "detail": "事项已转派",
+            "status": existing.status,
+            "new_item_id": existing.id,
+            "idempotent": True,
+        }
+    if item.status != "pending":
+        raise HTTPException(409, "仅待处理的人工事项可以转派")
     member = await db.scalar(select(ProjectMember.id).where(
         ProjectMember.project_id == project_id,
         ProjectMember.user_id == req.recipient_id,
@@ -600,14 +926,38 @@ async def transfer_item(
     recipient = await db.get(User, req.recipient_id)
     if not member or not recipient or not recipient.is_active:
         raise HTTPException(400, "转派对象必须是当前项目的有效成员")
+    if req.recipient_id in cc_ids:
+        raise HTTPException(400, "主处理人不能同时作为抄送人")
+    if user.id in cc_ids:
+        raise HTTPException(400, "不能抄送给自己")
+    if cc_ids:
+        valid_cc = set((await db.execute(
+            select(ProjectMember.user_id)
+            .join(User, User.id == ProjectMember.user_id)
+            .where(
+                ProjectMember.project_id == project_id,
+                ProjectMember.user_id.in_(cc_ids),
+                ProjectMember.left_at.is_(None),
+                User.is_active.is_(True),
+            )
+        )).scalars().all())
+        if valid_cc != set(cc_ids):
+            raise HTTPException(400, "所有抄送人都必须是当前项目的有效成员")
 
-    now = datetime.now()
     item.status = "transferred"
     item.completed_at = now
     db.add(CollaborationEvent(
         item_id=item.id, actor_id=user.id, action="transferred",
         detail=f"转派给 {recipient.real_name}（用户 {recipient.id}）" + (f"：{req.detail.strip()}" if req.detail.strip() else ""),
     ))
+    inherited = {
+        key: value for key, value in (item.metadata_json or {}).items()
+        if key not in {
+            "last_reminded_at", "last_reminder_note", "resolution",
+            "resolved_by_id", "resolved_by_name", "resolved_at",
+            "canceled_by_id", "canceled_by_name", "canceled_at", "cancel_reason",
+        }
+    }
     replacement = CollaborationItem(
         project_id=item.project_id,
         sender_id=user.id,
@@ -619,8 +969,8 @@ async def transfer_item(
         status="pending",
         title=item.title,
         description=item.description,
-        metadata_json={**(item.metadata_json or {}), "transferred_from": item.id},
-        source_key=f"manual:transfer:{item.id}:{now.timestamp()}",
+        metadata_json={**inherited, "transferred_from": item.id, "transfer_cc_ids": cc_ids},
+        source_key=replacement_key,
     )
     db.add(replacement)
     await db.flush()
@@ -628,14 +978,37 @@ async def transfer_item(
         item_id=replacement.id, actor_id=user.id, action="created",
         detail=f"由 {user.real_name} 转派" + (f"：{req.detail.strip()}" if req.detail.strip() else ""),
     ))
+    copied_followers: list[int] = []
+    existing_follower_ids: set[int] = set()
     for follower in (await db.execute(select(CollaborationFollower).where(
         CollaborationFollower.item_id == item.id
     ))).scalars().all():
         if follower.user_id == recipient.id:
             continue
+        existing_follower_ids.add(follower.user_id)
         db.add(CollaborationFollower(item_id=replacement.id, user_id=follower.user_id))
         db.add(CollaborationEvent(
             item_id=replacement.id, actor_id=user.id, action="cc_added", detail=str(follower.user_id)
         ))
+        copied_followers.append(follower.user_id)
+    for cc_id in cc_ids:
+        if cc_id in existing_follower_ids:
+            continue
+        db.add(CollaborationFollower(item_id=replacement.id, user_id=cc_id))
+        db.add(CollaborationEvent(
+            item_id=replacement.id, actor_id=user.id, action="cc_added", detail=str(cc_id)
+        ))
+        copied_followers.append(cc_id)
+    await _notify(
+        db, [recipient.id, *copied_followers],
+        title="你收到一个转派事项",
+        body=f"{user.real_name} 将「{item.title}」转派给你",
+        event_type="collaboration_transferred", item=replacement, actor_id=user.id,
+    )
     await db.commit()
-    return {"detail": "事项已转派", "status": item.status, "new_item_id": replacement.id}
+    return {
+        "detail": "事项已转派",
+        "status": item.status,
+        "new_item_id": replacement.id,
+        "idempotent": False,
+    }

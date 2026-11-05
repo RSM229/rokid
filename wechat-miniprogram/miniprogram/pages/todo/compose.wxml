@@ -123,9 +123,9 @@
             <text class="chevron">›</text>
           </view>
 
-          <view wx:if="{{!isTransfer}}" class="form-row" bindtap="openCcSheet" hover-class="row-pressed">
+          <view class="form-row" bindtap="openCcSheet" hover-class="row-pressed">
             <view class="row-copy">
-              <text class="row-label">{{mode === 'cc' ? '同时抄送给' : '抄送给'}}</text>
+              <text class="row-label">{{isTransfer ? '抄送给' : mode === 'cc' ? '同时抄送给' : '抄送给'}}</text>
               <text class="row-value {{ccMemberIds.length ? '' : 'row-placeholder'}}">{{ccSummary}}</text>
               <text class="row-note">抄送人不承担处理责任</text>
             </view>

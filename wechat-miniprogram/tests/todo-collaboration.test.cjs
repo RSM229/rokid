@@ -45,9 +45,9 @@ test('todo inbox has actionable, tracking, sent, and legacy task views with empt
 })
 
 test('opening a collaboration detail does not complete or remove its pending item', () => {
-  const openDetail = todoPage.match(/async openDetail\([\s\S]*?(?=\n  closeDetail\()/)?.[0] || ''
+  const openDetail = todoPage.match(/async openDetailById\([\s\S]*?(?=\n  async remindItem)/)?.[0] || ''
   assert.match(openDetail, /\/collaboration\/\$\{id\}/)
-  assert.doesNotMatch(openDetail, /resolve|complete|status\s*=/)
+  assert.doesNotMatch(openDetail, /\/resolve|item\.status\s*=/)
   assert.match(todoPage, /onShow\(\)[\s\S]{0,520}this\.load\(\)/)
 })
 
@@ -82,7 +82,7 @@ test('completion gives a result summary and keeps the item in a real completed i
 test('compose sends a stable idempotency key for network retries', () => {
   assert.match(composePage, /clientRequestId/)
   assert.match(composePage, /client_request_id: this\.data\.clientRequestId/)
-  const submit = composePage.match(/async submit\(\)[\s\S]*?(?=\n  \},\n\}\)\))/)?.[0] || ''
+  const submit = composePage.match(/async submit\(\)[\s\S]*/)?.[0] || ''
   assert.match(submit, /client_request_id/)
 })
 
@@ -123,4 +123,47 @@ test('todo badge refreshes after project switch and clears on lookup failure', (
   const loader = agentPage.match(/async loadTodoPendingCount\([\s\S]*?(?=\n  \},)/)?.[0] || ''
   assert.match(pickProject, /loadTodoPendingCount\(\)/)
   assert.match(loader, /catch \{[\s\S]{0,120}todoPendingCount: 0/)
+})
+
+test('inbox tabs show server counts and use real pagination', () => {
+  assert.match(todoPage, /collaboration\.counts/)
+  assert.match(todoPage, /views = this\.data\.views\.map/)
+  assert.match(todoPage, /limit=30&offset=/)
+  assert.match(todoPage, /Boolean\(collaboration\.has_more\)/)
+  assert.match(todoPage, /loadMore\(\)/)
+  assert.match(todoTemplate, /item\.count/)
+  assert.match(todoTemplate, /99\+/)
+  assert.match(todoTemplate, /显示更多/)
+})
+
+test('inbox exposes collaboration status filters without mislabeling CC as action', () => {
+  assert.match(todoPage, /collabStatusOptions/)
+  assert.match(todoPage, /进行中/)
+  assert.match(todoTemplate, /onCollabStatusChange/)
+  assert.match(todoTemplate, /collabStatuses\[collabStatusIndex\]/)
+})
+
+test('todo detail surfaces deadline, resolution, cc read state and reminder controls', () => {
+  assert.match(todoTemplate, /deadline_label/)
+  assert.match(todoTemplate, /deadline_state/)
+  assert.match(todoTemplate, /detail\.resolution/)
+  assert.match(todoTemplate, /cc_recipients/)
+  assert.match(todoTemplate, /未读/)
+  assert.match(todoTemplate, /detail\.can_remind/)
+  assert.match(todoTemplate, /remind_available_text/)
+  assert.match(todoPage, /\/collaboration\/\$\{detail\.id\}\/remind/)
+})
+
+test('todo detail uses server permission projections for actions', () => {
+  assert.match(todoTemplate, /detail\.can_resolve/)
+  assert.match(todoTemplate, /detail\.can_transfer/)
+  assert.match(todoTemplate, /detail\.can_cancel/)
+  assert.match(todoTemplate, /detail\.is_signoff/)
+})
+test('transfer supports optional CC recipients and a stable retry key', () => {
+  const transfer = composePage.match(/if \(this\.data\.isTransfer\)[\s\S]*?(?=\n      \} else \{)/)?.[0] || ''
+  assert.match(transfer, /cc_recipient_ids: this\.data\.ccMemberIds/)
+  assert.match(transfer, /client_request_id: this\.data\.clientRequestId/)
+  assert.match(composeTemplate, /isTransfer \? '抄送给'/)
+  assert.match(composeTemplate, /抄送人不承担处理责任/)
 })

@@ -37,10 +37,46 @@ interface CollaborationItem {
   cc_names_text?: string
   can_cancel?: boolean
   can_transfer?: boolean
+  can_resolve?: boolean
+  can_remind?: boolean
+  remind_available_at?: string
+  viewer_role?: 'sender' | 'recipient' | 'follower' | 'observer'
+  cc_recipients?: Array<{ id: number; real_name: string; read_at?: string }>
+  deadline?: string
+  deadline_state?: 'none' | 'normal' | 'due_today' | 'overdue' | 'closed'
+  deadline_label?: string
+  days_until_due?: number | null
+  source?: string
+  resolution?: string
+  completed_by_name?: string
+  last_reminded_at?: string
+  last_reminded_at_text?: string
+  last_reminder_note?: string
+  remind_available_text?: string
+  is_read?: boolean
   created_at?: string
   created_at_text?: string
   completed_at?: string
   completed_at_text?: string
+}
+
+interface InboxCounts {
+  action: number
+  collaboration_action: number
+  task_pending: number
+  cc: number
+  sent: number
+  done: number
+  tasks: number
+}
+
+interface InboxResponse {
+  items: CollaborationItem[]
+  tasks: TaskItem[]
+  pending_count: number
+  counts: InboxCounts
+  has_more: boolean
+  next_offset: number | null
 }
 
 type CompletionAction = 'approve' | 'reject' | 'process' | 'signoff'
@@ -79,19 +115,51 @@ function displayTime(value?: string): string {
   return text ? text.replace('T', ' ').slice(0, 16) : ''
 }
 
+const COLLAB_STATUS_VALUES: Record<string, string> = {
+  全部: '',
+  待处理: 'pending',
+  进行中: 'pending',
+  跟踪中: 'tracking',
+  已完成: 'completed',
+  已撤回: 'canceled',
+  已转派: 'transferred',
+}
+
+function collabStatusOptions(view: string): string[] {
+  if (view === 'done') return ['全部', '已完成', '已撤回', '已转派']
+  if (view === 'cc') return ['全部', '跟踪中', '进行中', '已完成', '已撤回', '已转派']
+  return ['全部', '待处理', '跟踪中', '已完成', '已撤回', '已转派']
+}
+
 Page(themed({
   data: {
     tasks: [] as TaskItem[],
     items: [] as CollaborationItem[],
     view: 'action',
     views: [
-      { key: 'action', label: '待我处理' },
-      { key: 'cc', label: '抄送跟踪' },
-      { key: 'sent', label: '我发出的' },
-      { key: 'done', label: '处理记录' },
-      { key: 'tasks', label: '派单任务' },
+      { key: 'action', label: '待我处理', count: 0 },
+      { key: 'cc', label: '抄送跟踪', count: 0 },
+      { key: 'sent', label: '我发出的', count: 0 },
+      { key: 'done', label: '处理记录', count: 0 },
+      { key: 'tasks', label: '派单任务', count: 0 },
     ],
+    counts: {
+      action: 0,
+      collaboration_action: 0,
+      task_pending: 0,
+      cc: 0,
+      sent: 0,
+      done: 0,
+      tasks: 0,
+    } as InboxCounts,
     pendingCount: 0,
+    hasMore: false,
+    loadingMore: false,
+    collabStatuses: ['全部', '待处理', '已完成', '已撤回', '已转派'],
+    collabStatusIndex: 0,
+    collabStatusFilter: '',
+    focusItemId: 0,
+    remindingId: 0,
     detail: null as CollaborationDetail | null,
     completion: null as CompletionResult | null,
     pendingCheckId: 0,
@@ -107,8 +175,13 @@ Page(themed({
     if (!requireLogin('pages/todo/index', options)) return
     // 预加载订阅消息模板：用户可能直接进待办页（通知跳转），此时首页的预加载不会执行
     void preloadNoticeTemplates()
-    this.setData({ focusId: Number(options.id || wx.getStorageSync('gdjl_focus_task') || 0) })
+    const focusItemId = Number(options.item_id || 0)
+    this.setData({
+      focusId: Number(options.id || wx.getStorageSync('gdjl_focus_task') || 0),
+      focusItemId,
+    })
     wx.removeStorageSync('gdjl_focus_task')
+    if (focusItemId) void this.openDetailById(focusItemId)
     this.load()
   },
   onShow() {
@@ -127,34 +200,89 @@ Page(themed({
   onPullDownRefresh() {
     this.load().finally(() => wx.stopPullDownRefresh())
   },
-  async load() {
-    this.setData({ loading: true })
+  async load(reset = true) {
+    if (!reset) {
+      if (this.data.loadingMore || !this.data.hasMore) return
+      this.setData({ loadingMore: true })
+    } else {
+      this.setData({ loading: true, items: [], hasMore: false })
+    }
+    const offset = reset ? 0 : this.data.items.length
+    const apiView = this.data.view === 'tasks' ? 'action' : this.data.view
+    const statusQuery = this.data.collabStatusFilter
+      ? `&status=${encodeURIComponent(this.data.collabStatusFilter)}`
+      : ''
+    const taskQuery = this.data.view === 'tasks'
+      ? (this.data.statusFilter ? `?status=${encodeURIComponent(this.data.statusFilter)}` : '')
+      : this.data.view === 'action' ? '?status=待处理' : ''
+    const loadsTasks = this.data.view === 'action' || this.data.view === 'tasks'
     try {
       const [collaboration, taskResult] = await Promise.all([
-        request<{ items: CollaborationItem[]; tasks: TaskItem[]; pending_count: number }>(`/collaboration/inbox?view=${this.data.view === 'tasks' ? 'action' : this.data.view}`),
-        request<{ tasks: TaskItem[] }>(`/task/my-tasks${this.data.view === 'action' ? '?status=待处理' : this.data.statusFilter ? `?status=${encodeURIComponent(this.data.statusFilter)}` : ''}`),
+        request<InboxResponse>(`/collaboration/inbox?view=${apiView}&limit=30&offset=${offset}${statusQuery}`),
+        loadsTasks
+          ? request<{ tasks: TaskItem[] }>(`/task/my-tasks${taskQuery}`)
+          : Promise.resolve({ tasks: [] as TaskItem[] }),
       ])
       const tasks = [...(taskResult.tasks || [])]
       if (this.data.focusId) {
         tasks.sort((a, b) => Number(b.id === this.data.focusId) - Number(a.id === this.data.focusId))
       }
-      const items = (collaboration.items || []).map((item) => ({
+      const pageItems = (collaboration.items || []).map((item) => ({
         ...item,
         created_at_text: displayTime(item.created_at),
         completed_at_text: displayTime(item.completed_at),
+        last_reminded_at_text: displayTime(item.last_reminded_at),
       }))
-      this.setData({ tasks, items, pendingCount: collaboration.pending_count || 0 })
+      const items = reset ? pageItems : this.data.items.concat(pageItems)
+      const counts = collaboration.counts || {
+        ...this.data.counts,
+        action: collaboration.pending_count || 0,
+        collaboration_action: collaboration.pending_count || 0,
+      }
+      const views = this.data.views.map((tab) => ({
+        ...tab,
+        count: counts[tab.key as keyof InboxCounts] || 0,
+      }))
+      this.setData({
+        tasks,
+        items,
+        counts,
+        views,
+        pendingCount: counts.action || 0,
+        hasMore: Boolean(collaboration.has_more),
+        loading: false,
+        loadingMore: false,
+      })
     } catch (error) {
-      wx.showToast({ title: (error as Error).message, icon: 'none' })
-    } finally {
-      this.setData({ loading: false })
+      this.setData({ loading: false, loadingMore: false })
+      wx.showToast({ title: (error as Error).message || '待办加载失败', icon: 'none' })
     }
+  },
+  loadMore() {
+    void this.load(false)
   },
   selectView(event: WechatMiniprogram.TouchEvent) {
     const view = String(event.currentTarget.dataset.view || 'action')
     if (view === this.data.view) return
-    this.setData({ view })
+    this.setData({
+      view,
+      items: [],
+      hasMore: false,
+      collabStatuses: collabStatusOptions(view),
+      collabStatusIndex: 0,
+      collabStatusFilter: '',
+    })
     this.load()
+  },
+  onCollabStatusChange(event: WechatMiniprogram.PickerChange) {
+    const index = Number(event.detail.value)
+    const label = this.data.collabStatuses[index] || '全部'
+    this.setData({
+      collabStatusIndex: index,
+      collabStatusFilter: COLLAB_STATUS_VALUES[label] || '',
+      items: [],
+      hasMore: false,
+    }, () => this.load())
   },
   async checkCompletedAfterBusiness(id: number) {
     try {
@@ -233,17 +361,41 @@ Page(themed({
     wx.navigateTo({ url })
   },
 
-  async openDetail(event: WechatMiniprogram.TouchEvent) {
-    const id = Number(event.currentTarget.dataset.id)
+  openDetail(event: WechatMiniprogram.TouchEvent) {
+    void this.openDetailById(Number(event.currentTarget.dataset.id))
+  },
+  async openDetailById(id: number) {
+    if (!id) return
     try {
       const detail = await request<NonNullable<typeof this.data.detail>>(`/collaboration/${id}`)
       detail.history = (detail.history || []).map((row) => ({
         ...row,
         created_at_text: displayTime(row.created_at),
       }))
+      detail.cc_recipients = detail.cc_recipients || []
+      detail.completed_at_text = displayTime(detail.completed_at)
+      detail.last_reminded_at_text = displayTime(detail.last_reminded_at)
+      detail.remind_available_text = displayTime(detail.remind_available_at).slice(11, 16)
       this.setData({ detail })
     } catch (error) {
       wx.showToast({ title: (error as Error).message, icon: 'none' })
+    }
+  },
+  async remindItem() {
+    const detail = this.data.detail
+    if (!detail || this.data.remindingId) return
+    this.setData({ remindingId: detail.id })
+    try {
+      const result = await request<{ detail: string; next_available_at?: string }>(
+        `/collaboration/${detail.id}/remind`,
+        { method: 'POST', data: { note: '请尽快处理' } },
+      )
+      wx.showToast({ title: result.detail || '已提醒', icon: 'success' })
+      await this.openDetailById(detail.id)
+    } catch (error) {
+      wx.showModal({ title: '催办失败', content: (error as Error).message, showCancel: false })
+    } finally {
+      this.setData({ remindingId: 0 })
     }
   },
   closeDetail() { this.setData({ detail: null }) },

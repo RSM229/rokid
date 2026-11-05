@@ -142,9 +142,7 @@ Page(themed({
       wx.navigateBack()
       return
     }
-    const clientRequestId = transferId
-      ? ''
-      : `todo-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+    const clientRequestId = `todo-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
     this.setData({
       objectType,
       objectId,
@@ -441,7 +439,9 @@ Page(themed({
           method: 'POST',
           data: {
             recipient_id: member!.id,
+            cc_recipient_ids: this.data.ccMemberIds.filter((id) => id !== member!.id),
             detail: this.data.description.trim(),
+            client_request_id: this.data.clientRequestId,
           },
         })
       } else {
