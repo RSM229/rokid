@@ -1354,9 +1354,17 @@ async def _agent_chat_impl(
                 result.get("need_more"), message=message,
                 fact_args=turn_fact_args, conversation_id=conversation_id,
             )
-            form = _agent_form(tool, args, result, message, str(getattr(project, "name", "") or ""))
-            result["form"] = form
-            result["input_components"] = _agent_input_components(form)
+            if result.get("ask_block"):
+                # 「一起询问」：验收要点以对话块（ask_block）一次性呈现，用户一并
+                # 文字回复即可，**不叠加表单卡片**（2026-11-05 用户真机反馈
+                # 「怎么还是填表格」——路由层无条件挂 _agent_form，前端把表格
+                # 卡片渲染在询问气泡下方，交互观感又拉回逐栏填写）。
+                result["form"] = None
+                result["input_components"] = []
+            else:
+                form = _agent_form(tool, args, result, message, str(getattr(project, "name", "") or ""))
+                result["form"] = form
+                result["input_components"] = _agent_input_components(form)
             result["input_channels"] = ["text", "voice", "image", "file"]
         elif result.get("ok"):
             await agent_tools.clear_pending(db, user.id, tool, conversation_id)
