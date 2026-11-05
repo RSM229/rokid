@@ -127,6 +127,9 @@ class ToolContext:
     project_id: int | None = None
     project: Project | None = None
     message: str = ""
+    # 随消息发送的素材文本（图片交给视觉模型/水印 OCR 后的识别结果）。
+    # 含水印原文，验收子类型等关键字段可从中按词命中，不必再追问用户。
+    material: str = ""
 
 
 Handler = Callable[[ToolContext, dict], Awaitable[dict]]
@@ -1096,8 +1099,11 @@ async def _create_work_record(ctx: ToolContext, args: dict) -> dict:
         # 只预填写死枚举里明确出现的词；推断不出仍走逐栏追问。
         acc_type_field = _acceptance_type_field()
         if acc_type_field and not _field_value(args, acc_type_field):
+            # 素材（照片水印/公示牌/OCR 文本）往往已写明验收子类型（如「检验批质量验收记录」
+            # 「隐蔽工程验收记录」），把它一并纳入命中，避免用户还要在 chips 里再点一次。
             acc_src = " ".join(x for x in (
-                str(ctx.message or ""), content, section, str(args.get("location") or "")
+                str(ctx.message or ""), content, section,
+                str(args.get("location") or ""), str(ctx.material or "")
             ) if str(x or "").strip())
             inferred = _infer_acceptance_type(acc_src)
             if inferred:
