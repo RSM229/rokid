@@ -289,7 +289,7 @@
               <view class="action-btn" wx:for="{{item.actions}}" wx:for-item="act" wx:for-index="ai" wx:key="ai" data-command="{{act.command}}" bindtap="handleActionTap">{{act.label}}</view>
             </view>
           </view>
-          <view wx:if="{{item.agentForm}}" class="agent-task-form {{item.agentForm.kind === 'attachments_done' ? 'completed' : ''}}">
+          <view wx:if="{{item.agentForm && (item.agentForm.kind === 'attachments_done' || !(item.chips && item.chips.length))}}" class="agent-task-form {{item.agentForm.kind === 'attachments_done' ? 'completed' : ''}}">
             <view class="agent-task-head">
               <view>
                 <text class="agent-task-title">{{item.agentForm.title}}</text>
