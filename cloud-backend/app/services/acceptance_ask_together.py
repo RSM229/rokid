@@ -9,8 +9,10 @@
   ③ assemble_ask_block 一起询问 → ④ 用户整体回复 →
   ⑤ aggregate_reply 按全部回复逐条归集 → ⑥ generate_conclusion 生成结论。
 
-注意：本文件为「骨架」，① 信息确认 confirm_info 预留接口（接 agent_tools._infer_acceptance_type
-或 LLM 识别），其余为可直接调用的实现。未接入数据库/路由，请勿在未确认集成点前直接 import 到生产链路。
+接入状态（2026-11-05）：已由 agent_tools._create_work_record 的验收分支接入
+（find_entry / assemble_ask_block / aggregate_reply / generate_conclusion）；routers/agent.py
+在 result 带 ask_block 时强制展示完整询问块。confirm_info 仍是预留占位
+（抛 NotImplementedError），生产链路不调用它。
 """
 from __future__ import annotations
 
