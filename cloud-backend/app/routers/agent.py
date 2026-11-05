@@ -1329,7 +1329,10 @@ async def _agent_chat_impl(
             # 模板 reply 只在 answer 缺失/过于机械时才兜底。两者绝不叠加，避免机械感。
             _model_answer = str((parsed or {}).get("answer") or "").strip()
             _tool_reply = str(result.get("reply") or "").strip()
-            if _model_answer and not _is_mechanical_reply(_model_answer):
+            if result.get("ask_block"):
+                # 「一起询问」：全部验收询问项必须完整呈现，不能被模型自然接话覆盖。
+                result["reply"] = _tool_reply
+            elif _model_answer and not _is_mechanical_reply(_model_answer):
                 result["reply"] = _model_answer
             elif _tool_reply:
                 result["reply"] = _tool_reply

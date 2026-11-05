@@ -650,6 +650,91 @@ def _infer_acceptance_type(text: str) -> str:
     return ""
 
 
+# ---------------------------------------------------------------------------
+# 验收「一起询问」模式辅助（2026-11-05）
+# 数据源：app.services.acceptance_ask_together（基于 acceptance_checklists.ITEMS 建索引）。
+# 流程：系统按 分部工程+关键工序 命中要点库 → 一次性带出全部「询问式」→ 用户一并回复
+#       → 系统据全部回复逐条归集 → 生成「验收结论」。
+# ---------------------------------------------------------------------------
+def _aat_find_entry(division: str, keyproc: str):
+    """按 分部工程 + 关键工序_关键部位 精确/模糊匹配条目（房建/市政通用）。"""
+    from app.services import acceptance_ask_together as _aat
+    return _aat.find_entry(division, keyproc)
+
+
+async def _aat_aggregate_reply(items, user_reply):
+    from app.services import acceptance_ask_together as _aat
+    return await _aat.aggregate_reply(items, user_reply)
+
+
+def _aat_generate_conclusion(aggregated):
+    from app.services import acceptance_ask_together as _aat
+    return _aat.generate_conclusion(aggregated)
+
+
+def _set_field_persist(orig_args: dict, args: dict, field: dict, value: str) -> dict:
+    """写字段值到本地 args，并镜像到 orig_args（路由器将暂存的对象），保证跨轮不丢。"""
+    args = _set_field_value(args, field, value)
+    arg = field.get("arg")
+    if arg:
+        orig_args[arg] = value
+    else:
+        extra = dict(orig_args.get(_EXTRA_ARG) or {})
+        extra[_field_slot(field)] = value
+        orig_args[_EXTRA_ARG] = extra
+    return args
+
+
+def _looks_like_reply(text: str) -> bool:
+    """在「已带出询问块、等待整体回复」状态下，判断用户这句是否是对全部询问项的回复。
+
+    处于待回复态时默认当作回复；仅当用户明显另下了新指令（记一条/新建…）才返回 False。
+    """
+    if not text:
+        return False
+    cues = ("符合", "不符合", "不适用", "合格", "不合格", "无异常", "无问题",
+            "没问题", "已", "都", "全部", "均", "通过", "正常", "一致", "满足",
+            "达到", "ok", "OK", "可以", "验收合格")
+    if any(c in text for c in cues):
+        return True
+    if re.search(r"[①②③④⑤⑥⑦⑧⑨⑩]", text):
+        return True
+    request_cues = ("记一条", "新建", "创建", "帮我记", "我要记", "记录一条", "再记一条")
+    if any(r in text for r in request_cues):
+        return False
+    return True
+
+
+def _acceptance_type_from_entry(entry: dict) -> str:
+    """由命中条目的 分部/工序 名启发式推断验收类型（内定，仍可被用户改）。
+
+    仅映射到 acceptance_record 表单受控枚举（_ACCEPTANCE_TYPES）内的值；映射不到则返回空。
+    """
+    s = f"{entry.get('分部工程', '')} {entry.get('关键工序_关键部位', '')}"
+    if any(k in s for k in ("进场", "材料", "设备", "构配件")):
+        return "进场验收"
+    if "隐蔽" in s:
+        return "隐蔽工程"
+    # 质量验收/危大验收不在表单受控枚举内，不强行内定，留待用户点选
+    return ""
+
+
+def _build_acceptance_content(entry: dict, aggregated: list[dict]) -> str:
+    """把逐条归集结果汇成「验收内容」文本：要点原文 + 各条结论。"""
+    originals = entry.get("验收要点_原文") or []
+    n = len(aggregated)
+    head = (f"【{entry.get('分部工程', '')} — {entry.get('关键工序_关键部位', '')}】"
+            f"验收内容（共 {n} 项，系统按询问项逐项归集）：")
+    lines = [head]
+    for a in aggregated:
+        idx = a.get("item_index")
+        orig = (originals[idx - 1]
+                if isinstance(idx, int) and 1 <= idx <= len(originals) else f"第{idx}项")
+        note = (f"（{a.get('note') or ''}）" if a.get("note") else "")
+        lines.append(f"{idx}、{orig} —— {a.get('conclusion')}{note}")
+    return "\n".join(lines)
+
+
 def _acceptance_content_field() -> dict | None:
     """acceptance_record 里 canonical=acceptance_content 的字段定义（缓存）。"""
     global _ACCEPT_FORM_CACHE
@@ -941,6 +1026,10 @@ def refill_missing_from_message(args: dict, missing_labels: list | None,
     text = (message or "").strip()
     if not text or _wants_skip(text) or any(h in text for h in ("？", "?")):
         return None
+    # 「一起询问」态：本句是对全部验收询问项的整体回复，交由 aggregate_reply 逐条归集，
+    # 绝不能当某个缺失字段的值兜底填进去（否则会污染验收内容栏并绕过归集）。
+    if args.get("_acceptance_ask_state"):
+        return None
     record_type = _norm_record_type(str(args.get("record_type") or "")) or ""
     form = record_field_spec.form_for_record_type(
         record_type, _is_weida(record_type, args, message))
@@ -967,6 +1056,10 @@ async def _create_work_record(ctx: ToolContext, args: dict) -> dict:
     content = str(args.get("work_content") or args.get("content") or args.get("description") or "").strip()
     section = str(args.get("section") or "").strip()
     location = str(args.get("location") or "").strip()
+    # 跨轮持久化锚点：路由器最终会暂存它自己持有的 args 对象（即本参数），
+    # 本函数内对 apply_canonical_form_fields 之后的本地副本做的字段写入不会自动回到该对象，
+    # 故凡需跨轮保留的状态（验收内容/结论/类型/询问态）都通过 _set_field_persist 显式镜像回 orig_args。
+    orig_args = args
     # 🔧 槽位键归一：模型可能用表字段 key（10_14）写 extra_fields，服务端读 canonical（pm_onsite）。
     # 不改会误判「仍缺字段」→ 死循环追问（2026-10-16 真机：危大巡视「到岗」反复被问）。
     raw_type = _norm_record_type(str(args.get("record_type") or "")) or ""
@@ -1104,25 +1197,86 @@ async def _create_work_record(ctx: ToolContext, args: dict) -> dict:
     if record_type == "旁站" and not str(args.get("station_content") or "").strip() and content:
         args["station_content"] = content
 
-    # 验收类型：验收要点按「房建举牌验收内容」表自动带出（A，2026-10-16）
-    # 用户给了部位/工序（如「钢筋笼」「地基基底」）→ strong_match 唯一命中 → 要点全文直接填入
+    # 验收分支 ·「一起询问」模式（2026-11-05）：系统按 分部工程+关键工序 命中要点库 →
+    # 一次性带出全部「询问式」→ 用户一并回复 → 系统据全部回复逐条归集 → 生成「验收结论」。
+    matched_entry = None
     if record_type == "验收":
         acc_field = _acceptance_content_field()
-        if acc_field and not _field_value(args, acc_field):
+        acc_value = _field_value(args, acc_field) if acc_field else ""
+        ask_state = args.get("_acceptance_ask_state")
+
+        # --- 已带出询问块、等待用户整体回复：按全部回复逐条归集 ---
+        # 不看 acc_value：第二轮模型/refill 可能把整句回复误填进验收内容栏，
+        # 只要询问态仍在，就以本轮 ctx.message 为「整体回复」归集并覆盖该栏。
+        if ask_state and isinstance(ask_state, dict):
+            reply_text = (ctx.message or "").strip()
+            if _wants_skip(reply_text) or any(h in reply_text for h in ("？", "?")):
+                # 用户明确「跳过，直接创建」或仍在提问 → 消费询问态，
+                # 不把这句当整体回复去归集，也不再重复呈现询问块打扰用户。
+                orig_args.pop("_acceptance_ask_state", None)
+                args.pop("_acceptance_ask_state", None)
+            else:
+                entry = _aat_find_entry(str(ask_state.get("div") or ""),
+                                        str(ask_state.get("item") or ""))
+                if entry and entry.get("验收要点_询问式"):
+                    aggregated = None
+                    if _looks_like_reply(reply_text):
+                        try:
+                            aggregated = await _aat_aggregate_reply(
+                                entry["验收要点_询问式"], reply_text)
+                        except Exception:  # noqa: BLE001
+                            aggregated = None
+                    if aggregated:
+                        built = _build_acceptance_content(entry, aggregated)
+                        args = _set_field_persist(orig_args, args, acc_field, built)
+                        concl_field = next(
+                            (f for f in record_field_spec.ask_fields("acceptance_record")
+                             if f.get("canonical") == "supervision_conclusion"), None)
+                        if concl_field:
+                            # 无条件覆盖：归集结论依据用户「全部回复」算出，
+                            # 权威于首轮可能预填的「合格」兜底值，否则不合格会被静默盖成合格。
+                            args = _set_field_persist(
+                                orig_args, args, concl_field,
+                                _aat_generate_conclusion(aggregated))
+                        orig_args.pop("_acceptance_ask_state", None)
+                        args.pop("_acceptance_ask_state", None)
+                    else:
+                        matched_entry = entry  # 归集失败/不像回复 → 重新呈现询问块
+
+        # --- 首次 / 非回复态：识别工序、带出询问块（不直接填 raw points） ---
+        if (not acc_value) and not (ask_state and isinstance(ask_state, dict)):
             acc_query = _acceptance_query(section, content,
                                           str(args.get("location") or ""), ctx.message or "")
-            prefer = _project_kind_from(ctx.project)   # 项目名特征 → 房建/市政，消歧义词
+            prefer = _project_kind_from(ctx.project)
             strong = acceptance_checklists.strong_match(acc_query, prefer_kind=prefer) if acc_query else None
             if strong:
-                args = _set_field_value(args, acc_field, str(strong["points"]))
+                entry = _aat_find_entry(str(strong.get("div") or ""),
+                                        str(strong.get("item") or ""))
+                if entry and entry.get("验收要点_询问式"):
+                    # 命中且有结构化询问式 → 首次态一律先「一起带出全部询问项」等用户一并回复，
+                    # 不把用户下指令的首句误当整体回复（避免行为不一致、白调一次 LLM）。
+                    _st = {"div": str(strong.get("div") or ""),
+                           "item": str(strong.get("item") or "")}
+                    args["_acceptance_ask_state"] = _st
+                    orig_args["_acceptance_ask_state"] = _st
+                    matched_entry = entry
+                else:
+                    args = _set_field_value(args, acc_field, str(strong["points"]))
             else:
-                # 也支持用户本轮直接说要点名（如「地基基底验收」）→ 同样唯一命中即填
                 direct = acceptance_checklists.strong_match(ctx.message or "", prefer_kind=prefer)
                 if direct:
-                    args = _set_field_value(args, acc_field, str(direct["points"]))
-        # 验收类型上下文预填：素材/原话里已出现明确类型词（如「隐蔽工程验收公示牌」
-        # 「检验批质量验收」）时直接填入，不再重复追问（2026-11-04 用户反馈「一点也不智能体」）。
-        # 只预填写死枚举里明确出现的词；推断不出仍走逐栏追问。
+                    entry = _aat_find_entry(str(direct.get("div") or ""),
+                                            str(direct.get("item") or ""))
+                    if entry and entry.get("验收要点_询问式"):
+                        _st = {"div": str(direct.get("div") or ""),
+                               "item": str(direct.get("item") or "")}
+                        args["_acceptance_ask_state"] = _st
+                        orig_args["_acceptance_ask_state"] = _st
+                        matched_entry = entry
+                    else:
+                        args = _set_field_value(args, acc_field, str(direct["points"]))
+
+        # 验收类型上下文预填（保留原行为；并持久化到 orig_args 以便跨轮，避免二轮被整句兜底污染）
         acc_type_field = _acceptance_type_field()
         if acc_type_field and not _field_value(args, acc_type_field):
             # 素材（照片水印/公示牌/OCR 文本）往往已写明验收子类型（如「检验批质量验收记录」
@@ -1132,21 +1286,24 @@ async def _create_work_record(ctx: ToolContext, args: dict) -> dict:
                 str(args.get("location") or ""), str(ctx.material or "")
             ) if str(x or "").strip())
             inferred = _infer_acceptance_type(acc_src)
+            if not inferred and matched_entry:
+                inferred = _acceptance_type_from_entry(matched_entry)
             if inferred:
-                args = _set_field_value(args, acc_type_field, inferred)
+                args = _set_field_persist(orig_args, args, acc_type_field, inferred)
         # 验收结论兜底回填：模型把「合格/不合格」收进 acceptance_result，
         # 而验收表对应栏是「监理验收结论」（2026-11-04 用户反馈「答了怎么还问」——
         # 验收表没有 acceptance_result 栏，不映射就会漏掉用户已经给的结论）。
+        # 「一起询问」态下不预填：结论必须依据用户对全部询问项的回复归集生成。
         acc_concl_field = next(
             (f for f in record_field_spec.ask_fields("acceptance_record")
              if f.get("canonical") == "supervision_conclusion"), None)
-        if acc_concl_field and not _field_value(args, acc_concl_field):
+        if acc_concl_field and not matched_entry and not _field_value(args, acc_concl_field):
             concl = str(args.get("acceptance_result") or "").strip()
             if not concl:
                 concl = next(
                     (h for h in _NO_ISSUE_HINTS if h in (ctx.message or "")), "") or ""
             if concl:
-                args = _set_field_value(args, acc_concl_field, concl)
+                args = _set_field_persist(orig_args, args, acc_concl_field, concl)
 
     # 字段表驱动的追问：表上「由系统生成=否」且用户还没说的字段，**一次性**把可枚举项
     # 以候选 chips 呈现、自由文本项列入待补清单，用户一轮点完/改完即可确认生成。
@@ -1166,7 +1323,7 @@ async def _create_work_record(ctx: ToolContext, args: dict) -> dict:
             (f for f in missing
              if record_type == "验收" and f.get("canonical") == "acceptance_content"), None)
         acc_options: dict[str, list[str]] = {}
-        if acc_content_field:
+        if acc_content_field and not matched_entry:
             acc_query = _acceptance_query(section, content,
                                           str(args.get("location") or ""), ctx.message or "")
             prefer = _project_kind_from(ctx.project)
@@ -1204,7 +1361,17 @@ async def _create_work_record(ctx: ToolContext, args: dict) -> dict:
                      + " 直接说或填即可。不方便也能先跳过。")
         else:
             reply = "还差几项待补全，上方已给出可选项，点选或回复均可；不方便也能先跳过。"
-        return _need_more(labels, reply, options=options)
+        result = _need_more(labels, reply, options=options)
+        if matched_entry:
+            # 「一起询问」：把该工序全部询问项一次性带出（不逐项追问），
+            # 用户就全部要点一并回复；系统再据全部回复逐条归集生成结论。
+            from app.services import acceptance_ask_together as _aat
+            block = _aat.assemble_ask_block(matched_entry)
+            result["reply"] = block + "\n\n" + reply
+            result["ask_block"] = block
+            result["ask_mode"] = "together"
+            # 询问态随草稿跨轮保留（已镜像进 orig_args），第二轮据此触发归集
+        return result
 
     # 旧聊天入口也必须经过同一份版本化合同。这里不让可选栏阻断旧有
     # “跳过”体验，但必填、冲突、格式错误与新整理计划保持完全相同的门槛。
@@ -1299,9 +1466,10 @@ async def _create_work_record(ctx: ToolContext, args: dict) -> dict:
             if resolved:
                 args = _set_field_value(args, acc_field, str(resolved["points"]))
 
-    # 隐藏键清洗：候选/编号解析用，不落库、不进 content_json
+    # 隐藏键清洗：候选/编号解析、一起询问态用，不落库、不进 content_json
     args.pop(_ACCEPT_CANDS_KEY, None)
     args.pop(_ACCEPT_CANDS_ORDER, None)
+    args.pop("_acceptance_ask_state", None)
 
     record = WorkRecord(
         record_type=record_type,
