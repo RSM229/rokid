@@ -11,6 +11,87 @@ function beijingNow(): Date {
   return new Date(utc + 8 * 3600000)
 }
 
+/** ISO 时间 → 「11月2日 15:32」，不再把 2026-11-02T15:32:10 原样丢给用户 */
+function humanTime(iso?: string): string {
+  if (!iso) return ''
+  const m = /^(\d{4})-(\d{2})-(\d{2})[T\s](\d{2}):(\d{2})/.exec(iso)
+  if (!m) return iso.replace('T', ' ').slice(0, 16)
+  return `${Number(m[2])}月${Number(m[3])}日 ${m[4]}:${m[5]}`
+}
+
+/** 洗掉模型输出里的 Markdown 残留和「场景与活动：」这类机器标签，只留第一句人话 */
+function cleanSummary(raw?: string): string {
+  if (!raw) return ''
+  let text = String(raw)
+    .replace(/\r/g, '')
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .replace(/<[^>]+>/g, '')
+    // 标题行/分隔线/列表符号是结构标记，不是现场描述，不能混进摘要
+    .replace(/^\s*#{1,6}\s*[^\n]*$/gm, '')
+    .replace(/^\s*[-*_]{3,}\s*$/gm, '')
+    .replace(/^\s*[-•·]+\s*/gm, '')
+    .replace(/[*_`~>]+/g, '')
+    .replace(/(场景与活动|旁站情况|巡视情况|检查情况|现场情况|施工内容|工作内容|主要活动|活动描述|情况说明|描述|备注|内容|情况)\s*[:：]\s*/g, '')
+    .replace(/\n+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  // 只留第一句，避免把整段模型输出硬截在半句话
+  const cut = text.search(/[。！？!?；;]/)
+  if (cut >= 0 && cut < 90) text = text.slice(0, cut + 1)
+  text = text.replace(/[…]+$/, '').trim()
+  if (text.length > 68) text = text.slice(0, 68).replace(/[，,、\s]+$/, '') + '…'
+  return text
+}
+
+/**
+ * 结构化记录卡：把列表原始记录整理成「时间 / 部位+事项 / 项目·位置 / 清洗摘要 / 待补充」。
+ * 纯前端派生，不改后端接口；内部编号 #78、ISO 时间、Markdown 正文不再直接露出。
+ */
+function decorateRecord(r: WorkRecordItem): WorkRecordItem {
+  const part = (r.section || r.location || '').trim()
+  const place = (r.location || '').trim()
+  const project = (r.project_name || r.system_project_name || '').trim()
+  const summary = cleanSummary(r.work_content)
+  const partLabel = part || '未填写部位'
+
+  // 事项：项目不一致是明确待办，优先当标题后半段；否则取清洗后首句的第一个短语
+  let subject = r.project_mismatch ? '水印项目与系统项目不一致' : ''
+  if (!subject) subject = summary ? summary.split(/[，,。！？]/)[0].slice(0, 18) : `${r.record_type || '工作'}记录`
+  const titleText = subject.startsWith(partLabel) ? subject : `${partLabel} · ${subject}`
+
+  // 位置若是项目名的截断重复（如「沙盛四路等4条道路工」），不再重复展示
+  const looksDup = !!place && !!project && place.slice(0, 5) === project.slice(0, 5)
+  const metaText = [project, !looksDup && place !== part ? place : ''].filter(Boolean).join(' / ')
+  const summaryText = r.project_mismatch
+    ? `现场核对发现${partLabel}水印项目与系统项目不一致，已记录待复核。`
+    : (summary || `${r.record_type || '工作'}记录已建立，可继续补充现场情况。`)
+
+  const missing: string[] = []
+  if (!r.section) missing.push('施工部位')
+  if (!r.location) missing.push('具体位置')
+  if (!r.work_content) missing.push('工作内容')
+  if (r.project_mismatch) missing.push('项目归属')
+
+  const status = r.status || ''
+  const statusTone = status.includes('草稿') ? 'draft'
+    : /驳回|退回|不通过/.test(status) ? 'warn'
+      : /待|审批|审核/.test(status) ? 'pending'
+        : 'done'
+
+  return {
+    ...r,
+    displayTime: humanTime(r.created_at),
+    titleText,
+    metaText,
+    summaryText,
+    missingCount: missing.length,
+    missingHint: missing.join('、'),
+    statusTone,
+    reportDate: (r.created_at || '').slice(0, 10),
+  }
+}
+
 interface HazardItem {
   id: number
   status: string
@@ -39,6 +120,15 @@ interface WorkRecordItem {
   work_content?: string
   created_at?: string
   checked?: boolean
+  // 结构化卡片展示字段（前端由原始记录派生，不落库、不改后端接口）
+  displayTime?: string
+  titleText?: string
+  metaText?: string
+  summaryText?: string
+  missingCount?: number
+  missingHint?: string
+  statusTone?: string
+  reportDate?: string
 }
 
 interface RecordFormOption {
@@ -281,9 +371,9 @@ Page(themed({
           image_url: absoluteMediaUrl(item.image_path || ''),
           evidence_text: (item.evidence || []).join('；'),
         }))
-        this.setData({ records: result.records, hazards: hazardItems })
+        this.setData({ records: (result.records || []).map(decorateRecord), hazards: hazardItems })
       } else {
-        this.setData({ records: result.records })
+        this.setData({ records: (result.records || []).map(decorateRecord) })
       }
     } catch (error) {
       wx.showToast({ title: (error as Error).message, icon: 'none' })
@@ -383,6 +473,27 @@ Page(themed({
     }
     const { type, id } = event.currentTarget.dataset
     this.openDetail({ currentTarget: { dataset: { type, id } } } as any)
+  },
+
+  /** 卡片「补填 N 项」：打开该记录编辑弹窗，加载完再提示缺哪几栏（避免被 loading 盖掉） */
+  onCardFill(event: WechatMiniprogram.TouchEvent) {
+    const { id, missing, count } = event.currentTarget.dataset
+    const recordId = Number(id)
+    if (!recordId) return
+    void this.openEditModal(recordId, 'record').then(() => {
+      const brief = String(missing || '部分字段').split('、').slice(0, 2).join('、')
+      wx.showToast({ title: `待补 ${count || ''} 项：${brief}`, icon: 'none', duration: 2200 })
+    })
+  },
+
+  /** 卡片「生成监理日志 →」：按该记录的业务日期预置日志生成弹窗 */
+  onCardDailyLog(event: WechatMiniprogram.TouchEvent) {
+    const date = String(event.currentTarget.dataset.date || '')
+    this.setData({
+      showReportModal: true,
+      reportType: 'day' as 'day' | 'week' | 'month',
+      reportDate: date || this.data.reportDate,
+    })
   },
 
   // ========== 批量操作 ==========

@@ -37,14 +37,25 @@
         <checkbox value="{{item.id}}" checked="{{item.checked}}" data-type="record" />
       </view>
       <view class="card-content" bindtap="onCardTap" data-type="record" data-id="{{item.id}}">
-        <view class="record-head">
-          <view class="type">{{item.record_type}}记录 #{{item.id}}</view>
-          <view class="status">{{item.status}}</view>
+        <!-- 时间 + 类型/状态：状态要有色彩区分，不再和标题挤一行 -->
+        <view class="rec-top">
+          <text class="rec-time">{{item.displayTime}}</text>
+          <view class="rec-chips">
+            <text class="rec-chip rec-type">{{item.record_type}}</text>
+            <text class="rec-chip rec-status {{item.statusTone}}">{{item.status}}</text>
+          </view>
         </view>
-        <view wx:if="{{item.project_name}}" class="muted">{{item.project_name}}<text wx:if="{{item.project_mismatch}}"> · 水印项目与系统项目不一致</text></view>
-        <view class="muted">{{item.section || '未填写区域'}} · {{item.location || '未填写位置'}}</view>
-        <view wx:if="{{item.work_content}}" class="record-desc">{{item.work_content}}</view>
-        <view class="muted">{{item.created_at}}</view>
+        <!-- 部位 · 事项 -->
+        <view class="rec-title">{{item.titleText}}</view>
+        <!-- 项目 / 位置：只出现一次，不重复项目名 -->
+        <view class="rec-meta" wx:if="{{item.metaText}}">{{item.metaText}}</view>
+        <!-- 清洗后的摘要：无 Markdown、无机器标签、无截断原文 -->
+        <view class="rec-summary">{{item.summaryText}}</view>
+        <view class="rec-foot" wx:if="{{!selectMode}}">
+          <view wx:if="{{item.missingCount}}" class="rec-missing" catchtap="onCardFill" data-id="{{item.id}}" data-missing="{{item.missingHint}}" data-count="{{item.missingCount}}">待补充 {{item.missingCount}} 项 ›</view>
+          <text wx:else class="rec-complete">信息齐全</text>
+          <view class="rec-cta" catchtap="onCardDailyLog" data-date="{{item.reportDate}}">生成监理日志 →</view>
+        </view>
       </view>
       <view class="card-menu" wx:if="{{!selectMode}}" bindtap="openRecordMenu" data-type="record" data-id="{{item.id}}">⋯</view>
     </view>
@@ -103,14 +114,25 @@
         <checkbox value="{{item.id}}" checked="{{item.checked}}" data-type="record" />
       </view>
       <view class="card-content" bindtap="onCardTap" data-type="record" data-id="{{item.id}}">
-        <view class="record-head">
-          <view class="type">{{item.record_type}}记录 #{{item.id}}</view>
-          <view class="status">{{item.status}}</view>
+        <!-- 时间 + 类型/状态：状态要有色彩区分，不再和标题挤一行 -->
+        <view class="rec-top">
+          <text class="rec-time">{{item.displayTime}}</text>
+          <view class="rec-chips">
+            <text class="rec-chip rec-type">{{item.record_type}}</text>
+            <text class="rec-chip rec-status {{item.statusTone}}">{{item.status}}</text>
+          </view>
         </view>
-        <view wx:if="{{item.project_name}}" class="muted">{{item.project_name}}<text wx:if="{{item.project_mismatch}}"> · 水印项目与系统项目不一致</text></view>
-        <view class="muted">{{item.section || '未填写区域'}} · {{item.location || '未填写位置'}}</view>
-        <view wx:if="{{item.work_content}}" class="record-desc">{{item.work_content}}</view>
-        <view class="muted">{{item.created_at}}</view>
+        <!-- 部位 · 事项 -->
+        <view class="rec-title">{{item.titleText}}</view>
+        <!-- 项目 / 位置：只出现一次，不重复项目名 -->
+        <view class="rec-meta" wx:if="{{item.metaText}}">{{item.metaText}}</view>
+        <!-- 清洗后的摘要：无 Markdown、无机器标签、无截断原文 -->
+        <view class="rec-summary">{{item.summaryText}}</view>
+        <view class="rec-foot" wx:if="{{!selectMode}}">
+          <view wx:if="{{item.missingCount}}" class="rec-missing" catchtap="onCardFill" data-id="{{item.id}}" data-missing="{{item.missingHint}}" data-count="{{item.missingCount}}">待补充 {{item.missingCount}} 项 ›</view>
+          <text wx:else class="rec-complete">信息齐全</text>
+          <view class="rec-cta" catchtap="onCardDailyLog" data-date="{{item.reportDate}}">生成监理日志 →</view>
+        </view>
       </view>
       <view class="card-menu" wx:if="{{!selectMode}}" bindtap="openRecordMenu" data-type="record" data-id="{{item.id}}">⋯</view>
     </view>
