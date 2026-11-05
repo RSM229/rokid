@@ -263,6 +263,32 @@ check("混合含不适用 → 合格并注明项数",
 check("有不符合 → 不合格", "验收不合格" in _m.generate_conclusion(
     [{"item_index": 1, "conclusion": "不符合", "note": "记录缺失"}]))
 
+print("\n== 12. 预填/全齐不挡询问块（2026-11-05 用户实测「发图只给 chips」回归） ==")
+# 12a 模型自作主张预填验收内容（水印场景：施工内容进 work_content、要点被模型预填）
+a5 = accept_args(work_content="污水管道基础包封")
+a5.setdefault("extra_fields", {})["acceptance_content"] = "污水管道基础包封已完成，质量合格。"
+r5 = LOOP.run_until_complete(at._create_work_record(ctx("污水管道基础包封验收"), a5))
+check("预填验收内容仍带出询问块",
+      r5.get("ask_mode") == "together" and len(ask_items(r5)) >= 1,
+      f"ask_mode={r5.get('ask_mode')} 项数={len(ask_items(r5))}")
+check("预填场景草稿保留询问态", bool(a5.get("_acceptance_ask_state")))
+
+# 12c 预填值在归集成功后被归集结果覆盖（不是沿用模型编的内容）
+a5b = at.merge_args(a5, {"record_type": "验收"})
+r7 = LOOP.run_until_complete(at._create_work_record(ctx("①②③④均符合"), a5b))
+c7 = str((a5b.get("extra_fields") or {}).get("acceptance_content") or "")
+check("归集覆盖模型预填值", " —— " in c7 and "已完成" not in c7, c7[:60])
+concl7 = str((a5b.get("extra_fields") or {}).get("supervision_conclusion") or "")
+check("归集生成结论（全符合→合格）", "验收合格" in concl7 and "不合格" not in concl7, concl7)
+
+# 12b 用户明确「跳过，直接创建」→ 消费询问态、放行创建（不拦截打扰）
+a6 = accept_args(work_content="污水管道基础包封")
+a6.setdefault("extra_fields", {})["acceptance_content"] = "污水管道基础包封已完成。"
+LOOP.run_until_complete(at._create_work_record(ctx("污水管道基础包封验收"), a6))
+r6 = LOOP.run_until_complete(at._create_work_record(ctx("跳过，直接创建"), a6))
+check("预填+跳过 → 消费询问态并放行",
+      r6.get("ask_mode") is None and "_acceptance_ask_state" not in a6)
+
 print()
 if FAILED:
     print(f"!!! {FAILED} 项失败")

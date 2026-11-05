@@ -1244,7 +1244,11 @@ async def _create_work_record(ctx: ToolContext, args: dict) -> dict:
                         matched_entry = entry  # 归集失败/不像回复 → 重新呈现询问块
 
         # --- 首次 / 非回复态：识别工序、带出询问块（不直接填 raw points） ---
-        if (not acc_value) and not (ask_state and isinstance(ask_state, dict)):
+        # 不看 acc_value：模型可能自作主张把水印信息/旧要点全文预填进验收内容栏，
+        # 若因此跳过询问块，用户发图后只会得到 chips 补全（2026-11-05 用户实测反馈
+        # 「发了图就给我这么一个回复吗」）。询问块归集成功后无条件覆盖该栏；
+        # 用户明确「跳过」时消费询问态、沿用已有值直接创建。
+        if not (ask_state and isinstance(ask_state, dict)):
             acc_query = _acceptance_query(section, content,
                                           str(args.get("location") or ""), ctx.message or "")
             prefer = _project_kind_from(ctx.project)
@@ -1372,6 +1376,26 @@ async def _create_work_record(ctx: ToolContext, args: dict) -> dict:
             result["ask_mode"] = "together"
             # 询问态随草稿跨轮保留（已镜像进 orig_args），第二轮据此触发归集
         return result
+
+    # 「一起询问」拦截：即使其它字段已齐（missing 为空，不进上方补全分支），
+    # 验收记录也必须先让用户对全部要点一并确认、归集生成验收内容与结论，
+    # 不能拿模型预填的验收内容静默创建（2026-11-05 用户实测反馈）。
+    # 用户明确「跳过，直接创建」时消费询问态、沿用已有值放行。
+    if record_type == "验收" and matched_entry:
+        if _wants_skip(ctx.message):
+            orig_args.pop("_acceptance_ask_state", None)
+            args.pop("_acceptance_ask_state", None)
+        else:
+            from app.services import acceptance_ask_together as _aat
+            block = _aat.assemble_ask_block(matched_entry)
+            result = _need_more(
+                [str((acc_field or {}).get("label") or "验收内容（验收要点）")],
+                block + "\n\n（请就上述全部要点一并回复，可逐条也可整体描述，"
+                "不符合/不适用请写明原因；回复后系统自动生成验收内容与验收结论。）",
+            )
+            result["ask_block"] = block
+            result["ask_mode"] = "together"
+            return result
 
     # 旧聊天入口也必须经过同一份版本化合同。这里不让可选栏阻断旧有
     # “跳过”体验，但必填、冲突、格式错误与新整理计划保持完全相同的门槛。
