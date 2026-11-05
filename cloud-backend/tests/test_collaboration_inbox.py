@@ -1,4 +1,5 @@
 import asyncio
+import json
 from datetime import datetime
 
 import pytest
@@ -10,6 +11,7 @@ from app.db import Base
 from app.main import app  # noqa: F401
 from app.models.collaboration import CollaborationEvent, CollaborationFollower, CollaborationItem
 from app.models.document import Document
+from app.models.notification import Notification
 from app.models.project_member import ProjectMember
 from app.models.task_assignment import TaskAssignment, TaskStatus
 from app.models.user import Project, User
@@ -103,6 +105,20 @@ def test_collaboration_inbox_permissions_read_state_and_transitions():
             assert cc_cannot_resolve.value.status_code == 404
             await resolve(item_id, ResolveRequest(detail="已核实"), recipient, db)
             assert (await inbox("action", recipient, db))["pending_count"] == 0
+            done = await inbox("done", recipient, db)
+            assert [row["id"] for row in done["items"]] == [item_id]
+            assert done["items"][0]["status"] == "completed"
+            assert done["items"][0]["mode_label"] == "已完成"
+            assert done["items"][0]["completed_at"]
+            assert (await inbox("done", follower, db))["items"] == []
+            note = (await db.execute(select(Notification).where(
+                Notification.user_id == sender.id,
+                Notification.event_type == "collaboration_completed",
+            ))).scalars().all()
+            assert len(note) == 1
+            payload = json.loads(note[0].payload)
+            assert payload["item_id"] == item_id
+            assert payload["object_type"] == "document"
 
             # Workflow approval items cannot be completed by the generic resolver.
             approval = CollaborationItem(
@@ -145,6 +161,10 @@ def test_collaboration_inbox_permissions_read_state_and_transitions():
             canceled = await db.get(CollaborationItem, cancellable["item"]["id"])
             assert canceled.status == "canceled"
             assert (await inbox("action", recipient, db))["pending_count"] == 0
+            done = await inbox("done", recipient, db)
+            canceled_row = next(row for row in done["items"] if row["id"] == cancellable["item"]["id"])
+            assert canceled_row["status"] == "canceled"
+            assert canceled_row["mode_label"] == "已撤回"
 
             transferable = await create_item(CreateCollaborationRequest(
                 object_type="document", object_id=doc.id, recipient_id=recipient.id,
@@ -158,6 +178,10 @@ def test_collaboration_inbox_permissions_read_state_and_transitions():
                 CollaborationItem.metadata_json["transferred_from"].as_integer() == old_id
             ))).scalar_one()
             assert (await db.get(CollaborationItem, old_id)).status == "transferred"
+            done = await inbox("done", recipient, db)
+            transferred_row = next(row for row in done["items"] if row["id"] == old_id)
+            assert transferred_row["status"] == "transferred"
+            assert transferred_row["mode_label"] == "已转派"
             assert replacement.recipient_id == follower.id and replacement.status == "pending"
             duplicate_cc = await db.scalar(select(CollaborationFollower.id).where(
                 CollaborationFollower.item_id == replacement.id,

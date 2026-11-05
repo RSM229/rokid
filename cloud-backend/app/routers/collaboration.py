@@ -114,6 +114,22 @@ async def _business_object(
     return obj
 
 
+def _mode_label(item: CollaborationItem, viewer_id: int | None) -> str:
+    if viewer_id == item.sender_id:
+        return "我发出的"
+    if viewer_id == item.recipient_id:
+        if item.status == "completed":
+            return "已完成"
+        if item.status == "canceled":
+            return "已撤回"
+        if item.status == "transferred":
+            return "已转派"
+        if item.mode == "cc":
+            return "抄送跟踪"
+        return "待我处理"
+    return "抄送跟踪"
+
+
 async def _serialize(db: AsyncSession, item: CollaborationItem, viewer_id: int | None = None) -> dict:
     sender = await db.get(User, item.sender_id)
     recipient = await db.get(User, item.recipient_id)
@@ -137,11 +153,7 @@ async def _serialize(db: AsyncSession, item: CollaborationItem, viewer_id: int |
         "cc_recipient_names": [row.real_name for row in follower_users],
         "cc_names_text": "、".join(row.real_name for row in follower_users),
         "mode": item.mode,
-        "mode_label": (
-            "我发出的" if viewer_id == item.sender_id
-            else "待我处理" if viewer_id == item.recipient_id and item.mode == "action"
-            else "抄送跟踪"
-        ),
+        "mode_label": _mode_label(item, viewer_id),
         "object_type": item.object_type,
         "object_id": item.object_id,
         "action_type": item.action_type,
@@ -172,7 +184,7 @@ async def _serialize(db: AsyncSession, item: CollaborationItem, viewer_id: int |
 
 @router.get("/inbox")
 async def inbox(
-    view: str = Query("action", pattern="^(action|cc|sent)$"),
+    view: str = Query("action", pattern="^(action|cc|sent|done)$"),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -195,11 +207,21 @@ async def inbox(
             and_(CollaborationItem.recipient_id == user.id, CollaborationItem.mode == "cc"),
             follows,
         ))
+    elif view == "done":
+        query = query.where(
+            CollaborationItem.recipient_id == user.id,
+            CollaborationItem.mode == "action",
+            CollaborationItem.status.in_(["completed", "canceled", "transferred"]),
+        )
     else:
         query = query.where(CollaborationItem.sender_id == user.id)
-    rows = (
-        await db.execute(query.order_by(CollaborationItem.created_at.desc()).limit(200))
-    ).scalars().all()
+    if view == "done":
+        query = query.order_by(
+            CollaborationItem.completed_at.desc(), CollaborationItem.id.desc()
+        )
+    else:
+        query = query.order_by(CollaborationItem.created_at.desc())
+    rows = (await db.execute(query.limit(200))).scalars().all()
     pending = await db.scalar(
         select(func.count(CollaborationItem.id)).where(
             CollaborationItem.project_id == project_id,
@@ -511,6 +533,20 @@ async def resolve(
     item.status = "completed"
     item.completed_at = datetime.now()
     db.add(CollaborationEvent(item_id=item.id, actor_id=user.id, action="resolved", detail=req.detail.strip() or None))
+    from app.models.notification import Notification
+    db.add(Notification(
+        user_id=item.sender_id,
+        title="协作事项已完成",
+        body=f"{user.real_name} 已完成「{item.title}」",
+        event_type="collaboration_completed",
+        payload=json.dumps({
+            "item_id": item.id,
+            "object_type": item.object_type,
+            "object_id": item.object_id,
+            "status": item.status,
+        }, ensure_ascii=False),
+        ts=datetime.now().timestamp(),
+    ))
     await db.commit()
     return {"detail": "处理事项已完成", "status": item.status}
 

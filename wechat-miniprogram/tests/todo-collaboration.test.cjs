@@ -36,10 +36,11 @@ test('todo count refreshes on page return and when the drawer is opened', () => 
 })
 
 test('todo inbox has actionable, tracking, sent, and legacy task views with empty states', () => {
-  for (const view of ['action', 'cc', 'sent', 'tasks']) assert.ok(todoPage.includes(`key: '${view}'`))
+  for (const view of ['action', 'cc', 'sent', 'done', 'tasks']) assert.ok(todoPage.includes(`key: '${view}'`))
   assert.match(todoTemplate, /当前没有待处理事项/)
   assert.match(todoTemplate, /当前没有抄送事项/)
   assert.match(todoTemplate, /当前没有发出的事项/)
+  assert.match(todoTemplate, /还没有处理记录/)
   assert.match(todoTemplate, /当前没有符合条件的派单/)
 })
 
@@ -47,7 +48,7 @@ test('opening a collaboration detail does not complete or remove its pending ite
   const openDetail = todoPage.match(/async openDetail\([\s\S]*?(?=\n  closeDetail\()/)?.[0] || ''
   assert.match(openDetail, /\/collaboration\/\$\{id\}/)
   assert.doesNotMatch(openDetail, /resolve|complete|status\s*=/)
-  assert.match(todoPage, /onShow\(\)[\s\S]{0,220}this\.load\(\)/)
+  assert.match(todoPage, /onShow\(\)[\s\S]{0,520}this\.load\(\)/)
 })
 
 test('todo detail uses server business labels and keeps deleted-object history readable', () => {
@@ -59,6 +60,23 @@ test('todo detail uses server business labels and keeps deleted-object history r
   assert.match(todoTemplate, /item\.action_label \|\| item\.action/)
   assert.match(todoTemplate, /item\.actor_name/)
   assert.match(todoPage, /if \(detail\.object_deleted\)/)
+})
+
+test('completion gives a result summary and keeps the item in a real completed inbox', () => {
+  assert.match(todoTemplate, /completion-mask/)
+  assert.match(todoTemplate, /completion\.eyebrow/)
+  assert.match(todoPage, /eyebrow: '处理结果'/)
+  assert.match(todoPage, /label: '处理记录'/)
+  assert.match(todoTemplate, /返回待办/)
+  assert.match(todoTemplate, /查看工作记录/)
+  assert.match(todoTemplate, /查看工作文书/)
+  assert.match(todoTemplate, /完成于/)
+  assert.match(todoPage, /buildCompletion\(/)
+  assert.match(todoPage, /checkCompletedAfterBusiness\(/)
+  assert.match(todoPage, /pendingCheckId/)
+  assert.match(todoPage, /completion, collabActionId: 0/)
+  assert.match(todoPage, /note \|\| '已完成'/)
+  assert.match(todoPage, /请填写驳回原因/)
 })
 
 test('compose sends a stable idempotency key for network retries', () => {

@@ -38,6 +38,25 @@ interface CollaborationItem {
   can_cancel?: boolean
   can_transfer?: boolean
   created_at?: string
+  created_at_text?: string
+  completed_at?: string
+  completed_at_text?: string
+}
+
+type CompletionAction = 'approve' | 'reject' | 'process' | 'signoff'
+
+interface CompletionResult {
+  tone: 'success' | 'danger'
+  eyebrow: string
+  title: string
+  description: string
+  note: string
+  itemTitle: string
+  senderName: string
+  statusLabel: string
+  objectType: 'work_record' | 'document'
+  objectId: number
+  objectDeleted: boolean
 }
 
 interface CollaborationHistory {
@@ -46,12 +65,18 @@ interface CollaborationHistory {
   actor_name?: string
   detail: string
   created_at: string
+  created_at_text?: string
 }
 
 interface CollaborationDetail extends CollaborationItem {
   object?: Record<string, any>
   object_deleted?: boolean
   history?: CollaborationHistory[]
+}
+
+function displayTime(value?: string): string {
+  const text = (value || '').trim()
+  return text ? text.replace('T', ' ').slice(0, 16) : ''
 }
 
 Page(themed({
@@ -63,12 +88,16 @@ Page(themed({
       { key: 'action', label: '待我处理' },
       { key: 'cc', label: '抄送跟踪' },
       { key: 'sent', label: '我发出的' },
+      { key: 'done', label: '处理记录' },
       { key: 'tasks', label: '派单任务' },
     ],
     pendingCount: 0,
     detail: null as CollaborationDetail | null,
+    completion: null as CompletionResult | null,
+    pendingCheckId: 0,
     loading: false,
     actionId: 0,
+    collabActionId: 0,
     statusFilter: '',
     statuses: ['全部', '待接单', '已接单', '进行中', '已完成', '已拒单'],
     statusIndex: 0,
@@ -88,6 +117,11 @@ Page(themed({
       this.setData({ focusId })
       wx.removeStorageSync('gdjl_focus_task')
     }
+    const checkId = this.data.pendingCheckId
+    if (checkId) {
+      this.setData({ pendingCheckId: 0 })
+      void this.checkCompletedAfterBusiness(checkId)
+    }
     this.load()
   },
   onPullDownRefresh() {
@@ -104,7 +138,12 @@ Page(themed({
       if (this.data.focusId) {
         tasks.sort((a, b) => Number(b.id === this.data.focusId) - Number(a.id === this.data.focusId))
       }
-      this.setData({ tasks, items: collaboration.items || [], pendingCount: collaboration.pending_count || 0 })
+      const items = (collaboration.items || []).map((item) => ({
+        ...item,
+        created_at_text: displayTime(item.created_at),
+        completed_at_text: displayTime(item.completed_at),
+      }))
+      this.setData({ tasks, items, pendingCount: collaboration.pending_count || 0 })
     } catch (error) {
       wx.showToast({ title: (error as Error).message, icon: 'none' })
     } finally {
@@ -117,10 +156,91 @@ Page(themed({
     this.setData({ view })
     this.load()
   },
+  async checkCompletedAfterBusiness(id: number) {
+    try {
+      const detail = await request<CollaborationDetail>(`/collaboration/${id}`)
+      if (detail.status !== 'completed') return
+      const action: CompletionAction = detail.is_signoff
+        ? 'signoff'
+        : detail.action_type === 'approve' ? 'approve' : 'process'
+      this.setData({ completion: this.buildCompletion(detail, action) })
+    } catch {
+      // The business page may have deleted the item; keep the inbox usable.
+    }
+  },
+
+  buildCompletion(
+    detail: CollaborationDetail,
+    action: CompletionAction,
+    note = '',
+    reason = '',
+  ): CompletionResult {
+    const senderName = detail.sender_name || '发起人'
+    const objectLabel = detail.object_type === 'work_record' ? '工作记录' : '工作文书'
+    let title = '事项已完成'
+    let description = `${senderName} 可在“我发出的”中看到完成状态；本次处理已保留在“处理记录”。`
+    let statusLabel = '已完成'
+    let tone: CompletionResult['tone'] = 'success'
+    if (action === 'approve') {
+      title = '审批已通过'
+      description = `审批结果已生效，${senderName} 可在“我发出的”中查看；本次处理已保留在“处理记录”。`
+      statusLabel = '已通过'
+    } else if (action === 'reject') {
+      title = '已驳回'
+      description = `驳回原因已记录，${senderName} 修改后可重新提交；本次处理已保留在“处理记录”。`
+      statusLabel = '已驳回'
+      tone = 'danger'
+    } else if (action === 'signoff') {
+      title = '签认已完成'
+      description = `签认已写入${objectLabel}，${senderName} 可在“我发出的”中查看；本次处理已保留在“处理记录”。`
+      statusLabel = '已签认'
+    }
+    return {
+      tone,
+      eyebrow: '处理结果',
+      title,
+      description,
+      note: reason ? `驳回原因：${reason}` : note ? `处理说明：${note}` : '',
+      itemTitle: detail.title,
+      senderName,
+      statusLabel,
+      objectType: detail.object_type,
+      objectId: detail.object_id,
+      objectDeleted: Boolean(detail.object_deleted),
+    }
+  },
+
+  closeCompletion() {
+    this.setData({ completion: null })
+  },
+
+  backToInbox() {
+    this.setData({ completion: null })
+    void this.load()
+  },
+
+  viewCompletionBusiness() {
+    const completion = this.data.completion
+    if (!completion) return
+    if (completion.objectDeleted) {
+      wx.showToast({ title: '关联业务对象已删除', icon: 'none' })
+      return
+    }
+    this.setData({ completion: null })
+    const url = completion.objectType === 'work_record'
+      ? `/pages/work/index?id=${completion.objectId}&type=record`
+      : `/pages/documents/detail?id=${completion.objectId}`
+    wx.navigateTo({ url })
+  },
+
   async openDetail(event: WechatMiniprogram.TouchEvent) {
     const id = Number(event.currentTarget.dataset.id)
     try {
       const detail = await request<NonNullable<typeof this.data.detail>>(`/collaboration/${id}`)
+      detail.history = (detail.history || []).map((row) => ({
+        ...row,
+        created_at_text: displayTime(row.created_at),
+      }))
       this.setData({ detail })
     } catch (error) {
       wx.showToast({ title: (error as Error).message, icon: 'none' })
@@ -148,7 +268,8 @@ Page(themed({
   openBusiness() {
     const detail = this.data.detail
     if (!detail) return
-    this.setData({ detail: null })
+    const shouldCheck = detail.mode === 'action' && detail.status === 'pending' && !detail.object_deleted
+    this.setData({ detail: null, pendingCheckId: shouldCheck ? detail.id : 0 })
     if (detail.object_deleted) {
       wx.showToast({ title: '关联业务对象已删除', icon: 'none' })
       return
@@ -160,35 +281,74 @@ Page(themed({
   },
   async completeItem() {
     const detail = this.data.detail
-    if (!detail) return
+    if (!detail || this.data.collabActionId) return
+    const isApprove = detail.action_type === 'approve'
+    let note = ''
+    if (isApprove) {
+      const confirm = await wx.showModal({
+        title: '确认审批通过',
+        content: `「${detail.title}」通过后将进入已审批状态，发起人会收到结果。`,
+        confirmText: '通过',
+        confirmColor: '#176b62',
+      })
+      if (!confirm.confirm) return
+    } else {
+      const result = await wx.showModal({
+        title: '完成事项',
+        content: '可填写处理说明，发起人会在处理记录中看到。',
+        editable: true,
+        placeholderText: '处理说明（选填）',
+        confirmText: '完成',
+        confirmColor: '#176b62',
+      })
+      if (!result.confirm) return
+      note = (result.content || '').trim()
+    }
+    this.setData({ collabActionId: detail.id })
     try {
-      if (detail.action_type === 'approve') {
+      if (isApprove) {
         const base = detail.object_type === 'work_record' ? '/work-record' : '/document'
         await request(`${base}/${detail.object_id}/approve`, { method: 'POST', data: {} })
       } else {
-        await request(`/collaboration/${detail.id}/resolve`, { method: 'POST', data: { detail: '已完成' } })
+        await request(`/collaboration/${detail.id}/resolve`, {
+          method: 'POST',
+          data: { detail: note || '已完成' },
+        })
       }
-      wx.showToast({ title: '已处理', icon: 'success' })
-      this.setData({ detail: null })
+      const completion = this.buildCompletion(detail, isApprove ? 'approve' : 'process', note)
+      this.setData({ detail: null, completion, collabActionId: 0 })
       await this.load()
     } catch (error) {
+      this.setData({ collabActionId: 0 })
       wx.showModal({ title: '处理失败', content: (error as Error).message, showCancel: false })
     }
   },
   rejectItem() {
     const detail = this.data.detail
-    if (!detail || detail.action_type !== 'approve') return
+    if (!detail || detail.action_type !== 'approve' || this.data.collabActionId) return
     wx.showModal({
-      title: '驳回事项', content: '请填写驳回原因', editable: true, placeholderText: '驳回原因',
+      title: '驳回事项',
+      content: '请填写驳回原因，发起人会看到并修改后重新提交。',
+      editable: true,
+      placeholderText: '驳回原因（必填）',
+      confirmText: '驳回',
+      confirmColor: '#b73832',
       success: async result => {
         if (!result.confirm) return
+        const reason = (result.content || '').trim()
+        if (!reason) {
+          wx.showToast({ title: '请填写驳回原因', icon: 'none' })
+          return
+        }
+        this.setData({ collabActionId: detail.id })
         const base = detail.object_type === 'work_record' ? '/work-record' : '/document'
         try {
-          await request(`${base}/${detail.object_id}/reject`, { method: 'POST', data: detail.object_type === 'work_record' ? { reason: result.content || '小程序端驳回' } : { reason: result.content || '小程序端驳回' } })
-          wx.showToast({ title: '已驳回', icon: 'success' })
-          this.setData({ detail: null })
+          await request(`${base}/${detail.object_id}/reject`, { method: 'POST', data: { reason } })
+          const completion = this.buildCompletion(detail, 'reject', '', reason)
+          this.setData({ detail: null, completion, collabActionId: 0 })
           await this.load()
         } catch (error) {
+          this.setData({ collabActionId: 0 })
           wx.showModal({ title: '驳回失败', content: (error as Error).message, showCancel: false })
         }
       },

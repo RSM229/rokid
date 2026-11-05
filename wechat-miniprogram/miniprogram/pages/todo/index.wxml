@@ -13,12 +13,13 @@
   </view>
 
   <view wx:if="{{view !== 'tasks' && loading && !items.length}}" class="empty">正在加载待办事项…</view>
-  <view wx:elif="{{view !== 'tasks' && !items.length && !(view === 'action' && tasks.length)}}" class="empty">{{view === 'action' ? '当前没有待处理事项' : view === 'cc' ? '当前没有抄送事项' : '当前没有发出的事项'}}</view>
+  <view wx:elif="{{view !== 'tasks' && !items.length && !(view === 'action' && tasks.length)}}" class="empty">{{view === 'action' ? '当前没有待处理事项' : view === 'cc' ? '当前没有抄送事项' : view === 'done' ? '还没有处理记录' : '当前没有发出的事项'}}</view>
   <view wx:if="{{view !== 'tasks'}}" wx:for="{{items}}" wx:key="id" class="card task" data-id="{{item.id}}" bindtap="openDetail">
     <view class="task-head"><view class="task-title">{{item.title}}</view><view class="state {{item.status}}">{{item.status_label || item.status}}</view></view>
     <view class="tags"><text>{{item.object_type === 'work_record' ? '工作记录' : '工作文书'}}</text><text>{{item.mode_label || (item.mode === 'cc' ? '抄送跟踪' : '待我处理')}}</text><text>{{item.action_label || '请处理'}}</text></view>
     <view wx:if="{{item.description}}" class="description">{{item.description}}</view>
-    <view class="muted">{{view === 'sent' ? '接收人：' + item.recipient_name : '发起人：' + item.sender_name}} · {{item.created_at}}</view>
+    <view class="muted">{{view === 'sent' ? '接收人：' + item.recipient_name : '发起人：' + item.sender_name}} · {{item.created_at_text || item.created_at}}</view>
+    <view wx:if="{{view === 'done' && item.completed_at_text}}" class="muted">完成于：{{item.completed_at_text}}</view>
     <view wx:if="{{item.cc_names_text}}" class="muted">抄送：{{item.cc_names_text}}</view>
   </view>
 
@@ -60,16 +61,34 @@
         <view wx:if="{{detail.object.reject_reason}}">驳回原因：{{detail.object.reject_reason}}</view>
       </view>
       <view wx:if="{{detail.history.length}}" class="history-title">处理记录</view>
-      <view wx:for="{{detail.history}}" wx:key="created_at" class="history-row">{{item.action_label || item.action}}{{item.actor_name ? ' · ' + item.actor_name : ''}}{{item.detail ? ' · ' + item.detail : ''}} · {{item.created_at}}</view>
+      <view wx:for="{{detail.history}}" wx:key="created_at" class="history-row">{{item.action_label || item.action}}{{item.actor_name ? ' · ' + item.actor_name : ''}}{{item.detail ? ' · ' + item.detail : ''}} · {{item.created_at_text || item.created_at}}</view>
       <view class="actions">
         <button wx:if="{{!detail.object_deleted}}" size="mini" bindtap="openBusiness">查看业务详情</button>
-        <button wx:if="{{!detail.object_deleted && detail.mode === 'action' && detail.status === 'pending' && detail.action_type !== 'approve' && !detail.is_signoff}}" class="primary" size="mini" bindtap="completeItem">标记完成</button>
+        <button wx:if="{{!detail.object_deleted && detail.mode === 'action' && detail.status === 'pending' && detail.action_type !== 'approve' && !detail.is_signoff}}" class="primary" size="mini" loading="{{collabActionId === detail.id}}" disabled="{{collabActionId > 0}}" bindtap="completeItem">标记完成</button>
         <button wx:if="{{!detail.object_deleted && detail.mode === 'action' && detail.status === 'pending' && detail.is_signoff}}" class="primary" size="mini" bindtap="openBusiness">前往签认</button>
         <button wx:if="{{!detail.object_deleted && detail.can_transfer}}" size="mini" bindtap="openTransfer">转派</button>
         <button wx:if="{{detail.can_cancel}}" size="mini" bindtap="cancelItem">撤回</button>
-        <button wx:if="{{!detail.object_deleted && detail.mode === 'action' && detail.status === 'pending' && detail.action_type === 'approve'}}" size="mini" bindtap="rejectItem">驳回</button>
-        <button wx:if="{{!detail.object_deleted && detail.mode === 'action' && detail.status === 'pending' && detail.action_type === 'approve'}}" class="primary" size="mini" bindtap="completeItem">审批通过</button>
+        <button wx:if="{{!detail.object_deleted && detail.mode === 'action' && detail.status === 'pending' && detail.action_type === 'approve'}}" size="mini" disabled="{{collabActionId > 0}}" bindtap="rejectItem">驳回</button>
+        <button wx:if="{{!detail.object_deleted && detail.mode === 'action' && detail.status === 'pending' && detail.action_type === 'approve'}}" class="primary" size="mini" loading="{{collabActionId === detail.id}}" disabled="{{collabActionId > 0}}" bindtap="completeItem">审批通过</button>
       </view>
+    </view>
+  </view>
+
+  <view wx:if="{{completion}}" class="completion-mask" catchtouchmove="true">
+    <view class="completion-backdrop" bindtap="closeCompletion"></view>
+    <view class="completion-panel">
+      <view class="completion-icon {{completion.tone}}">{{completion.tone === 'danger' ? '!' : '✓'}}</view>
+      <text class="completion-eyebrow">{{completion.eyebrow}}</text>
+      <text class="completion-title">{{completion.title}}</text>
+      <text class="completion-desc">{{completion.description}}</text>
+      <text wx:if="{{completion.note}}" class="completion-note">{{completion.note}}</text>
+      <view class="completion-meta">
+        <view class="completion-meta-row"><text>事项</text><text>{{completion.itemTitle}}</text></view>
+        <view class="completion-meta-row"><text>发起人</text><text>{{completion.senderName}}</text></view>
+        <view class="completion-meta-row"><text>状态</text><text class="completion-status">{{completion.statusLabel}}</text></view>
+      </view>
+      <button class="completion-primary" bindtap="viewCompletionBusiness" disabled="{{completion.objectDeleted}}">{{completion.objectDeleted ? '业务对象已删除' : completion.objectType === 'work_record' ? '查看工作记录' : '查看工作文书'}}</button>
+      <button class="completion-secondary" bindtap="backToInbox">返回待办</button>
     </view>
   </view>
 </view>
