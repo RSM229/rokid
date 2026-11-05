@@ -208,7 +208,10 @@ def render_context_summary(args: dict[str, Any] | None,
         }:
             lines.append(f"- 用户消息中已提取 {field}：{value}（来源：{fact.get('source_ref') or '历史草稿'}）")
     if missing:
-        lines.append("- 当前仍缺少：" + "、".join(_text(x) for x in missing if _text(x)))
+        n = len([x for x in missing if _text(x)])
+        lines.append(
+            f"- 当前草稿尚有 {n} 项待用户补充；服务端会一次只问一栏引导，你只需在 answer 里自然接话、确认已识别信息，不要逐栏列清单、也不要复述「还差 X」。"
+        )
     if args:
         lines.append("- 当前草稿参数已由服务端保存；本轮只合并新增或明确更正的值。")
     history = messages
