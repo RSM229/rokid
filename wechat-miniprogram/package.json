@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "postinstall": "cd miniprogram && npm install --no-audit --no-fund",
     "typecheck": "tsc --noEmit",
     "test": "node --test tests/*.test.cjs"
   },

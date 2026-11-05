@@ -9,6 +9,10 @@ npm install
 npm run typecheck
 ```
 
+`npm install` 会通过 `postinstall` 把 `trtc-wx-sdk`、`@babel/runtime` 安装到
+`miniprogram/node_modules`。依赖必须位于 `miniprogramRoot` 内，开发者工具才能执行
+「工具 → 构建 npm」；构建产物输出到 `miniprogram/miniprogram_npm`。
+
 ## 本地后端联调
 
 本地开发运行同一套 FastAPI 后端，使用服务器真实微信、AI 配置，并经 R640 SSH 隧道直接连接服务器业务库 `gdjl`。本地与服务器数据实时共享；本地创建、修改或删除的业务数据会直接影响服务器上的真实数据，请使用已有账号和测试项目，不要写入演示数据。上传与导出文件仍保存在本机 `cloud-backend/.local/`，不与服务器文件目录同步。先在仓库根目录执行：
@@ -47,7 +51,7 @@ cd ..
    | socket 合法域名 | `wss://www.baize.gdces.cn`（wss 域名免配端口，默认放行该域名下所有端口；当前版本用轮询信令，暂未用到） |
 
    要点：带端口域名配置后，**代码里的地址必须带完全相同的端口**，写不带端口或写 `:443` 都会被拦截；反过来后台若不配端口，请求 URL 里也不能带端口（连 `:443` 都失败）。域名必须已完成 ICP 备案，且证书域名匹配、TLS ≥ 1.2。
-5. **音视频通话依赖 `trtc-wx-sdk`，上传代码前必须在开发者工具执行「工具 → 构建 npm」**，否则通话页会提示“音视频组件未安装”。
+5. **音视频通话依赖 `trtc-wx-sdk`，上传代码前必须在开发者工具执行「工具 → 构建 npm」**，否则通话页会提示“音视频组件未安装”。若提示 “NPM packages not found”，先在 `wechat-miniprogram/miniprogram` 执行 `npm install`（或在上一级目录执行 `cd miniprogram && npm install`），确认生成 `miniprogram/node_modules` 后再构建。
 6. 使用真机验证相机、录音、位置、前后台切换、弱网重试及双端呼叫。
 
 弱网上传队列会在小程序回到前台或网络恢复后自动补传，也可在“采集”页手动重试。不同发布环境的地址通过 `ext` 配置隔离，微信 AppSecret、RTC Secret 和 AI Token 始终只保存在服务端。
