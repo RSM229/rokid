@@ -5,6 +5,7 @@
     <view class="nav-bar-inner" style="height: {{navBarHeight}}px; top: {{statusBarHeight}}px;">
       <view class="nav-left" bindtap="openHistory">
         <view class="nav-menu-icon"></view>
+        <text wx:if="{{todoPendingCount}}" class="todo-badge">{{todoPendingCount > 99 ? '99+' : todoPendingCount}}</text>
       </view>
       <view class="nav-title-wrap" bindtap="switchProject">
         <text class="nav-title">{{projectName || '监理智能体'}}</text>
@@ -665,33 +666,11 @@
         </view>
 
         <view class="drawer-group">
-          <view class="drawer-head" data-group="docs" bindtap="toggleDrawerGroup">
-            <text class="drawer-title">工作文书</text>
-            <view class="drawer-arrow {{drawerDocsExpanded ? 'open' : ''}}"></view>
+          <view class="drawer-nav todo-drawer-entry" data-url="/pages/todo/index" bindtap="navigateTo">
+            <view class="drawer-nav-icon ic-list"></view>
+            <text class="drawer-nav-text">待办事项</text>
+            <text wx:if="{{todoPendingCount}}" class="todo-drawer-badge">{{todoPendingCount > 99 ? '99+' : todoPendingCount}}</text>
           </view>
-          <block wx:if="{{drawerDocsExpanded}}">
-            <!-- 材料台账：二级可折叠目录（「文书档案」入口已移到「+」面板「规范文书」，同一页面不重复提供） -->
-            <view class="drawer-nav" data-group="ledger" bindtap="toggleDrawerGroup">
-              <view class="drawer-nav-icon ic-list"></view>
-              <text class="drawer-nav-text">材料台账</text>
-              <view class="drawer-arrow {{drawerLedgerExpanded ? 'open' : ''}}"></view>
-            </view>
-            <view class="drawer-sub" wx:if="{{drawerLedgerExpanded}}">
-              <view class="drawer-nav" data-url="/pages/documents/index?tab=ledger" bindtap="navigateTo">
-                <view class="drawer-nav-icon ic-list"></view>
-                <text class="drawer-nav-text">台账总览</text>
-              </view>
-              <view
-                class="drawer-nav"
-                wx:for="{{docEntries}}"
-                wx:key="key"
-                data-url="{{item.url}}"
-                bindtap="navigateTo">
-                <view class="drawer-nav-icon ic-list"></view>
-                <text class="drawer-nav-text">{{item.label}}</text>
-              </view>
-            </view>
-          </block>
         </view>
 
         <!-- 「资料库」整组已撤（2026-10-08）：

@@ -88,6 +88,16 @@ class KnowledgeDocument(Base):
     path: Mapped[str] = mapped_column(String(1024))
     mime_type: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     size_bytes: Mapped[int] = mapped_column(BigInteger, default=0)
+    # System-generated project archive copy. One business document keeps one
+    # stable knowledge-document row and is overwritten on regeneration.
+    source_document_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("documents.id"), nullable=True, unique=True, index=True
+    )
+    source_revision: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    # Stable human-readable trace that survives business-document deletion.
+    source_document_ref: Mapped[Optional[str]] = mapped_column(
+        String(256), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     # 软删除：删除文档先标记 is_deleted，进回收站可恢复；彻底删除才移除磁盘文件。
     # 两列由 init_db 的 _reconcile_missing_columns 安全补齐，不破坏历史数据。
@@ -221,33 +231,42 @@ PRESET_FOLDER_TREE: list[dict] = [
 ]
 
 
-async def ensure_kb_folder_tree(db: AsyncSession, kb_id: int) -> None:
-    """若资料库尚无文件夹，则播种预设目录分类树（幂等）。"""
-    existing = (
-        await db.execute(
-            select(func.count(KbFolder.id)).where(KbFolder.kb_id == kb_id)
-        )
-    ).scalar() or 0
-    if existing:
-        return
+async def ensure_kb_folder_tree(
+    db: AsyncSession, kb_id: int, *, commit: bool = True
+) -> None:
+    """Ensure every preset folder node exists, preserving user-created siblings.
 
-    order = 0
+    This is intentionally a recursive merge rather than a one-shot seed: an older
+    or partially initialized KB must still gain the exact archive subdirectories
+    required by project-document synchronization.
+    """
+    existing_rows = (
+        await db.execute(select(KbFolder).where(KbFolder.kb_id == kb_id))
+    ).scalars().all()
+    by_parent_name: dict[tuple[Optional[int], str], KbFolder] = {}
+    for row in existing_rows:
+        by_parent_name.setdefault((row.parent_id, row.name), row)
+    order = max((row.sort_order or 0 for row in existing_rows), default=-1) + 1
 
     async def build(nodes: list[dict], parent_id: Optional[int]) -> None:
         nonlocal order
         for node in nodes:
-            folder = KbFolder(
-                kb_id=kb_id,
-                parent_id=parent_id,
-                name=node["name"],
-                sort_order=order,
-                is_preset=True,
-            )
-            db.add(folder)
-            await db.flush()
-            order += 1
+            folder = by_parent_name.get((parent_id, node["name"]))
+            if folder is None:
+                folder = KbFolder(
+                    kb_id=kb_id,
+                    parent_id=parent_id,
+                    name=node["name"],
+                    sort_order=order,
+                    is_preset=True,
+                )
+                db.add(folder)
+                await db.flush()
+                by_parent_name[(parent_id, node["name"])] = folder
+                order += 1
             if node.get("children"):
                 await build(node["children"], folder.id)
 
     await build(PRESET_FOLDER_TREE, None)
-    await db.commit()
+    if commit:
+        await db.commit()

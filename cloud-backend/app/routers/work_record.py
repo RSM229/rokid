@@ -1,7 +1,7 @@
 """工作记录路由 — 巡视/验收/见证/旁站"""
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_, update
+from sqlalchemy import select, func, and_, update, or_, exists
 from pydantic import BaseModel, Field
 from typing import Any, Optional
 from datetime import datetime, date
@@ -945,25 +945,38 @@ async def submit_work_record(
     except Exception as exc:  # noqa: BLE001
         logger.warning("自动生成文书失败（记录已提交）：%s", exc)
     await db.commit()
+    if doc and doc.docx_path:
+        from app.services.project_archive import sync_document_to_project_archive
 
-    # 通知有审批权限的人
+        await sync_document_to_project_archive(db, doc, user)
+        await db.commit()
+
+    # Durable responsibility first; reminders are best-effort and never replace
+    # the collaboration item as the source of truth for the red badge.
+    from app.services.permissions import project_members_with_permission
+    from app.services.collaboration import upsert_action_items
+
+    approver_rows = await project_members_with_permission(
+        db, project_id, "document_approve"
+    )
+    await upsert_action_items(
+        db,
+        project_id=project_id,
+        sender_id=user.id,
+        recipient_ids=[member_user.id for _, member_user in approver_rows],
+        object_type="work_record",
+        object_id=record.id,
+        action_type="approve",
+        title=f"待审批{record.record_type}记录",
+        description=record.section or record.location or "",
+        source_prefix="workflow",
+        retire_missing=True,
+    )
+    await db.commit()
     try:
         from app.services.notification import push_realtime
-        from app.services.permissions import member_user_ids_with_roles
 
-        # Step 2（设计说明 §7.8.4）：按本项目成员表的岗位集合投递
-        approver_ids = await member_user_ids_with_roles(
-            db,
-            project_id,
-            [UserRole.CHIEF_SUPERVISOR.value, UserRole.DEPUTY_CHIEF.value],
-        )
-        approvers_result = await db.execute(
-            select(User).where(
-                User.id.in_(approver_ids or [-1]),
-                User.is_active.is_(True),
-            )
-        )
-        for approver in approvers_result.scalars().all():
+        for _, approver in approver_rows:
             await push_realtime(
                 user_id=approver.id,
                 event_type="work_record_submitted",
@@ -975,7 +988,7 @@ async def submit_work_record(
                 },
             )
     except Exception:
-        pass
+        logger.exception("工作记录审批提醒发送失败（待办责任项已落库）")
 
     return {
         "detail": "工作记录已提交审批",
@@ -1005,6 +1018,11 @@ async def approve_work_record(
     record.approved_by = user.id
     record.approved_at = datetime.now()
     record.reject_reason = None
+    from app.services.collaboration import complete_action_items
+    await complete_action_items(
+        db, object_type="work_record", object_id=record.id,
+        action_type="approve", actor_id=user.id, detail="审批通过",
+    )
     await db.commit()
 
     # 推送给提交人
@@ -1046,6 +1064,11 @@ async def reject_work_record(
     record.reject_reason = req.reason.strip()
     record.approved_by = user.id
     record.approved_at = datetime.now()
+    from app.services.collaboration import complete_action_items
+    await complete_action_items(
+        db, object_type="work_record", object_id=record.id,
+        action_type="approve", actor_id=user.id, detail="审批驳回",
+    )
     await db.commit()
 
     # 推送给提交人
@@ -1086,6 +1109,11 @@ async def archive_work_record(
     if not record.approved_by:
         record.approved_by = user.id
         record.approved_at = datetime.now()
+    from app.services.collaboration import complete_action_items
+    await complete_action_items(
+        db, object_type="work_record", object_id=record.id,
+        action_type="approve", actor_id=user.id, detail="归档完成",
+    )
     await db.commit()
     return {"detail": "工作记录已归档", "record_id": record_id, "status": record.status}
 
@@ -1315,6 +1343,15 @@ async def generate_witness_report(
     record.witness_report_path = doc.pdf_path
     await _validate_record_ready(db, record)
     record.status = WorkRecordStatus.ARCHIVED.value
+    from app.services.collaboration import complete_action_items
+    await complete_action_items(
+        db, object_type="work_record", object_id=record.id,
+        action_type="approve", actor_id=user.id, detail="见证报告生成并归档",
+    )
+    await db.commit()
+    from app.services.project_archive import sync_document_to_project_archive
+
+    await sync_document_to_project_archive(db, doc, user)
     await db.commit()
     return {
         "detail": "见证报告已生成并归档",
@@ -1672,7 +1709,26 @@ async def get_work_record(
         stmt = stmt.where(WorkRecord.project_id == scope)
     result = await db.execute(stmt)
     record = result.scalar_one_or_none()
-    if not record or (record.creator_id != user.id and not user.has_permission("task_manage")):
+    collaborator_access = False
+    if record and record.creator_id != user.id and not user.has_permission("task_manage"):
+        from app.models.collaboration import CollaborationFollower, CollaborationItem
+
+        collaborator_access = bool(await db.scalar(
+            select(CollaborationItem.id).where(
+                CollaborationItem.project_id == record.project_id,
+                CollaborationItem.object_type == "work_record",
+                CollaborationItem.object_id == record.id,
+                or_(
+                    CollaborationItem.sender_id == user.id,
+                    CollaborationItem.recipient_id == user.id,
+                    exists(select(CollaborationFollower.id).where(
+                        CollaborationFollower.item_id == CollaborationItem.id,
+                        CollaborationFollower.user_id == user.id,
+                    )),
+                ),
+            ).limit(1)
+        ))
+    if not record or (record.creator_id != user.id and not user.has_permission("task_manage") and not collaborator_access):
         raise HTTPException(404, "记录不存在或无权查看")
     # 监理人员 = 记录创建人（GD-B-214 等省统表「监理人员」栏）
     creator_name = (await db.execute(
@@ -1921,6 +1977,15 @@ async def delete_work_record(
     if record.creator_id != user.id and not user.has_permission("task_manage"):
         raise HTTPException(403, "仅创建人或管理人员可删除工作记录")
 
+    from app.services.collaboration import cancel_action_items
+
+    await cancel_action_items(
+        db,
+        object_type="work_record",
+        object_id=record.id,
+        actor_id=user.id,
+        detail="工作记录已删除",
+    )
     photo_paths = list(record.inspection_photos or []) + list(record.witness_photos or [])
     # 🔴 task_assignments.work_record_id → work_records.id 是无级联外键：
     # 记录被派发过待办任务时直接删会抛 1451 → 500。先解绑（任务保留，只是不再指向已删记录）。
@@ -2155,6 +2220,9 @@ async def share_work_record(
     doc, spec, content = await generate_form_from_record(
         db, user, project, record, req.form_code
     )
+    await db.commit()
+    from app.services.project_archive import sync_document_to_project_archive
+    await sync_document_to_project_archive(db, doc, user)
     await db.commit()
 
     # 推送通知

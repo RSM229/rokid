@@ -55,6 +55,8 @@ Page(themed({
   data: {
     kbId: 0,
     kbName: '资料库',
+    projectArchiveKbId: 0,
+    projectArchiveKbName: '',
     canUpload: false,
     resolving: true,
 
@@ -140,6 +142,7 @@ Page(themed({
     }
     if (!this.data.kbId) this.resolveHome()
     else this.loadFolders()
+    void this.loadProjectArchiveLibrary()
   },
 
   onHide() {
@@ -223,6 +226,31 @@ Page(themed({
     } finally {
       this.setData({ resolving: false })
     }
+  },
+
+  async loadProjectArchiveLibrary() {
+    const projectId = Number(session.getUser()?.project_id || 0)
+    if (!projectId) {
+      this.setData({ projectArchiveKbId: 0, projectArchiveKbName: '' })
+      return
+    }
+    try {
+      // The mapping table behind this endpoint is the only source of truth.
+      // Never scan /kb for a same-named/shared library: that can select a
+      // personal, builtin, or unrelated project's KB.
+      const library = await request<{ id: number; name: string }>('/kb/project-archive')
+      this.setData({
+        projectArchiveKbId: library.id || 0,
+        projectArchiveKbName: library.name || '',
+      })
+    } catch {
+      this.setData({ projectArchiveKbId: 0, projectArchiveKbName: '' })
+    }
+  },
+
+  openProjectArchiveLibrary() {
+    if (!this.data.projectArchiveKbId) return
+    wx.navigateTo({ url: `/pages/kb/detail?id=${this.data.projectArchiveKbId}` })
   },
 
   async resolveHomeFallback(): Promise<{ id: number; name: string } | null> {

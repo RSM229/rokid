@@ -9,6 +9,8 @@
       <view class="status">{{doc.status}}</view>
       <view class="muted" wx:if="{{doc.doc_number}}">编号：{{doc.doc_number}}</view>
       <view class="muted" wx:if="{{doc.doc_type}}">类型：{{doc.doc_type}}</view>
+      <view wx:if="{{doc.archive_sync_status === 'failed'}}" class="muted">项目资料库同步失败：{{doc.archive_sync_error || '请重试'}}</view>
+      <button wx:if="{{doc.archive_sync_status === 'failed' && doc.can_retry_archive}}" size="mini" bindtap="retryArchive">重试归档</button>
     </view>
 
     <!-- 文书详情：直接铺开正文/影像/补填/签认履历（2026-10-15 定稿：内容优先，PDF/Word 收进底部按钮） -->
@@ -75,6 +77,7 @@
 
     <!-- 业务动作：签认 / 审批（同款 doc-btn 样式） -->
     <view class="actions">
+      <button wx:if="{{doc.status !== '已归档'}}" class="doc-btn ghost" bindtap="openCollaboration">发起协作</button>
       <button wx:if="{{doc.status !== '已归档'}}" class="doc-btn" bindtap="openSign">本人签认 / 项目用章</button>
       <button wx:if="{{doc.status === '草稿'}}" class="doc-btn" loading="{{submitting}}" bindtap="submit">提交审批</button>
       <button wx:if="{{canApprove}}" class="doc-btn" loading="{{approving}}" bindtap="approve">审批通过</button>

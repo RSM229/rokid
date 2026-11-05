@@ -42,8 +42,10 @@ from app.models.knowledge_base import (
     KbTag,
     ensure_kb_folder_tree,
 )
+from app.models.project_archive import ProjectArchiveLibrary
+from app.models.project_member import ProjectMember
 from app.models.user import User
-from app.routers.auth import get_current_user
+from app.routers.auth import get_current_user, require_project_id
 from app.services import model_gateway
 from app.services.ai_client import ai_client
 from app.services.knowledge_service import (
@@ -120,6 +122,22 @@ async def _get_kb(db: AsyncSession, kb_id: int) -> KnowledgeBase:
 def _reject_builtin(kb: KnowledgeBase, action: str = "修改") -> None:
     if kb.is_builtin:
         raise HTTPException(status_code=403, detail=f"系统内置知识库不支持{action}")
+
+
+async def _is_project_archive(db: AsyncSession, kb_id: int) -> bool:
+    return bool(await db.scalar(
+        select(ProjectArchiveLibrary.id).where(
+            ProjectArchiveLibrary.kb_id == kb_id
+        )
+    ))
+
+
+async def _reject_archive_member_management(db: AsyncSession, kb_id: int) -> None:
+    if await _is_project_archive(db, kb_id):
+        raise HTTPException(
+            status_code=409,
+            detail="项目资料库成员由项目在岗成员自动同步，不能手工变更",
+        )
 
 
 async def _get_member(db: AsyncSession, kb_id: int, user_id: int) -> Optional[KnowledgeBaseMember]:
@@ -330,6 +348,9 @@ async def list_knowledge_bases(
             )
         )).all()
     )
+    archive_kb_ids = set((await db.execute(
+        select(ProjectArchiveLibrary.kb_id)
+    )).scalars().all())
 
     items = [
         {
@@ -337,11 +358,13 @@ async def list_knowledge_bases(
             "name": kb.name,
             "description": kb.description,
             "kb_type": kb.kb_type,
+            "project_id": kb.project_id,
             "owner_id": kb.owner_id,
             "role": role,
             "is_owner": kb.owner_id == user.id,
             "is_builtin": bool(kb.is_builtin),
             "is_public": bool(kb.is_public),
+            "is_project_archive": kb.id in archive_kb_ids,
             "document_count": int(doc_counts.get(kb.id, 0)),
             "member_count": int(member_counts.get(kb.id, 0)),
             "created_at": kb.created_at.isoformat() if kb.created_at else None,
@@ -386,6 +409,42 @@ async def my_home_knowledge_base(
     }
 
 
+@router.get("/project-archive")
+async def project_archive_library(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return/create the unique shared archive KB for the current project."""
+    project_id = require_project_id(user)
+    member_exists = await db.scalar(
+        select(ProjectMember.id).where(
+            ProjectMember.project_id == project_id,
+            ProjectMember.user_id == user.id,
+            ProjectMember.left_at.is_(None),
+        )
+    )
+    if not member_exists:
+        raise HTTPException(status_code=403, detail="您不是该项目在岗成员")
+    from app.services.project_archive import ensure_project_archive_library
+
+    try:
+        kb = await ensure_project_archive_library(db, project_id, user.id)
+        await db.commit()
+    except RuntimeError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    member = await _get_member(db, kb.id, user.id)
+    return {
+        "id": kb.id,
+        "name": kb.name,
+        "description": kb.description,
+        "kb_type": kb.kb_type,
+        "project_id": kb.project_id,
+        "role": member.role if member else "viewer",
+        "is_project_archive": True,
+    }
+
+
 @router.post("")
 async def create_knowledge_base(
     req: KnowledgeBaseCreate,
@@ -394,6 +453,26 @@ async def create_knowledge_base(
 ):
     if req.kb_type not in {"personal", "shared"}:
         raise HTTPException(status_code=400, detail="kb_type 仅支持 personal/shared")
+    if req.kb_type == "shared" and req.project_id is not None:
+        member_id = await db.scalar(select(ProjectMember.id).where(
+            ProjectMember.project_id == req.project_id,
+            ProjectMember.user_id == user.id,
+            ProjectMember.left_at.is_(None),
+        ))
+        if not member_id:
+            raise HTTPException(status_code=403, detail="只能创建自己所在项目的共享资料库")
+        existing_project_kb = await db.scalar(
+            select(KnowledgeBase.id).where(
+                KnowledgeBase.project_id == req.project_id,
+                KnowledgeBase.kb_type == "shared",
+                KnowledgeBase.is_builtin.is_(False),
+            ).order_by(KnowledgeBase.id)
+        )
+        if existing_project_kb is not None:
+            raise HTTPException(
+                status_code=409,
+                detail="每个项目只能有一个共享资料库，请使用现有项目资料库",
+            )
     kb = KnowledgeBase(
         name=req.name.strip(),
         description=(req.description or "").strip() or None,
@@ -508,6 +587,8 @@ async def publish_knowledge_base(
     kb = await _get_kb(db, kb_id)
     await _require_role(db, kb, user, "admin")
     _reject_builtin(kb, "修改发布状态")
+    if await _is_project_archive(db, kb_id):
+        raise HTTPException(status_code=409, detail="项目资料库用于项目内部归档，不能发布到广场")
     if req.is_public and kb.kb_type != "shared":
         raise HTTPException(status_code=400, detail="仅共享知识库可发布到广场")
     kb.is_public = bool(req.is_public)
@@ -554,6 +635,11 @@ async def get_knowledge_base(
             select(func.count(KnowledgeBaseMember.id)).where(KnowledgeBaseMember.kb_id == kb_id)
         )
     ).scalar() or 0
+    is_project_archive = bool(await db.scalar(
+        select(ProjectArchiveLibrary.id).where(
+            ProjectArchiveLibrary.kb_id == kb_id
+        )
+    ))
     return {
         "id": kb.id,
         "name": kb.name,
@@ -564,6 +650,7 @@ async def get_knowledge_base(
         "is_owner": kb.owner_id == user.id,
         "is_builtin": bool(kb.is_builtin),
         "is_public": bool(kb.is_public),
+        "is_project_archive": is_project_archive,
         "invite_code": kb.invite_code if KB_ROLE_LEVEL[member.role] >= 2 else None,
         "document_count": int(document_count),
         "member_count": int(member_count),
@@ -599,6 +686,15 @@ async def delete_knowledge_base(
     if kb.owner_id != user.id:
         raise HTTPException(status_code=403, detail="仅创建者可删除知识库")
     _reject_builtin(kb, "删除")
+    if await db.scalar(
+        select(ProjectArchiveLibrary.id).where(
+            ProjectArchiveLibrary.kb_id == kb_id
+        )
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="项目资料库由项目归档同步维护，不能删除",
+        )
     docs = (
         await db.execute(select(KnowledgeDocument).where(KnowledgeDocument.kb_id == kb_id))
     ).scalars().all()
@@ -669,6 +765,7 @@ async def add_member(
     kb = await _get_kb(db, kb_id)
     actor = await _require_role(db, kb, user, "admin")
     _reject_builtin(kb)
+    await _reject_archive_member_management(db, kb_id)
     if req.role not in {"admin", "editor", "viewer"}:
         raise HTTPException(status_code=400, detail="角色仅支持 admin/editor/viewer")
 
@@ -703,6 +800,7 @@ async def update_member_role(
     kb = await _get_kb(db, kb_id)
     actor = await _require_role(db, kb, user, "admin")
     _reject_builtin(kb)
+    await _reject_archive_member_management(db, kb_id)
     if req.role not in {"admin", "editor", "viewer"}:
         raise HTTPException(status_code=400, detail="角色仅支持 admin/editor/viewer")
     member = await _get_member(db, kb_id, member_user_id)
@@ -728,6 +826,7 @@ async def remove_member(
     kb = await _get_kb(db, kb_id)
     actor = await _require_role(db, kb, user, "admin")
     _reject_builtin(kb)
+    await _reject_archive_member_management(db, kb_id)
     member = await _get_member(db, kb_id, member_user_id)
     if member is None:
         raise HTTPException(status_code=404, detail="成员不存在")
@@ -752,6 +851,8 @@ async def get_invite(
     kb = await _get_kb(db, kb_id)
     await _require_role(db, kb, user, "admin")
     _reject_builtin(kb)
+    if await _is_project_archive(db, kb_id):
+        raise HTTPException(status_code=409, detail="项目资料库成员由项目成员关系自动同步")
     if kb.kb_type != "shared":
         raise HTTPException(status_code=400, detail="仅共享知识库支持邀请")
     if not kb.invite_code:
@@ -773,6 +874,8 @@ async def join_knowledge_base(
     ).scalar_one_or_none()
     if kb is None or kb.kb_type != "shared":
         raise HTTPException(status_code=404, detail="邀请码无效")
+    if await _is_project_archive(db, kb.id):
+        raise HTTPException(status_code=403, detail="项目资料库只能通过加入项目获得访问权限")
     existing = await _get_member(db, kb.id, user.id)
     if existing:
         return {"detail": "已加入该知识库", "kb_id": kb.id, "role": existing.role}

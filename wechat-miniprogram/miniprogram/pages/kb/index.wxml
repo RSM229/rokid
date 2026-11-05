@@ -6,6 +6,14 @@
   <view wx:if="{{resolving}}" class="empty">正在加载资料库…</view>
 
   <block wx:else>
+    <view wx:if="{{projectArchiveKbId}}" class="project-archive-entry" bindtap="openProjectArchiveLibrary">
+      <view class="project-archive-copy">
+        <text class="project-archive-title">项目资料库</text>
+        <text class="project-archive-name">{{projectArchiveKbName}}</text>
+      </view>
+      <text class="project-archive-arrow">›</text>
+    </view>
+
     <!-- 面包屑：非根层显示，可点「全部」回到根 -->
     <view wx:if="{{currentFolderId !== 0}}" class="breadcrumb">
       <text class="crumb root" data-id="0" bindtap="goBreadcrumb">全部</text>

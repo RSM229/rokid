@@ -12,14 +12,14 @@ from pathlib import Path
 
 from app.db import get_db
 from app.config import settings
-from app.models.user import User, UserRole, Project
+from app.models.user import User, Project
 from app.models.document import Document, DocType, DocStatus
 from app.models.work_record import WorkRecord, WorkRecordType, WorkRecordStatus
 from app.models.hazard import Hazard, HazardStatus
 from app.models.rectification import RectificationRecord
 from app.routers.auth import (
     get_current_user,
-    require_role,
+    require_permission,
     require_project_id,
     project_scope_id,
     can_read_project,
@@ -307,6 +307,11 @@ async def get_document(
     return {
         "content_revision": doc.content_revision,
         "signed_pdf_path": doc.signed_pdf_path,
+        "archive_sync_status": doc.archive_sync_status,
+        "archive_sync_error": doc.archive_sync_error,
+        "can_retry_archive": (
+            doc.creator_id == user.id or user.has_permission("document_approve")
+        ),
         "reviewed_at": doc.reviewed_at.isoformat() if doc.reviewed_at else None,
         "id": doc.id,
         "doc_type": doc.doc_type,
@@ -321,6 +326,30 @@ async def get_document(
         "pdf_path": doc.pdf_path,
         "created_at": doc.created_at.isoformat(),
         "updated_at": doc.updated_at.isoformat() if doc.updated_at else None,
+    }
+
+
+@router.post("/{doc_id}/archive-sync")
+async def retry_project_archive_sync(
+    doc_id: int,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    project_id = require_project_id(user)
+    doc = (await db.execute(select(Document).where(
+        Document.id == doc_id, Document.project_id == project_id
+    ))).scalar_one_or_none()
+    if not doc:
+        raise HTTPException(status_code=404, detail="文书不存在")
+    if doc.creator_id != user.id and not user.has_permission("document_approve"):
+        raise HTTPException(status_code=403, detail="无权重试项目资料库归档")
+    if not (doc.docx_path or doc.pdf_path or doc.signed_pdf_path):
+        raise HTTPException(status_code=409, detail="文书尚无可归档的正式文件")
+    await _sync_project_archive_copy(db, doc, user)
+    return {
+        "status": doc.archive_sync_status,
+        "error": doc.archive_sync_error,
+        "revision": doc.archive_synced_revision,
     }
 
 
@@ -409,24 +438,30 @@ async def submit_for_approval(
             raise HTTPException(400, "请补全文书：" + "、".join(missing))
     needs_approval = doc.doc_type in NEED_APPROVAL_TYPES
     doc.status = DocStatus.PENDING_APPROVAL.value if needs_approval else DocStatus.ARCHIVED.value
+    approver_rows = []
+    if needs_approval:
+        from app.services.permissions import project_members_with_permission
+        from app.services.collaboration import upsert_action_items
+        approver_rows = await project_members_with_permission(
+            db, project_id, "document_approve"
+        )
+        await upsert_action_items(
+            db,
+            project_id=project_id,
+            sender_id=user.id,
+            recipient_ids=[approver.id for _, approver in approver_rows],
+            object_type="document",
+            object_id=doc.id,
+            action_type="approve",
+            title=f"待审批文书：{doc.title}",
+            description=doc.doc_type,
+            source_prefix="workflow",
+            retire_missing=True,
+        )
     await db.commit()
     if needs_approval:
-        # Step 2（设计说明 §7.8.4）：投递判据由「全局单值角色 + 上下文 project_id」
-        # 改为「本项目成员表岗位集合」——修复跨项目兼职者漏发、
-        # 以及"已转场但上下文仍挂本项目"的误发。
-        from app.services.permissions import member_user_ids_with_roles
-
-        approver_ids = await member_user_ids_with_roles(
-            db, project_id, [UserRole.CHIEF_SUPERVISOR.value]
-        )
-        approvers = await db.execute(
-            select(User).where(
-                User.id.in_(approver_ids or [-1]),
-                User.is_active.is_(True),
-            )
-        )
         from app.services.notification import push_to_glasses, push_realtime
-        for approver in approvers.scalars().all():
+        for _, approver in approver_rows:
             await push_to_glasses(
                 user_id=approver.id,
                 title=f"待审批文书：{doc.title}",
@@ -449,7 +484,7 @@ async def submit_for_approval(
 @router.post("/{doc_id}/approve")
 async def approve_document(
     doc_id: int,
-    user: User = Depends(require_role("总监理工程师")),
+    user: User = Depends(require_permission("document_approve")),
     db: AsyncSession = Depends(get_db),
 ):
     """总监审批通过"""
@@ -471,8 +506,15 @@ async def approve_document(
     doc.content = {**(doc.content or {}), "review_date": doc.reviewed_at.date().isoformat()}
     doc.pdf_path = None
     doc.docx_path = None
+    doc.archive_sync_status = "pending"
+    doc.archive_sync_error = "审批信息已更新，等待重新生成并同步正式文件"
     # 已签PDF作为签署时快照保留；审阅日期在新导出中可见。
     doc.status = DocStatus.APPROVED.value
+    from app.services.collaboration import complete_action_items
+    await complete_action_items(
+        db, object_type="document", object_id=doc.id, action_type="approve",
+        actor_id=user.id, detail="审批通过",
+    )
     await db.commit()
     from app.services.notification import push_to_glasses, push_realtime, push_to_wechat
     await push_to_glasses(
@@ -511,7 +553,7 @@ async def approve_document(
 async def reject_document(
     doc_id: int,
     req: Optional[DocRejectRequest] = None,
-    user: User = Depends(require_role("总监理工程师")),
+    user: User = Depends(require_permission("document_approve")),
     db: AsyncSession = Depends(get_db),
 ):
     """总监驳回"""
@@ -522,12 +564,19 @@ async def reject_document(
     doc = result.scalar_one_or_none()
     if not doc:
         raise HTTPException(status_code=404, detail="文书不存在")
+    if doc.status != DocStatus.PENDING_APPROVAL.value:
+        raise HTTPException(status_code=400, detail="仅待审批文书可驳回")
     doc.status = DocStatus.REJECTED.value
     if req and req.reason.strip():
         doc.content = {
             **(doc.content or {}),
             "reject_reason": req.reason.strip(),
         }
+    from app.services.collaboration import complete_action_items
+    await complete_action_items(
+        db, object_type="document", object_id=doc.id, action_type="approve",
+        actor_id=user.id, detail="审批驳回",
+    )
     await db.commit()
     from app.services.notification import push_to_glasses, push_realtime, push_to_wechat
     await push_to_glasses(
@@ -572,6 +621,13 @@ def _merge_doc_images(doc) -> dict:
     if merged:
         data["attached_images"] = merged
     return data
+
+
+async def _sync_project_archive_copy(db: AsyncSession, doc: Document, user: User) -> None:
+    from app.services.project_archive import sync_document_to_project_archive
+
+    await sync_document_to_project_archive(db, doc, user)
+    await db.commit()
 
 
 @router.get("/{doc_id}/export-pdf")
@@ -648,6 +704,7 @@ async def export_pdf(
     # 更新文书 PDF 路径
     doc.pdf_path = f"/exports/{pdf_filename}"
     await db.commit()
+    await _sync_project_archive_copy(db, doc, user)
 
     return {
         "doc_id": doc_id,
@@ -676,6 +733,7 @@ async def export_docx(
     doc.docx_path = f"/exports/{output.name}"
     doc.pdf_path = None
     await db.commit()
+    await _sync_project_archive_copy(db, doc, user)
     return {"doc_id": doc.id, "docx_url": doc.docx_path}
 
 
@@ -749,6 +807,20 @@ async def delete_document(
     from app.models.document_signoff import DocumentSignoff
     if (await db.execute(select(DocumentSignoff.id).where(DocumentSignoff.document_id == doc.id).limit(1))).first():
         raise HTTPException(409, "文书有签认履历，请保留归档，不可删除")
+
+    from app.services.collaboration import cancel_action_items
+
+    await cancel_action_items(
+        db,
+        object_type="document",
+        object_id=doc.id,
+        actor_id=user.id,
+        detail="业务文书已删除，归档副本按安全策略保留",
+    )
+    # Keep the project archive copy after the source business document is removed.
+    from app.services.project_archive import detach_project_archive_copy
+
+    await detach_project_archive_copy(db, doc.id)
 
     # 清理关联文件（PDF/DOCX/签章件/附件图）
     paths = [doc.pdf_path, doc.docx_path, doc.signed_pdf_path]

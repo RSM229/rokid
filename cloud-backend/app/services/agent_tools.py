@@ -2110,6 +2110,9 @@ async def _generate_document(ctx: ToolContext, args: dict) -> dict:
         "tool": "generate_document", "entity": "document", "id": doc.id,
     })
     await ctx.db.commit()
+    from app.services.project_archive import sync_document_to_project_archive
+    await sync_document_to_project_archive(ctx.db, doc, ctx.user)
+    await ctx.db.commit()
 
     return _ok(
         f"已基于记录 #{record.id}（{record.record_type}）生成「{spec.name}」#{doc.id}，编号 {content.get('doc_number')}。",
@@ -2121,6 +2124,25 @@ async def _generate_document(ctx: ToolContext, args: dict) -> dict:
         undo={"tool": "generate_document", "entity": "document", "id": doc.id},
         data={"doc_id": doc.id, "record_id": record.id},
     )
+
+
+async def _prepare_business_object_delete(
+    db, object_type: str, object_id: int, actor_id: int
+) -> None:
+    """Retire collaboration work and release archive FKs before deletion."""
+    from app.services.collaboration import cancel_action_items
+
+    await cancel_action_items(
+        db,
+        object_type=object_type,
+        object_id=object_id,
+        actor_id=actor_id,
+        detail="业务对象已由智能体撤销",
+    )
+    if object_type == "document":
+        from app.services.project_archive import detach_project_archive_copy
+
+        await detach_project_archive_copy(db, object_id)
 
 
 async def undo_entity(ctx: ToolContext, entity: str, obj_id: int) -> dict:
@@ -2140,6 +2162,9 @@ async def undo_entity(ctx: ToolContext, entity: str, obj_id: int) -> dict:
         await ctx.db.execute(sql_text(
             "UPDATE task_assignments SET work_record_id = NULL WHERE work_record_id = :rid"
         ), {"rid": obj_id})
+        await _prepare_business_object_delete(
+            ctx.db, "work_record", obj_id, ctx.user.id
+        )
         await ctx.db.delete(obj)
     elif entity == "parallel_inspection":
         obj = await ctx.db.get(ParallelInspection, obj_id)
@@ -2154,6 +2179,9 @@ async def undo_entity(ctx: ToolContext, entity: str, obj_id: int) -> dict:
             if doc:
                 obj.generated_doc_id = None
                 await ctx.db.flush()
+                await _prepare_business_object_delete(
+                    ctx.db, "document", doc.id, ctx.user.id
+                )
                 await ctx.db.delete(doc)
         await ctx.db.delete(obj)
         await _audit(ctx.db, ctx.user, "agent_undo", {"tool": "undo_entity", "entity": entity, "id": obj_id})
@@ -2184,6 +2212,9 @@ async def undo_entity(ctx: ToolContext, entity: str, obj_id: int) -> dict:
         await ctx.db.execute(sql_text(
             "UPDATE work_records SET generated_doc_id = NULL WHERE generated_doc_id = :did"
         ), {"did": obj_id})
+        await _prepare_business_object_delete(
+            ctx.db, "document", obj_id, ctx.user.id
+        )
         await ctx.db.delete(obj)
         await _audit(ctx.db, ctx.user, "agent_undo", {"tool": "undo_entity", "entity": entity, "id": obj_id})
         await ctx.db.commit()
@@ -2233,6 +2264,9 @@ async def _undo_last_action(ctx: ToolContext, args: dict) -> dict:
         await ctx.db.execute(sql_text(
             "UPDATE task_assignments SET work_record_id = NULL WHERE work_record_id = :rid"
         ), {"rid": obj_id})
+        await _prepare_business_object_delete(
+            ctx.db, "work_record", obj_id, ctx.user.id
+        )
         await ctx.db.delete(obj)
     elif entity == "parallel_inspection":
         obj = await ctx.db.get(ParallelInspection, obj_id)
@@ -2247,6 +2281,9 @@ async def _undo_last_action(ctx: ToolContext, args: dict) -> dict:
             if doc:
                 obj.generated_doc_id = None
                 await ctx.db.flush()
+                await _prepare_business_object_delete(
+                    ctx.db, "document", doc.id, ctx.user.id
+                )
                 await ctx.db.delete(doc)
         await ctx.db.delete(obj)
     elif entity == "hazard":
@@ -2267,6 +2304,9 @@ async def _undo_last_action(ctx: ToolContext, args: dict) -> dict:
         await ctx.db.execute(sql_text(
             "UPDATE work_records SET generated_doc_id = NULL WHERE generated_doc_id = :did"
         ), {"did": obj_id})
+        await _prepare_business_object_delete(
+            ctx.db, "document", obj_id, ctx.user.id
+        )
         await ctx.db.delete(obj)
     else:
         return _ok("这条记录类型暂不支持撤销。")

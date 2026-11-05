@@ -1869,6 +1869,7 @@ _OWNERSHIP_TABLES = {
     "rtc_call_audit",
     "signatures",
     "knowledge_base_members",
+    "collaboration_followers",
 }
 
 
@@ -1911,6 +1912,17 @@ async def _purge_user_references(db: AsyncSession, user_id: int, manager_id: int
                 delete(table).where(or_(*(col == user_id for col in user_fk_cols)))
             )
             continue
+        if table.name == "collaboration_items":
+            # A deleted recipient must not leave a permanent actionable item
+            # assigned to the account that performs the deletion.
+            await db.execute(
+                update(table)
+                .where(
+                    table.c.recipient_id == user_id,
+                    table.c.status == "pending",
+                )
+                .values(status="canceled", completed_at=datetime.now())
+            )
         # 业务类：逐列解除归属，保留业务记录
         for col in user_fk_cols:
             if col.nullable:

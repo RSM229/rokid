@@ -243,7 +243,13 @@ async def get_my_tasks(
     query = select(TaskAssignment).where(TaskAssignment.assignee_id == user.id)
     if scope is not None:
         query = query.where(TaskAssignment.project_id == scope)
-    if status:
+    if status == "待处理":
+        query = query.where(TaskAssignment.status.in_([
+            TaskStatus.PENDING.value,
+            TaskStatus.ACCEPTED.value,
+            TaskStatus.IN_PROGRESS.value,
+        ]))
+    elif status:
         query = query.where(TaskAssignment.status == status)
     query = query.order_by(TaskAssignment.created_at.desc())
     result = await db.execute(query)

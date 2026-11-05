@@ -35,7 +35,8 @@ from app.routers.auth import (
     project_scope_id,
 )
 from app.services.form_registry import FORMS, FORM_BY_CODE, form_groups
-from app.services.form_renderer import render_form
+from app.services.form_renderer import docx_to_pdf, render_form
+from app.services.project_archive import sync_document_to_project_archive
 from app.services.period_report_service import (
     doc_type_for as _doc_type_for,
     generate_aggregate_doc,
@@ -538,6 +539,7 @@ async def generate_form_from_record(
         existing.content = content
         existing.attached_images = attached_photos
         existing.docx_path = f"/exports/{docx_file.name}"
+        existing.archive_sync_status = "pending"
         # A PDF is always a conversion of the current DOCX. Never keep a PDF
         # generated from the previous revision of the same document.
         existing.pdf_path = None
@@ -589,6 +591,11 @@ async def generate_doc_from_record(
     )
     await db.commit()
 
+    # Archive synchronization is post-commit so an archive outage cannot roll back
+    # the generated business document. Re-generation updates the stable archive row.
+    await sync_document_to_project_archive(db, doc, user)
+    await db.commit()
+
     return {
         "doc_id": doc.id,
         "title": doc.title,
@@ -618,7 +625,7 @@ async def aggregate_generate(
     """
     project_id = require_project_id(user)
     try:
-        return await generate_aggregate_doc(
+        result = await generate_aggregate_doc(
             db,
             project_id,
             req.period,
@@ -629,6 +636,13 @@ async def aggregate_generate(
             force=True,
             extra_fields=req.extra_fields,
         )
+        await db.commit()
+        if isinstance(result, dict) and result.get("doc_id"):
+            doc = await db.get(Document, int(result["doc_id"]))
+            if doc:
+                await sync_document_to_project_archive(db, doc, user)
+                await db.commit()
+        return result
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     except RuntimeError as exc:
@@ -656,6 +670,8 @@ async def export_form_doc(
         if doc.pdf_path:
             cached_pdf = settings.export_dir / doc.pdf_path.replace("/exports/", "")
             if cached_pdf.exists():
+                await sync_document_to_project_archive(db, doc, user)
+                await db.commit()
                 return FileResponse(
                     str(cached_pdf), media_type="application/pdf",
                     filename=f"{doc.title}.pdf",
@@ -665,11 +681,13 @@ async def export_form_doc(
         docx_path = settings.export_dir / doc.docx_path.replace("/exports/", "")
         if not docx_path.exists():
             raise HTTPException(404, "Word 文件不存在")
-        from app.services.form_renderer import docx_to_pdf
         pdf = await asyncio.to_thread(docx_to_pdf, docx_path)
         if pdf is None:
             raise HTTPException(501, "服务器未安装 Word/LibreOffice，暂不支持 docx→pdf")
         doc.pdf_path = f"/exports/{pdf.name}"
+        await db.commit()
+        await db.refresh(doc)
+        await sync_document_to_project_archive(db, doc, user)
         await db.commit()
         return FileResponse(str(pdf), media_type="application/pdf", filename=f"{doc.title}.pdf")
     if not doc.docx_path:

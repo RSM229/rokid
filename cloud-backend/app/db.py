@@ -79,6 +79,48 @@ def _reconcile_missing_columns(conn: Connection, table_names=None) -> None:
             conn.execute(text(statement))
             logger.info("数据库迁移：已添加字段 %s.%s", table.name, column.name)
 
+    # ``create_all`` cannot add constraints to existing tables. Keep the
+    # source-document mapping one-to-one on upgraded databases as well.
+    if table_names is None or "knowledge_documents" in table_names:
+        if "knowledge_documents" in existing_tables:
+            columns = {
+                item["name"]
+                for item in inspect(conn).get_columns("knowledge_documents")
+            }
+            if "source_document_id" in columns:
+                indexes = inspect(conn).get_indexes("knowledge_documents")
+                constraints = inspect(conn).get_unique_constraints(
+                    "knowledge_documents"
+                )
+                has_unique_source_index = any(
+                    item.get("unique") and item.get("column_names") == ["source_document_id"]
+                    for item in indexes
+                ) or any(
+                    item.get("column_names") == ["source_document_id"]
+                    for item in constraints
+                )
+                if not has_unique_source_index:
+                    duplicates = conn.execute(text(
+                        "SELECT source_document_id FROM knowledge_documents "
+                        "WHERE source_document_id IS NOT NULL "
+                        "GROUP BY source_document_id HAVING COUNT(*) > 1 LIMIT 1"
+                    )).first()
+                    if duplicates:
+                        logger.error(
+                            "无法创建项目归档来源唯一索引：knowledge_documents.source_document_id "
+                            "存在重复值 %s", duplicates[0],
+                        )
+                    else:
+                        index_name = preparer.quote(
+                            "uq_knowledge_documents_source_document_id"
+                        )
+                        table_name = preparer.quote("knowledge_documents")
+                        column_name = preparer.quote("source_document_id")
+                        conn.execute(text(
+                            f"CREATE UNIQUE INDEX {index_name} ON {table_name} "
+                            f"({column_name})"
+                        ))
+
 
 async def init_db():
     """初始化数据库表，并非破坏性地补齐新增字段。"""
@@ -109,6 +151,7 @@ async def init_db():
     from app.models import role_permission  # noqa: F401  # Step 3：角色与权限矩阵
     from app.models import security_question  # noqa: F401  # 密保问题（忘记密码自助重置）
     from app.models import agent_draft  # noqa: F401  # 聊天追问草稿（多轮补字段持久状态）
+    from app.models import collaboration, project_archive  # noqa: F401
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         await conn.run_sync(_reconcile_missing_columns)

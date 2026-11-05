@@ -1240,6 +1240,9 @@ async def create_rectification_doc(
     ))
     await db.commit()
     await db.refresh(doc)
+    from app.services.project_archive import sync_document_to_project_archive
+    await sync_document_to_project_archive(db, doc, user)
+    await db.commit()
 
     return {
         "doc_id": doc.id,
@@ -1337,6 +1340,9 @@ async def create_notify_doc(
     hazard.notify_doc_id = doc.id
     await db.commit()
     await db.refresh(doc)
+    from app.services.project_archive import sync_document_to_project_archive
+    await sync_document_to_project_archive(db, doc, user)
+    await db.commit()
 
     return {
         "doc_id": doc.id,
@@ -1485,6 +1491,9 @@ async def create_reply_doc(
     hazard.reply_doc_id = doc.id
     await db.commit()
     await db.refresh(doc)
+    from app.services.project_archive import sync_document_to_project_archive
+    await sync_document_to_project_archive(db, doc, user)
+    await db.commit()
 
     return {
         "doc_id": doc.id,

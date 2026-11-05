@@ -19,6 +19,9 @@ interface DocumentDetail {
   created_at?: string
   signed_pdf_path?: string
   updated_at?: string | null
+  archive_sync_status?: string | null
+  archive_sync_error?: string | null
+  can_retry_archive?: boolean
 }
 
 const SUBMITTABLE_STATUS = '草稿'
@@ -419,6 +422,33 @@ Page(themed({
         fail() { wx.hideLoading(); wx.showToast({ title: 'Word下载失败', icon: 'none' }) },
       })
     }).catch(error => { wx.hideLoading(); wx.showToast({ title: (error as Error).message, icon: 'none' }) })
+  },
+
+  async retryArchive() {
+    const id = this.data.doc?.id
+    if (!id) return
+    wx.showLoading({ title: '同步项目资料库', mask: true })
+    try {
+      const result = await request<{ status: string; error?: string | null }>(
+        `/document/${id}/archive-sync`, { method: 'POST', data: {} },
+      )
+      await this.loadDoc(id)
+      if (result.status === 'synced') {
+        wx.showToast({ title: '已同步到项目资料库', icon: 'success' })
+      } else {
+        wx.showModal({ title: '同步未完成', content: result.error || '请稍后重试', showCancel: false })
+      }
+    } catch (error) {
+      wx.showModal({ title: '同步失败', content: (error as Error).message, showCancel: false })
+    } finally {
+      wx.hideLoading()
+    }
+  },
+
+  openCollaboration() {
+    const doc = this.data.doc
+    if (!doc) return
+    wx.navigateTo({ url: `/pages/todo/compose?type=document&id=${doc.id}&title=${encodeURIComponent(doc.title || doc.doc_type)}` })
   },
 
   openPdf() {

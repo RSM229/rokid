@@ -698,6 +698,10 @@ async def generate_supervision_log(
         except Exception as exc2:  # noqa: BLE001
             logger.warning("监理日志 PDF 生成失败（文书已入库）：%s", exc2)
 
+    from app.services.project_archive import sync_document_to_project_archive
+    await sync_document_to_project_archive(db, doc, signer)
+    await db.commit()
+
     summary = {
         "work_records": len(work_records),
         "hazards": len(hazards),
@@ -990,6 +994,10 @@ async def generate_safety_log(
     except Exception as exc:  # noqa: BLE001
         logger.warning("安全监理日志 docx 生成失败（文书已入库）：%s", exc)
 
+    from app.services.project_archive import sync_document_to_project_archive
+    await sync_document_to_project_archive(db, doc, signer)
+    await db.commit()
+
     summary = {
         "work_records": len(work_records),
         "hazards": len(hazards),
@@ -1054,6 +1062,10 @@ async def generate_aggregate_doc(
             await db.commit()
         except Exception as exc:  # noqa: BLE001
             logger.warning("监理日志 docx 附件生成失败（文书与 PDF 已入库，跳过 docx）：%s", exc)
+
+        from app.services.project_archive import sync_document_to_project_archive
+        await sync_document_to_project_archive(db, daily_doc, supervisor)
+        await db.commit()
         return {**daily, "docx_url": daily_doc.docx_path, "form_code": "gd_b_220_rizhi", "form_name": "监理日志"}
 
     title = spec.default_title.format(date=start.isoformat(), period=period_label) or (
@@ -1153,6 +1165,10 @@ async def generate_aggregate_doc(
         await db.rollback()
         docx_file.unlink(missing_ok=True)
         raise
+
+    from app.services.project_archive import sync_document_to_project_archive
+    await sync_document_to_project_archive(db, doc, signer)
+    await db.commit()
 
     return {
         "doc_id": doc.id,

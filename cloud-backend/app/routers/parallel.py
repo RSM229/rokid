@@ -180,6 +180,9 @@ async def generate_document(pid: int, user: User = Depends(get_current_user), db
     await db.flush()
     p.generated_doc_id = doc.id
     await db.commit()
+    from app.services.project_archive import sync_document_to_project_archive
+    await sync_document_to_project_archive(db, doc, user)
+    await db.commit()
     return {"doc_id": doc.id, "doc_number": content["doc_number"], "docx_url": doc.docx_path}
 
 

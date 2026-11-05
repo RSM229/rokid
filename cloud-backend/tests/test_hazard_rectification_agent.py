@@ -83,4 +83,7 @@ def test_gdaq30308_notice_keeps_hazard_link_and_deferred_receipt_fields():
     assert hazard.rectification_doc_id == doc.id
     assert hazard.status == HazardStatus.NOTIFIED.value
     assert audit.action == "hazard_rectification_doc_create"
-    assert db.commits == 1
+    # The business document and hazard link commit first; project-archive
+    # synchronization then runs in its own post-commit transaction.
+    assert db.commits == 2
+    assert doc.archive_sync_status == 'pending'

@@ -16,7 +16,7 @@ from app.config import (
     check_critical_security,
 )
 from app.routers import auth, hazard, document, knowledge, ledger, watermark, simulator, local_ai
-from app.routers import work_record, task, knowledge_graph, project
+from app.routers import work_record, task, collaboration, knowledge_graph, project
 from app.routers import media, miniprogram_auth
 from app.routers import signature, inspection, ws
 from app.routers import acceptance_template, wechat_notice
@@ -188,6 +188,7 @@ app.include_router(simulator.router, prefix="/api", tags=["眼镜端模拟器"])
 app.include_router(local_ai.router, prefix="/api/local", tags=["本地AI服务"])
 app.include_router(work_record.router, prefix="/api/work-record", tags=["工作记录"])
 app.include_router(task.router, prefix="/api/task", tags=["派单管理"])
+app.include_router(collaboration.router, prefix="/api/collaboration", tags=["协作待办"])
 app.include_router(knowledge_graph.router, prefix="/api/kg", tags=["知识图谱"])
 app.include_router(project.router, prefix="/api/project", tags=["项目管理"])
 app.include_router(

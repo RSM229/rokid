@@ -19,6 +19,7 @@
     "pages/work/index",
     "pages/dashboard/index",
     "pages/todo/index",
+    "pages/todo/compose",
     "pages/hazards/index",
     "pages/knowledge/index",
     "pages/knowledge/detail",

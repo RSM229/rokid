@@ -336,6 +336,8 @@ def business_record_fields(record, project=None) -> dict:
 def invalidate_document(doc):
     """保留签署历史，旧版本签章不可再用于新内容。"""
     doc.content_revision = (doc.content_revision or 1) + 1
+    doc.archive_sync_status = "pending"
+    doc.archive_sync_error = "文书内容已修订，等待重新生成并同步"
     doc.pdf_path = None
     doc.docx_path = None
     doc.signed_pdf_path = None

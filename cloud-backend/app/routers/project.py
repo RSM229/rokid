@@ -924,6 +924,23 @@ async def add_member(
         f"项目 #{project_id} += 用户 #{req.user_id}({target.username}) 岗位={role}"
         + (f" 附加={extras}" if extras else ""),
     )
+    if existing is not None:
+        from app.services.permissions import permissions_for_roles
+        from app.services.collaboration import cancel_action_items
+
+        if 'document_approve' not in permissions_for_roles([role, *(extras or [])]):
+            await cancel_action_items(
+                db,
+                project_id=project_id,
+                recipient_id=req.user_id,
+                action_type='approve',
+                actor_id=manager.id,
+                detail='项目岗位调整后不再具备审批权限',
+            )
+    from app.services.project_archive import sync_project_archive_members
+
+    await db.flush()
+    await sync_project_archive_members(db, project_id, manager.id)
     await db.commit()
     return {
         "detail": detail, "project_id": project_id,
@@ -970,6 +987,17 @@ async def remove_member(
     member.left_at = datetime.now()
     if target is not None and target.project_id == project_id:
         target.project_id = None
+    from app.services.collaboration import cancel_action_items
+    from app.services.project_archive import sync_project_archive_members
+
+    await cancel_action_items(
+        db,
+        project_id=project_id,
+        recipient_id=user_id,
+        actor_id=manager.id,
+        detail="责任人已离开项目",
+    )
+    await sync_project_archive_members(db, project_id, manager.id)
     _write_audit(
         db, manager, "project_member_remove",
         f"项目 #{project_id} -= 用户 #{user_id}({getattr(target, 'username', '')}) "
@@ -1036,6 +1064,16 @@ async def complete_project(
     # ② 项目状态与结项时间
     project.status = PROJECT_STATUS_COMPLETED
     project.completed_at = now
+    from app.services.collaboration import cancel_action_items
+    from app.services.project_archive import sync_project_archive_members
+
+    await cancel_action_items(
+        db,
+        project_id=project_id,
+        actor_id=user.id,
+        detail="项目已结项",
+    )
+    await sync_project_archive_members(db, project_id, user.id)
 
     # ③ 清空停留本项目的上下文（下次需重新选项目）
     cleared = 0
@@ -1098,6 +1136,9 @@ async def reopen_project(
 
     project.status = PROJECT_STATUS_ACTIVE
     project.completed_at = None
+    from app.services.project_archive import sync_project_archive_members
+
+    await sync_project_archive_members(db, project_id, user.id)
     ip = await _client_ip(request)
     _write_audit(
         db, user, "project_reopen",

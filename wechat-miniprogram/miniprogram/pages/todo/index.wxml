@@ -1,17 +1,30 @@
 <view class="page tab-host" style="{{themeStyle}}">
   <glass-nav-bar title="待办事项" left="back" />
-  <tab-bar active="" />
-
-  <view class="filter-row">
+  <scroll-view scroll-x class="view-tabs" show-scrollbar="false">
+    <view wx:for="{{views}}" wx:key="key" data-view="{{item.key}}" class="view-tab {{view === item.key ? 'active' : ''}}" bindtap="selectView">
+      {{item.label}}<text wx:if="{{item.key === 'action' && pendingCount}}" class="count">{{pendingCount > 99 ? '99+' : pendingCount}}</text>
+    </view>
+  </scroll-view>
+  <view wx:if="{{view === 'tasks'}}" class="filter-row">
     <picker mode="selector" range="{{statuses}}" value="{{statusIndex}}" bindchange="onFilterChange">
       <view class="filter">状态：{{statuses[statusIndex]}} ▾</view>
     </picker>
     <text class="muted">共 {{tasks.length}} 项</text>
   </view>
 
-  <view wx:if="{{loading && !tasks.length}}" class="empty">正在加载派单…</view>
-  <view wx:elif="{{!tasks.length}}" class="empty">当前没有符合条件的派单</view>
-  <view wx:for="{{tasks}}" wx:key="id" class="card task {{focusId === item.id ? 'focused' : ''}}">
+  <view wx:if="{{view !== 'tasks' && loading && !items.length}}" class="empty">正在加载待办事项…</view>
+  <view wx:elif="{{view !== 'tasks' && !items.length && !(view === 'action' && tasks.length)}}" class="empty">{{view === 'action' ? '当前没有待处理事项' : view === 'cc' ? '当前没有抄送事项' : '当前没有发出的事项'}}</view>
+  <view wx:if="{{view !== 'tasks'}}" wx:for="{{items}}" wx:key="id" class="card task" data-id="{{item.id}}" bindtap="openDetail">
+    <view class="task-head"><view class="task-title">{{item.title}}</view><view class="state {{item.status}}">{{item.status_label || item.status}}</view></view>
+    <view class="tags"><text>{{item.object_type === 'work_record' ? '工作记录' : '工作文书'}}</text><text>{{item.mode_label || (item.mode === 'cc' ? '抄送跟踪' : '待我处理')}}</text><text>{{item.action_label || '请处理'}}</text></view>
+    <view wx:if="{{item.description}}" class="description">{{item.description}}</view>
+    <view class="muted">{{view === 'sent' ? '接收人：' + item.recipient_name : '发起人：' + item.sender_name}} · {{item.created_at}}</view>
+    <view wx:if="{{item.cc_names_text}}" class="muted">抄送：{{item.cc_names_text}}</view>
+  </view>
+
+  <view wx:if="{{view === 'tasks' && loading && !tasks.length}}" class="empty">正在加载派单…</view>
+  <view wx:if="{{view === 'tasks' && !loading && !tasks.length}}" class="empty">当前没有符合条件的派单</view>
+  <view wx:if="{{view === 'tasks' || view === 'action'}}" wx:for="{{tasks}}" wx:key="id" class="card task {{focusId === item.id ? 'focused' : ''}}">
     <view class="task-head">
       <view class="task-title">{{item.title}}</view>
       <view class="priority" style="{{item.priority === '紧急' ? 'color:#fff;background:#b93838' : item.priority === '高' ? 'color:#9d2e2e;background:#fee3e3' : ''}}">{{item.priority}}</view>
@@ -28,6 +41,35 @@
       <button wx:if="{{item.status === '进行中'}}" size="mini" data-id="{{item.id}}" bindtap="capture">上传取证</button>
       <button wx:if="{{item.status === '进行中'}}" class="primary" size="mini" data-id="{{item.id}}" loading="{{actionId === item.id}}" disabled="{{actionId}}" bindtap="complete">完成</button>
       <button size="mini" open-type="share" data-id="{{item.id}}">分享</button>
+    </view>
+  </view>
+
+  <view wx:if="{{detail}}" class="detail-mask" catchtouchmove="true">
+    <view class="detail-backdrop" bindtap="closeDetail"></view>
+    <view class="detail-panel">
+      <view class="detail-head"><text class="detail-title">{{detail.title}}</text><text class="close" bindtap="closeDetail">×</text></view>
+      <view class="tags"><text>{{detail.object_type === 'work_record' ? '工作记录' : '工作文书'}}</text><text>{{detail.mode_label || (detail.mode === 'cc' ? '抄送跟踪' : '待我处理')}}</text><text>{{detail.action_label || '请处理'}}</text><text>{{detail.status_label || detail.status}}</text></view>
+      <view class="muted">发起人：{{detail.sender_name}}</view>
+      <view wx:if="{{detail.description}}" class="description">{{detail.description}}</view>
+      <view wx:if="{{detail.cc_names_text}}" class="muted">抄送：{{detail.cc_names_text}}</view>
+      <view wx:if="{{detail.object_deleted}}" class="muted">关联业务对象已删除，仅保留协作记录</view>
+      <view wx:if="{{detail.object}}" class="business-summary">
+        <view>业务状态：{{detail.object.status}}</view>
+        <view wx:if="{{detail.object.record_type}}">记录类型：{{detail.object.record_type}}</view>
+        <view wx:if="{{detail.object.doc_type}}">文书类型：{{detail.object.doc_type}}</view>
+        <view wx:if="{{detail.object.reject_reason}}">驳回原因：{{detail.object.reject_reason}}</view>
+      </view>
+      <view wx:if="{{detail.history.length}}" class="history-title">处理记录</view>
+      <view wx:for="{{detail.history}}" wx:key="created_at" class="history-row">{{item.action_label || item.action}}{{item.actor_name ? ' · ' + item.actor_name : ''}}{{item.detail ? ' · ' + item.detail : ''}} · {{item.created_at}}</view>
+      <view class="actions">
+        <button wx:if="{{!detail.object_deleted}}" size="mini" bindtap="openBusiness">查看业务详情</button>
+        <button wx:if="{{!detail.object_deleted && detail.mode === 'action' && detail.status === 'pending' && detail.action_type !== 'approve' && !detail.is_signoff}}" class="primary" size="mini" bindtap="completeItem">标记完成</button>
+        <button wx:if="{{!detail.object_deleted && detail.mode === 'action' && detail.status === 'pending' && detail.is_signoff}}" class="primary" size="mini" bindtap="openBusiness">前往签认</button>
+        <button wx:if="{{!detail.object_deleted && detail.can_transfer}}" size="mini" bindtap="openTransfer">转派</button>
+        <button wx:if="{{detail.can_cancel}}" size="mini" bindtap="cancelItem">撤回</button>
+        <button wx:if="{{!detail.object_deleted && detail.mode === 'action' && detail.status === 'pending' && detail.action_type === 'approve'}}" size="mini" bindtap="rejectItem">驳回</button>
+        <button wx:if="{{!detail.object_deleted && detail.mode === 'action' && detail.status === 'pending' && detail.action_type === 'approve'}}" class="primary" size="mini" bindtap="completeItem">审批通过</button>
+      </view>
     </view>
   </view>
 </view>

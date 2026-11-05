@@ -6,6 +6,7 @@
     <view class="title">工作记录</view>
     <view class="toolbar-right">
       <view class="select-btn" bindtap="createRecord">新建记录</view>
+      <view class="select-btn" bindtap="openDocuments">文书管理</view>
       <view class="time-btn" bindtap="openTimeSheet">{{timeRangeLabel}} ▾</view>
       <view class="select-btn" bindtap="toggleSelectMode">
         {{selectMode ? '完成' : '选择'}}
@@ -275,6 +276,7 @@
       </view>
       <!-- 已有文书时仍允许查看；如需改用其他表式可先编辑/重新选择。 -->
       <view class="doc-btn-row">
+        <button wx:if="{{detailType === 'record'}}" class="doc-btn ghost" bindtap="openCollaboration">发起协作</button>
         <button class="doc-btn ghost" bindtap="editDetailRecord">编辑修改</button>
         <button wx:if="{{detail.generated_doc_id}}" class="doc-btn" bindtap="openRecordDocument">查看文书</button>
         <button wx:elif="{{detailType === 'hazard'}}" class="doc-btn" bindtap="generateRecordDocument" loading="{{generatingDoc}}">生成整改通知</button>

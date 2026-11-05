@@ -18,9 +18,55 @@ interface TaskItem {
   created_at?: string
 }
 
+interface CollaborationItem {
+  id: number
+  title: string
+  description: string
+  mode: 'action' | 'cc'
+  action_type: string
+  is_signoff?: boolean
+  object_type: 'work_record' | 'document'
+  object_id: number
+  status: string
+  status_label?: string
+  mode_label?: string
+  action_label?: string
+  sender_name: string
+  recipient_name?: string
+  cc_recipient_names?: string[]
+  cc_names_text?: string
+  can_cancel?: boolean
+  can_transfer?: boolean
+  created_at?: string
+}
+
+interface CollaborationHistory {
+  action: string
+  action_label?: string
+  actor_name?: string
+  detail: string
+  created_at: string
+}
+
+interface CollaborationDetail extends CollaborationItem {
+  object?: Record<string, any>
+  object_deleted?: boolean
+  history?: CollaborationHistory[]
+}
+
 Page(themed({
   data: {
     tasks: [] as TaskItem[],
+    items: [] as CollaborationItem[],
+    view: 'action',
+    views: [
+      { key: 'action', label: '待我处理' },
+      { key: 'cc', label: '抄送跟踪' },
+      { key: 'sent', label: '我发出的' },
+      { key: 'tasks', label: '派单任务' },
+    ],
+    pendingCount: 0,
+    detail: null as CollaborationDetail | null,
     loading: false,
     actionId: 0,
     statusFilter: '',
@@ -42,7 +88,7 @@ Page(themed({
       this.setData({ focusId })
       wx.removeStorageSync('gdjl_focus_task')
     }
-    if (this.data.tasks.length) this.load()
+    this.load()
   },
   onPullDownRefresh() {
     this.load().finally(() => wx.stopPullDownRefresh())
@@ -50,20 +96,103 @@ Page(themed({
   async load() {
     this.setData({ loading: true })
     try {
-      const query = this.data.statusFilter
-        ? `?status=${encodeURIComponent(this.data.statusFilter)}`
-        : ''
-      const result = await request<{ tasks: TaskItem[] }>(`/task/my-tasks${query}`)
-      const tasks = [...result.tasks]
+      const [collaboration, taskResult] = await Promise.all([
+        request<{ items: CollaborationItem[]; tasks: TaskItem[]; pending_count: number }>(`/collaboration/inbox?view=${this.data.view === 'tasks' ? 'action' : this.data.view}`),
+        request<{ tasks: TaskItem[] }>(`/task/my-tasks${this.data.view === 'action' ? '?status=待处理' : this.data.statusFilter ? `?status=${encodeURIComponent(this.data.statusFilter)}` : ''}`),
+      ])
+      const tasks = [...(taskResult.tasks || [])]
       if (this.data.focusId) {
         tasks.sort((a, b) => Number(b.id === this.data.focusId) - Number(a.id === this.data.focusId))
       }
-      this.setData({ tasks })
+      this.setData({ tasks, items: collaboration.items || [], pendingCount: collaboration.pending_count || 0 })
     } catch (error) {
       wx.showToast({ title: (error as Error).message, icon: 'none' })
     } finally {
       this.setData({ loading: false })
     }
+  },
+  selectView(event: WechatMiniprogram.TouchEvent) {
+    const view = String(event.currentTarget.dataset.view || 'action')
+    if (view === this.data.view) return
+    this.setData({ view })
+    this.load()
+  },
+  async openDetail(event: WechatMiniprogram.TouchEvent) {
+    const id = Number(event.currentTarget.dataset.id)
+    try {
+      const detail = await request<NonNullable<typeof this.data.detail>>(`/collaboration/${id}`)
+      this.setData({ detail })
+    } catch (error) {
+      wx.showToast({ title: (error as Error).message, icon: 'none' })
+    }
+  },
+  closeDetail() { this.setData({ detail: null }) },
+  openTransfer() {
+    const detail = this.data.detail
+    if (!detail) return
+    this.setData({ detail: null })
+    wx.navigateTo({ url: `/pages/todo/compose?transfer=${detail.id}` })
+  },
+  async cancelItem() {
+    const detail = this.data.detail
+    if (!detail) return
+    const confirm = await wx.showModal({ title: '撤回事项', content: '撤回后，处理人将不再承担此事项。' })
+    if (!confirm.confirm) return
+    try {
+      await request(`/collaboration/${detail.id}/cancel`, { method: 'POST', data: {} })
+      wx.showToast({ title: '已撤回', icon: 'success' })
+      this.setData({ detail: null })
+      await this.load()
+    } catch (error) { wx.showModal({ title: '撤回失败', content: (error as Error).message, showCancel: false }) }
+  },
+  openBusiness() {
+    const detail = this.data.detail
+    if (!detail) return
+    this.setData({ detail: null })
+    if (detail.object_deleted) {
+      wx.showToast({ title: '关联业务对象已删除', icon: 'none' })
+      return
+    }
+    const url = detail.object_type === 'work_record'
+      ? `/pages/work/index?id=${detail.object_id}&type=record`
+      : `/pages/documents/detail?id=${detail.object_id}`
+    wx.navigateTo({ url })
+  },
+  async completeItem() {
+    const detail = this.data.detail
+    if (!detail) return
+    try {
+      if (detail.action_type === 'approve') {
+        const base = detail.object_type === 'work_record' ? '/work-record' : '/document'
+        await request(`${base}/${detail.object_id}/approve`, { method: 'POST', data: {} })
+      } else {
+        await request(`/collaboration/${detail.id}/resolve`, { method: 'POST', data: { detail: '已完成' } })
+      }
+      wx.showToast({ title: '已处理', icon: 'success' })
+      this.setData({ detail: null })
+      await this.load()
+    } catch (error) {
+      wx.showModal({ title: '处理失败', content: (error as Error).message, showCancel: false })
+    }
+  },
+  rejectItem() {
+    const detail = this.data.detail
+    if (!detail || detail.action_type !== 'approve') return
+    wx.showModal({
+      title: '驳回事项', content: '请填写驳回原因', editable: true, placeholderText: '驳回原因',
+      success: async result => {
+        if (!result.confirm) return
+        const base = detail.object_type === 'work_record' ? '/work-record' : '/document'
+        try {
+          await request(`${base}/${detail.object_id}/reject`, { method: 'POST', data: detail.object_type === 'work_record' ? { reason: result.content || '小程序端驳回' } : { reason: result.content || '小程序端驳回' } })
+          wx.showToast({ title: '已驳回', icon: 'success' })
+          this.setData({ detail: null })
+          await this.load()
+        } catch (error) {
+          wx.showModal({ title: '驳回失败', content: (error as Error).message, showCancel: false })
+        }
+      },
+    })
   },
   onFilterChange(event: WechatMiniprogram.PickerChange) {
     const statusIndex = Number(event.detail.value)

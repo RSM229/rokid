@@ -505,14 +505,6 @@ Page(themed({
     ] as { icon: string; text: string; command: string; needProject: boolean; onlyNoProject?: boolean }[],
     /** 实际渲染的快捷动作：无项目时滤掉写业务的、并补一个「加入项目」入口 */
     visibleHeroActions: [] as { icon: string; text: string; command: string }[],
-    // 侧边栏「工作文书」子项：对应工作记录生成的各类文书（PDF/Word）
-    docEntries: [
-      { key: 'xunshi', label: '巡视记录', url: '/pages/documents/index?type=xunshi' },
-      { key: 'pangzhan', label: '旁站记录', url: '/pages/documents/index?type=pangzhan' },
-      { key: 'jianzheng', label: '见证记录', url: '/pages/documents/index?type=jianzheng' },
-      { key: 'yanshou', label: '验收记录', url: '/pages/documents/index?type=yanshou' },
-      { key: 'daiding', label: '待定记录', url: '/pages/documents/index?type=daiding' },
-    ] as { key: string; label: string; url: string }[],
     input: '',
     loading: false,
     activeProgressIndex: -1,
@@ -520,9 +512,8 @@ Page(themed({
     recording: false,
     speaking: false,
     showHistory: false,
-    // 侧边栏各组默认收起（点分组标题展开），避免抽屉过长
-    drawerDocsExpanded: false,
-    drawerLedgerExpanded: false,
+    todoPendingCount: 0,
+    // 侧边栏历史对话默认收起，避免抽屉过长
     drawerHistoryExpanded: false,
     historyList: [] as ChatHistory[],
     mode: 'chat' as 'chat' | 'hazard',
@@ -687,6 +678,7 @@ Page(themed({
     }
     this.refreshPendingVoice()
     this.loadPendingDrafts()
+    void this.loadTodoPendingCount()
     void this.resumeAgentProgress()
   },
 
@@ -3578,7 +3570,7 @@ Page(themed({
     })
   },
 
-  /** 工作记录卡「生成文书」：/form-docs/generate → 自动归档到侧边栏「工作文书」对应分类 */
+  /** 工作记录卡「生成文书」：/form-docs/generate → 同步到项目资料库对应目录 */
   async generateDocFromRecord(recordId: number) {
     if (this.data.loading) return
     wx.showLoading({ title: '生成文书...', mask: true })
@@ -3590,7 +3582,7 @@ Page(themed({
       })
       this.addMessage({
         role: 'assistant',
-        text: `✅ 已生成文书《${res.title}》，自动归档到侧边栏「工作文书」对应分类；可在文书管理中查看、签认并导出 PDF / Word。`,
+        text: `✅ 已生成文书《${res.title}》，并同步到项目资料库「项目文件夹 / 工作记录与表单」；可在文书管理中查看、签认并导出 PDF / Word。`,
         actions: [{ label: '查看文书', command: `navigate:/pages/documents/detail?id=${res.doc_id}` }],
       })
     } catch (error) {
@@ -3659,7 +3651,7 @@ Page(themed({
       if (result.undo) {
         actions.push({ label: '撤销', command: `agent-undo:${result.undo.entity}:${result.undo.id}` })
       }
-      // 工作记录卡：附「生成文书」（渲染省统表并归档到工作文书对应分类）
+      // 工作记录卡：附「生成文书」（渲染省统表并同步到项目资料库）
       for (const cd of cards) {
         if (cd.kind === 'work_record' && cd.id) {
           actions.push({ label: '生成 PDF/Word', command: `gen-doc:${cd.id}` })
@@ -3722,7 +3714,7 @@ Page(themed({
       if (recordId) void this.attachPhotoToRecord(recordId)
       return
     }
-    // 工作记录卡「生成文书」：渲染省统表文书，自动归档到侧边栏「工作文书」对应分类
+    // 工作记录卡「生成文书」：渲染省统表文书并同步到项目资料库
     if (command.startsWith('gen-doc:')) {
       const recordId = Number(command.slice('gen-doc:'.length))
       if (recordId) void this.generateDocFromRecord(recordId)
@@ -4829,6 +4821,7 @@ Page(themed({
       drawerHistoryExpanded: true,
     })
     void this.loadProjectSummary()
+    void this.loadTodoPendingCount()
     try {
       const result = await request<{ conversations: RemoteConversationSummary[] }>('/agent/conversations', {
         data: { limit: 30 },
@@ -4866,16 +4859,25 @@ Page(themed({
 
   closeHistory() { this.setData({ showHistory: false }) },
 
-  /** 侧边栏分组折叠：data-group = docs | ledger | history
-   *  （tools 组 2026-09-30 去重时整组移除，入口统一走「+」面板；
-   *    kb 组 2026-10-08 整组移除——资料库升为底栏 tab，规范资料库/我的笔记挂到「+」面板） */
+  async loadTodoPendingCount() {
+    if (!this.data.currentProjectId) {
+      this.setData({ todoPendingCount: 0 })
+      return
+    }
+    try {
+      const result = await request<{ pending_count: number }>('/collaboration/inbox?view=action')
+      this.setData({ todoPendingCount: result.pending_count || 0 })
+    } catch {
+      // 请求失败时清零，避免切换项目后显示上一个项目的红点。
+      this.setData({ todoPendingCount: 0 })
+    }
+  },
+
+  /** 侧边栏分组折叠：当前仅「历史对话」。
+   *  工作文书组已移除，文书管理入口保留在工作记录页；资料库为底栏 tab。 */
   toggleDrawerGroup(event: WechatMiniprogram.TouchEvent) {
     const group = String((event.currentTarget.dataset as { group?: string }).group || '')
-    if (group === 'docs') {
-      this.setData({ drawerDocsExpanded: !this.data.drawerDocsExpanded })
-    } else if (group === 'ledger') {
-      this.setData({ drawerLedgerExpanded: !this.data.drawerLedgerExpanded })
-    } else if (group === 'history') {
+    if (group === 'history') {
       this.setData({ drawerHistoryExpanded: !this.data.drawerHistoryExpanded })
     }
   },
@@ -4942,6 +4944,7 @@ Page(themed({
       this.currentSessionId = 0
       this.initMessages()
       void this.loadPendingDrafts()
+      void this.loadTodoPendingCount()
     } catch (error) {
       wx.showModal({ title: '切换失败', content: (error as Error).message, showCancel: false })
     } finally {

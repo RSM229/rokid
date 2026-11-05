@@ -1,5 +1,11 @@
 /* 玻璃拟态改造（浅色版） */
 .filter-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20rpx; }
+.view-tabs { white-space: nowrap; margin: 4rpx 0 24rpx; border-bottom: 1rpx solid rgba(33,53,74,.14); }
+.view-tab { position: relative; display: inline-flex; align-items: center; gap: 8rpx; padding: 18rpx 20rpx; color: #536273; font-size: 27rpx; }
+.view-tab.active { color: #176b62; font-weight: 650; border-bottom: 4rpx solid #176b62; }
+.count { min-width: 30rpx; height: 30rpx; line-height: 30rpx; padding: 0 8rpx; border-radius: 18rpx; text-align: center; color: #fff; background: #c83c35; font-size: 20rpx; }
+.state { flex: none; color: #6a7480; font-size: 23rpx; }
+.state.pending { color: #b73832; }
 .filter { padding: 16rpx 22rpx; border-radius: 16rpx; background: rgba(255,255,255,0.34); border: 2rpx solid rgba(255,255,255,0.60); }
 .task.focused { outline: 4rpx solid #d9a441; }
 .task-head { display: flex; align-items: center; justify-content: space-between; gap: 20rpx; }
@@ -14,3 +20,12 @@
 
 /* 列表卡片反复渲染，去模糊保性能 */
 .card { background: rgba(255,255,255,0.34); backdrop-filter: none; -webkit-backdrop-filter: none; border: 2rpx solid rgba(var(--brand-rgb, 22,119,255), 0.14); }
+.detail-mask { position: fixed; inset: 0; z-index: 1000; display: flex; align-items: flex-end; }
+.detail-backdrop { position: absolute; inset: 0; background: rgba(16,27,39,.42); }
+.detail-panel { position: relative; width: 100%; max-height: 82vh; overflow-y: auto; box-sizing: border-box; padding: 28rpx 28rpx calc(28rpx + env(safe-area-inset-bottom)); border-radius: 16rpx 16rpx 0 0; background: #f8fafb; }
+.detail-head { display: flex; align-items: flex-start; gap: 20rpx; justify-content: space-between; }
+.detail-title { flex: 1; font-size: 34rpx; line-height: 1.4; font-weight: 650; color: #172b3b; }
+.close { width: 48rpx; text-align: center; font-size: 44rpx; line-height: 44rpx; color: #677582; }
+.business-summary { margin-top: 24rpx; padding: 18rpx 0; border-top: 1rpx solid #dfe5e9; border-bottom: 1rpx solid #dfe5e9; color: #354756; line-height: 1.8; }
+.history-title { margin-top: 22rpx; font-weight: 650; }
+.history-row { padding: 12rpx 0; color: #5c6873; font-size: 23rpx; border-bottom: 1rpx solid #e5e9ec; }

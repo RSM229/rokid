@@ -421,6 +421,11 @@ Page(themed({
     } })
   },
 
+  /** 抽屉移除「工作文书」后，保留明确、稳定的文书管理入口。 */
+  openDocuments() {
+    wx.navigateTo({ url: '/pages/documents/index' })
+  },
+
   /** 点击卡片/复选框切换勾选（不依赖 checkbox 的 change 事件） */
   toggleSelectById(type: string, id: number) {
     if (type === 'hazard') {
@@ -738,7 +743,7 @@ Page(themed({
     else wx.showToast({ title: '请先生成该记录的文书', icon: 'none' })
   },
 
-  /** 详情弹窗「生成文书」：记录 → 省统表文书并归档「工作文书」；隐患 → 安全隐患整改通知单 */
+  /** 详情弹窗「生成文书」：记录 → 省统表文书并同步项目资料库；隐患 → 安全隐患整改通知单 */
   async generateRecordDocument(event?: WechatMiniprogram.TouchEvent) {
     const record = this.data.detail
     if (!record?.id || this.data.generatingDoc) return
@@ -772,7 +777,7 @@ Page(themed({
       wx.hideLoading()
       wx.showModal({
         title: '文书已生成',
-        content: `${title ? `《${title}》` : '文书'}已存入侧边栏「工作文书」对应分类，可查看、签认并导出 PDF / Word。`,
+        content: `${title ? `《${title}》` : '文书'}已同步到项目资料库「项目文件夹 / 工作记录与表单」，并可在文书管理中查看、签认和导出。`,
         showCancel: false,
       })
     } catch (error) {
@@ -958,6 +963,13 @@ Page(themed({
 
   closeDetail() {
     this.setData({ showDetail: false, detail: {}, detailPhotos: [], detailMediaEvidence: [], detailForms: [], selectedFormCode: '' })
+  },
+
+  openCollaboration() {
+    if (this.data.detailType !== 'record' || !this.data.detail.id) return
+    const detail = this.data.detail
+    const title = `${detail.record_type || '工作'}记录${detail.section ? ` · ${detail.section}` : ''}`
+    wx.navigateTo({ url: `/pages/todo/compose?type=work_record&id=${detail.id}&title=${encodeURIComponent(title)}` })
   },
 
   selectRecordForm(event: WechatMiniprogram.TouchEvent) {

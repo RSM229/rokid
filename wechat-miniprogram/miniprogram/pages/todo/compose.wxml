@@ -1,0 +1,14 @@
+<view class="page compose-page" style="{{themeStyle}}">
+  <glass-nav-bar title="{{isTransfer ? '转派事项' : '发起协作'}}" left="back" />
+  <view class="form">
+    <view class="field"><text class="label">关联内容</text><text class="value">{{objectTitle}}</text></view>
+    <view wx:if="{{!isTransfer}}" class="field"><text class="label">协作方式</text><radio-group bindchange="onModeChange" class="modes"><label><radio value="action" checked="{{mode === 'action' && !signoff}}" />请处理</label><label wx:if="{{objectType === 'document' && signSlots.length}}"><radio value="signoff" checked="{{signoff}}" />请签认</label><label><radio value="cc" checked="{{mode === 'cc'}}" />抄送跟踪</label></radio-group></view>
+    <view wx:if="{{!isTransfer && signoff}}" class="field"><text class="label">必签位置</text><picker range="{{signSlots}}" range-key="label" value="{{signSlotIndex < 0 ? 0 : signSlotIndex}}" bindchange="onSignSlotChange"><view class="picker">{{signSlotIndex < 0 ? '选择签认位置' : signSlots[signSlotIndex].label}}　›</view></picker></view>
+    <view class="field"><text class="label">发送给</text><picker range="{{members}}" range-key="real_name" value="{{memberIndex < 0 ? 0 : memberIndex}}" bindchange="onMemberChange"><view class="picker">{{memberIndex < 0 ? '选择项目成员' : members[memberIndex].real_name}}　›</view></picker></view>
+    <view wx:if="{{!isTransfer}}" class="field"><text class="label">抄送给</text><checkbox-group bindchange="onCCChange" class="cc-list"><label wx:for="{{members}}" wx:key="id"><checkbox value="{{item.id}}" />{{item.real_name}}</label></checkbox-group></view>
+    <view wx:if="{{!isTransfer}}" class="field"><text class="label">事项标题</text><input value="{{title}}" data-key="title" bindinput="onInput" maxlength="100" /></view>
+    <view class="field"><text class="label">说明</text><textarea value="{{description}}" data-key="description" bindinput="onInput" maxlength="1000" auto-height /></view>
+    <view wx:if="{{!isTransfer && mode === 'action'}}" class="field"><text class="label">期望完成日期</text><picker mode="date" value="{{deadline}}" bindchange="onDeadlineChange"><view class="picker">{{deadline || '不设置'}}　›</view></picker></view>
+    <button class="submit" loading="{{submitting}}" disabled="{{submitting}}" bindtap="submit">{{isTransfer ? '确认转派' : '发送'}}</button>
+  </view>
+</view>

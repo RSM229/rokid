@@ -399,6 +399,25 @@ async def confirm_offline_signoff(
         action="document_offline_signoff_confirmed",
         detail=f"doc={doc.id} revision={doc.content_revision or 1} slot={req.slot}",
     ))
+    from app.services.collaboration import complete_action_items
+    from app.services.document_signoffs import required_any_slot_groups_for
+
+    completed_group = False
+    for group in required_any_slot_groups_for(doc):
+        if req.slot in group:
+            for grouped_slot in group:
+                await complete_action_items(
+                    db, object_type="document", object_id=doc.id,
+                    action_type=f"signoff:{grouped_slot}", actor_id=user.id,
+                    detail="线下签认已完成" if grouped_slot == req.slot else "同组必签项已满足",
+                )
+            completed_group = True
+            break
+    if not completed_group:
+        await complete_action_items(
+            db, object_type="document", object_id=doc.id,
+            action_type=f"signoff:{req.slot}", actor_id=user.id, detail="线下签认已完成",
+        )
     await db.commit()
     return {
         "doc_id": doc.id,
@@ -528,12 +547,35 @@ async def sign_document(doc_id: int, req: SignDocumentRequest, user: User = Depe
         from app.models.security_audit import SecurityAudit
         db.add(SecurityAudit(user_id=user.id, username=user.username, action="document_signoff",
                              detail=f"doc={doc.id} revision={doc.content_revision or 1} slot={slot} hash={signature_hash}"))
+        from app.services.collaboration import complete_action_items
+        from app.services.document_signoffs import required_any_slot_groups_for
+
+        completed_group = False
+        for group in required_any_slot_groups_for(doc):
+            if slot in group:
+                for grouped_slot in group:
+                    await complete_action_items(
+                        db, object_type="document", object_id=doc.id,
+                        action_type=f"signoff:{grouped_slot}", actor_id=user.id,
+                        detail="电子签认已完成" if grouped_slot == slot else "同组必签项已满足",
+                    )
+                completed_group = True
+                break
+        if not completed_group:
+            await complete_action_items(
+                db, object_type="document", object_id=doc.id,
+                action_type=f"signoff:{slot}", actor_id=user.id, detail="电子签认已完成",
+            )
         await db.commit()
     except Exception:
         await db.rollback()
         for path in output_files:
             path.unlink(missing_ok=True)
         raise
+    if doc.docx_path or doc.pdf_path or doc.signed_pdf_path:
+        from app.services.project_archive import sync_document_to_project_archive
+        await sync_document_to_project_archive(db, doc, user)
+        await db.commit()
     return {"doc_id": doc.id, "signed_pdf_url": pdf_url, "signed_at": signed_at.isoformat(), "signed_by": user.id,
             "slot": slot, "signature_hash": signature_hash}
 

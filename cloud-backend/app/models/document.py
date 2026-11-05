@@ -57,3 +57,7 @@ class Document(Base):
     section: Mapped[str | None] = mapped_column(String(128), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now)
+    archive_sync_status: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    archive_sync_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    archive_synced_revision: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    archive_kb_document_id: Mapped[int | None] = mapped_column(Integer, nullable=True)

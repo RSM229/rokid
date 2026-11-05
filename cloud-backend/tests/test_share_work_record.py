@@ -70,6 +70,9 @@ class FakeScalar:
     def scalar_one_or_none(self):
         return self._value
 
+    def first(self):
+        return self._value
+
 
 class FakeScalars:
     def __init__(self, values):
@@ -83,8 +86,11 @@ class FakeScalars:
 
 
 class FakeDB:
-    def __init__(self, record, recipients, project=None):
-        self._results = [FakeScalar(record), FakeScalars(recipients)]
+    def __init__(self, record, recipients, project=None, member=None):
+        self._results = [FakeScalar(record)]
+        if member is not None:
+            self._results.append(FakeScalar(member))
+        self._results.append(FakeScalars(recipients))
         self._project = project or FakeProject()
 
     async def execute(self, query):
@@ -103,6 +109,8 @@ class ShareWorkRecordTests(unittest.IsolatedAsyncioTestCase):
         push = AsyncMock(return_value=True)
         self.patches = [
             patch("app.routers.form_doc.generate_form_from_record", gen),
+            patch("app.services.permissions.member_user_ids_with_roles", AsyncMock(return_value=[1, 2])),
+            patch("app.services.project_archive.sync_document_to_project_archive", AsyncMock()),
             patch("app.services.notification.push_to_glasses", push),
         ]
         for p in self.patches:
@@ -133,7 +141,7 @@ class ShareWorkRecordTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(res["recipients"], 2)
 
     async def test_forward_to_single_user(self) -> None:
-        db = FakeDB(FakeRecord(), [FakeEng()])
+        db = FakeDB(FakeRecord(), [FakeEng()], member=object())
         res = await share_work_record(
             5,
             ShareWorkRecordRequest(
