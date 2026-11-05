@@ -1077,7 +1077,10 @@ async def _create_work_record(ctx: ToolContext, args: dict) -> dict:
         looks_like_project = looks_like_project or section.endswith(("项目", "项目部"))
         if looks_like_project:
             args["section"] = section = content
-    if not content and not section and not location:
+    # 🔴 验收记录不受此守卫拦截：验收的「内容/部位」由要点询问块（一起询问）
+    # 汇总生成，先拦内容会把流程串行成「问类型→问内容→问工序→询问块」
+    # 四五轮填表（2026-11-05 15:07 用户实测「怎么还是填表」）。
+    if (not content and not section and not location) and raw_type != "验收":
         return _need_more(["记录内容或施工区域"], "请说明记录内容与位置，例如「3号楼二层，钢筋绑扎，天气晴」。")
 
     # 记录类型必须明确：识别不出就追问，不静默建「待定」。

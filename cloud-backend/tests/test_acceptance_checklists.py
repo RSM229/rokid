@@ -305,7 +305,9 @@ check("隐蔽类 → 候选工序 chips", 1 <= len(chips8) <= 12, f"{len(chips8)
 check("市政项目 → 市政工序排前",
       bool(chips8) and chips8[0].startswith("[市政]"), str(chips8[:1]))
 check("suggest 质量类不给候选", _m.suggest_procedures("检验批质量验收") == [])
-check("suggest 未知类型不给候选", _m.suggest_procedures("") == [])
+check("suggest 未知类型 → 全类型混合候选（可跳过验收类型步）",
+      len(_m.suggest_procedures("")) >= 6
+      and all(any(k in x for k in ("隐蔽", "进场", "材料", "设备")) for x in _m.suggest_procedures("")))
 
 # 13b 用户点选工序 chip → 下一轮触发「一起询问」（闭环）
 a9 = at.merge_args(a8, {"record_type": "验收"})
@@ -315,6 +317,18 @@ r9 = LOOP.run_until_complete(
 check("点选工序 chip → 一起询问块",
       r9.get("ask_mode") == "together" and len(ask_items(r9)) >= 1,
       f"ask_mode={r9.get('ask_mode')} 项数={len(ask_items(r9))}")
+
+# 13c 「答类型后仍无内容/部位」不被内容守卫拦截（2026-11-05 15:07 用户实测回归：
+#     验收记录内容/部位全空 → 旧逻辑先问「记录内容或施工区域」，工序引导被串行化）
+a10 = {"record_type": "验收", "extra_fields": {}, "section": "",
+       "location": "沙盛四路"}
+r10 = LOOP.run_until_complete(
+    at._create_work_record(ctx("验收", project_name="沙盛四路等4条道路工程"), a10))
+need10 = [str(x) for x in r10.get("need_more") or []]
+check("验收无内容不被内容守卫拦", "记录内容或施工区域" not in need10, str(need10))
+check("验收无内容仍给工序引导",
+      "具体工序" in str(r10.get("reply") or "")
+      and len((r10.get("options") or {}).get("验收工序（点选）", [])) >= 6)
 
 print()
 if FAILED:

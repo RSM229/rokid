@@ -89,21 +89,29 @@ def suggest_procedures(acc_type: str = "", prefer_kind: str = "",
       常见工序兜底（要点表顺序），并排在命中项之前。
     - 质量类（检验批/分项/分部等）覆盖面太大，返回空列表只做文字引导。
     """
-    kws: tuple[str, ...] = ()
+    kws: tuple[str, ...] | None = None
     for type_keys, proc_keys in _TYPE_KEYWORDS:
         if any(k in (acc_type or "") for k in type_keys):
             kws = proc_keys
             break
-    if not kws:
-        return []
-    cand = [e for e in _INDEX if any(k in e["关键工序_关键部位"] for k in kws)]
+    if kws is None:
+        if (acc_type or "").strip():
+            return []      # 质量类（检验批/分项/分部等）覆盖面太大 → 只做文字引导
+        # 类型未知：给全类型混合候选（隐蔽+进场+危大），用户点工序即可跳过验收类型步
+        kws = tuple(dict.fromkeys(k for _, pks in _TYPE_KEYWORDS for k in pks))
+    matched = [e for e in _INDEX if any(k in e["关键工序_关键部位"] for k in kws)]
     if prefer_kind:
-        own = [e for e in cand if e["kind"] == prefer_kind]
-        # 本类别无按名命中 → 该类别全部工序按要点表顺序兜底
-        pool = own if own else [e for e in _INDEX if e["kind"] == prefer_kind]
-        pool = pool + [e for e in cand if e["kind"] != prefer_kind]
+        own_matched = [e for e in matched if e["kind"] == prefer_kind]
+        own_all = [e for e in _INDEX if e["kind"] == prefer_kind]
+        other_matched = [e for e in matched if e["kind"] != prefer_kind]
+        if not (acc_type or "").strip():
+            # 类型未知：本类别常见工序按要点表顺序打头，再补其它类别的关键词命中
+            pool = own_all + other_matched
+        else:
+            # 类型已知但本类别无按名命中（如市政工序名不叫「隐蔽」）→ 该类别全部工序兜底
+            pool = (own_matched if own_matched else own_all) + other_matched
     else:
-        pool = cand
+        pool = matched
     picked: list[dict] = []
     seen: set[str] = set()
     for e in pool:
