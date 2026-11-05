@@ -299,9 +299,10 @@ r8 = LOOP.run_until_complete(
 rep8 = str(r8.get("reply") or "")
 opts8 = r8.get("options") or {}
 chips8 = opts8.get("验收工序（点选）") or []
-check("无工序 → 引导句出现", "具体工序" in rep8 and "逐项确认" in rep8, rep8[:60])
+check("无工序 → 引导句出现（对话式问句）",
+      "哪个工序" in rep8 and "直接说" in rep8, rep8[:60])
 check("无工序 → 不出询问块", r8.get("ask_mode") is None and not r8.get("ask_block"))
-check("隐蔽类 → 候选工序 chips", 1 <= len(chips8) <= 12, f"{len(chips8)} 个")
+check("隐蔽类 → 候选工序 chips（≤6 个，少而精）", 1 <= len(chips8) <= 6, f"{len(chips8)} 个")
 check("市政项目 → 市政工序排前",
       bool(chips8) and chips8[0].startswith("[市政]"), str(chips8[:1]))
 check("suggest 质量类不给候选", _m.suggest_procedures("检验批质量验收") == [])
@@ -327,8 +328,14 @@ r10 = LOOP.run_until_complete(
 need10 = [str(x) for x in r10.get("need_more") or []]
 check("验收无内容不被内容守卫拦", "记录内容或施工区域" not in need10, str(need10))
 check("验收无内容仍给工序引导",
-      "具体工序" in str(r10.get("reply") or "")
+      "哪个工序" in str(r10.get("reply") or "")
       and len((r10.get("options") or {}).get("验收工序（点选）", [])) >= 6)
+
+# 13d 项目对象推断不出类别 → 用水印/消息文本兜底（2026-11-05 真机实测：
+#     沙盛四路市政项目 ctx.project 缺类别时推出一排 [房建] 隐蔽工序）
+check("文本兜底：道路工程 → 市政", at._kind_from_text("沙盛四路等4条道路工程 隐蔽工程验收公示牌") == "市政")
+check("文本兜底：住宅楼 → 房建", at._kind_from_text("阳光花园3号楼隐蔽验收") == "房建")
+check("文本兜底：无信号 → None", at._kind_from_text("隐蔽验收") is None)
 
 print()
 if FAILED:

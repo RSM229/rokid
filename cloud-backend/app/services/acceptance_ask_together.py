@@ -79,7 +79,7 @@ _TYPE_KEYWORDS: list[tuple[tuple[str, ...], tuple[str, ...]]] = [
 
 
 def suggest_procedures(acc_type: str = "", prefer_kind: str = "",
-                       limit: int = 12) -> list[str]:
+                       limit: int = 6) -> list[str]:
     """按验收类型推荐候选关键工序（用于用户没说工序时给 chips 引导）。
 
     返回格式与验收要点候选一致：'[房建]钢筋笼隐蔽前验收（地基与基础 · 桩基础）'。
@@ -88,6 +88,8 @@ def suggest_procedures(acc_type: str = "", prefer_kind: str = "",
       若用户项目类别内没有命中项（如市政工序名不叫「隐蔽」），改推该类别
       常见工序兜底（要点表顺序），并排在命中项之前。
     - 质量类（检验批/分项/分部等）覆盖面太大，返回空列表只做文字引导。
+    - limit 默认 6（2026-11-05 用户真机反馈「要交互不要这么多选择」——
+      12 个 chips 刷满一屏像表格；少而精，其它工序用户会自己说）。
     """
     kws: tuple[str, ...] | None = None
     for type_keys, proc_keys in _TYPE_KEYWORDS:

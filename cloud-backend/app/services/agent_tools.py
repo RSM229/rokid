@@ -951,6 +951,32 @@ def _project_kind_from(project) -> str | None:
     return None
 
 
+def _kind_from_text(text: str) -> str | None:
+    """项目对象推断不出类别时的文本兜底：用水印 OCR/用户消息猜市政或房建。
+
+    场景（2026-11-05 真机实测）：多项目视角/项目档案缺失时 ctx.project 推断
+    不出，沙盛四路（市政道路）的公示牌照片却推出一排 [房建] 隐蔽工序 chips。
+    """
+    t = str(text or "")
+    if not t.strip():
+        return None
+    score: dict[str, int] = {}
+    for kind, words in _PROJECT_KIND_WORDS.items():
+        score[kind] = sum(1 for w in words if w in t)
+    if score.get("市政", 0) > score.get("房建", 0):
+        return "市政"
+    if score.get("房建", 0) > score.get("市政", 0):
+        return "房建"
+    return None
+
+
+def _acceptance_prefer_kind(ctx) -> str | None:
+    """验收候选排序用的项目类别：项目档案优先，水印/消息文本兜底。"""
+    return _project_kind_from(ctx.project) or _kind_from_text(
+        " ".join(x for x in (str(ctx.message or ""), str(ctx.material or "")) if x)
+    )
+
+
 def _time_filled(args: dict, field: dict) -> bool:
     """起止时间：本字段有值，或用户给了「9:00 到 11:30」这类时间段原文，都算已答。"""
     arg = field.get("arg")
@@ -1254,7 +1280,7 @@ async def _create_work_record(ctx: ToolContext, args: dict) -> dict:
         if not (ask_state and isinstance(ask_state, dict)):
             acc_query = _acceptance_query(section, content,
                                           str(args.get("location") or ""), ctx.message or "")
-            prefer = _project_kind_from(ctx.project)
+            prefer = _acceptance_prefer_kind(ctx)
             strong = acceptance_checklists.strong_match(acc_query, prefer_kind=prefer) if acc_query else None
             if strong:
                 entry = _aat_find_entry(str(strong.get("div") or ""),
@@ -1333,7 +1359,7 @@ async def _create_work_record(ctx: ToolContext, args: dict) -> dict:
         if acc_content_field and not matched_entry:
             acc_query = _acceptance_query(section, content,
                                           str(args.get("location") or ""), ctx.message or "")
-            prefer = _project_kind_from(ctx.project)
+            prefer = _acceptance_prefer_kind(ctx)
             cands = _acceptance_candidates(acc_query, prefer_kind=prefer) if acc_query else []
             if cands:
                 args = _acceptance_hide_candidates(args, cands)
@@ -1371,20 +1397,21 @@ async def _create_work_record(ctx: ToolContext, args: dict) -> dict:
             acc_type_now = str((args.get("extra_fields") or {}).get("acceptance_type")
                                or args.get("acceptance_type") or "")
             sugg = _aat2.suggest_procedures(
-                acc_type_now, prefer_kind=_project_kind_from(ctx.project))
+                acc_type_now, prefer_kind=_acceptance_prefer_kind(ctx))
             if sugg:
                 options["验收工序（点选）"] = sugg
-            guide = ("本次验收的具体工序是什么？说了工序，我会把该工序的验收要点"
-                     "一次性列出来和你逐项确认。\n")
-            reply = guide + ("还差几项待补全：上方可点选的先点；" + "、".join(freetext)
-                             + " 直接说或填即可。不方便也能先跳过。"
+            # 对话式引导（2026-11-05 用户反馈「要交互，不要这么多选择」）：
+            # 一句自然问句打头，chips 只是「点了更快」的快捷方式，不是必填表单。
+            guide = "这次验收做的是哪个工序？直接说就行，我说不准的下面点了也可以。\n"
+            reply = guide + ("另外还有几项顺手补一下：" + "、".join(freetext)
+                             + "，直接说就行。不方便也能先跳过。"
                              if freetext else
-                             "还差几项待补全，上方已给出可选项，点选或回复均可；不方便也能先跳过。")
+                             "其余缺的栏目点下方选项或直接说都可以；不方便也能先跳过。")
         elif freetext:
-            reply = ("还差几项待补全：上方可点选的先点；" + "、".join(freetext)
-                     + " 直接说或填即可。不方便也能先跳过。")
+            reply = ("还有几项顺手补一下：" + "、".join(freetext)
+                     + "，直接说就行。不方便也能先跳过。")
         else:
-            reply = "还差几项待补全，上方已给出可选项，点选或回复均可；不方便也能先跳过。"
+            reply = "其余缺的栏目点下方选项或直接说都可以；不方便也能先跳过。"
         result = _need_more(labels, reply, options=options)
         if matched_entry:
             # 「一起询问」：把该工序全部询问项一次性带出（不逐项追问），

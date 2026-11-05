@@ -272,10 +272,10 @@ def _agent_form(
         }
 
     if result.get("need_more"):
-        # 「补齐信息」卡片与服务端一次性返回的缺项对齐（2026-11-04 重构：枚举项已用
-        # chips 呈现，表单只作自由文本项的快捷填写，默认收起）。need_more 现在携带本轮
-        # 全部缺项，卡片据其过滤后全部展示，不再人为砍成一栏。
-        pending_labels = [str(x) for x in (result.get("need_more") or [])]
+        # 一次只问当前最该补的那一栏（2026-11-05 用户明确要求「不要填表形式」：
+        # 上传图片后 agent 应先分析、给建议、确认类别，再逐栏引导；服务端不再把全部
+        # 缺项一次性摊成卡片/表格。这与 8402996 的「一次性 chips/表单」设计相反，按用户指令覆盖）。
+        pending_labels = [str(x) for x in (result.get("need_more") or [])][:1]
         fields = agent_tools.missing_field_views(args, form_code) if form_code else []
         if fields and pending_labels:
             fields = [v for v in fields if str(v.get("label") or "") in pending_labels]
@@ -291,7 +291,7 @@ def _agent_form(
             "id": f"{tool}:{form_code or 'form'}",
             "kind": "work_record" if form_code else "form",
             "schema_version": 1, "field_schema": "record_field_spec.v1", "form_code": form_code or "",
-            "title": (f"还差 {len(fields)} 项待补全" if fields
+            "title": (f"还差「{pending_labels[0]}」" if pending_labels
                       else (f"{record_type}记录 · 补齐信息" if record_type else "补齐信息")),
             "hint": "上方可点选的先点；其余直接说或点开填写即可，不方便也能先跳过。" if fields
                     else "都可以留空，直接提交也行。",
@@ -1370,12 +1370,18 @@ async def _agent_chat_impl(
             await agent_tools.clear_pending(db, user.id, tool, conversation_id)
             result["form"] = _agent_form(tool, args, result, message, str(getattr(project, "name", "") or ""))
         if auto_filled:
-            # 让用户一眼看到「水印确实读到了、也确实填进表单了」，而不是被空问一句「要记什么」
-            head = "已从照片水印自动填入：" + "、".join(auto_filled)
-            if result.get("need_more"):
-                rtype = agent_tools._norm_record_type(str(args.get("record_type") or "")) or "巡视"
-                head = f"已按「{rtype}」开始记录，{head}。还差的栏目已列在下面，填完一次提交就行："
-            result["reply"] = head + "\n" + str(result.get("reply") or "").strip()
+            # 让用户一眼看到「水印确实读到了、也确实填进表单了」，而不是被空问一句「要记什么」。
+            # 但冲突提示（field_conflicts brief）里已经说过「已按水印/EXIF 填入」时不再重复
+            # 清单+口号——2026-11-05 真机反馈：冲突提示 + 自动填入清单 + 模型接话三段
+            # 堆成一面墙，交互感全无。
+            if result.get("field_conflicts"):
+                pass  # 冲突 brief 已覆盖「按水印填入」这层信息，正文交给模型接话
+            else:
+                head = "已从照片水印自动填入：" + "、".join(auto_filled)
+                if result.get("need_more"):
+                    rtype = agent_tools._norm_record_type(str(args.get("record_type") or "")) or "巡视"
+                    head = f"已按「{rtype}」开始记录，{head}。"
+                result["reply"] = head + "\n" + str(result.get("reply") or "").strip()
         return {"kind": "action", "tool": tool, "model": model_id,
                 "request_plan": incoming_plan, **result}
 
