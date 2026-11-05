@@ -14,11 +14,14 @@ test('agent replies follow the filing-assistant single-column layout', () => {
   assert.match(styles, /\.message\.assistant \{[^}]*align-items:\s*stretch/)
   assert.match(styles, /\.message\.assistant \{[^}]*border-left/)
   assert.match(template, /class="message-head"/)
-  assert.match(template, /class="message-role">监理智能体/)
+  // 7c03e7a 起角色标签随 role 动态切换（助手=监理智能体 / 用户=我），不再是写死的纯文本
+  assert.match(template, /class="message-role">\{\{[^}]*item\.role[^}]*'监理智能体'[^}]*\}\}/)
   assert.match(template, /class="agent-task-toggle"[^>]*bindtap="toggleAgentForm"/)
   assert.match(template, /wx:if="\{\{item\.agentForm\.expanded\}\}" class="agent-task-body"/)
   assert.match(page, /toggleAgentForm\(event: WechatMiniprogram\.TouchEvent\)/)
-  assert.match(page, /expanded: sourceForm\.expanded === true/)
+  // 38bc5c8 起新追问默认收起，展开态只保留用户主动点开的；旧断言「沿用 sourceForm.expanded」已反转
+  assert.match(page, /sourceForm \? \{[\s\S]{0,400}?expanded: false,/)
+  assert.doesNotMatch(page, /expanded: sourceForm\.expanded === true/)
   assert.match(template, /class="inline-review-preview"[^>]*bindtap="toggleInlineReviewDetails"/)
   assert.match(page, /toggleInlineReviewDetails\(event: WechatMiniprogram\.TouchEvent\)/)
   assert.match(page, /function mergeAgentProgress\(target: Message, progress: Message\): Message/)
