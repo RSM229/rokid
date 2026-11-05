@@ -289,6 +289,33 @@ r6 = LOOP.run_until_complete(at._create_work_record(ctx("跳过，直接创建")
 check("预填+跳过 → 消费询问态并放行",
       r6.get("ask_mode") is None and "_acceptance_ask_state" not in a6)
 
+print("\n== 13. 无工序信息 → 工序引导 + 候选 chips（2026-11-05 用户截图「记录今天的工作」回归） ==")
+# 13a 隐蔽类型已知 + 用户没说工序 → 引导句 + 候选工序 chips（市政项目优先市政工序）
+a8 = accept_args(work_content="沙盛四路隐蔽工程验收公示牌",
+                 extra={"acceptance_type": "隐蔽工程"},
+                 extra_top={"location": "沙盛四路"})
+r8 = LOOP.run_until_complete(
+    at._create_work_record(ctx("记录今天的工作", project_name="沙盛四路等4条道路工程"), a8))
+rep8 = str(r8.get("reply") or "")
+opts8 = r8.get("options") or {}
+chips8 = opts8.get("验收工序（点选）") or []
+check("无工序 → 引导句出现", "具体工序" in rep8 and "逐项确认" in rep8, rep8[:60])
+check("无工序 → 不出询问块", r8.get("ask_mode") is None and not r8.get("ask_block"))
+check("隐蔽类 → 候选工序 chips", 1 <= len(chips8) <= 12, f"{len(chips8)} 个")
+check("市政项目 → 市政工序排前",
+      bool(chips8) and chips8[0].startswith("[市政]"), str(chips8[:1]))
+check("suggest 质量类不给候选", _m.suggest_procedures("检验批质量验收") == [])
+check("suggest 未知类型不给候选", _m.suggest_procedures("") == [])
+
+# 13b 用户点选工序 chip → 下一轮触发「一起询问」（闭环）
+a9 = at.merge_args(a8, {"record_type": "验收"})
+a9.pop("_acceptance_ask_state", None)
+r9 = LOOP.run_until_complete(
+    at._create_work_record(ctx(chips8[0], project_name="沙盛四路等4条道路工程"), a9))
+check("点选工序 chip → 一起询问块",
+      r9.get("ask_mode") == "together" and len(ask_items(r9)) >= 1,
+      f"ask_mode={r9.get('ask_mode')} 项数={len(ask_items(r9))}")
+
 print()
 if FAILED:
     print(f"!!! {FAILED} 项失败")

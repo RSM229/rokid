@@ -70,6 +70,57 @@ def _build_index() -> None:
         _BY_DIVISION.setdefault(div_key, []).append(i)
 
 
+# 验收类型 → 工序名筛选关键词（无法命中时返回空，由调用方只做文字引导）
+_TYPE_KEYWORDS: list[tuple[tuple[str, ...], tuple[str, ...]]] = [
+    (("隐蔽",), ("隐蔽",)),
+    (("进场", "材料"), ("进场", "材料", "设备")),
+    (("危大",), ("危大",)),
+]
+
+
+def suggest_procedures(acc_type: str = "", prefer_kind: str = "",
+                       limit: int = 12) -> list[str]:
+    """按验收类型推荐候选关键工序（用于用户没说工序时给 chips 引导）。
+
+    返回格式与验收要点候选一致：'[房建]钢筋笼隐蔽前验收（地基与基础 · 桩基础）'。
+    规则：
+    - 类型能映射到关键词（隐蔽/进场材料/危大）→ 取工序名命中项；
+      若用户项目类别内没有命中项（如市政工序名不叫「隐蔽」），改推该类别
+      常见工序兜底（要点表顺序），并排在命中项之前。
+    - 质量类（检验批/分项/分部等）覆盖面太大，返回空列表只做文字引导。
+    """
+    kws: tuple[str, ...] = ()
+    for type_keys, proc_keys in _TYPE_KEYWORDS:
+        if any(k in (acc_type or "") for k in type_keys):
+            kws = proc_keys
+            break
+    if not kws:
+        return []
+    cand = [e for e in _INDEX if any(k in e["关键工序_关键部位"] for k in kws)]
+    if prefer_kind:
+        own = [e for e in cand if e["kind"] == prefer_kind]
+        # 本类别无按名命中 → 该类别全部工序按要点表顺序兜底
+        pool = own if own else [e for e in _INDEX if e["kind"] == prefer_kind]
+        pool = pool + [e for e in cand if e["kind"] != prefer_kind]
+    else:
+        pool = cand
+    picked: list[dict] = []
+    seen: set[str] = set()
+    for e in pool:
+        name = e["关键工序_关键部位"]
+        if name in seen:
+            continue
+        seen.add(name)
+        picked.append(e)
+        if len(picked) >= limit:
+            break
+    return [
+        f"{'[房建]' if e['kind'] == '房建' else '[市政]'}{e['关键工序_关键部位']}"
+        f"（{e['分部工程']}）"
+        for e in picked
+    ]
+
+
 _build_index()
 
 

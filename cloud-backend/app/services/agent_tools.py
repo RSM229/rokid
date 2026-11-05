@@ -1360,7 +1360,24 @@ async def _create_work_record(ctx: ToolContext, args: dict) -> dict:
                 else:
                     freetext.append(label)
         options["可跳过"] = ["跳过，直接创建"]
-        if freetext:
+        # 工序引导：验收记录未命中要点库（用户/水印都没提具体工序）时，
+        # 光补字段不够——要点从未和用户核对过。按已知验收类型给候选工序 chips，
+        # 用户点选/说出工序后，下一轮即触发「一起询问」要点确认。
+        if record_type == "验收" and not matched_entry and not acc_options:
+            from app.services import acceptance_ask_together as _aat2
+            acc_type_now = str((args.get("extra_fields") or {}).get("acceptance_type")
+                               or args.get("acceptance_type") or "")
+            sugg = _aat2.suggest_procedures(
+                acc_type_now, prefer_kind=_project_kind_from(ctx.project))
+            if sugg:
+                options["验收工序（点选）"] = sugg
+            guide = ("本次验收的具体工序是什么？说了工序，我会把该工序的验收要点"
+                     "一次性列出来和你逐项确认。\n")
+            reply = guide + ("还差几项待补全：上方可点选的先点；" + "、".join(freetext)
+                             + " 直接说或填即可。不方便也能先跳过。"
+                             if freetext else
+                             "还差几项待补全，上方已给出可选项，点选或回复均可；不方便也能先跳过。")
+        elif freetext:
             reply = ("还差几项待补全：上方可点选的先点；" + "、".join(freetext)
                      + " 直接说或填即可。不方便也能先跳过。")
         else:
