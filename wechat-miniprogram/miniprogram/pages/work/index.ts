@@ -967,9 +967,7 @@ Page(themed({
 
   openCollaboration() {
     if (this.data.detailType !== 'record' || !this.data.detail.id) return
-    const detail = this.data.detail
-    const title = `${detail.record_type || '工作'}记录${detail.section ? ` · ${detail.section}` : ''}`
-    wx.navigateTo({ url: `/pages/todo/compose?type=work_record&id=${detail.id}&title=${encodeURIComponent(title)}` })
+    wx.navigateTo({ url: `/pages/todo/compose?type=work_record&id=${this.data.detail.id}` })
   },
 
   selectRecordForm(event: WechatMiniprogram.TouchEvent) {

@@ -10,6 +10,7 @@ const agentTemplate = fs.readFileSync(path.join(root, 'pages/agent/index.wxml'),
 const todoPage = fs.readFileSync(path.join(root, 'pages/todo/index.ts'), 'utf8')
 const todoTemplate = fs.readFileSync(path.join(root, 'pages/todo/index.wxml'), 'utf8')
 const composePage = fs.readFileSync(path.join(root, 'pages/todo/compose.ts'), 'utf8')
+const composeTemplate = fs.readFileSync(path.join(root, 'pages/todo/compose.wxml'), 'utf8')
 const kbPage = fs.readFileSync(path.join(root, 'pages/kb/index.ts'), 'utf8')
 const workPage = fs.readFileSync(path.join(root, 'pages/work/index.ts'), 'utf8')
 const workTemplate = fs.readFileSync(path.join(root, 'pages/work/index.wxml'), 'utf8')
@@ -65,6 +66,28 @@ test('compose sends a stable idempotency key for network retries', () => {
   assert.match(composePage, /client_request_id: this\.data\.clientRequestId/)
   const submit = composePage.match(/async submit\(\)[\s\S]*?(?=\n  \},\n\}\)\))/)?.[0] || ''
   assert.match(submit, /client_request_id/)
+})
+
+test('compose hydrates the real business object instead of trusting a route title', () => {
+  assert.match(composePage, /request<WorkRecordContext>\(`\/work-record\/\$\{objectId\}`\)/)
+  assert.match(composePage, /request<DocumentContext>\(`\/document\/\$\{objectId\}`\)/)
+  assert.match(composePage, /request<Member\[\]>\('\/collaboration\/members'\)/)
+  assert.doesNotMatch(composePage, /options\.title|objectTitle/)
+  assert.doesNotMatch(workPage, /compose\?type=work_record&id=\$\{detail\.id\}&title=/)
+  assert.doesNotMatch(fs.readFileSync(path.join(root, 'pages/documents/detail.ts'), 'utf8'), /compose\?type=document&id=\$\{doc\.id\}&title=/)
+})
+
+test('compose separates responsibility, signoff and non-blocking CC semantics', () => {
+  assert.match(composeTemplate, /负责人/)
+  assert.match(composeTemplate, /主要跟踪人/)
+  assert.match(composeTemplate, /同时抄送给/)
+  assert.match(composeTemplate, /不承担处理责任/)
+  assert.match(composeTemplate, /不计入待办/)
+  assert.match(composePage, /待我处理/)
+  assert.match(composeTemplate, /仅显示当前文书尚未完成的必签项/)
+  assert.match(composeTemplate, /objectLoading/)
+  assert.match(composeTemplate, /objectError/)
+  assert.match(composeTemplate, /membersError/)
 })
 
 test('project archive entry uses the dedicated project-scoped API, not a library-name scan', () => {

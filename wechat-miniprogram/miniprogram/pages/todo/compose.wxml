@@ -1,14 +1,222 @@
-<view class="page compose-page" style="{{themeStyle}}">
+<view class="compose-page" style="{{themeStyle}}">
   <glass-nav-bar title="{{isTransfer ? '转派事项' : '发起协作'}}" left="back" />
-  <view class="form">
-    <view class="field"><text class="label">关联内容</text><text class="value">{{objectTitle}}</text></view>
-    <view wx:if="{{!isTransfer}}" class="field"><text class="label">协作方式</text><radio-group bindchange="onModeChange" class="modes"><label><radio value="action" checked="{{mode === 'action' && !signoff}}" />请处理</label><label wx:if="{{objectType === 'document' && signSlots.length}}"><radio value="signoff" checked="{{signoff}}" />请签认</label><label><radio value="cc" checked="{{mode === 'cc'}}" />抄送跟踪</label></radio-group></view>
-    <view wx:if="{{!isTransfer && signoff}}" class="field"><text class="label">必签位置</text><picker range="{{signSlots}}" range-key="label" value="{{signSlotIndex < 0 ? 0 : signSlotIndex}}" bindchange="onSignSlotChange"><view class="picker">{{signSlotIndex < 0 ? '选择签认位置' : signSlots[signSlotIndex].label}}　›</view></picker></view>
-    <view class="field"><text class="label">发送给</text><picker range="{{members}}" range-key="real_name" value="{{memberIndex < 0 ? 0 : memberIndex}}" bindchange="onMemberChange"><view class="picker">{{memberIndex < 0 ? '选择项目成员' : members[memberIndex].real_name}}　›</view></picker></view>
-    <view wx:if="{{!isTransfer}}" class="field"><text class="label">抄送给</text><checkbox-group bindchange="onCCChange" class="cc-list"><label wx:for="{{members}}" wx:key="id"><checkbox value="{{item.id}}" />{{item.real_name}}</label></checkbox-group></view>
-    <view wx:if="{{!isTransfer}}" class="field"><text class="label">事项标题</text><input value="{{title}}" data-key="title" bindinput="onInput" maxlength="100" /></view>
-    <view class="field"><text class="label">说明</text><textarea value="{{description}}" data-key="description" bindinput="onInput" maxlength="1000" auto-height /></view>
-    <view wx:if="{{!isTransfer && mode === 'action'}}" class="field"><text class="label">期望完成日期</text><picker mode="date" value="{{deadline}}" bindchange="onDeadlineChange"><view class="picker">{{deadline || '不设置'}}　›</view></picker></view>
-    <button class="submit" loading="{{submitting}}" disabled="{{submitting}}" bindtap="submit">{{isTransfer ? '确认转派' : '发送'}}</button>
+
+  <scroll-view class="compose-scroll" scroll-y>
+    <view class="compose-body">
+      <view wx:if="{{projectName}}" class="project-line">
+        <view class="project-dot"></view>
+        <text>{{projectName}}</text>
+      </view>
+
+      <view class="intro">
+        <text class="intro-kicker">{{isTransfer ? '事项转派' : '协作事项'}}</text>
+        <text class="intro-title">{{isTransfer ? '把事项交给更合适的人' : '让下一步清晰可见'}}</text>
+        <text class="intro-sub">{{isTransfer ? '新负责人会收到待办，原负责人不再承担此事项。' : '围绕当前业务记录，指定负责人，并保留完整处理记录。'}}</text>
+      </view>
+
+      <view class="section">
+        <view class="section-head">
+          <text class="section-title">关联事项</text>
+          <text class="section-note">当前项目</text>
+        </view>
+
+        <view wx:if="{{objectLoading}}" class="object-card skeleton-card">
+          <view class="skeleton-line short"></view>
+          <view class="skeleton-line"></view>
+          <view class="skeleton-line medium"></view>
+        </view>
+
+        <view wx:elif="{{objectError}}" class="error-card">
+          <text class="error-title">关联事项读取失败</text>
+          <text class="error-copy">{{objectError}}</text>
+          <text class="text-link" bindtap="retryContext">重新加载</text>
+        </view>
+
+        <view wx:else class="object-card">
+          <view class="object-top">
+            <text class="object-type">{{object.type_label}}</text>
+            <text wx:if="{{object.status}}" class="status-pill status-{{object.tone}}">{{object.status}}</text>
+          </view>
+          <text class="object-title">{{object.title}}</text>
+          <view wx:if="{{object.meta.length}}" class="object-meta">
+            <view wx:for="{{object.meta}}" wx:for-item="meta" wx:key="label" class="meta-item">
+              <text class="meta-label">{{meta.label}}</text>
+              <text class="meta-value">{{meta.value}}</text>
+            </view>
+          </view>
+          <text wx:if="{{object.subtitle}}" class="object-subtitle">{{object.subtitle}}</text>
+        </view>
+
+        <view wx:if="{{isTransfer && currentSenderName}}" class="info-line">
+          <text class="info-label">发起人</text>
+          <text class="info-value">{{currentSenderName}}</text>
+        </view>
+        <view wx:if="{{isTransfer && originalDescription}}" class="quote-card">
+          <text class="quote-label">原事项说明</text>
+          <text class="quote-text">{{originalDescription}}</text>
+        </view>
+      </view>
+
+      <view wx:if="{{!isTransfer}}" class="section">
+        <view class="section-head">
+          <text class="section-title">协作方式</text>
+          <text class="section-note">决定对方是否产生待办</text>
+        </view>
+        <view class="mode-list">
+          <view class="mode-card {{mode === 'action' && !signoff ? 'selected' : ''}}" data-mode="action" bindtap="selectMode" hover-class="pressed">
+            <view class="mode-mark">→</view>
+            <view class="mode-copy">
+              <text class="mode-title">请处理</text>
+              <text class="mode-desc">对方需要完成操作，计入待办</text>
+            </view>
+            <view class="select-dot {{mode === 'action' && !signoff ? 'on' : ''}}"></view>
+          </view>
+
+          <view wx:if="{{signSlots.length}}" class="mode-card {{signoff ? 'selected' : ''}}" data-mode="signoff" bindtap="selectMode" hover-class="pressed">
+            <view class="mode-mark">签</view>
+            <view class="mode-copy">
+              <text class="mode-title">请签认</text>
+              <text class="mode-desc">对方完成指定签认位后关闭</text>
+            </view>
+            <view class="select-dot {{signoff ? 'on' : ''}}"></view>
+          </view>
+
+          <view class="mode-card {{mode === 'cc' ? 'selected' : ''}}" data-mode="cc" bindtap="selectMode" hover-class="pressed">
+            <view class="mode-mark">◎</view>
+            <view class="mode-copy">
+              <text class="mode-title">抄送跟踪</text>
+              <text class="mode-desc">只同步进展，不计入待办</text>
+            </view>
+            <view class="select-dot {{mode === 'cc' ? 'on' : ''}}"></view>
+          </view>
+        </view>
+
+        <view wx:if="{{signoff}}" class="sub-card">
+          <text class="sub-label">签认位置</text>
+          <picker range="{{signSlots}}" range-key="label" value="{{signSlotIndex < 0 ? 0 : signSlotIndex}}" bindchange="onSignSlotChange">
+            <view class="picker-row">
+              <text class="{{signSlotIndex < 0 ? 'picker-placeholder' : ''}}">{{signSlotIndex < 0 ? '选择尚未完成的必签项' : signSlots[signSlotIndex].label}}</text>
+              <text class="chevron">›</text>
+            </view>
+          </picker>
+          <text class="helper">仅显示当前文书尚未完成的必签项。</text>
+        </view>
+        <text wx:if="{{signSlotsError}}" class="helper warn">{{signSlotsError}}</text>
+      </view>
+
+      <view class="section">
+        <view class="section-head">
+          <text class="section-title">{{!isTransfer && mode === 'cc' ? '跟踪范围' : '责任人与抄送'}}</text>
+          <text class="section-note">仅限本项目在岗成员</text>
+        </view>
+        <view class="group-card">
+          <view class="form-row" bindtap="openMemberSheet" hover-class="row-pressed">
+            <view class="row-copy">
+              <text class="row-label">{{isTransfer ? '转派给' : mode === 'cc' ? '主要跟踪人' : '负责人'}}</text>
+              <view wx:if="{{selectedMember}}" class="member-inline">
+                <view class="avatar avatar-sm">{{selectedMember.initial}}</view>
+                <text class="row-value">{{selectedMember.real_name}}</text>
+                <text class="role-chip">{{selectedMember.role_label}}</text>
+              </view>
+              <text wx:else class="row-placeholder">{{membersLoading ? '正在读取项目成员…' : '选择一位项目成员'}}</text>
+            </view>
+            <text class="chevron">›</text>
+          </view>
+
+          <view wx:if="{{!isTransfer}}" class="form-row" bindtap="openCcSheet" hover-class="row-pressed">
+            <view class="row-copy">
+              <text class="row-label">{{mode === 'cc' ? '同时抄送给' : '抄送给'}}</text>
+              <text class="row-value {{ccMemberIds.length ? '' : 'row-placeholder'}}">{{ccSummary}}</text>
+              <text class="row-note">抄送人不承担处理责任</text>
+            </view>
+            <text class="chevron">›</text>
+          </view>
+        </view>
+        <text class="helper">{{modeHint}}</text>
+        <view wx:if="{{membersError}}" class="inline-error">
+          <text>{{membersError}}</text>
+          <text class="text-link" bindtap="retryMembers">重试</text>
+        </view>
+        <view wx:elif="{{!membersLoading && !members.length}}" class="inline-note">当前项目暂无其他在岗成员，请先在项目管理中添加成员。</view>
+      </view>
+
+      <view class="section">
+        <view class="section-head">
+          <text class="section-title">{{isTransfer ? '转派说明' : '事项内容'}}</text>
+          <text class="section-note">{{isTransfer ? '选填' : '清晰、可执行'}}</text>
+        </view>
+        <view class="form-card">
+          <view wx:if="{{!isTransfer}}" class="input-block">
+            <view class="input-head">
+              <text class="input-label">标题</text>
+              <text class="input-count">{{title.length}}/100</text>
+            </view>
+            <input class="text-input" value="{{title}}" data-key="title" bindinput="onInput" maxlength="100" placeholder="一句话说明需要对方做什么" placeholder-class="input-placeholder" />
+          </view>
+
+          <view wx:if="{{!isTransfer}}" class="input-divider"></view>
+          <view class="input-block">
+            <view class="input-head">
+              <text class="input-label">{{isTransfer ? '交接说明' : '补充说明'}}</text>
+              <text class="input-count">{{isTransfer ? '选填' : '选填'}}</text>
+            </view>
+            <textarea class="text-area" value="{{description}}" data-key="description" bindinput="onInput" maxlength="1000" placeholder="{{isTransfer ? '说明转派原因或需要交接的背景' : '补充依据、要求或希望对方如何反馈'}}" placeholder-class="input-placeholder" />
+            <text class="char-count">{{description.length}}/1000</text>
+          </view>
+
+          <view wx:if="{{!isTransfer && mode === 'action' && !signoff}}" class="input-divider"></view>
+          <view wx:if="{{!isTransfer && mode === 'action' && !signoff}}" class="form-row deadline-row">
+            <view class="row-copy">
+              <text class="row-label">期望完成</text>
+              <text class="row-note">选填，仅作为提醒</text>
+            </view>
+            <view class="deadline-control">
+              <picker mode="date" value="{{deadline}}" bindchange="onDeadlineChange">
+                <view class="date-pill {{deadline ? 'set' : ''}}">{{deadline || '选择日期'}}</view>
+              </picker>
+              <text wx:if="{{deadline}}" class="text-link" catchtap="clearDeadline">清除</text>
+            </view>
+          </view>
+        </view>
+      </view>
+    </view>
+  </scroll-view>
+
+  <view class="compose-footer">
+    <text wx:if="{{validationError}}" class="footer-error">{{validationError}}</text>
+    <button class="submit-btn {{canSubmit ? 'ready' : ''}}" loading="{{submitting}}" disabled="{{submitting || objectLoading}}" bindtap="submit">{{submitLabel}}</button>
+    <text class="footer-note">{{isTransfer ? '转派会保留原事项的处理历史' : '发送后可在“待办事项 → 我发出的”查看进展'}}</text>
+  </view>
+
+  <view wx:if="{{sheetType}}" class="sheet-layer" catchtouchmove="noop">
+    <view class="sheet-backdrop" bindtap="closeSheet"></view>
+    <view class="sheet-panel" catchtap="noop">
+      <view class="sheet-handle"></view>
+      <view class="sheet-head">
+        <view class="sheet-heading">
+          <text class="sheet-title">{{sheetType === 'member' ? (mode === 'cc' ? '选择主要跟踪人' : '选择负责人') : '选择抄送人'}}</text>
+          <text class="sheet-subtitle">{{sheetType === 'member' ? '仅显示当前项目在岗成员' : '抄送人只查看进展，不承担处理责任'}}</text>
+        </view>
+        <text class="sheet-done" bindtap="closeSheet">{{sheetType === 'cc' ? '完成' : '取消'}}</text>
+      </view>
+
+      <scroll-view class="sheet-list" scroll-y>
+        <view wx:for="{{sheetType === 'cc' ? ccCandidates : members}}" wx:key="id" class="member-row {{sheetType === 'cc' && item.selected ? 'selected' : ''}} {{selectedMemberId === item.id ? 'current' : ''}}" data-id="{{item.id}}" bindtap="chooseSheetMember" hover-class="row-pressed">
+          <view class="avatar">{{item.initial}}</view>
+          <view class="member-copy">
+            <text class="member-name">{{item.real_name}}</text>
+            <text class="member-role">{{item.role_label || item.role}}</text>
+          </view>
+          <view wx:if="{{sheetType === 'cc'}}" class="check {{item.selected ? 'on' : ''}}">{{item.selected ? '✓' : ''}}</view>
+          <view wx:elif="{{selectedMemberId === item.id}}" class="check on">✓</view>
+          <text wx:else class="chevron">›</text>
+        </view>
+      </scroll-view>
+
+      <view wx:if="{{sheetType === 'cc'}}" class="sheet-footer">
+        <text class="sheet-selected">已选 {{ccMemberIds.length}} 人</text>
+        <text class="text-link" bindtap="clearCc">清空</text>
+      </view>
+    </view>
   </view>
 </view>

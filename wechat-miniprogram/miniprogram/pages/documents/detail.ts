@@ -448,7 +448,7 @@ Page(themed({
   openCollaboration() {
     const doc = this.data.doc
     if (!doc) return
-    wx.navigateTo({ url: `/pages/todo/compose?type=document&id=${doc.id}&title=${encodeURIComponent(doc.title || doc.doc_type)}` })
+    wx.navigateTo({ url: `/pages/todo/compose?type=document&id=${doc.id}` })
   },
 
   openPdf() {
