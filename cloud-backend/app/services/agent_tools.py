@@ -606,20 +606,46 @@ def apply_form_values(args: dict, form: str | None, values: dict | None) -> dict
 _ACCEPT_CANDS_KEY = "_accept_cands"        # 隐藏键：候选 item→points（存草稿，落库前清洗）
 _ACCEPT_CANDS_ORDER = "_accept_cands_order"
 _ACCEPT_FORM_CACHE: dict | None = None
-_ACCEPTANCE_TYPES = ("隐蔽工程", "检验批", "进场验收", "分项分部")
+# 验收类型：显示枚举（chips 选项）。顺序即展示顺序；「分项分部」为历史别名，保留兼容旧数据。
+_ACCEPTANCE_TYPES = (
+    "隐蔽工程", "检验批", "进场验收",
+    "分项工程验收", "分部工程验收", "单位工程验收",
+    "竣工验收", "预验收", "分项分部",
+)
+
+
+# 从素材/原话保守推断验收类型：只认明确出现的类型词，按顺序命中第一个即返回。
+# 「分项工程」须在「分部工程」前，避免把「分项工程质量验收」误判为分部；
+# 「竣工预验收」须在「竣工验收」前，避免把预验收误判为竣工。
+_ACCEPTANCE_INFER = [
+    ("隐蔽工程", "隐蔽工程"),
+    ("检验批", "检验批"),
+    ("进场验收", "进场验收"),
+    ("材料进场", "进场验收"),
+    ("材料验收", "进场验收"),
+    ("构配件", "进场验收"),
+    ("分项工程", "分项工程验收"),
+    ("子分部", "分部工程验收"),
+    ("分部工程", "分部工程验收"),
+    ("单位工程", "单位工程验收"),
+    ("竣工预验收", "预验收"),
+    ("预验收", "预验收"),
+    ("竣工验收", "竣工验收"),
+]
 
 
 def _infer_acceptance_type(text: str) -> str:
-    """从素材/正文里保守推断验收类型（只认写死的四类词，取命中第一个）。
+    """从素材/正文里保守推断验收类型（只认明确出现的类型词，取命中第一个）。
 
-    「隐蔽工程验收公示牌」「钢筋隐蔽验收」→ 隐蔽工程；「检验批质量验收」→ 检验批。
-    只用于文本里*明确出现*类型词的情形——整体仍优先保留用户可说、可改。
+    「隐蔽工程验收公示牌」→ 隐蔽工程；「检验批质量验收」→ 检验批；
+    「分项工程质量验收记录」→ 分项工程验收；「单位工程竣工验收」→ 单位工程验收。
+    只用于文本里*明确出现*类型词的情形——整体仍保留用户可说、可改。
     """
     t = str(text or "")
     if not t:
         return ""
-    for kind in _ACCEPTANCE_TYPES:
-        if kind in t:
+    for kw, kind in _ACCEPTANCE_INFER:
+        if kw in t:
             return kind
     return ""
 
@@ -1165,7 +1191,8 @@ async def _create_work_record(ctx: ToolContext, args: dict) -> dict:
             else:
                 enum = record_field_spec.options_for(field)
                 if field.get("canonical") == "acceptance_type":
-                    # 受控枚举（隐蔽工程/检验批/进场验收/分项分部），从源头灭掉模型口误
+                    # 受控枚举（隐蔽工程/检验批/进场验收/分项工程验收/分部工程验收/
+                    # 单位工程验收/竣工验收/预验收；「分项分部」为旧值别名），从源头灭掉模型口误
                     enum = list(_ACCEPTANCE_TYPES)
                 if enum:
                     options[label] = enum

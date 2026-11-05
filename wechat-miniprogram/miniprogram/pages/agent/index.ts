@@ -463,7 +463,7 @@ const FIELD_SUGGESTIONS: Record<string, string[]> = {
   inspection_remark: ['现场情况正常', '无异常', '已口头提醒施工单位'],
   problems: ['未发现问题', '发现轻微问题已当场整改', '存在安全隐患需整改'],
   treatment: ['口头通知整改', '下发监理通知单', '已复查合格'],
-  acceptance_type: ['隐蔽工程验收', '分项工程验收', '检验批验收', '材料进场验收'],
+  acceptance_type: ['隐蔽工程', '检验批', '进场验收', '分项工程验收', '分部工程验收', '单位工程验收', '竣工验收', '预验收'],
   acceptance_content: ['钢筋规格数量', '模板尺寸标高', '混凝土外观质量', '防水层搭接'],
   acceptance_result: ['合格', '不合格', '整改后合格'],
   station_project_name: ['混凝土浇筑', '土方回填', '桩基施工', '防水施工'],

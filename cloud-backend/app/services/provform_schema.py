@@ -170,7 +170,7 @@ SCHEMAS: dict[str, dict] = {
                           _f("6_02", "编号", "text", True, system=True),
                           _f("date", "验收日期", "date", True, system=True)),
             _sec("内容",
-                          _f("acceptance_type", "验收类型", "select", True, ["隐蔽工程", "检验批", "进场验收", "分项分部"]),
+                          _f("acceptance_type", "验收类型", "select", True, ["隐蔽工程", "检验批", "进场验收", "分项工程验收", "分部工程验收", "单位工程验收", "竣工验收", "预验收", "分项分部"]),
                           _f("6_05", "验收部位、工序、材料、设备进场", "text", True),
                           _f("6_06", "验收内容（验收要点）", "text", True),
                           _f("6_07", "施工单位自检结论", "text", True),

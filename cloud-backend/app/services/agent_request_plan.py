@@ -34,7 +34,7 @@ RECORD_TYPES: dict[str, dict[str, Any]] = {
     "验收": {
         "form": "acceptance_record",
         "aliases": ("检查验收", "工序验收", "隐蔽验收", "举牌验收"),
-        "description": "隐蔽工程、检验批、分项分部或材料进场验收",
+        "description": "隐蔽工程、检验批、进场验收、分项工程验收、分部工程验收、单位工程验收、竣工验收或预验收（「分项分部」为旧值别名）",
     },
     "见证": {
         "form": "witness_record",

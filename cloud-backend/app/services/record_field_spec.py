@@ -14,7 +14,7 @@ TABLE_SOURCE = '监理通各记录关键字（草稿）(1).xlsx'
 
 ASK_ANYWAY = ['weather', 'wind']
 
-QUESTION_OVERRIDES = {'section': '这次的工程部位（施工区域）是哪里？例如「3号楼二层临边防护」', 'problems': '现场发现了什么问题？无异常就回复「符合要求」', 'weather': '当天天气如何？可以直接选，或回复「跳过」', 'content': '具体检查/巡视内容是什么？', 'start_time': '开始时间是几点？例如「9:00」', 'end_time': '结束时间是几点？例如「11:30」', 'worker_count': '现场施工人数大约多少？', 'station_process': '旁站的关键工序是什么？例如「混凝土浇筑」', 'hazard_name': '危大工程名称/类型是什么？例如「落地式钢管脚手架工程-一般危大工程」', 'wind': '现场风力如何？可以直接选，或回复「跳过」', 'qa_onsite': '施工单位质检员、安全员、施工员是否到岗？', 'self_check': '施工单位是否已完成自查自检并达到质量标准？', 'acceptance_type': '这是哪类验收？隐蔽工程／检验批／进场验收／分项分部', 'acceptance_content': '验收要点（验收内容）是什么？'}
+QUESTION_OVERRIDES = {'section': '这次的工程部位（施工区域）是哪里？例如「3号楼二层临边防护」', 'problems': '现场发现了什么问题？无异常就回复「符合要求」', 'weather': '当天天气如何？可以直接选，或回复「跳过」', 'content': '具体检查/巡视内容是什么？', 'start_time': '开始时间是几点？例如「9:00」', 'end_time': '结束时间是几点？例如「11:30」', 'worker_count': '现场施工人数大约多少？', 'station_process': '旁站的关键工序是什么？例如「混凝土浇筑」', 'hazard_name': '危大工程名称/类型是什么？例如「落地式钢管脚手架工程-一般危大工程」', 'wind': '现场风力如何？可以直接选，或回复「跳过」', 'qa_onsite': '施工单位质检员、安全员、施工员是否到岗？', 'self_check': '施工单位是否已完成自查自检并达到质量标准？', 'acceptance_type': '这是哪类验收？隐蔽工程／检验批／进场验收／分项工程验收／分部工程验收／单位工程验收／竣工验收／预验收（「分项分部」为旧值别名）', 'acceptance_content': '验收要点（验收内容）是什么？'}
 
 ENUM_OPTIONS = {'weather': ['晴', '多云', '阴', '小雨', '大雨', '大风'], 'qa_onsite': ['是', '否'], 'self_check': ['是', '否'], 'conclusion': ['合格', '不合格'], 'acceptance_result': ['合格', '不合格', '待整改'], 'hazard_category': ['深基坑', '高大模板', '起重吊装', '脚手架', '拆除', '暗挖', '其他'], 'pm_onsite': ['是', '否'], 'safety_onsite': ['是', '否'], 'test_result': ['合格', '不合格', '待检'], 'acceptance_result_cailiao': ['合格', '不合格']}
 
@@ -118,7 +118,7 @@ FORMS: dict[str, dict] = {
             {'key': '6_01', 'canonical': 'project_name', 'label': '工程项目名称', 'raw_label': '工程项目名称', 'section': '基本信息', 'table_type': '文本', 'auto': True, 'required': True, 'kind': 'auto', 'arg': None},
             {'key': '6_02', 'canonical': 'doc_number', 'label': '编号', 'raw_label': '编号', 'section': '基本信息', 'table_type': '文本', 'auto': True, 'required': True, 'kind': 'auto', 'arg': None},
             {'key': 'date', 'canonical': 'date', 'label': '验收日期', 'raw_label': '验收日期', 'section': '基本信息', 'table_type': '', 'auto': True, 'required': True, 'kind': 'auto', 'arg': None},
-            {'key': 'acceptance_type', 'canonical': 'acceptance_type', 'label': '验收类型', 'raw_label': '验收类型', 'section': '内容', 'table_type': '枚举（隐蔽工程/检验批/进场验收/分项分部）', 'auto': False, 'required': True, 'kind': 'ask', 'arg': None},
+            {'key': 'acceptance_type', 'canonical': 'acceptance_type', 'label': '验收类型', 'raw_label': '验收类型', 'section': '内容', 'table_type': '枚举（隐蔽工程/检验批/进场验收/分项工程验收/分部工程验收/单位工程验收/竣工验收/预验收/分项分部）', 'auto': False, 'required': True, 'kind': 'ask', 'arg': None},
             {'key': '6_05', 'canonical': 'section', 'label': '验收部位、工序、材料、设备进场', 'raw_label': '验收部位、工序、材料、设备进场', 'section': '内容', 'table_type': '文本（精准到楼栋/楼层/轴线）', 'auto': False, 'required': True, 'kind': 'ask', 'arg': 'section'},
             {'key': '6_06', 'canonical': 'acceptance_content', 'label': '验收内容（验收要点）', 'raw_label': '验收内容（验收要点）', 'section': '内容', 'table_type': '文本', 'auto': False, 'required': True, 'kind': 'ask', 'arg': None},
             {'key': '6_07', 'canonical': 'self_check_conclusion', 'label': '施工单位自检结论', 'raw_label': '施工单位自检结论', 'section': '内容', 'table_type': '文本', 'auto': False, 'required': True, 'kind': 'ask', 'arg': None},
