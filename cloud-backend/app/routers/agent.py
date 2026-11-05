@@ -424,7 +424,7 @@ args 可以放你已确认的工具参数，但服务端仍会重新抽取、校
 
 **除此之外，任何字段缺失都不要追问、不要退回普通聊天**——返回对应动作，把你已经听到的填进 facts/args，
 没听到的一律省略。缺失栏目会由**服务端一次性**以可点选候选（chips）和预填表单呈现，你不需要逐栏代劳。
-- 🔴 回答的行文：answer 必须先**自然接住用户这句**——把本句已确认的事实（如「验收结论=合格」）简短转述，再告诉用户「缺的项上面已经给出可选项、点一下就行，或直接说/填」，**不要**在 answer 里手列候选值、不要列填空清单、不要逐栏盘问。例：用户答「合格」→ answer：「收到，验收结论记『合格』。还差验收类型和施工部位，上方点选验收类型、部位直接说一声就行；不方便也能先跳过。」。
+- 🔴 回答的行文：answer 必须先**自然接住用户这句**——把本句已确认的事实（如「验收结论=合格」）简短转述，再告诉用户「缺的项下面已经给出可选项、点一下就行，或直接说/填」，**不要**在 answer 里手列候选值、不要列填空清单、不要逐栏盘问。例：用户答「合格」→ answer：「收到，验收结论记『合格』。还差验收类型和施工部位，下面点一下验收类型、部位直接说一声就行；不方便也能先跳过。」。
 - 🔴 你的 answer 是这条消息的**主角**，服务端兜底文案只在没有可用 answer 时才出现；不要把机械的「还需要补充：XX」塞进 answer。
 
 错误示范（严禁）：用户说「记一条旁站：屋面防水卷材铺贴，9:00 到 12:00，10人」，
@@ -437,7 +437,7 @@ station_start_time=9:00、station_end_time=12:00、worker_count=10，结论留�
 其他硬约束
 ----------
 - args 只能包含该工具声明的参数；拿不准的参数不要编造，省略即可（服务端会追问缺失项）。
-- 🔴 缺失字段由**服务端一次性**以可点选候选（chips）和预填表单呈现，你**不要**在 answer 里逐栏追问、也不要手列候选值。接话时只自然转述已确认事实 + 一句「缺的上面点选/填一下即可」。验收类型只能从受控枚举里选（隐蔽工程／检验批／进场验收／分项工程验收／分部工程验收／单位工程验收／竣工验收／预验收；「分项分部」为旧值别名），拿不准就说「点上方验收类型」，绝不要自己造类型词（如把「分项分部」说成「分部分部」）。
+- 🔴 缺失字段由**服务端一次性**以可点选候选（chips）和预填表单呈现，你**不要**在 answer 里逐栏追问、也不要手列候选值。接话时只自然转述已确认事实 + 一句「下面点一下即可」。🔴 带照片水印/素材且已经能判断是哪类记录时，**必须返回 record_work 动作**，不许因为"信息和水印不一致"就退回纯聊天去汇报差异——冲突由服务端用一句提示 + 可点选项承载。验收类型只能从受控枚举里选（隐蔽工程／检验批／进场验收／分项工程验收／分部工程验收／单位工程验收／竣工验收／预验收；「分项分部」为旧值别名），拿不准就说「点下方验收类型」，绝不要自己造类型词（如把「分项分部」说成「分部分部」）。
 - section（工程部位/施工区域）只填**用户明确说出来的**具体施工部位（如「3号楼二层东侧临边」）。🔴 上面括号里的字只是示意格式，**不是候选值**：用户没说部位就留空，服务端会追问；严禁按规范/经验列举（例如把「临边洞口防护、高处作业、卸料平台、起重吊装、移动操作平台、模板支撑体系」这类检查项清单当成部位填进来）。用户句中的项目名称（如「巡视XX项目」）也不要填进 section。
 - 🔴 用户只回了记录类型（如只答「巡视」「旁站」「验收」）时，**除 record_type 外一个字段都不要填**：不准按经验补部位、工作内容、时间、天气、人数。留空由服务端补齐/追问，编造的字段会直接写进正式文书。
 - content（工作内容）只写用户说过的内容；不要把隐患识别结果、检查项清单、规范条目搬进来。
@@ -1229,6 +1229,17 @@ async def _agent_chat_impl(
             message=message, fact_args=turn_fact_args, conversation_id=conversation_id,
         )
 
+    # 🔴 服务端接管：模型在「已带素材证据 + 已识别记录类型或存在字段冲突」时仍返回
+    # 纯聊天（典型：只汇报「你描述的信息与图片证据不一致…请核对」），整轮会退化成一堵
+    # 文字，need_more/options/form 全空，用户既没有可点选项、也无处核对，只能继续打字。
+    # 2026-11-05 生产会话实测：kind=chat / need_more=[] / options=NULL。此时不等模型
+    # 自觉，直接走建记录流程，由 _create_work_record 一次性给出 chips 与预填表单。
+    if (not tool and not needs_record_type
+            and (str(material or "").strip() or prefill)
+            and (incoming_plan.get("field_conflicts")
+                 or agent_tools._norm_record_type(str(args.get("record_type") or "")))):
+        tool = "create_work_record"
+
     if tool == "create_work_record":
         if prefill:
             rtype = agent_tools._norm_record_type(str(args.get("record_type") or "")) or ""
@@ -1470,23 +1481,17 @@ async def agent_chat(
             "owner_unit": "建设单位", "construction_unit": "施工单位",
             "supervision_unit": "监理单位", "inspector": "检查人员",
         }
-        lines = ["发现你描述的信息与图片证据不一致："]
-        for item in conflicts[:4]:
-            if not isinstance(item, dict):
-                continue
-            label = labels.get(str(item.get("field") or ""), str(item.get("field") or "字段"))
-            evidence = "、".join(str(value) for value in (item.get("evidence_values") or []))
-            candidates = []
-            if str(item.get("system_value") or "").strip():
-                candidates.append(f"系统资料为「{item.get('system_value')}」")
-            if str(item.get("user_value") or "").strip():
-                candidates.append(f"你描述的是「{item.get('user_value')}」")
-            if evidence:
-                candidates.append(f"照片水印是「{evidence}」")
-            lines.append(f"- {label}：" + "；".join(candidates))
-        lines.append("当前候选优先保留照片水印/EXIF 证据；系统资料和你的描述不会静默覆盖，需在草稿中核对确认。")
+        # 冲突详情不再逐条铺成 5 行文字（2026-11-05 真机反馈「怎么还是这样子」：
+        # 整屏都是只能读、不能点的说明）。压成一句 + 字段名，具体候选值由下方
+        # chips / 表单承载，用户点一下即可改口径。
+        conflict_labels = [
+            labels.get(str(item.get("field") or ""), str(item.get("field") or "字段"))
+            for item in conflicts[:4] if isinstance(item, dict)
+        ]
+        brief = (f"有 {len(conflicts)} 项与照片水印不一致（{'、'.join(conflict_labels)}），"
+                 "已先按水印/EXIF 填入；要改直接说一声，或点下方选项。")
         result["field_conflicts"] = conflicts
-        result["reply"] = "\n".join(lines) + "\n" + str(result.get("reply") or "").strip()
+        result["reply"] = brief + "\n" + str(result.get("reply") or "").strip()
     if isinstance(result, dict):
         result["request_id"] = request_id
     if conversation_id and isinstance(result, dict):
