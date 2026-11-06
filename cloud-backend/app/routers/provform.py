@@ -14,7 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
-from app.models.agent_draft import AgentDraft
+from app.models.agent_draft import AgentConversationDraft, AgentDraft
 from app.models.user import User
 from app.models.work_record import WorkRecord
 from app.routers.auth import get_current_user
@@ -73,9 +73,19 @@ async def get_schema_steps(
 
 
 async def _prefill_from_draft(db: AsyncSession, user: User, draft_id: int) -> tuple[dict, str]:
+    # 🔧 草稿现已迁到会话级新表 agent_conversation_drafts（stash_pending 带 conversation_id
+    # 时只写新表，旧表 agent_drafts 不再写入）。「用表单填」预填必须优先查新表，找不到再
+    # 回退旧表，否则按 draft_id 在新表里查不到 → 预填全空/报「草稿不存在」。
     row = (await db.execute(
-        select(AgentDraft).where(AgentDraft.id == draft_id, AgentDraft.user_id == user.id)
+        select(AgentConversationDraft).where(
+            AgentConversationDraft.id == draft_id,
+            AgentConversationDraft.user_id == user.id,
+        )
     )).scalars().first()
+    if row is None:
+        row = (await db.execute(
+            select(AgentDraft).where(AgentDraft.id == draft_id, AgentDraft.user_id == user.id)
+        )).scalars().first()
     if row is None:
         raise HTTPException(status_code=404, detail="草稿不存在")
     try:
