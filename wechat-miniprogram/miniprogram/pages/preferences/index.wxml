@@ -1,0 +1,93 @@
+<!--
+  AI 偏好（二级页）· 2026-11-06 新建
+
+  能力：管理「用户长期偏好」——用户明示的、希望 AI 一直遵守的做事规则。
+  这些规则会跨会话进入 Agent 系统上下文（后端 /api/agent/preferences，
+  由 agent 聊天时注入），比如「整改回复必须附前后对比照片」。
+
+  页面布局：
+    ① 新增卡：输入一句话偏好 + 选分类
+    ② 列表卡：已添加的偏好，每行可启用/停用/删除
+  参照 account-security 的目录页风格（glass-nav-bar + section/cell 基元）。
+-->
+<view class="page" style="{{themeStyle}}">
+  <glass-nav-bar title="AI 偏好" left="back" />
+
+  <!-- ① 新增偏好 -->
+  <view class="group-title">告诉 AI 你的工作规矩</view>
+  <view class="section">
+    <view class="add-wrap">
+      <textarea
+        class="add-input"
+        value="{{inputValue}}"
+        placeholder="例如：整改回复必须附前后对比照片"
+        placeholder-class="add-placeholder"
+        maxlength="200"
+        bindinput="onInput"
+        auto-height
+      ></textarea>
+      <view class="add-row">
+        <view class="cat-picker" bindtap="openCategoryPicker">
+          <text class="cat-value">{{selectedCategoryLabel || '分类'}}</text>
+          <text class="cell-arrow">▾</text>
+        </view>
+        <button
+          class="add-btn"
+          size="mini"
+          loading="{{adding}}"
+          disabled="{{adding || !inputValue}}"
+          bindtap="addPreference"
+        >添加</button>
+      </view>
+    </view>
+  </view>
+
+  <!-- ② 已添加偏好 -->
+  <view class="group-title">已添加（{{preferences.length}}）</view>
+  <view class="section" wx:if="{{preferences.length}}">
+    <view class="cell pref-item" wx:for="{{preferences}}" wx:key="id">
+      <view class="pref-main">
+        <view class="pref-head">
+          <text class="pref-cat">{{item.categoryLabel}}</text>
+          <view class="pref-tag {{item.active ? 'on' : 'off'}}">{{item.active ? '生效中' : '已停用'}}</view>
+        </view>
+        <text class="pref-rule">{{item.rule}}</text>
+      </view>
+      <view class="pref-actions">
+        <switch
+          checked="{{item.active}}"
+          data-id="{{item.id}}"
+          data-active="{{item.active}}"
+          bindchange="togglePreference"
+          color="#13795b"
+        />
+        <view class="pref-del" data-id="{{item.id}}" bindtap="removePreference">删除</view>
+      </view>
+    </view>
+  </view>
+  <view class="empty" wx:elif="{{!loading}}">
+    <text>还没有偏好。添加后，AI 会在以后的对话里一直遵守。</text>
+  </view>
+  <view class="empty" wx:if="{{loading}}">
+    <text>加载中…</text>
+  </view>
+
+  <!-- 分类选择浮层（mask + sheet 平级兄弟，禁嵌 modal 进 mask） -->
+  <view class="overlay" wx:if="{{showCategoryPicker}}" catchtouchmove="true">
+    <view class="overlay-mask" bindtap="closeCategoryPicker"></view>
+    <view class="cat-sheet">
+      <view class="cat-sheet-title">选择分类</view>
+      <view
+        class="cat-option {{selectedCategory === item.value ? 'selected' : ''}}"
+        wx:for="{{categories}}"
+        wx:key="value"
+        data-value="{{item.value}}"
+        bindtap="onCategoryChange"
+      >
+        <text>{{item.label}}</text>
+        <text class="cat-check" wx:if="{{selectedCategory === item.value}}">✓</text>
+      </view>
+      <view class="cat-sheet-cancel" bindtap="closeCategoryPicker">取消</view>
+    </view>
+  </view>
+</view>

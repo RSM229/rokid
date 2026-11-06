@@ -87,6 +87,16 @@
       </view>
       <text class="cell-arrow">›</text>
     </view>
+    <view class="cell entry-item entry-tint" bindtap="openPreferences">
+      <view class="entry-main">
+        <view class="entry-icon ic-pref"></view>
+        <view class="entry-text">
+          <text class="entry-title">AI 偏好</text>
+          <text class="entry-desc">告诉 AI 你的工作规矩，它会一直遵守</text>
+        </view>
+      </view>
+      <text class="cell-arrow">›</text>
+    </view>
   </view>
 
   <button class="logout-btn" bindtap="logout">退出登录</button>

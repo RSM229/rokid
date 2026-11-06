@@ -1,0 +1,192 @@
+@import "../../styles/cell-list.wxss";
+
+.page {
+  min-height: 100vh;
+  padding-bottom: 60rpx;
+}
+
+.group-title {
+  margin: 30rpx 34rpx 14rpx;
+  font-size: 26rpx;
+  color: var(--color-text-secondary, #666);
+}
+
+.section {
+  margin: 0 30rpx;
+  background: var(--color-background-primary, #fff);
+  border-radius: 18rpx;
+  overflow: hidden;
+}
+
+/* ============ 新增偏好 ============ */
+.add-wrap {
+  padding: 24rpx 28rpx;
+}
+.add-input {
+  width: 100%;
+  min-height: 96rpx;
+  font-size: 30rpx;
+  line-height: 44rpx;
+  box-sizing: border-box;
+}
+.add-placeholder {
+  color: var(--color-text-tertiary, #aaa);
+}
+.add-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 20rpx;
+}
+.cat-picker {
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+  padding: 10rpx 20rpx;
+  border: 1rpx solid var(--color-border-secondary, #ddd);
+  border-radius: 14rpx;
+  font-size: 26rpx;
+  color: var(--color-text-primary, #333);
+}
+.cat-value {
+  font-size: 26rpx;
+}
+.add-btn {
+  background: #13795b;
+  color: #fff;
+  border-radius: 14rpx;
+  font-size: 26rpx;
+  line-height: 2.2;
+  padding: 0 34rpx;
+}
+.add-btn[disabled] {
+  opacity: 0.5;
+}
+
+/* ============ 偏好列表 ============ */
+.pref-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16rpx;
+  padding: 26rpx 28rpx;
+}
+.pref-main {
+  flex: 1;
+  min-width: 0;
+}
+.pref-head {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  margin-bottom: 8rpx;
+}
+.pref-cat {
+  font-size: 22rpx;
+  color: #13795b;
+  background: rgba(19,121,91,0.08);
+  padding: 2rpx 12rpx;
+  border-radius: 8rpx;
+}
+.pref-tag {
+  font-size: 22rpx;
+  padding: 2rpx 12rpx;
+  border-radius: 8rpx;
+}
+.pref-tag.on {
+  color: #13795b;
+  background: rgba(19,121,91,0.08);
+}
+.pref-tag.off {
+  color: #999;
+  background: rgba(0,0,0,0.05);
+}
+.pref-rule {
+  font-size: 30rpx;
+  line-height: 44rpx;
+  color: var(--color-text-primary, #333);
+  word-break: break-all;
+}
+.pref-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 14rpx;
+  flex-shrink: 0;
+}
+.pref-actions switch {
+  transform: scale(0.8);
+  transform-origin: right center;
+}
+.pref-del {
+  font-size: 24rpx;
+  color: #c0392b;
+  padding: 4rpx 8rpx;
+}
+
+/* ============ 空态 / 加载 ============ */
+.empty {
+  margin: 40rpx 60rpx;
+  text-align: center;
+  color: var(--color-text-tertiary, #aaa);
+  font-size: 26rpx;
+  line-height: 40rpx;
+}
+
+/* ============ 分类选择浮层 ============ */
+.overlay {
+  position: fixed;
+  left: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 900;
+}
+.overlay-mask {
+  position: absolute;
+  left: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0,0,0,0.45);
+}
+.cat-sheet {
+  position: fixed;
+  left: 30rpx;
+  right: 30rpx;
+  bottom: 60rpx;
+  background: var(--color-background-primary, #fff);
+  border-radius: 20rpx;
+  overflow: hidden;
+  z-index: 901;
+}
+.cat-sheet-title {
+  text-align: center;
+  font-size: 30rpx;
+  font-weight: 500;
+  padding: 28rpx;
+  color: var(--color-text-primary, #333);
+}
+.cat-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 26rpx 34rpx;
+  font-size: 30rpx;
+  color: var(--color-text-primary, #333);
+  border-top: 1rpx solid rgba(0,0,0,0.05);
+}
+.cat-option.selected {
+  color: #13795b;
+}
+.cat-check {
+  color: #13795b;
+  font-size: 30rpx;
+}
+.cat-sheet-cancel {
+  border-top: 1rpx solid rgba(0,0,0,0.05);
+  text-align: center;
+  padding: 26rpx;
+  font-size: 30rpx;
+  color: var(--color-text-secondary, #666);
+}

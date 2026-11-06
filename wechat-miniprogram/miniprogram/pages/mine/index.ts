@@ -108,6 +108,10 @@ Page(themed({
     wx.navigateTo({ url: '/pages/settings/index' })
   },
 
+  /** AI 偏好：管理「用户长期偏好」——AI 跨会话遵守的做事规则 */
+  openPreferences() {
+    wx.navigateTo({ url: '/pages/preferences/index' })
+  },
 
   async loadProfile() {
     try {

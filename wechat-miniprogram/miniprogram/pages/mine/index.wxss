@@ -73,3 +73,14 @@
   -webkit-mask-image: url("data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2024%2024%22%3E%3Cpath%20fill=%22%231677ff%22%20d=%22M3%2017.25V21h3.75L17.81%209.94l-3.75-3.75zM20.71%207.04a1%201%200%200%200%200-1.41l-2.34-2.34a1%201%200%200%200-1.41%200l-1.83%201.83%203.75%203.75z%22/%3E%3C/svg%3E");
   mask-image: url("data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2024%2024%22%3E%3Cpath%20fill=%22%231677ff%22%20d=%22M3%2017.25V21h3.75L17.81%209.94l-3.75-3.75zM20.71%207.04a1%201%200%200%200%200-1.41l-2.34-2.34a1%201%200%200%200-1.41%200l-1.83%201.83%203.75%203.75z%22/%3E%3C/svg%3E");
 }
+
+/* AI 偏好：主题绿（星形/规则），区别于设置灰蓝与看板主题色 */
+.entry-icon.ic-pref {
+  background: rgba(19,121,91,0.10);
+  border-color: rgba(19,121,91,0.20);
+}
+.entry-icon.ic-pref::before {
+  background-color: #13795b;
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2024%2024%22%3E%3Cpath%20fill=%22%2313795b%22%20d=%22M12%2017.27 18.18 21l-1.64-7.03L22%209.24l-7.19-.61L12%202 9.19 8.63 2 9.24l5.46 4.73L5.82 21z%22/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2024%2024%22%3E%3Cpath%20fill=%22%2313795b%22%20d=%22M12%2017.27 18.18 21l-1.64-7.03L22%209.24l-7.19-.61L12%202 9.19 8.63 2 9.24l5.46 4.73L5.82 21z%22/%3E%3C/svg%3E");
+}
