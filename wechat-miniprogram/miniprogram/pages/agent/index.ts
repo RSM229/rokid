@@ -1325,8 +1325,19 @@ Page(themed({
         results.forEach((res, i) => {
           const wmLine = this.formatWatermark(res.wm)
           const observationLine = res.observation ? `【图片内容观察】${res.observation}` : ''
-          blocks.push(wmLine
-            ? `【图片 ${i + 1}】\n${wmLine}${observationLine ? `\n${observationLine}` : ''}`
+          // 2026-11-06 修复：水印横幅/原始识别文字（如「隐蔽工程验收公示牌」）此前因
+          // formatWatermark 只输出 6 个结构化字段而被丢弃，导致服务端推断不出验收子类型、
+          // 反过来问用户「这是什么类型」。把原始识别行一并纳入素材（服务端据此关键词匹配）。
+          const wmRawLines = Array.isArray((res.wm as Record<string, any>)._lines)
+            ? (res.wm as Record<string, any>)._lines
+              .filter((t: string) => t && String(t).trim())
+              .join(' ')
+            : ''
+          const wmRawBlock = wmRawLines && !wmLine.includes(wmRawLines)
+            ? `【水印识别原文】${wmRawLines}` : ''
+          const wmBlock = [wmLine, wmRawBlock].filter(Boolean).join('；')
+          blocks.push(wmBlock
+            ? `【图片 ${i + 1}】\n${wmBlock}${observationLine ? `\n${observationLine}` : ''}`
             : `【图片 ${i + 1}】${observationLine ? `\n${observationLine}` : '\n已收到图片'}`)
           for (const key of Object.keys(res.wm)) {
             if (res.wm[key] && !wmFields[key]) wmFields[key] = res.wm[key]
