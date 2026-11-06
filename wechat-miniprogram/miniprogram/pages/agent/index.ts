@@ -233,6 +233,15 @@ interface Message {
   /** 追问的快速候选值（点击即作为回答发送，如 巡视/旁站/验收/见证） */
   chips?: string[]
   agentForm?: AgentForm
+  /** 长期偏好建议卡片（由 /agent/chat 返回；用户点「记住」才真正落库） */
+  preferenceSuggestion?: {
+    rule: string
+    category: string
+    reason: 'assistant' | 'repeated'
+    evidence?: string
+    saved?: boolean
+    busy?: boolean
+  }
   hazardCandidates?: HazardCandidateView[]
   hazardCandidateBusy?: boolean
   hazardCandidateResult?: string
@@ -308,6 +317,13 @@ interface AgentChatResponse {
   model?: string
   degraded?: boolean
   request_plan?: AgentRequestPlan
+  /** 长期偏好沉淀建议：模型判定或重复表达检测命中时返回，前端出「记住/不用」卡片 */
+  preference_suggestion?: {
+    rule: string
+    category: string
+    reason: 'assistant' | 'repeated'
+    evidence?: string
+  }
 }
 
 interface AgentRequestPlanClarification {
@@ -3094,6 +3110,9 @@ Page(themed({
       chips: chips.length ? chips : undefined,
       hint: missing,
       agentForm,
+      preferenceSuggestion: result.preference_suggestion
+        ? { ...result.preference_suggestion }
+        : undefined,
     }
   },
 
@@ -3112,6 +3131,48 @@ Page(themed({
       return
     }
     this.setData({ messages: [...messages, reply] })
+  },
+
+  /** 局部更新某条消息的偏好建议（busy/saved/清除） */
+  patchPreferenceSuggestion(
+    messageIndex: number,
+    patch: Partial<NonNullable<Message['preferenceSuggestion']>> | null,
+  ) {
+    const messages = [...this.data.messages]
+    const message = messages[messageIndex]
+    if (!message?.preferenceSuggestion) return
+    messages[messageIndex] = {
+      ...message,
+      preferenceSuggestion: patch ? { ...message.preferenceSuggestion, ...patch } : undefined,
+    }
+    this.setData({ messages })
+  },
+
+  /** 点「记住」才真正落库：偏好会进以后每一轮的系统上下文，绝不自动保存 */
+  async savePreferenceSuggestion(event: WechatMiniprogram.TouchEvent) {
+    const messageIndex = Number(event.currentTarget.dataset.index)
+    const suggestion = this.data.messages[messageIndex]?.preferenceSuggestion
+    if (!suggestion || suggestion.saved || suggestion.busy) return
+    this.patchPreferenceSuggestion(messageIndex, { busy: true })
+    try {
+      await request('/agent/preferences', {
+        method: 'POST',
+        data: {
+          rule: suggestion.rule,
+          category: suggestion.category,
+          source: 'assistant_suggested',
+        },
+      })
+      this.patchPreferenceSuggestion(messageIndex, { saved: true, busy: false })
+      wx.showToast({ title: '已记住，以后每轮都生效', icon: 'none' })
+    } catch (error) {
+      this.patchPreferenceSuggestion(messageIndex, { busy: false })
+      wx.showToast({ title: (error as Error).message || '保存失败', icon: 'none' })
+    }
+  },
+
+  dismissPreferenceSuggestion(event: WechatMiniprogram.TouchEvent) {
+    this.patchPreferenceSuggestion(Number(event.currentTarget.dataset.index), null)
   },
 
   updateAgentForm(messageIndex: number, patch: (form: AgentForm) => AgentForm) {

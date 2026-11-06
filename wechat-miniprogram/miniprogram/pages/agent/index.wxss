@@ -612,3 +612,19 @@
 .bubble-copy:active { opacity: .55; }
 .bubble-copy-ic { width: 30rpx; height: 30rpx; background-color: #0f6e52; -webkit-mask: url("data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2024%2024%22%20fill=%22%23000000%22%3E%3Crect%20x=%226.5%22%20y=%226.5%22%20width=%2211%22%20height=%2211%22%20rx=%222%22%20fill=%22none%22%20stroke=%22%23000000%22%20stroke-width=%222%22/%3E%3Crect%20x=%2210.5%22%20y=%2210.5%22%20width=%2211%22%20height=%2211%22%20rx=%222%22%20fill=%22none%22%20stroke=%22%23000000%22%20stroke-width=%222%22/%3E%3C/svg%3E") center / 100% 100% no-repeat; mask: url("data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2024%2024%22%20fill=%22%23000000%22%3E%3Crect%20x=%226.5%22%20y=%226.5%22%20width=%2211%22%20height=%2211%22%20rx=%222%22%20fill=%22none%22%20stroke=%22%23000000%22%20stroke-width=%222%22/%3E%3Crect%20x=%2210.5%22%20y=%2210.5%22%20width=%2211%22%20height=%2211%22%20rx=%222%22%20fill=%22none%22%20stroke=%22%23000000%22%20stroke-width=%222%22/%3E%3C/svg%3E") center / 100% 100% no-repeat; }
 .message.user .bubble-copy-ic { background-color: #13795b; }
+
+/* ============ 长期偏好沉淀建议卡（2026-11-06） ============
+   气泡下方的轻量确认条：Agent 判定「这句话像是一条以后都要遵守的规矩」时出现，
+   点「记住」才写库（偏好会进以后每一轮系统上下文，绝不自动保存）。 */
+.pref-suggest { margin-top: 14rpx; padding: 20rpx 22rpx; border-radius: 16rpx; background: rgba(var(--brand-rgb, 10,46,92), 0.05); box-shadow: inset 0 0 0 1rpx rgba(var(--brand-rgb, 10,46,92), 0.12); }
+.pref-suggest-head { display: flex; align-items: baseline; gap: 12rpx; }
+.pref-suggest-title { font-size: 26rpx; font-weight: 600; color: var(--ink, #12253d); }
+.pref-suggest-sub { font-size: 21rpx; color: #8b98a8; }
+.pref-suggest-rule { display: block; margin-top: 10rpx; font-size: 26rpx; line-height: 1.5; color: var(--ink-2, #2f4157); }
+.pref-suggest-actions { display: flex; justify-content: flex-end; gap: 16rpx; margin-top: 16rpx; }
+.pref-suggest-btn { padding: 10rpx 30rpx; border-radius: 12rpx; font-size: 25rpx; }
+.pref-suggest-btn:active { opacity: .72; }
+.pref-suggest-btn.ghost { color: #6b7c90; box-shadow: inset 0 0 0 1rpx rgba(var(--brand-rgb, 10,46,92), 0.16); }
+.pref-suggest-btn.primary { color: var(--on-brand, #fff); background: var(--brand, #0a2e5c); }
+.pref-suggest-btn.disabled { opacity: .55; }
+.pref-suggest-done { margin-top: 12rpx; font-size: 23rpx; color: #0f7a55; }

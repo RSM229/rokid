@@ -290,6 +290,19 @@
               <view class="action-btn" wx:for="{{item.actions}}" wx:for-item="act" wx:for-index="ai" wx:key="ai" data-command="{{act.command}}" bindtap="handleActionTap">{{act.label}}</view>
             </view>
           </view>
+          <!-- 长期偏好沉淀建议：点「记住」才落库（偏好会进以后每轮上下文，不自动保存） -->
+          <view wx:if="{{item.preferenceSuggestion}}" class="pref-suggest">
+            <view class="pref-suggest-head">
+              <text class="pref-suggest-title">要不要记成长期偏好？</text>
+              <text class="pref-suggest-sub">{{item.preferenceSuggestion.reason === 'repeated' ? '你之前提过类似要求' : '这条规矩以后每轮都适用'}}</text>
+            </view>
+            <text class="pref-suggest-rule">{{item.preferenceSuggestion.rule}}</text>
+            <view wx:if="{{item.preferenceSuggestion.saved}}" class="pref-suggest-done">已加入「我的 - AI 偏好」</view>
+            <view wx:else class="pref-suggest-actions">
+              <view class="pref-suggest-btn ghost" data-index="{{mi}}" bindtap="dismissPreferenceSuggestion">不用</view>
+              <view class="pref-suggest-btn primary {{item.preferenceSuggestion.busy ? 'disabled' : ''}}" data-index="{{mi}}" bindtap="savePreferenceSuggestion">{{item.preferenceSuggestion.busy ? '保存中' : '记住'}}</view>
+            </view>
+          </view>
           <view wx:if="{{item.agentForm && (item.agentForm.kind === 'attachments_done' || !(item.chips && item.chips.length))}}" class="agent-task-form {{item.agentForm.kind === 'attachments_done' ? 'completed' : ''}}">
             <view class="agent-task-head">
               <view>

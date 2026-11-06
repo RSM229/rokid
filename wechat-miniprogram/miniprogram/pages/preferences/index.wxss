@@ -52,7 +52,7 @@
   font-size: 26rpx;
 }
 .add-btn {
-  background: #13795b;
+  background: var(--brand, #0a2e5c);
   color: #fff;
   border-radius: 14rpx;
   font-size: 26rpx;
@@ -83,8 +83,8 @@
 }
 .pref-cat {
   font-size: 22rpx;
-  color: #13795b;
-  background: rgba(19,121,91,0.08);
+  color: var(--brand, #0a2e5c);
+  background: rgba(var(--brand-rgb, 10,46,92), 0.08);
   padding: 2rpx 12rpx;
   border-radius: 8rpx;
 }
@@ -94,8 +94,8 @@
   border-radius: 8rpx;
 }
 .pref-tag.on {
-  color: #13795b;
-  background: rgba(19,121,91,0.08);
+  color: var(--brand, #0a2e5c);
+  background: rgba(var(--brand-rgb, 10,46,92), 0.08);
 }
 .pref-tag.off {
   color: #999;
@@ -177,10 +177,10 @@
   border-top: 1rpx solid rgba(0,0,0,0.05);
 }
 .cat-option.selected {
-  color: #13795b;
+  color: var(--brand, #0a2e5c);
 }
 .cat-check {
-  color: #13795b;
+  color: var(--brand, #0a2e5c);
   font-size: 30rpx;
 }
 .cat-sheet-cancel {
