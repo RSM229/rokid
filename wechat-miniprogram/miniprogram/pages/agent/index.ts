@@ -562,6 +562,15 @@ Page(themed({
     showPlusPanel: false,
     /** 待发送附件：图片/文件可多选先挂在这里，补充文字后一次性发送识别 */
     attachments: [] as Attachment[],
+    /**
+     * 本会话已上传、但还没关联到任何工作记录的现场照片。
+     * 带图那一轮常常只是在追问记录类型，真正建档发生在后面的纯文字轮；
+     * attachments 发出即清空，若不在这里留一份，建单时就再也拿不到 mediaId，
+     * 照片会变成媒体库里的孤儿，记录详情「影像资料」整块不渲染。
+     */
+    pendingRecordPhotos: [] as Attachment[],
+    /** 登记时的会话 id，用于避免把上个会话的照片误挂到新会话建出的记录 */
+    pendingRecordPhotosSession: 0,
     canSend: false,
 
     breadcrumb: [] as string[],
@@ -1438,12 +1447,28 @@ Page(themed({
       }
 
       const material = blocks.join('\n\n')
+      // 多轮建单补挂：uploadEvidence 已把 mediaId 写回 images，attachments 随后被清空。
+      // 这里留一份「已上传未关联」的媒体，若本轮没有建档，后续纯文字轮建出记录时
+      // 由 applyAgentReply 统一 /media/link 到该记录（见 attachPendingPhotosFromReply）。
+      if (images.length) {
+        const uploadedImages = images.filter(img => img.mediaId !== undefined)
+        if (uploadedImages.length) {
+          this.setData({
+            pendingRecordPhotos: [...this.data.pendingRecordPhotos, ...uploadedImages].slice(-9),
+            pendingRecordPhotosSession: this.currentSessionId || 0,
+          })
+        }
+      }
       const actionIds = new Set(requestPlan.actions.map(action => action.id))
       const wantsRecordPlan = images.length > 0 && (
         actionIds.has('record_work') || actionIds.has('archive_evidence') ||
         requestPlan.execution_mode === 'clarify'
       )
       if (wantsRecordPlan) {
+        // 整理计划执行时会按 evidence 自己把 media 关联到各条记录，且要求 media
+        // 尚未关联业务（agent_review_execute.py 会抛 409）；这里若先 /media/link，
+        // 整理计划将直接建档失败，所以清空待挂队列、交给计划自己管。
+        this.setData({ pendingRecordPhotos: [], pendingRecordPhotosSession: 0 })
         if (detections.length) {
           const reviewMessageIndex = await this.createReviewPlanFromAttachments(note, images, observations, requestPlan, false)
           if (reviewMessageIndex === null) return
@@ -2954,34 +2979,9 @@ Page(themed({
         ].filter(Boolean).join('\n')
       }
       this.applyAgentReply(result, this.data.messages)
-      // 上传图片且 Agent 建的是工作记录 → 自动把这张照片挂到该记录
-      // （已上传的直接 /media/link 关联；未上传的走 /media/images business_type=work_record 链路。
-      //   后端会自动同步 inspection_photos/witness_photos/content_json.media_ids）
-      // 单独 try 包裹：挂图失败绝不能冲掉已建好的记录卡片（落到外层 catch 会用原始 messages 覆盖）。
-      if (images.length) {
-        try {
-          const recCard =
-            (result.cards && result.cards.find(c => c.kind === 'work_record' && c.id)) ||
-            (result.card && result.card.kind === 'work_record' ? result.card : undefined)
-          if (recCard && recCard.id) {
-            const { ok, failed, lastError } = await this.attachPhotosToRecord(recCard.id, images)
-            if (ok) {
-              this.addMessage({
-                role: 'assistant',
-                text: `📎 已自动把这 ${ok} 张照片挂到记录 #${recCard.id}` +
-                  (failed ? `（另有 ${failed} 张失败${lastError ? `：${lastError}` : ''}）` : '') + '。',
-              })
-            } else if (failed) {
-              this.addMessage({
-                role: 'assistant',
-                text: `⚠️ 照片自动挂记录失败${lastError ? `：${lastError}` : ''}，可点记录卡「补充照片」手动添加。`,
-              })
-            }
-          }
-        } catch (attachErr) {
-          console.warn('自动挂照片失败（不影响已建记录）：', attachErr)
-        }
-      }
+      // 照片补挂统一走 applyAgentReply → attachPendingPhotosFromReply，覆盖
+      // 「带图首轮只追问、后续纯文字轮才建档」的场景；本轮不再单独挂一次，
+      // 否则同一批照片会挂两遍并冒出两条互相矛盾的提示。
       await this.finishAgentProgress(
         requestId,
         result.need_more?.length || result.form ? 'waiting' : 'completed',
@@ -3099,6 +3099,9 @@ Page(themed({
 
   /** 把 /agent/chat 回执渲染成一条助手消息（卡片/动作/chips/缺项提示） */
   applyAgentReply(result: AgentChatResponse, messages: Message[]) {
+    // 所有 /agent/chat 回执的统一入口：带图首轮往往只追问类型，真正建档在后续纯文字轮。
+    // 只要这一轮回了「工作记录」卡，就把本会话待挂的现场照片补关联上（异步，不阻塞气泡）。
+    void this.attachPendingPhotosFromReply(result)
     const reply = this.agentReplyToMessage(result)
     const progressIndex = messages.length - 1
     const progress = messages[progressIndex]
@@ -3546,6 +3549,52 @@ Page(themed({
       invalidateCache(CACHE_KEYS.WORK_RECORD_STATS)
     }
     return { ok, failed, lastError }
+  },
+
+  /**
+   * 多轮建单补挂照片。
+   * 现场照片在「带图那一轮」就已上传并拿到 mediaId，但那一轮常常只是追问记录类型；
+   * 真正建出 work_record 的可能是几轮之后的纯文字消息（handleLlmChat），那条路径既
+   * 拿不到附件也不会主动挂图。这里在统一的 applyAgentReply 里拦「工作记录」回执卡，
+   * 把本会话攒下的媒体一次性 /media/link 过去，避免记录详情「影像资料」整块空白。
+   */
+  async attachPendingPhotosFromReply(result: AgentChatResponse) {
+    const pending = this.data.pendingRecordPhotos
+    if (!pending.length) return
+    const session = this.data.pendingRecordPhotosSession
+    const current = this.currentSessionId || 0
+    if (session && current && session !== current) {
+      // 换了会话就别把旧照片挂到新会话建出的记录上
+      this.setData({ pendingRecordPhotos: [], pendingRecordPhotosSession: 0 })
+      return
+    }
+    const recCard =
+      (result.cards && result.cards.find(c => c.kind === 'work_record' && c.id)) ||
+      (result.card && result.card.kind === 'work_record' ? result.card : undefined)
+    if (!recCard || !recCard.id) return
+    const recordId = Number(recCard.id)
+    if (!recordId) return
+    // 先出队：同一条回执只挂一次，也防止这批图被挂到会话里后续建出的第二条记录。
+    this.setData({ pendingRecordPhotos: [] })
+    try {
+      const { ok, failed, lastError } = await this.attachPhotosToRecord(recordId, pending)
+      if (ok) {
+        this.addMessage({
+          role: 'assistant',
+          text: `📎 已自动把本次会话的 ${ok} 张现场照片挂到记录 #${recordId}` +
+            (failed ? `（另有 ${failed} 张失败${lastError ? `：${lastError}` : ''}）` : '') + '。',
+        })
+      } else {
+        this.setData({ pendingRecordPhotos: pending, pendingRecordPhotosSession: current })
+        this.addMessage({
+          role: 'assistant',
+          text: `⚠️ 现场照片挂记录失败${lastError ? `：${lastError}` : ''}，可点记录卡「补充照片」手动添加。`,
+        })
+      }
+    } catch (error) {
+      this.setData({ pendingRecordPhotos: pending, pendingRecordPhotosSession: current })
+      this.addMessage({ role: 'assistant', text: `⚠️ 现场照片挂记录失败：${(error as Error).message}` })
+    }
   },
 
   /**
