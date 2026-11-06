@@ -85,7 +85,11 @@ check("市政条目数 139", sum(1 for x in ac.ITEMS if x[0] == "市政") == 139
 # 一次性带出全部询问项（一起询问），用户一并回复后由系统逐条归集生成结论。
 # 故下面几节的期望由「不再追问验收内容」改为「带出 ask_block、验收内容待回复」。
 def ask_items(result):
-    return [x for x in (result.get("ask_block") or "").splitlines() if x.startswith("请确认")]
+    # 2026-11-06「完全交互」后询问项不再带「请确认：」前缀、也不带复选框，
+    # 按 ①②③ 序号切分（归集同样按序号，语义未变）。
+    marks = tuple("①②③④⑤⑥⑦⑧⑨⑩")
+    return [x for x in (result.get("ask_block") or "").splitlines()
+            if x.lstrip().startswith(marks)]
 
 
 print("\n== 1. A 自动带出：强命中唯一 → 一起带出全部询问项 ==")
@@ -104,14 +108,14 @@ need = [str(x) for x in r.get("need_more") or []]
 check("反向包含→同样一起带出询问项",
       "验收内容（验收要点）" in need and r.get("ask_mode") == "together", f"缺口={need}")
 
-print("\n== 2. B 候选追问：多是候选 → 命中多条给选项 ==")
+print("\n== 2. B 多候选场景 → 纯文字追问（2026-11-06「不要这些选择」） ==")
 r = create(accept_args(section="钢筋"), "记一条验收：钢筋，验收要点你说几点我选")
 need = [str(x) for x in r.get("need_more") or []]
 check("缺验收内容", "验收内容（验收要点）" in need, f"缺口={need}")
-opts = r.get("options") or {}
-acc_opts = opts.get("验收内容（验收要点）") or []
-check("给了候选（编号.要点名）", len(acc_opts) >= 3, f"{acc_opts[:2]}")
-check("候选带kind前缀与序号", any(o.startswith(("[房建]1.", "[房建]2.")) for o in acc_opts), f"{acc_opts[:4]}")
+check("完全交互 → 不给候选 chips", not (r.get("options") or {}), str(r.get("options")))
+check("完全交互 → 只回一句自然语言追问",
+      len(str(r.get("reply") or "").splitlines()) == 1
+      and "、" not in str(r.get("reply") or ""), str(r.get("reply") or "")[:80])
 
 print("\n== 3. 编号解析回要点全文（候选内 1-based 序号） ==")
 cands = at._acceptance_candidates("钢筋")
@@ -289,47 +293,42 @@ r6 = LOOP.run_until_complete(at._create_work_record(ctx("跳过，直接创建")
 check("预填+跳过 → 消费询问态并放行",
       r6.get("ask_mode") is None and "_acceptance_ask_state" not in a6)
 
-print("\n== 13. 无工序信息 → 工序引导 + 候选 chips（2026-11-05 用户截图「记录今天的工作」回归） ==")
-# 13a 隐蔽类型已知 + 用户没说工序 → 引导句 + 候选工序 chips（市政项目优先市政工序）
+print("\n== 13. 无工序信息 → 纯文字一问一答（2026-11-06 用户「我不要这些选择，我要完全交互」） ==")
+# 13a 隐蔽类型已知 + 用户没说工序 → 只给一句自然问句，不下发任何 chips / 字段清单
 a8 = accept_args(work_content="沙盛四路隐蔽工程验收公示牌",
                  extra={"acceptance_type": "隐蔽工程"},
                  extra_top={"location": "沙盛四路"})
 r8 = LOOP.run_until_complete(
     at._create_work_record(ctx("记录今天的工作", project_name="沙盛四路等4条道路工程"), a8))
 rep8 = str(r8.get("reply") or "")
-opts8 = r8.get("options") or {}
-chips8 = opts8.get("验收工序（点选）") or []
-check("无工序 → 引导句出现（对话式问句）",
-      "哪个工序" in rep8 and "直接说" in rep8, rep8[:60])
+check("无工序 → 引导句出现（纯文字问句）",
+      "哪个工序" in rep8 and "直接说" in rep8, rep8[:80])
 check("无工序 → 不出询问块", r8.get("ask_mode") is None and not r8.get("ask_block"))
-check("隐蔽类 → 候选工序 chips（≤6 个，少而精）", 1 <= len(chips8) <= 6, f"{len(chips8)} 个")
-check("市政项目 → 市政工序排前",
-      bool(chips8) and chips8[0].startswith("[市政]"), str(chips8[:1]))
-check("suggest 质量类不给候选", _m.suggest_procedures("检验批质量验收") == [])
-check("suggest 未知类型 → 全类型混合候选（可跳过验收类型步）",
-      len(_m.suggest_procedures("")) >= 6
-      and all(any(k in x for k in ("隐蔽", "进场", "材料", "设备")) for x in _m.suggest_procedures("")))
+check("完全交互 → 不下发任何候选 chips", not (r8.get("options") or {}), str(r8.get("options")))
+check("完全交互 → 不出现字段清单/点选/复选框措辞",
+      all(x not in rep8 for x in ("顺手补一下", "点下方", "点选", "□符合", "chips")), rep8[:80])
+check("完全交互 → 回复只问一栏（不含顿号串列）", "、" not in rep8, rep8[:80])
 
-# 13b 用户点选工序 chip → 下一轮触发「一起询问」（闭环）
+# 13b 用户用文字说出工序名 → 下一轮触发「一起询问」（闭环，不依赖 chips）
 a9 = at.merge_args(a8, {"record_type": "验收"})
 a9.pop("_acceptance_ask_state", None)
 r9 = LOOP.run_until_complete(
-    at._create_work_record(ctx(chips8[0], project_name="沙盛四路等4条道路工程"), a9))
-check("点选工序 chip → 一起询问块",
+    at._create_work_record(ctx("钢筋笼隐蔽前验收", project_name="沙盛四路等4条道路工程"), a9))
+check("文字说出工序 → 一起询问块",
       r9.get("ask_mode") == "together" and len(ask_items(r9)) >= 1,
       f"ask_mode={r9.get('ask_mode')} 项数={len(ask_items(r9))}")
+check("询问块不含复选框",
+      "□符合" not in str(r9.get("ask_block") or ""), str(r9.get("ask_block") or "")[:80])
 
-# 13c 「答类型后仍无内容/部位」不被内容守卫拦截（2026-11-05 15:07 用户实测回归：
-#     验收记录内容/部位全空 → 旧逻辑先问「记录内容或施工区域」，工序引导被串行化）
+# 13c 「答类型后仍无内容/部位」不被内容守卫拦截（2026-11-05 15:07 用户实测回归）
 a10 = {"record_type": "验收", "extra_fields": {}, "section": "",
        "location": "沙盛四路"}
 r10 = LOOP.run_until_complete(
     at._create_work_record(ctx("验收", project_name="沙盛四路等4条道路工程"), a10))
 need10 = [str(x) for x in r10.get("need_more") or []]
 check("验收无内容不被内容守卫拦", "记录内容或施工区域" not in need10, str(need10))
-check("验收无内容仍给工序引导",
-      "哪个工序" in str(r10.get("reply") or "")
-      and len((r10.get("options") or {}).get("验收工序（点选）", [])) >= 6)
+check("验收无内容仍给纯文字工序引导",
+      "哪个工序" in str(r10.get("reply") or "") and not (r10.get("options") or {}))
 
 # 13d 项目对象推断不出类别 → 用水印/消息文本兜底（2026-11-05 真机实测：
 #     沙盛四路市政项目 ctx.project 缺类别时推出一排 [房建] 隐蔽工序）

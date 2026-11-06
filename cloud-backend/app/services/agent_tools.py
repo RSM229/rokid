@@ -159,18 +159,20 @@ def _ok(reply: str, **kw) -> dict:
 
 def _need_more(missing: list[str], reply: str = "",
                options: dict[str, list[str]] | None = None) -> dict:
-    """参数不足：回追问话术；options 提供可点选的候选值（前端渲染成 chips）。"""
+    """参数不足：回纯文字追问话术。
+
+    2026-11-06 用户明确「我不要这些选择，我要完全交互」：无论调用方传什么
+    options，一律不再下发可点选候选 chips / 表单控件；缺项只用自然语言
+    一次问一栏，用户自己打字回答。options 参数保留仅为兼容既有调用签名。
+    """
     if not reply:
         labels = [str(x) for x in (missing or [])]
-        if len(labels) == 1:
-            reply = (f"还差一项：请补充「{labels[0]}」；不用填也没关系，直接说跳过。")
-        elif labels:
-            reply = ("还有几项待补充（" + "、".join(labels)
-                     + "）；可以一次说完，也可以说「跳过」继续。")
+        if labels:
+            reply = f"还差「{labels[0]}」，你说一下就行；不方便也可以先跳过。"
         else:
             reply = "请补充缺失信息。"
     return {"ok": False, "reply": reply, "card": None, "cards": [], "actions": [],
-            "need_more": missing, "options": options or {}, "undo": None, "data": {}}
+            "need_more": missing, "options": {}, "undo": None, "data": {}}
 
 
 def _parse_json_object(raw: str) -> dict | None:
@@ -1167,16 +1169,18 @@ async def _create_work_record(ctx: ToolContext, args: dict) -> dict:
                 ))
                 return _need_more(
                     [conflict["label"]],
-                    f"{conflict['label']}识别到多个候选值，请选择正确内容或直接输入：",
-                    options={conflict["label"]: candidates} if candidates else None,
+                    f"{conflict['label']}我这边读到几个不同的说法"
+                    f"（{'、'.join(candidates) if candidates else '以你说的为准'}），你说一下按哪个算就行。",
                 )
             field = next((item for item in resolved["fields"] if item.get("missing") or item.get("validation_error")), None)
             if field:
-                options = {field["label"]: field["options"]} if field.get("options") else None
+                # 2026-11-06「完全交互」：不再把字段表 question_for 的
+                # 「还差一项：X（可直接填写…）」模板或候选 options 下发到对话，
+                # 具体校验错误仍照实说，其余统一成一句自然语言。
                 return _need_more(
                     [field["label"]],
-                    field.get("validation_error") or field.get("question") or f"请补充{field['label']}：",
-                    options=options,
+                    field.get("validation_error")
+                    or f"{field['label']}你说一下就行；不方便也可以先跳过。",
                 )
         if args.get("_require_confirmation") and not args.get("_execution_confirmed"):
             return _need_more(
@@ -1367,8 +1371,9 @@ async def _create_work_record(ctx: ToolContext, args: dict) -> dict:
             if concl:
                 args = _set_field_persist(orig_args, args, acc_concl_field, concl)
 
-    # 字段表驱动的追问：表上「由系统生成=否」且用户还没说的字段，**一次性**把可枚举项
-    # 以候选 chips 呈现、自由文本项列入待补清单，用户一轮点完/改完即可确认生成。
+    # 字段表驱动的追问：表上「由系统生成=否」且用户还没说的字段，只用纯文字
+    # **一次问当前最该补的一栏**（2026-11-06 用户「我不要这些选择，我要完全交互」：
+    # 不再下发任何候选 chips / 可点选项 /「还有几项」字段清单，全部自然语言一问一答）。
     # “跳过”只允许跳过非必填栏；合同声明的必填字段、冲突和格式错误不能被跳过。
     assist = assist_fields(record_type, is_weida)
     missing = [
@@ -1379,75 +1384,22 @@ async def _create_work_record(ctx: ToolContext, args: dict) -> dict:
     ]
     required_missing = [f for f in missing if bool(f.get("required"))]
     if missing and (required_missing or not _wants_skip(ctx.message)):
-        # 验收要点：先取候选（多候选时作为可点选项之一），但**不**独占提前
-        # return——否则会屏蔽其它缺项的枚举 chip，违背「一次性呈现所有缺项」。
-        acc_content_field = next(
-            (f for f in missing
-             if record_type == "验收" and f.get("canonical") == "acceptance_content"), None)
-        acc_options: dict[str, list[str]] = {}
-        if acc_content_field and not matched_entry:
-            acc_query = _acceptance_query(section, content,
-                                          str(args.get("location") or ""), ctx.message or "")
-            prefer = _acceptance_prefer_kind(ctx)
-            cands = _acceptance_candidates(acc_query, prefer_kind=prefer) if acc_query else []
-            if cands:
-                args = _acceptance_hide_candidates(args, cands)
-                acc_options[str(acc_content_field.get("label") or acc_content_field.get("canonical") or "")] = [
-                    f"{'[房建]' if c.get('kind') == '房建' else '[市政]'}"
-                    f"{i}. {c['item']}（{c['div']}）" for i, c in enumerate(cands, 1)
-                ]
-        # 通用合并：本轮所有缺字段的可枚举候选一次性带出（前端渲染成 chips），
-        # 自由文本项（无枚举，如施工部位）列入待补清单由用户直接填/说。
-        labels: list[str] = []
-        options: dict[str, list[str]] = {}
-        freetext: list[str] = []
-        for field in missing:
-            label = str(field.get("label") or field.get("canonical") or "")
-            labels.append(label)
-            if label in acc_options:
-                # 验收要点候选：与验收类型等枚举一起一次性呈现，不独占
-                options[label] = acc_options[label]
-            else:
-                enum = record_field_spec.options_for(field)
-                if field.get("canonical") == "acceptance_type":
-                    # 受控枚举（隐蔽工程/检验批/进场验收/分项工程验收/分部工程验收/
-                    # 单位工程验收/竣工验收/预验收；「分项分部」为旧值别名），从源头灭掉模型口误
-                    enum = list(_ACCEPTANCE_TYPES)
-                if enum:
-                    options[label] = enum
-                else:
-                    freetext.append(label)
-        options["可跳过"] = ["跳过，直接创建"]
-        # 工序引导：验收记录未命中要点库（用户/水印都没提具体工序）时，
-        # 光补字段不够——要点从未和用户核对过。按已知验收类型给候选工序 chips，
-        # 用户点选/说出工序后，下一轮即触发「一起询问」要点确认。
-        if record_type == "验收" and not matched_entry and not acc_options:
-            from app.services import acceptance_ask_together as _aat2
-            acc_type_now = str((args.get("extra_fields") or {}).get("acceptance_type")
-                               or args.get("acceptance_type") or "")
-            sugg = _aat2.suggest_procedures(
-                acc_type_now, prefer_kind=_acceptance_prefer_kind(ctx))
-            if sugg:
-                options["验收工序（点选）"] = sugg
-            # 对话式引导（2026-11-05 用户反馈「要交互，不要这么多选择」）：
-            # 一句自然问句打头，chips 只是「点了更快」的快捷方式，不是必填表单。
-            guide = "这次验收做的是哪个工序？直接说就行，我说不准的下面点了也可以。\n"
-            reply = guide + ("另外还有几项顺手补一下：" + "、".join(freetext)
-                             + "，直接说就行。不方便也能先跳过。"
-                             if freetext else
-                             "其余缺的栏目点下方选项或直接说都可以；不方便也能先跳过。")
-        elif freetext:
-            reply = ("还有几项顺手补一下：" + "、".join(freetext)
-                     + "，直接说就行。不方便也能先跳过。")
+        labels = [str(f.get("label") or f.get("canonical") or "") for f in missing]
+        current = labels[0] if labels else "信息"
+        if record_type == "验收" and not matched_entry:
+            # 工序未知：只问这一件事，不给候选清单。用户自己说出工序名后，
+            # 由 strong_match/_acceptance_query 在下一轮触发「一起询问」。
+            reply = "这次验收做的是哪个工序？你直接说就行。"
         else:
-            reply = "其余缺的栏目点下方选项或直接说都可以；不方便也能先跳过。"
-        result = _need_more(labels, reply, options=options)
+            reply = f"还差「{current}」，你说一下就行；不方便也可以先跳过。"
+        result = _need_more(labels, reply)
         if matched_entry:
-            # 「一起询问」：把该工序全部询问项一次性带出（不逐项追问），
+            # 「一起询问」：把该工序全部要点一次性带出（纯文字、无复选框），
             # 用户就全部要点一并回复；系统再据全部回复逐条归集生成结论。
             from app.services import acceptance_ask_together as _aat
             block = _aat.assemble_ask_block(matched_entry)
-            result["reply"] = block + "\n\n" + reply
+            result["reply"] = block + "\n\n" + (
+                f"另外「{current}」你要是顺手有，也一起说给我就行。")
             result["ask_block"] = block
             result["ask_mode"] = "together"
             # 询问态随草稿跨轮保留（已镜像进 orig_args），第二轮据此触发归集
@@ -1466,8 +1418,7 @@ async def _create_work_record(ctx: ToolContext, args: dict) -> dict:
             block = _aat.assemble_ask_block(matched_entry)
             result = _need_more(
                 [str((acc_field or {}).get("label") or "验收内容（验收要点）")],
-                block + "\n\n（请就上述全部要点一并回复，可逐条也可整体描述，"
-                "不符合/不适用请写明原因；回复后系统自动生成验收内容与验收结论。）",
+                block + "\n\n你照实际情况说一句就行，我来整理成验收内容和结论。",
             )
             result["ask_block"] = block
             result["ask_mode"] = "together"
@@ -1505,16 +1456,20 @@ async def _create_work_record(ctx: ToolContext, args: dict) -> dict:
                 ))
                 return _need_more(
                     [conflict.get("label") or conflict.get("canonical")],
-                    f"{conflict.get('label') or conflict.get('canonical')}识别到多个候选值，请选择正确内容或直接输入：",
-                    options={conflict.get("label") or conflict.get("canonical"): candidates} if candidates else None,
+                    f"{conflict.get('label') or conflict.get('canonical')}我这边读到几个不同的说法"
+                    f"（{'、'.join(candidates) if candidates else '以你说的为准'}），你说一下按哪个算就行。",
                 )
             invalid = next(iter(resolved_form.get("invalid_fields") or []), None)
             field = next((item for item in resolved_form.get("fields") or [] if item.get("missing") or item.get("validation_error")), None)
             if invalid or field:
                 item = invalid or field or {}
                 label = item.get("label") or item.get("canonical") or "必填项"
-                options = {label: item.get("options")} if item.get("options") else None
-                return _need_more([label], item.get("message") or item.get("validation_error") or item.get("question") or f"请补充{label}：", options=options)
+                # 同上：具体错误照实说，字段表模板/候选一律不下发到对话。
+                return _need_more(
+                    [label],
+                    item.get("message") or item.get("validation_error")
+                    or f"{label}你说一下就行；不方便也可以先跳过。",
+                )
             return _need_more(["表式字段"], str(resolved_form.get("materialization_error") or "请补全该表式字段"))
         # 合同归一后的值优先于模型参数，确保记录列、快照和后续文书看到同一份数据。
         for key, value in (resolved_form.get("values") or {}).items():

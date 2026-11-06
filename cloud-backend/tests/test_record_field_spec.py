@@ -124,8 +124,8 @@ check("天气给枚举", rfs.options_for(next(f for f in at.assist_fields("旁�
       == ['晴', '多云', '阴', '小雨', '大雨', '大风'])
 check("追问话术取 override",
       rfs.question_for(next(f for f in at.assist_fields("巡视") if f["canonical"] == "section")).startswith("这次的工程部位"))
-check("无 override 走通用模板",
-      "请补充" in rfs.question_for(next(f for f in at.assist_fields("旁站") if f["canonical"] == "equipment")))
+check("无 override 走字段表通用模板（生成物内部文案；对话出口已改纯文字）",
+      "还差一项" in rfs.question_for(next(f for f in at.assist_fields("旁站") if f["canonical"] == "equipment")))
 
 print("== 8. 补充回答的命中判定 ==")
 d = {"record_type": "旁站"}

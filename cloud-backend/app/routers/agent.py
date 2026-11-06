@@ -191,15 +191,22 @@ def _attachment_block(label: str = "现场照片（可选）", hint: str = "相�
 def _agent_form(
     tool: str, args: dict, result: dict, message: str = "", project_name: str = "",
 ) -> dict | None:
-    """把一次回执变成聊天内可直接填写的表单。
+    """把一次回执变成聊天内的卡片。
 
-    - 记录类型未定：只给一个类型选择框；
-    - 字段未齐：按省统表字段表一次性列出所有缺失栏目（必填在前），照片框内嵌；
-    - 记录已建：给一个可跳过的照片框，并附文书/记录的文字链接。
+    2026-11-06 用户「我不要这些选择，我要完全交互」：缺项/选类型阶段一律
+    纯文字一问一答，不再下发下拉框、候选或待填字段卡；这里只保留
+    - 最终确认卡（生成正式记录前的安全网，文字确认同样可用）；
+    - 记录已建后的补充照片框，并附文书/记录的文字链接。
     """
     missing = [str(x) for x in (result.get("need_more") or [])]
     options = result.get("options") or {}
     form_code = _record_form_code(tool, args, message)
+
+    # 2026-11-06 用户「我不要这些选择，我要完全交互」：缺项 / 选记录类型一律
+    # 用文字气泡一问一答，不再下发下拉框、候选字段或「还差 X」待填卡片。
+    # 仅保留「最终确认」卡（生成正式记录前的安全网，走文字确认同样可用）。
+    if result.get("need_more") and "最终确认" not in missing:
+        return None
 
     if tool == "create_work_record" and not form_code:
         opts = [str(x) for x in (options.get("记录类型")
@@ -271,37 +278,7 @@ def _agent_form(
             "actions": [],
         }
 
-    if result.get("need_more"):
-        # 一次只问当前最该补的那一栏（2026-11-05 用户明确要求「不要填表形式」：
-        # 上传图片后 agent 应先分析、给建议、确认类别，再逐栏引导；服务端不再把全部
-        # 缺项一次性摊成卡片/表格。这与 8402996 的「一次性 chips/表单」设计相反，按用户指令覆盖）。
-        pending_labels = [str(x) for x in (result.get("need_more") or [])][:1]
-        fields = agent_tools.missing_field_views(args, form_code) if form_code else []
-        if fields and pending_labels:
-            fields = [v for v in fields if str(v.get("label") or "") in pending_labels]
-        if not fields:
-            # 没有字段表/没有命中时退回原来的通用列表，保证能填
-            fields = agent_tools.missing_field_views(args, form_code) if form_code else []
-            if not fields:
-                fields = _generic_fields(missing, options)
-        filled = agent_tools.filled_field_views(args, form_code) if form_code else []
-        record_type = agent_tools._norm_record_type(str(args.get("record_type") or "")) or ""
-        has_required = any(field.get("required") for field in fields)
-        return {
-            "id": f"{tool}:{form_code or 'form'}",
-            "kind": "work_record" if form_code else "form",
-            "schema_version": 1, "field_schema": "record_field_spec.v1", "form_code": form_code or "",
-            "title": (f"还差「{pending_labels[0]}」" if pending_labels
-                      else (f"{record_type}记录 · 补齐信息" if record_type else "补齐信息")),
-            "hint": "上方可点选的先点；其余直接说或点开填写即可，不方便也能先跳过。" if fields
-                    else "都可以留空，直接提交也行。",
-            "fields": fields,
-            "filled": filled,
-            "attachments": _attachment_block(),
-            "submit_label": "保存记录" if form_code else "提交",
-            "skippable": not has_required,
-            "actions": [],
-        }
+    # need_more 分支已在函数开头统一拦截（纯文字一问一答，不下发表单卡）。
     return None
 
 
@@ -423,8 +400,8 @@ args 可以放你已确认的工具参数，但服务端仍会重新抽取、校
 再拿去问用户**——你已经复述了「施工内容：污水管道基础包封验收」，就不能紧接着问「你想整理成哪一类记录」。
 
 **除此之外，任何字段缺失都不要追问、不要退回普通聊天**——返回对应动作，把你已经听到的填进 facts/args，
-没听到的一律省略。缺失栏目会由**服务端一次性**以可点选候选（chips）和预填表单呈现，你不需要逐栏代劳。
-- 🔴 回答的行文：answer 必须先**自然接住用户这句**——把本句已确认的事实（如「验收结论=合格」）简短转述，再告诉用户「下面会一次只问当前最该补的那一栏，你直接说一声或点一下就行」，**不要**在 answer 里手列候选值、不要列填空清单、不要逐栏盘问、更不要复述「还差 X、还差 Y」清单。例：用户答「合格」→ answer：「收到，验收结论记『合格』。还差验收类型，下面一次只问这一栏，你点一下或说一声就行；不方便也能先跳过。」。
+没听到的一律省略。缺失栏目由服务端用**一句自然语言一次只问一栏**，界面上没有任何候选按钮、表单或清单，你不需要逐栏代劳。
+- 🔴 回答的行文：answer 必须先**自然接住用户这句**——把本句已确认的事实（如「验收结论=合格」）简短转述，再用一句话引到下面要问的那一栏；**不要**在 answer 里手列候选值、不要列填空清单、不要逐栏盘问、更不要复述「还差 X、还差 Y」清单。**严禁**出现「点一下」「点下方选项」「可点选」「候选」「chips」「表单」这类字样——本产品是纯文字一问一答，界面上没有任何可点选项。例：用户答「合格」→ answer：「收到，验收结论记『合格』。验收类型你说一下是哪一类就行；不方便也能先跳过。」。
 - 🔴 你的 answer 是这条消息的**主角**，服务端兜底文案只在没有可用 answer 时才出现；不要把机械的「还需要补充：XX」塞进 answer。
 
 错误示范（严禁）：用户说「记一条旁站：屋面防水卷材铺贴，9:00 到 12:00，10人」，
@@ -437,7 +414,7 @@ station_start_time=9:00、station_end_time=12:00、worker_count=10，结论留�
 其他硬约束
 ----------
 - args 只能包含该工具声明的参数；拿不准的参数不要编造，省略即可（服务端会追问缺失项）。
-- 🔴 缺失字段由**服务端一次只问一栏**（当前最该补的那一栏），你**不要**在 answer 里逐栏追问、也不要手列候选值、更不要复述「还差 X、还差 Y」清单。接话时只自然转述已确认事实 + 一句「下面一次只问这一栏，你直接说一声即可」。🔴 带照片水印/素材且已经能判断是哪类记录时，**必须返回 record_work 动作**，不许因为"信息和水印不一致"就退回纯聊天去汇报差异——冲突由服务端用一句提示 + 可点选项承载。验收类型只能从受控枚举里选（隐蔽工程／检验批／进场验收／分项工程验收／分部工程验收／单位工程验收／竣工验收／预验收；「分项分部」为旧值别名），拿不准就说「点下方验收类型」，绝不要自己造类型词（如把「分项分部」说成「分部分部」）。
+- 🔴 缺失字段由**服务端一次只问一栏**（当前最该补的那一栏），你**不要**在 answer 里逐栏追问、也不要手列候选值、更不要复述「还差 X、还差 Y」清单。接话时只自然转述已确认事实 + 一句「你直接说一声即可」，**严禁**提到任何按钮/选项/表单（本产品是纯文字对话）。🔴 带照片水印/素材且已经能判断是哪类记录时，**必须返回 record_work 动作**，不许因为"信息和水印不一致"就退回纯聊天去汇报差异——冲突由服务端用一句提示承载。验收类型只能从受控枚举里选（隐蔽工程／检验批／进场验收／分项工程验收／分部工程验收／单位工程验收／竣工验收／预验收；「分项分部」为旧值别名），拿不准就用文字问「是哪一类验收」，绝不要自己造类型词（如把「分项分部」说成「分部分部」）。
 - section（工程部位/施工区域）只填**用户明确说出来的**具体施工部位（如「3号楼二层东侧临边」）。🔴 上面括号里的字只是示意格式，**不是候选值**：用户没说部位就留空，服务端会追问；严禁按规范/经验列举（例如把「临边洞口防护、高处作业、卸料平台、起重吊装、移动操作平台、模板支撑体系」这类检查项清单当成部位填进来）。用户句中的项目名称（如「巡视XX项目」）也不要填进 section。
 - 🔴 用户只回了记录类型（如只答「巡视」「旁站」「验收」）时，**除 record_type 外一个字段都不要填**：不准按经验补部位、工作内容、时间、天气、人数。留空由服务端补齐/追问，编造的字段会直接写进正式文书。
 - content（工作内容）只写用户说过的内容；不要把隐患识别结果、检查项清单、规范条目搬进来。
@@ -1232,9 +1209,9 @@ async def _agent_chat_impl(
 
     # 🔴 服务端接管：模型在「已带素材证据 + 已识别记录类型或存在字段冲突」时仍返回
     # 纯聊天（典型：只汇报「你描述的信息与图片证据不一致…请核对」），整轮会退化成一堵
-    # 文字，need_more/options/form 全空，用户既没有可点选项、也无处核对，只能继续打字。
-    # 2026-11-05 生产会话实测：kind=chat / need_more=[] / options=NULL。此时不等模型
-    # 自觉，直接走建记录流程，由 _create_work_record 一次性给出 chips 与预填表单。
+    # 文字，need_more 全空，整轮退化成纯汇报。
+    # 2026-11-05 生产会话实测：kind=chat / need_more=[]。此时不等模型自觉，
+    # 直接走建记录流程，由 _create_work_record 给出一句自然语言追问。
     if (not tool and not needs_record_type
             and (str(material or "").strip() or prefill)
             and (incoming_plan.get("field_conflicts")
@@ -1390,29 +1367,22 @@ async def _agent_chat_impl(
     # This is deliberately a draft, not a record: no database side effect is
     # performed until the user chooses a target type and completes the form.
     if needs_record_type:
-        options = {"记录类型": list(agent_tools.record_field_spec.RECORD_TYPE_TO_FORM)}
         has_evidence = bool(
             material or prefill
             or (incoming_plan.get("evidence") if isinstance(incoming_plan.get("evidence"), list) else None)
             or _plan_evidence_count(incoming_plan)
         )
-        form = _agent_form(
-            "create_work_record", args,
-            {"need_more": ["记录类型"], "options": options}, message,
-            str(getattr(project, "name", "") or ""),
-        )
+        # 2026-11-06「我不要这些选择，我要完全交互」：只回一句自然语言提问，
+        # 不下发记录类型下拉框 / 候选 chips / 表单卡 / 推荐项。
         return {
             "kind": "action", "tool": "create_work_record",
             "reply": _missing_record_type_reply(has_evidence),
             "card": None, "cards": [], "actions": [],
             "need_more": ["记录类型"],
-            "options": options,
-            "form": form,
-            "input_components": _agent_input_components(form),
-            "recommendations": ([{
-                "field": "record_type", "value": proposed_record_type,
-                "reason": "结合你这次的描述给出的类型建议；需要你点选确认。",
-            }] if proposed_record_type in agent_tools.record_field_spec.RECORD_TYPE_TO_FORM else []),
+            "options": {},
+            "form": None,
+            "input_components": [],
+            "recommendations": [],
             "undo": None, "model": model_id, "request_plan": incoming_plan,
         }
 
@@ -1496,15 +1466,15 @@ async def agent_chat(
             "owner_unit": "建设单位", "construction_unit": "施工单位",
             "supervision_unit": "监理单位", "inspector": "检查人员",
         }
-        # 冲突详情不再逐条铺成 5 行文字（2026-11-05 真机反馈「怎么还是这样子」：
-        # 整屏都是只能读、不能点的说明）。压成一句 + 字段名，具体候选值由下方
-        # chips / 表单承载，用户点一下即可改口径。
+        # 冲突详情不再逐条铺成 5 行文字（2026-11-05 真机反馈「怎么还是这样子」）。
+        # 压成一句 + 字段名；2026-11-06 用户「完全交互」后不再提「点下方选项」，
+        # 改口径全靠用户直接说一句话。
         conflict_labels = [
             labels.get(str(item.get("field") or ""), str(item.get("field") or "字段"))
             for item in conflicts[:4] if isinstance(item, dict)
         ]
         brief = (f"有 {len(conflicts)} 项与照片水印不一致（{'、'.join(conflict_labels)}），"
-                 "已先按水印/EXIF 填入；要改直接说一声，或点下方选项。")
+                 "已先按水印/EXIF 填入；要改直接说一声就行。")
         result["field_conflicts"] = conflicts
         result["reply"] = brief + "\n" + str(result.get("reply") or "").strip()
     if isinstance(result, dict):
