@@ -1,6 +1,6 @@
 import { request } from '../../services/request'
 import { config, absoluteMediaUrl } from '../../config'
-import { getCached, CACHE_KEYS } from '../../services/cache'
+import { getCached, CACHE_KEYS, invalidateCache } from '../../services/cache'
 import { requireLogin } from '../../utils/guard'
 import { themed } from '../../utils/theme'
 
@@ -207,6 +207,7 @@ interface DetailItem {
 interface MenuItem {
   key: string
   label: string
+  danger?: boolean
 }
 
 interface ReportType {
@@ -241,6 +242,7 @@ const MENU_ITEMS: MenuItem[] = [
   { key: 'detail', label: '查看详情' },
   { key: 'edit', label: '编辑' },
   { key: 'share', label: '分享给好友' },
+  { key: 'delete', label: '删除', danger: true },
 ]
 
 Page(themed({
@@ -266,6 +268,7 @@ Page(themed({
     // 批量操作
     generatingReport: false,
     generatingDoc: false,
+    deletingBatch: false,
     submittingBatch: false,
 
     // 详情弹窗
@@ -551,6 +554,58 @@ Page(themed({
     }
   },
 
+  async batchDelete() {
+    const items = this.getSelectedItems()
+    if (!items.length) return
+    const recordCount = items.filter((item) => item.type === 'record').length
+    const hazardCount = items.length - recordCount
+    const desc =
+      `确定删除选中的 ${items.length} 条记录吗？` +
+      (hazardCount ? `（工作记录 ${recordCount} 条、隐患 ${hazardCount} 条）` : '') +
+      '此操作不可撤销。'
+    const confirm = await wx.showModal({
+      title: '确认删除',
+      content: desc,
+      confirmColor: '#c53030',
+    })
+    if (!confirm.confirm) return
+
+    this.setData({ deletingBatch: true })
+    wx.showLoading({ title: '删除中…', mask: true })
+    let ok = 0
+    const fails: string[] = []
+    try {
+      for (const item of items) {
+        try {
+          if (item.type === 'hazard') {
+            await request(`/hazard/${item.id}`, { method: 'DELETE' })
+          } else {
+            await request(`/work-record/${item.id}`, { method: 'DELETE' })
+          }
+          ok += 1
+        } catch (error) {
+          fails.push(`#${item.id} ${(error as Error).message}`)
+        }
+      }
+      invalidateCache(CACHE_KEYS.HAZARD_LIST)
+      wx.hideLoading()
+      if (fails.length) {
+        wx.showModal({
+          title: `已删除 ${ok} 条，${fails.length} 条失败`,
+          content: fails.slice(0, 6).join('\n'),
+          showCancel: false,
+        })
+      } else {
+        wx.showToast({ title: '删除成功', icon: 'success' })
+      }
+      this.setData({ selectMode: false, selectedCount: 0, allSelected: false })
+      this.load()
+    } finally {
+      wx.hideLoading()
+      this.setData({ deletingBatch: false })
+    }
+  },
+
   // ========== 报告生成 ==========
   closeReportModal() {
     this.setData({ showReportModal: false })
@@ -644,6 +699,8 @@ Page(themed({
       this.openEditModal(currentRecordId, currentRecordType)
     } else if (action === 'share') {
       this.shareRecord(currentRecordId, currentRecordType)
+    } else if (action === 'delete') {
+      this.deleteRecord(currentRecordId, currentRecordType)
     }
   },
 
@@ -779,6 +836,31 @@ Page(themed({
       wx.showToast({ title: (error as Error).message, icon: 'none' })
     } finally {
       this.setData({ savingEdit: false })
+    }
+  },
+
+  async deleteRecord(recordId: number, type: 'record' | 'hazard') {
+    const confirm = await wx.showModal({
+      title: '确认删除',
+      content: '确定删除这条记录吗？此操作不可撤销。',
+      confirmColor: '#c53030',
+    })
+    if (!confirm.confirm) return
+
+    wx.showLoading({ title: '删除中...' })
+    try {
+      if (type === 'hazard') {
+        await request(`/hazard/${recordId}`, { method: 'DELETE' })
+        invalidateCache(CACHE_KEYS.HAZARD_LIST)
+      } else {
+        await request(`/work-record/${recordId}`, { method: 'DELETE' })
+      }
+      wx.showToast({ title: '删除成功', icon: 'success' })
+      this.load()
+    } catch (error) {
+      wx.showToast({ title: (error as Error).message, icon: 'none' })
+    } finally {
+      wx.hideLoading()
     }
   },
 
