@@ -148,7 +148,6 @@
     <view class="batch-actions">
       <button size="mini" class="primary" bindtap="batchSubmit" loading="{{submittingBatch}}">提交审批</button>
       <button size="mini" class="primary" bindtap="generateReport" loading="{{generatingReport}}">生成报告</button>
-      <button size="mini" class="danger" bindtap="batchDelete" loading="{{deletingBatch}}">删除</button>
     </view>
   </view>
 
