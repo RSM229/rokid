@@ -1279,7 +1279,7 @@ Page(themed({
           void this.reportAgentProgress(requestId, 'evidence_upload', uploaded ? 'completed' : 'failed',
             uploaded
               ? `图片 ${imageIndex}/${images.length}：上传完成，媒体编号 ${uploaded.id}`
-              : `图片 ${imageIndex}/${images.length}：图片上传失败`,
+              : `图片 ${imageIndex}/${images.length}：图片上传失败${((this as any).lastUploadErrorMsg) ? `：${(this as any).lastUploadErrorMsg}` : ''}`,
             { image_index: imageIndex, image_count: images.length, file_name: img.name,
               media_id: uploaded?.id || null, capture_time: uploaded?.capture_time || '',
               capture_time_source: uploaded?.capture_time_source || '' },
@@ -2707,21 +2707,35 @@ Page(themed({
         capture_time_source: image.captureTimeSource,
       }
     }
-    try {
-      const uploaded = await uploadImage<UploadedImageResult>(image.path, {
-        source,
-        trigger_detection: false,
-        add_system_watermark: image.cameraCapture === true,
-      })
-      image.mediaId = uploaded.id
-      image.remoteUrl = uploaded.url
-      image.serverWatermark = uploaded.watermark
-      image.captureTime = uploaded.capture_time
-      image.captureTimeSource = uploaded.capture_time_source
-      return uploaded
-    } catch {
-      return null
+    // 上传故障多为 wx.uploadFile 客户端/网络层瞬时抖动（请求根本没到后端，
+    // 同域名 observe 却成功即此特征）。UploadError.retryable 已区分可重试，
+    // 这里最多重试 3 次、按 0.8s*轮次退避；仍失败则记下真实错误便于定位。
+    let lastErr: any = null
+    const maxAttempts = 3
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        const uploaded = await uploadImage<UploadedImageResult>(image.path, {
+          source,
+          trigger_detection: false,
+          add_system_watermark: image.cameraCapture === true,
+        })
+        image.mediaId = uploaded.id
+        image.remoteUrl = uploaded.url
+        image.serverWatermark = uploaded.watermark
+        image.captureTime = uploaded.capture_time
+        image.captureTimeSource = uploaded.capture_time_source
+        return uploaded
+      } catch (err: any) {
+        lastErr = err
+        const retryable = err && err.retryable === true
+        if (!retryable || attempt === maxAttempts) break
+        await new Promise<void>((resolve) => setTimeout(resolve, 800 * attempt))
+      }
     }
+    const msg = lastErr?.message || (typeof lastErr === 'string' ? lastErr : '图片上传失败')
+    ;(this as any).lastUploadErrorMsg = msg
+    console.error('[uploadEvidence] 图片上传失败：', msg)
+    return null
   },
 
   /** 服务端水印识别结果 → 前端扁平字段记录（原 readWatermark 的输出格式） */
