@@ -174,6 +174,7 @@ async def ensure_agent_history_schema() -> None:
         AgentConversationMessage,
         AgentFlowInstance,
         AgentRequestTrace,
+        AgentUserPreference,
     )
 
     try:
@@ -184,6 +185,7 @@ async def ensure_agent_history_schema() -> None:
                     AgentConversationMessage.__table__,
                     AgentRequestTrace.__table__,
                     AgentFlowInstance.__table__,
+                    AgentUserPreference.__table__,
                 ],
             )
     except SQLAlchemyError:

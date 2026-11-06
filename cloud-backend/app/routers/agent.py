@@ -27,7 +27,14 @@ from app.models.agent_draft import AgentFlowInstance, AgentReviewPlan
 from app.models.miniprogram import MediaRecord, MediaType
 from app.routers.auth import get_current_user
 from app.routers.local_ai import _PLAINTEXT_SUFFIX
-from app.services import agent_fact_model, agent_request_plan, agent_runtime, agent_tools, model_gateway
+from app.services import (
+    agent_fact_model,
+    agent_preferences,
+    agent_request_plan,
+    agent_runtime,
+    agent_tools,
+    model_gateway,
+)
 from app.services.record_fields import project_context
 from app.services.agent_context import (
     extract_explicit_message_facts,
@@ -897,6 +904,14 @@ async def _agent_chat_impl(
         record_types=json.dumps(agent_request_plan.RECORD_TYPES, ensure_ascii=False),
     )
     messages: list[dict] = [{"role": "system", "content": system}]
+    # 🔴 用户长期偏好（跨会话）以独立 system message 注入，不合并进 _AGENT_SYSTEM
+    # 模板体——模板要保持字节稳定供跑分基线比对。偏好只是非破坏性基线：
+    # 具体落库前服务端仍做参数/权限/审计，偏好不能越权（对齐 agent_fact_model）。
+    preferences_block = agent_preferences.render_preferences_block(
+        await agent_preferences.list_active_preferences(db, user.id)
+    )
+    if preferences_block:
+        messages.append({"role": "system", "content": preferences_block})
     if pend_for_context:
         messages.append({"role": "system", "content": render_context_summary(
             draft_for_context.get("args"), draft_for_context.get("facts"),
@@ -2194,3 +2209,81 @@ async def execute_review_plan(
             review_plan_id=plan_id,
         )
         raise
+
+
+# ---------------------------------------------------------------------------
+# 用户长期偏好管理端点（跨会话注入 agent 上下文）
+# ---------------------------------------------------------------------------
+class PreferenceCreateRequest(BaseModel):
+    rule: str = Field(min_length=1, max_length=500)
+    category: str = "general"
+    source: str = "user_declared"
+
+
+class PreferenceToggleRequest(BaseModel):
+    active: bool
+
+
+def _preference_payload(row: Any) -> dict[str, Any]:
+    return {
+        "id": row.id,
+        "rule": row.rule,
+        "category": row.category,
+        "source": row.source,
+        "active": row.active,
+        "created_at": row.created_at.isoformat() if getattr(row, "created_at", None) else None,
+        "updated_at": row.updated_at.isoformat() if getattr(row, "updated_at", None) else None,
+    }
+
+
+@router.get("/preferences")
+async def list_preferences(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    category: str | None = None,
+):
+    """List this user's preferences. ?category= filters; ?active=true/false
+    further narrows to active-only rows (used by the management page)."""
+    rows = await agent_preferences.list_all_preferences(db, user.id)
+    payload = [_preference_payload(r) for r in rows]
+    if category:
+        payload = [p for p in payload if p["category"] == category]
+    return {"preferences": payload}
+
+
+@router.post("/preferences")
+async def create_preference(
+    req: PreferenceCreateRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Add (or reactivate) a persistent preference for the current user."""
+    try:
+        row = await agent_preferences.upsert_preference(
+            db,
+            user.id,
+            req.rule,
+            category=req.category,
+            source=req.source,
+        )
+        await db.commit()
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return _preference_payload(row)
+
+
+@router.patch("/preferences/{preference_id}")
+async def toggle_preference(
+    preference_id: int,
+    req: PreferenceToggleRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Enable/disable one preference row (soft delete)."""
+    updated = await agent_preferences.set_preference_active(
+        db, user.id, preference_id, req.active
+    )
+    if not updated:
+        raise HTTPException(status_code=404, detail="偏好不存在或不属于当前用户")
+    await db.commit()
+    return {"ok": True, "id": preference_id, "active": req.active}

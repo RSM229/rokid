@@ -20,7 +20,7 @@
 """
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.dialects.mysql import MEDIUMTEXT
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -155,6 +155,38 @@ class AgentRequestTrace(Base):
     )
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+
+class AgentUserPreference(Base):
+    """用户级长期业务偏好 —— 跨会话、跨项目生效。
+
+    与 ``AgentConversationMemory``（会话级原话）不同，本表存的是**用户明示的、
+    希望以后一直遵守**的做事规则。来源两类：
+    - ``user_declared``：用户在管理页/聊天中主动声明（如「整改回复必须附前后对比照片」）；
+    - ``assistant_suggested``：助手发现用户重复表达同一习惯后建议沉淀（可被用户关闭）。
+
+    注入口径：只把 ``active=True`` 的规则注入 agent 系统上下文（见
+    ``app/services/agent_preferences.py``），每条按 ``user_id`` 隔离，
+    跨项目不串（与现有 agent 记忆同一隔离原则）。
+
+    迁移安全：新表由 ``db.init_db`` 的 ``create_all`` 直接建，
+    不动既有表结构，无需停机 ALTER（同 ``user_security_questions`` 套路）。
+    """
+    __tablename__ = "agent_user_preferences"
+    __table_args__ = (
+        Index("ix_agent_preferences_user_active", "user_id", "active"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, index=True, comment="所属用户 id")
+    rule: Mapped[str] = mapped_column(String(500), comment="偏好规则文本（注入 prompt 用）")
+    category: Mapped[str] = mapped_column(String(32), default="general", comment="分类：general/rectification/record/writing")
+    source: Mapped[str] = mapped_column(String(24), default="user_declared", comment="来源：user_declared/assistant_suggested")
+    active: Mapped[bool] = mapped_column(Boolean, default=True, index=True, comment="是否生效；false 表示用户已关闭/删除")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.now, onupdate=datetime.now, index=True,
+    )
 
 
 class AgentFlowInstance(Base):
