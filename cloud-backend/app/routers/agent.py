@@ -29,6 +29,7 @@ from app.routers.auth import get_current_user
 from app.routers.local_ai import _PLAINTEXT_SUFFIX
 from app.services import (
     agent_fact_model,
+    agent_preference_suggest,
     agent_preferences,
     agent_request_plan,
     agent_runtime,
@@ -464,7 +465,14 @@ station_start_time=9:00、station_end_time=12:00、worker_count=10，结论留�
 
 🔴 上述「叙述性文字严禁进 create_provform_doc」的精神适用于**所有省统表**：只要用户发的是一段描述现场 / 工作或记录 / 日志的**叙述性自由文字**、没有明确点名要建哪张省统表表式，就**严禁返回 create_provform_doc**（必填项校验会卡成「该表还不能生成」）。按意图分流：要留痕 → record_work；要出监理文书 → generate_document；只是陈述 / 咨询 → chat。只有用户**明确说出表式名或「建 / 新建 / 生成 XX 表」**（如「建一份监理工程师通知单」「生成旁站记录表」）时才返回 create_provform_doc。
 
-🔴 **例外——续接未完成草稿优先于上面的守门**：如果系统上下文里已给出「未完成草稿 / 仍未收集的字段」（即上一轮你已为某张省统表追问过缺哪几栏），而用户这句正是在补这些栏（描述现场情况、工作内容等），必须**续接上一轮同一个工具**（create_provform_doc）把这段文字填进对应 fields / extra_fields，**不要改投 record_work，也不要重复问已经给过的内容**。守门只拦「凭空新建一张表」，不拦「补全自己刚开的那张表的草稿」。"""
+🔴 **例外——续接未完成草稿优先于上面的守门**：如果系统上下文里已给出「未完成草稿 / 仍未收集的字段」（即上一轮你已为某张省统表追问过缺哪几栏），而用户这句正是在补这些栏（描述现场情况、工作内容等），必须**续接上一轮同一个工具**（create_provform_doc）把这段文字填进对应 fields / extra_fields，**不要改投 record_work，也不要重复问已经给过的内容**。守门只拦「凭空新建一张表」，不拦「补全自己刚开的那张表的草稿」。
+
+【长期偏好沉淀——只有这一种情况才输出标记】
+当用户这句话是在**提一条「以后都要照这样办」的工作规矩**（例如「整改回复必须附前后对比照片」「结论要写具体数字」「旁站记录一律写时间点」），**并且此前对话里用户已经表达过同类要求**时，在回复正文的最后**另起一行**输出：
+<<PREF 规矩原文|分类>>
+分类只能是 general / rectification / record / writing 之一。
+这条标记只供系统解析，**不要在正文里解释它、不要说「我已记住」、不要提及偏好**。
+除上述情况外——普通提问、本次任务的临时要求、首次提出、闲聊——**一律不要输出该标记**。"""
 
 
 # ---------------------------------------------------------------------------
@@ -1494,6 +1502,27 @@ async def agent_chat(
         result["reply"] = brief + "\n" + str(result.get("reply") or "").strip()
     if isinstance(result, dict):
         result["request_id"] = request_id
+    if isinstance(result, dict):
+        # 长期偏好自动沉淀：先剥掉模型打的 <<PREF ...>> 标记（用户不该看到），
+        # 再兜底做一次「同一句规矩说了两遍」的重复检测。只产生建议，绝不自动落库。
+        try:
+            existing_rules = [
+                row.rule for row in await agent_preferences.list_active_preferences(db, user_id)
+            ]
+            clean_reply, suggestion = await agent_preference_suggest.build_suggestion(
+                db,
+                user_id,
+                req.message,
+                str(result.get("reply") or ""),
+                existing_rules=existing_rules,
+            )
+            if suggestion:
+                result["reply"] = clean_reply
+                result["preference_suggestion"] = suggestion
+        except Exception:  # noqa: BLE001
+            # 不 rollback：业务动作可能已提交，这里只是「锦上添花」的建议；
+            # 若会话确实已坏，后面落历史的 try/except 会兜住并回滚。
+            logger.exception("偏好沉淀建议生成失败，user_id=%s", user_id)
     if conversation_id and isinstance(result, dict):
         result["conversation_id"] = conversation_id
         try:
