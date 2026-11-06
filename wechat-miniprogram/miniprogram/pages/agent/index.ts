@@ -221,6 +221,9 @@ interface Message {
   hint?: string
   image?: string
   images?: string[]
+  /** 服务端返回的持久化图片地址（带 access_token）。本地临时路径失效（重进会话/历史回看）
+   * 时用于显示兜底；与 images（会话内本地临时路径，必然可渲染）分开存，避免互相覆盖。 */
+  remoteImages?: string[]
   type?: 'text' | 'actions' | 'stats'
   actions?: { label: string; command: string }[]
   /** 工作记录字段候选（点选即填入，也可自己填写） */
@@ -1312,15 +1315,25 @@ Page(themed({
         }))
         watermarks.push(...results.map(result => result.wm))
         observations.push(...results.map(result => result.observation))
-        // 历史回看需要持久化地址：把用户消息里的本地临时路径换成服务端 URL，
-        // 否则重进会话/查看历史时本地路径失效，照片就「丢」了。
+        // 会话内显示始终用本地临时路径（设备上的文件，真机必然可渲染，不受 downloadFile
+        // 合法域名限制）；服务端 URL 单独存进 remoteImages，用于历史回看兜底（见 onMsgImgError
+        // 与 loadHistoryItem 归一化）。此前整条覆盖 images 为远程 URL，真机加载失败时照片直接「没了」。
         const uploadedUrls = results.map(result => result.url).filter(Boolean) as string[]
         if (uploadedUrls.length) {
           const updated = [...this.data.messages]
           if (updated[userMsgIndex]?.role === 'user') {
-            updated[userMsgIndex] = { ...updated[userMsgIndex], images: uploadedUrls.map(absoluteMediaUrl) }
+            updated[userMsgIndex] = { ...updated[userMsgIndex], remoteImages: uploadedUrls.map(absoluteMediaUrl) }
             this.setData({ messages: updated })
           }
+        }
+        // 部分图片上传失败：给出轻量提示，避免「图发丢了却无任何反馈」。
+        if (uploadedUrls.length < images.length) {
+          wx.showToast({
+            title: uploadedUrls.length
+              ? `有 ${images.length - uploadedUrls.length} 张图片上传失败，可能无法识别`
+              : '图片上传失败，可能无法识别',
+            icon: 'none',
+          })
         }
         results.forEach((res, i) => {
           const wmLine = this.formatWatermark(res.wm)
@@ -4042,6 +4055,30 @@ Page(themed({
     wx.previewImage({ current: url, urls: [url] })
   },
 
+  /** 消息内图片加载失败兜底：本地临时路径失效时切换到服务端远程地址（remoteImages）。
+   * 仅当远程地址与当前不同才替换，避免 binderror 重复触发死循环。 */
+  onMsgImgError(event: WechatMiniprogram.TouchEvent) {
+    const mi = Number(event.currentTarget.dataset.mi)
+    const imgIdx = Number(event.currentTarget.dataset.imgidx)
+    const msg = this.data.messages[mi]
+    if (!msg) return
+    const remote = msg.remoteImages?.[imgIdx]
+    const current = msg.images?.[imgIdx] ?? (imgIdx === 0 ? msg.image : undefined)
+    if (remote && remote !== current) {
+      const updated = [...this.data.messages]
+      const m = { ...updated[mi] }
+      if (imgIdx === 0 && !m.images) {
+        m.image = remote
+      } else {
+        const imgs = [...(m.images || [])]
+        imgs[imgIdx] = remote
+        m.images = imgs
+      }
+      updated[mi] = m
+      this.setData({ messages: updated })
+    }
+  },
+
   /** 一键复制某条对话气泡的文字内容到剪贴板 */
   copyMessage(event: WechatMiniprogram.TouchEvent) {
     const idx = Number(event.currentTarget.dataset.index)
@@ -4997,11 +5034,17 @@ Page(themed({
     }
     // 接续该历史会话：继续对话时覆盖同一条历史，而不是新建
     this.currentSessionId = item.id
+    // 历史回看时本地临时路径已失效，改用服务端远程地址（remoteImages）显示，
+    // 否则重进会话后用户发的照片变空白（旧数据无 remoteImages 时沿用原 images，向后兼容）。
+    const restoredMessages = (item.messages || []).map(m =>
+      (m.role === 'user' && m.remoteImages && m.remoteImages.length)
+        ? { ...m, images: m.remoteImages, image: m.remoteImages[0] }
+        : m)
     this.setData({
       showHistory: false,
       mode: 'chat',
       hazardMode: false,
-      messages: item.messages,
+      messages: restoredMessages,
     })
     void this.loadPendingDrafts()
     void this.resumeAgentProgress()

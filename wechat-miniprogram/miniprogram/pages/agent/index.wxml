@@ -51,10 +51,10 @@
             <text class="message-role">{{item.role === 'assistant' ? '监理智能体' : '我'}}</text>
           </view>
           <view wx:if="{{item.text || item.image || (item.images && item.images.length)}}" class="bubble">
-            <image wx:if="{{item.image}}" class="msg-image" src="{{item.image}}" mode="widthFix" data-url="{{item.image}}" bindtap="previewImageUrl" />
+            <image wx:if="{{item.image}}" class="msg-image" src="{{item.image}}" mode="widthFix" data-url="{{item.image}}" bindtap="previewImageUrl" binderror="onMsgImgError" data-mi="{{mi}}" data-imgidx="0" />
             <view wx:if="{{item.images && item.images.length}}" class="msg-images">
-              <image wx:for="{{item.images}}" wx:for-item="img" wx:key="*this" class="msg-image-grid"
-                     src="{{img}}" mode="aspectFill" data-url="{{img}}" bindtap="previewImageUrl" />
+              <image wx:for="{{item.images}}" wx:for-item="img" wx:for-index="ii" wx:key="*this" class="msg-image-grid"
+                     src="{{img}}" mode="aspectFill" data-url="{{img}}" bindtap="previewImageUrl" binderror="onMsgImgError" data-mi="{{mi}}" data-imgidx="{{ii}}" />
             </view>
             <text wx:if="{{item.text}}" class="bubble-text" user-select="{{true}}">{{item.text}}</text>
           </view>
