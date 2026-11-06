@@ -2273,6 +2273,7 @@ async def create_preference(
 
 
 @router.patch("/preferences/{preference_id}")
+@router.post("/preferences/{preference_id}")
 async def toggle_preference(
     preference_id: int,
     req: PreferenceToggleRequest,
