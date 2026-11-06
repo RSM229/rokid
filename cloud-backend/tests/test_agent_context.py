@@ -1,6 +1,11 @@
 import importlib.util
+import sys
 from pathlib import Path
 
+# 仓库搬迁后统一用相对路径推导后端根，不再依赖 pytest 的 rootdir 注入。
+# agent_context 内部会 `from app.services.time_normalization import …`，
+# 必须先让 app 包在 sys.path 中可导入，importlib 加载才不会断链。
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 MODULE = Path(__file__).parents[1] / "app" / "services" / "agent_context.py"
 spec = importlib.util.spec_from_file_location("agent_context", MODULE)
@@ -39,7 +44,9 @@ def test_context_summary_does_not_turn_missing_media_into_missing_user_fact():
         ["天气"],
     )
     assert "用户消息中已提取 section：3号楼二层" in summary
-    assert "当前仍缺少：天气" in summary
+    # 🔴 2026-11-06 更新：10-27 收敛追问后「当前草稿尚有 N 项待用户补充…一次只问一栏」替
+    # 代了旧文案「当前仍缺少：天气」；语义（揭示缺项、不覆盖已确认值）未变。
+    assert "1 项待用户补充" in summary
     assert "不得覆盖用户已确认值" in summary
 
 

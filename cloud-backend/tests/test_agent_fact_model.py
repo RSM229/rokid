@@ -1,3 +1,9 @@
+import sys
+from pathlib import Path
+
+# 仓库搬迁后统一用相对路径推导后端根，不再依赖 pytest 的 rootdir 注入
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 from app.services import agent_fact_model, agent_tools, record_field_spec
 
 

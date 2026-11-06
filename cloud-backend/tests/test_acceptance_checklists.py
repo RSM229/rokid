@@ -5,9 +5,11 @@
 """
 import asyncio
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 
-sys.path.insert(0, r"D:/rokid/rokid_glass/rokid_glass/cloud-backend")
+# 10-20 仓库搬迁后统一用相对路径推导后端根，不再硬编码旧双层路径
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.services import agent_tools as at
 from app.services import acceptance_checklists as ac
