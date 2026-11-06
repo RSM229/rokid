@@ -410,17 +410,6 @@ Page(themed({
     this.setData({ records, hazards })
   },
 
-  createRecord() {
-    wx.showActionSheet({ itemList: ['巡视记录', '旁站记录', '验收记录', '平行检查', '省统表录入'], success: (res) => {
-      if (res.tapIndex === 4) {
-        wx.navigateTo({ url: '/pages/record-form/choose' })
-        return
-      }
-      if (res.tapIndex === 3) wx.navigateTo({ url: '/pages/parallel/index' })
-      else wx.navigateTo({ url: `/pages/agent/index?createRecord=${['inspection', 'station', 'acceptance'][res.tapIndex]}` })
-    } })
-  },
-
   /** 抽屉移除「工作文书」后，保留明确、稳定的文书管理入口。 */
   openDocuments() {
     wx.navigateTo({ url: '/pages/documents/index' })
