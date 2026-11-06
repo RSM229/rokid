@@ -662,6 +662,19 @@ def _aat_find_entry(division: str, keyproc: str):
     return _aat.find_entry(division, keyproc)
 
 
+def _aat_already_asked(args: dict | None, match: dict | None) -> bool:
+    """同一 (分部,工序) 此前已「一起询问」过 → 不再重复带出询问块（防重问）。
+
+    `_acceptance_asked` 是持久化进草稿的标记（非空 dict，不会被 _draft_clean_args 剔除），
+    跨轮保留；仅记录已询问过的 (div,item)，不阻断其它工序或新会话。
+    """
+    asked = (args or {}).get("_acceptance_asked")
+    if not (asked and isinstance(asked, dict) and match):
+        return False
+    return (str(asked.get("div") or "") == str(match.get("div") or "")
+            and str(asked.get("item") or "") == str(match.get("item") or ""))
+
+
 async def _aat_aggregate_reply(items, user_reply):
     from app.services import acceptance_ask_together as _aat
     return await _aat.aggregate_reply(items, user_reply)
@@ -1270,7 +1283,10 @@ async def _create_work_record(ctx: ToolContext, args: dict) -> dict:
                         orig_args.pop("_acceptance_ask_state", None)
                         args.pop("_acceptance_ask_state", None)
                     else:
-                        matched_entry = entry  # 归集失败/不像回复 → 重新呈现询问块
+                        # 归集失败/不像回复：若同一 (分部,工序) 此前已询问过，不再重复呈现
+                        # 询问块（避免「答非所问→又问一遍」死循环），改走缺失项补全流程。
+                        if not _aat_already_asked(args, ask_state):
+                            matched_entry = entry
 
         # --- 首次 / 非回复态：识别工序、带出询问块（不直接填 raw points） ---
         # 不看 acc_value：模型可能自作主张把水印信息/旧要点全文预填进验收内容栏，
@@ -1286,13 +1302,20 @@ async def _create_work_record(ctx: ToolContext, args: dict) -> dict:
                 entry = _aat_find_entry(str(strong.get("div") or ""),
                                         str(strong.get("item") or ""))
                 if entry and entry.get("验收要点_询问式"):
-                    # 命中且有结构化询问式 → 首次态一律先「一起带出全部询问项」等用户一并回复，
-                    # 不把用户下指令的首句误当整体回复（避免行为不一致、白调一次 LLM）。
-                    _st = {"div": str(strong.get("div") or ""),
-                           "item": str(strong.get("item") or "")}
-                    args["_acceptance_ask_state"] = _st
-                    orig_args["_acceptance_ask_state"] = _st
-                    matched_entry = entry
+                    if _aat_already_asked(args, strong):
+                        # 该 (分部,工序) 此前已「一起询问」过，不再重复带出询问块；
+                        # 沿用已有值进入正常归集/缺失补全流程，避免「答完又问一遍」。
+                        pass
+                    else:
+                        # 首次命中且有结构化询问式 → 先「一起带出全部询问项」等用户一并回复，
+                        # 不把用户下指令的首句误当整体回复（避免行为不一致、白调一次 LLM）。
+                        _st = {"div": str(strong.get("div") or ""),
+                               "item": str(strong.get("item") or "")}
+                        args["_acceptance_ask_state"] = _st
+                        orig_args["_acceptance_ask_state"] = _st
+                        args["_acceptance_asked"] = _st
+                        orig_args["_acceptance_asked"] = _st
+                        matched_entry = entry
                 else:
                     args = _set_field_value(args, acc_field, str(strong["points"]))
             else:
@@ -1301,11 +1324,17 @@ async def _create_work_record(ctx: ToolContext, args: dict) -> dict:
                     entry = _aat_find_entry(str(direct.get("div") or ""),
                                             str(direct.get("item") or ""))
                     if entry and entry.get("验收要点_询问式"):
-                        _st = {"div": str(direct.get("div") or ""),
-                               "item": str(direct.get("item") or "")}
-                        args["_acceptance_ask_state"] = _st
-                        orig_args["_acceptance_ask_state"] = _st
-                        matched_entry = entry
+                        if _aat_already_asked(args, direct):
+                            # 已询问过，不再重复带出询问块（防重问）
+                            pass
+                        else:
+                            _st = {"div": str(direct.get("div") or ""),
+                                   "item": str(direct.get("item") or "")}
+                            args["_acceptance_ask_state"] = _st
+                            orig_args["_acceptance_ask_state"] = _st
+                            args["_acceptance_asked"] = _st
+                            orig_args["_acceptance_asked"] = _st
+                            matched_entry = entry
                     else:
                         args = _set_field_value(args, acc_field, str(direct["points"]))
 
