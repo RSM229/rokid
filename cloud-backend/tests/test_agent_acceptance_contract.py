@@ -195,6 +195,43 @@ class ConfirmationUxTest(unittest.TestCase):
         self.assertNotIn("work_record_confirm", src)
         self.assertNotIn('"title": f"{record_type}记录 · 最终核对"', src)
 
+    def test_instruction_only_message_never_refills_missing_field(self):
+        """「生成记录」这类指令词不是字段值，不能兜底填进缺失字段。
+
+        2026-11-09 生产实测：缺「举牌验收照片」时，路由层 refill 兜底把用户那句
+        「生成记录」原话填进 photo 栏（photo='生成记录'），合同层 is_instruction_only
+        判定为指令 → 照片仍缺，形成「指令被塞进照片栏又反复追问」的假象。
+        """
+        args = {
+            "record_type": "验收",
+            "record_date": "2026-11-09",
+            "section": "沙盛四路",
+            "location": "沙盛四路等4条道路工",
+            "work_content": "污水管道基础包封验收",
+            "extra_fields": {"photo": ""},
+        }
+        result = agent_tools.refill_missing_from_message(args, ["举牌验收照片"], "生成记录")
+        self.assertIsNone(result, "指令词不应被兜底填进缺的照片字段")
+        self.assertEqual(args.get("extra_fields", {}).get("photo"), "", "photo 字段不得被指令词污染")
+
+    def test_photo_field_never_takes_plain_text_fallback(self):
+        """照片类字段（photo）只吃真实图片，不吃整句文本兜底。
+
+        即便用户这句不是纯指令（例如「我确认」），也不能直接塞进 photo 栏，
+        否则合同层仍会判缺（照片必须有真实图片）并形成死循环追问。
+        """
+        args = {
+            "record_type": "验收",
+            "record_date": "2026-11-09",
+            "section": "沙盛四路",
+            "location": "沙盛四路等4条道路工",
+            "work_content": "污水管道基础包封验收",
+            "extra_fields": {"photo": ""},
+        }
+        result = agent_tools.refill_missing_from_message(args, ["举牌验收照片"], "现场已拍好照了")
+        self.assertIsNone(result, "照片字段不能吃非图片文本")
+        self.assertEqual(args.get("extra_fields", {}).get("photo"), "")
+
 
 INQUIRY_CONTENT = (
     "【预制管槽施工主体结构 — 管道基础】验收内容（共 4 项，系统按询问项逐项归集）：\n"

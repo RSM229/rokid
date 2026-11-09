@@ -64,6 +64,21 @@ def _is_mechanical_reply(text: str) -> bool:
     return len(stripped) <= 6
 
 
+# 模型自然接话里的「假成功」措辞：need_more（还没写库）时一旦命中，
+# 说明模型把「即将创建 / 已接收」吹成了既成事实，会盖掉系统追问
+# （2026-11-09 生产实测：缺「举牌验收照片」却回「服务端会据此创建并回执」）。
+# 此时必须退回工具话术，保证用户看到真实状态（还差什么 / 需要确认）。
+_FAKE_SUCCESS_MARKERS = (
+    "已创建", "已生成", "创建成功", "生成成功", "已提交生成", "服务端会据此创建",
+    "已写入正式记录", "已建档", "保存成功", "已保存记录", "记录已生成",
+)
+
+
+def _sounds_like_success(text: str) -> bool:
+    t = str(text or "").strip()
+    return any(m in t for m in _FAKE_SUCCESS_MARKERS)
+
+
 class AgentChatRequest(BaseModel):
     message: str
     request_id: Optional[str] = None
@@ -1377,7 +1392,7 @@ async def _agent_chat_impl(
             if result.get("ask_block"):
                 # 「一起询问」：全部验收询问项必须完整呈现，不能被模型自然接话覆盖。
                 result["reply"] = _tool_reply
-            elif _model_answer and not _is_mechanical_reply(_model_answer):
+            elif _model_answer and not _is_mechanical_reply(_model_answer) and not _sounds_like_success(_model_answer):
                 # 最终确认是写库前唯一的安全网：模型接话常说「收到，已生成」，
                 # 会把系统的「请回复确认生成」盖掉，用户以为建档成功却查不到记录
                 # （2026-11-09 生产实测）。保留自然接话，但必须补上状态与操作指引。

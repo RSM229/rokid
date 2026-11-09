@@ -1105,6 +1105,13 @@ def refill_missing_from_message(args: dict, missing_labels: list | None,
     text = (message or "").strip()
     if not text or _wants_skip(text) or any(h in text for h in ("？", "?")):
         return None
+    # 🔧 整句是「指令词」（生成记录/确认生成/帮我记录…）时，不是任何字段的值，
+    # 绝不能兜底填进缺的字段（2026-11-09 生产实测：缺「举牌验收照片」时
+    # 路由层把用户那句「生成记录」原话填进了 photo 栏，合同层 is_instruction_only
+    # 判定为指令 → 照片仍缺、还污染了草稿，形成「指令被塞进照片栏又反复追问」）。
+    from app.services.record_fields import is_instruction_only
+    if is_instruction_only(text):
+        return None
     # 「一起询问」态：本句是对全部验收询问项的整体回复，交由 aggregate_reply 逐条归集，
     # 绝不能当某个缺失字段的值兜底填进去（否则会污染验收内容栏并绕过归集）。
     if args.get("_acceptance_ask_state"):
@@ -1121,6 +1128,14 @@ def refill_missing_from_message(args: dict, missing_labels: list | None,
             continue
         if field.get("canonical") in ("start_time", "end_time"):
             continue                      # 时间要按区间解析，不吃整句兜底
+        # 🔧 照片/附件类字段只能吃「真实图片」，不吃整句兜底：用户回「生成记录」
+        # 这类指令时，若把原话原文填进 photo 栏，合同校验仍会把纯文本判为无效照片
+        # （value 为空 → missing 恒真），就会变成「指令被塞进照片栏又反复追问缺照片」
+        # 的死循环（2026-11-09 生产实测：草稿 id=40 photo='生成记录'）。
+        if (str(field.get("canonical") or "").find("photo") >= 0
+                or str(field.get("key") or "").find("photo") >= 0
+                or "照片" in str(field.get("label") or "")):
+            continue
         if _field_value(args, field):
             continue
         return _set_field_value(args, field, text[:120])
