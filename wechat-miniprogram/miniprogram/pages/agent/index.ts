@@ -511,6 +511,9 @@ Page(themed({
   /** 当前会话在本地历史里的 id（稳定不变，重复保存=覆盖同一条，避免产生重复历史） */
   currentSessionId: 0,
   inlinePlanSaveQueues: {} as Record<string, Promise<void>>,
+  /** 页面正在卸载（切 tab / 切后台 / 关闭）：此时在飞的请求会被微信中止，
+   *  属预期，catch 里据此不打刺眼「调用失败」。 */
+  pageUnloading: false,
 
   data: {
     messages: [] as Message[],
@@ -729,6 +732,7 @@ Page(themed({
   },
 
   onUnload() {
+    this.pageUnloading = true
     this.stopAgentProgressTimers()
     this.saveCurrentSession()
     player.stop()
@@ -3032,8 +3036,17 @@ Page(themed({
         },
       )
     } catch (error) {
-      this.addMessage({ role: 'assistant', text: `调用失败：${(error as Error).message}` })
-      await this.finishAgentProgress(requestId, 'failed', 'Agent 请求失败，未返回成功结果', { error: (error as Error).message })
+      const errMsg = (error as Error).message || ''
+      const aborted = /abort/i.test(errMsg)
+      // 用户已切走/切后台时请求被微信中止属预期，不打刺眼「调用失败」；
+      // 仍在页内却被中断（偶发抖动）给柔和提示，真错误仍原样上报。
+      if (!(aborted && this.pageUnloading)) {
+        this.addMessage({
+          role: 'assistant',
+          text: aborted ? '请求被中断，请重新发送消息重试。' : `调用失败：${errMsg}`,
+        })
+      }
+      await this.finishAgentProgress(requestId, 'failed', 'Agent 请求失败，未返回成功结果', { error: errMsg })
     } finally {
       this.setData({ loading: false })
       void this.loadPendingDrafts()
@@ -3551,8 +3564,17 @@ Page(themed({
           response_excerpt: String(result.reply || '').slice(0, 900) },
       )
     } catch (error) {
-      this.addMessage({ role: 'assistant', text: `调用失败：${(error as Error).message}` })
-      await this.finishAgentProgress(requestId, 'failed', 'Agent 请求失败，未返回成功结果', { error: (error as Error).message })
+      const errMsg = (error as Error).message || ''
+      const aborted = /abort/i.test(errMsg)
+      // 用户已切走/切后台时请求被微信中止属预期，不打刺眼「调用失败」；
+      // 仍在页内却被中断（偶发抖动）给柔和提示，真错误仍原样上报。
+      if (!(aborted && this.pageUnloading)) {
+        this.addMessage({
+          role: 'assistant',
+          text: aborted ? '请求被中断，请重新发送消息重试。' : `调用失败：${errMsg}`,
+        })
+      }
+      await this.finishAgentProgress(requestId, 'failed', 'Agent 请求失败，未返回成功结果', { error: errMsg })
     } finally {
       this.setData({ loading: false })
       void this.loadPendingDrafts()
