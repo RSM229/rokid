@@ -425,7 +425,10 @@ async def project_archive_library(
     )
     if not member_exists:
         raise HTTPException(status_code=403, detail="您不是该项目在岗成员")
-    from app.services.project_archive import ensure_project_archive_library
+    from app.services.project_archive import (
+        count_archive_candidates,
+        ensure_project_archive_library,
+    )
 
     try:
         kb = await ensure_project_archive_library(db, project_id, user.id)
@@ -434,6 +437,14 @@ async def project_archive_library(
         await db.rollback()
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     member = await _get_member(db, kb.id, user.id)
+    document_count = (
+        await db.execute(
+            select(func.count(KnowledgeDocument.id)).where(
+                KnowledgeDocument.kb_id == kb.id, _DOC_ALIVE
+            )
+        )
+    ).scalar() or 0
+    pending_count = await count_archive_candidates(db, project_id)
     return {
         "id": kb.id,
         "name": kb.name,
@@ -442,7 +453,47 @@ async def project_archive_library(
         "project_id": kb.project_id,
         "role": member.role if member else "viewer",
         "is_project_archive": True,
+        "document_count": int(document_count),
+        "archive_pending_count": pending_count,
     }
+
+
+@router.post("/project-archive/backfill")
+async def backfill_project_archive_library(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Archive project documents generated before archive sync existed.
+
+    Safe to retry: already-synced revisions are skipped and the source business
+    documents are never modified. Only project archive editors may trigger it.
+    """
+    project_id = require_project_id(user)
+    member_exists = await db.scalar(
+        select(ProjectMember.id).where(
+            ProjectMember.project_id == project_id,
+            ProjectMember.user_id == user.id,
+            ProjectMember.left_at.is_(None),
+        )
+    )
+    if not member_exists:
+        raise HTTPException(status_code=403, detail="您不是该项目在岗成员")
+    from app.services.project_archive import (
+        backfill_project_archive,
+        ensure_project_archive_library,
+    )
+
+    try:
+        kb = await ensure_project_archive_library(db, project_id, user.id)
+        await db.commit()
+    except RuntimeError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    await _require_role(db, kb, user, "editor")
+
+    summary = await backfill_project_archive(db, project_id, user)
+    await db.commit()
+    return {"kb_id": kb.id, **summary}
 
 
 @router.post("")
@@ -640,6 +691,11 @@ async def get_knowledge_base(
             ProjectArchiveLibrary.kb_id == kb_id
         )
     ))
+    archive_pending_count = 0
+    if is_project_archive and kb.project_id:
+        from app.services.project_archive import count_archive_candidates
+
+        archive_pending_count = await count_archive_candidates(db, kb.project_id)
     return {
         "id": kb.id,
         "name": kb.name,
@@ -653,6 +709,7 @@ async def get_knowledge_base(
         "is_project_archive": is_project_archive,
         "invite_code": kb.invite_code if KB_ROLE_LEVEL[member.role] >= 2 else None,
         "document_count": int(document_count),
+        "archive_pending_count": archive_pending_count,
         "member_count": int(member_count),
         "created_at": kb.created_at.isoformat() if kb.created_at else None,
     }

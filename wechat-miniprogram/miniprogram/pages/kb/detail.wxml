@@ -19,6 +19,20 @@
     <view wx:if="{{kb.is_builtin}}" class="builtin-tip">系统内置资料库，文档由「规范库维护」统一管理，可直接检索与问答。</view>
   </view>
 
+  <view wx:if="{{kb.is_project_archive}}" class="archive-tip">
+    <view class="archive-tip-copy">
+      <text class="archive-tip-title">项目正式归档库</text>
+      <text class="archive-tip-sub">文书归档在「项目文件夹 / 工作记录与表单 / 对应类型」</text>
+    </view>
+    <button
+      wx:if="{{canUpload && archivePending > 0}}"
+      class="btn-gray archive-sync-btn"
+      size="mini"
+      loading="{{backfilling}}"
+      bindtap="syncArchiveBackfill"
+    >同步历史文书（{{archivePending}}）</button>
+  </view>
+
   <view class="tabs">
     <view class="{{tab === 'docs' ? 'active' : ''}}" data-tab="docs" bindtap="onTab">文档 ({{kb.document_count}})</view>
     <view class="{{tab === 'qa' ? 'active' : ''}}" data-tab="qa" bindtap="onTab">问答</view>
@@ -34,7 +48,7 @@
 
     <block wx:if="{{!showTrash}}">
     <view class="breadcrumb">
-      <text class="crumb {{currentFolderId === 0 ? 'on' : ''}}" data-id="0" bindtap="goBreadcrumb">全部</text>
+      <text class="crumb {{currentFolderId === 0 ? 'on' : ''}}" data-id="0" bindtap="goBreadcrumb">根目录</text>
       <text wx:for="{{breadcrumb}}" wx:key="id" class="crumb {{item.id === currentFolderId ? 'on' : ''}}" data-id="{{item.id}}" bindtap="goBreadcrumb"> › {{item.name}}</text>
     </view>
 
@@ -74,7 +88,7 @@
     </view>
 
     <view wx:if="{{docsLoading && !docs.length && !currentSubfolders.length}}" class="empty">正在加载…</view>
-    <view wx:elif="{{!currentSubfolders.length && !docs.length}}" class="empty">{{searchKeyword ? '没有匹配的文档，换个关键词试试' : '还没有文档，点上方“+ 上传文档”归档到分类'}}</view>
+    <view wx:elif="{{!currentSubfolders.length && !docs.length}}" class="empty">{{searchKeyword ? '没有匹配的文档，换个关键词试试' : (kb.is_project_archive ? '当前目录暂无文档。文书会自动归档到「项目文件夹 / 工作记录与表单」下对应类型目录。' : '还没有文档，点上方“+ 上传文档”归档到分类')}}</view>
     <view wx:for="{{docs}}" wx:key="id" class="card doc">
       <view class="doc-name">{{item.name}}</view>
       <view class="doc-meta">{{item.sizeText}} · {{item.uploader_name}}</view>

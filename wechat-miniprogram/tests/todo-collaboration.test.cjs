@@ -109,7 +109,8 @@ test('compose separates responsibility, signoff and non-blocking CC semantics', 
 })
 
 test('project archive entry uses the dedicated project-scoped API, not a library-name scan', () => {
-  assert.match(kbPage, /request<\{ id: number; name: string \}>\('\/kb\/project-archive'\)/)
+  assert.match(kbPage, /request<\{[\s\S]{0,200}?\}>\('\/kb\/project-archive'\)/)
+  assert.match(kbPage, /archive_pending_count/)
   assert.doesNotMatch(kbPage, /find\(\(item\) => item\.kb_type === 'shared' && item\.project_id === projectId\)/)
 })
 

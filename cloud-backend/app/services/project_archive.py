@@ -391,6 +391,103 @@ async def sync_document_to_project_archive(
         return None
 
 
+def _current_source_path(doc: Document) -> Path | None:
+    """Return the file that would be archived for the document's current state."""
+    return next(
+        (
+            candidate
+            for candidate in (
+                _source_path(doc.signed_pdf_path),
+                _source_path(doc.pdf_path),
+                _source_path(doc.docx_path),
+            )
+            if candidate is not None and candidate.exists()
+        ),
+        None,
+    )
+
+
+async def list_archive_candidates(
+    db: AsyncSession, project_id: int
+) -> list[Document]:
+    """Documents whose current file still needs a project-archive copy.
+
+    A document is considered up to date only when its stable archive row exists
+    and the archived revision equals the business document's current revision.
+    Documents without a readable DOCX/PDF are excluded instead of being turned
+    into permanent ``pending`` rows by a backfill.
+    """
+    rows = (
+        await db.execute(
+            select(Document)
+            .where(
+                Document.project_id == project_id,
+                (Document.docx_path.is_not(None))
+                | (Document.pdf_path.is_not(None))
+                | (Document.signed_pdf_path.is_not(None)),
+            )
+            .order_by(Document.id)
+        )
+    ).scalars().all()
+    candidates: list[Document] = []
+    for doc in rows:
+        revision = doc.content_revision or 1
+        if (
+            doc.archive_sync_status == "synced"
+            and doc.archive_kb_document_id
+            and doc.archive_synced_revision == revision
+        ):
+            continue
+        if _current_source_path(doc) is None:
+            continue
+        candidates.append(doc)
+    return candidates
+
+
+async def count_archive_candidates(db: AsyncSession, project_id: int) -> int:
+    return len(await list_archive_candidates(db, project_id))
+
+
+async def backfill_project_archive(
+    db: AsyncSession, project_id: int, actor: User, limit: int = 200
+) -> dict:
+    """Archive existing business documents that predate the sync feature.
+
+    Idempotent: each successful call makes the document's status ``synced`` at
+    its current revision, so a second call selects nothing. Every document is
+    committed independently so one broken file cannot roll back the batch.
+    """
+    candidates = await list_archive_candidates(db, project_id)
+    selected = candidates[: max(1, limit)]
+    summary = {
+        "total": len(candidates),
+        "processed": 0,
+        "synced": 0,
+        "pending": 0,
+        "failed": 0,
+        "remaining": max(0, len(candidates) - len(selected)),
+        "errors": [],
+    }
+    for doc in selected:
+        doc_id = doc.id
+        title = doc.title
+        await sync_document_to_project_archive(db, doc, actor)
+        status = doc.archive_sync_status
+        error = doc.archive_sync_error
+        await db.commit()
+        summary["processed"] += 1
+        if status == "synced":
+            summary["synced"] += 1
+        elif status == "failed":
+            summary["failed"] += 1
+            summary["errors"].append(
+                {"document_id": doc_id, "title": title, "error": error or ""}
+            )
+        else:
+            summary["pending"] += 1
+    return summary
+
+
 async def is_project_archive_library(db: AsyncSession, kb_id: int) -> bool:
     return bool(
         await db.scalar(

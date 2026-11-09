@@ -57,6 +57,7 @@ Page(themed({
     kbName: '资料库',
     projectArchiveKbId: 0,
     projectArchiveKbName: '',
+    projectArchiveMeta: '',
     canUpload: false,
     resolving: true,
 
@@ -231,20 +232,36 @@ Page(themed({
   async loadProjectArchiveLibrary() {
     const projectId = Number(session.getUser()?.project_id || 0)
     if (!projectId) {
-      this.setData({ projectArchiveKbId: 0, projectArchiveKbName: '' })
+      this.setData({
+        projectArchiveKbId: 0,
+        projectArchiveKbName: '',
+        projectArchiveMeta: '',
+      })
       return
     }
     try {
       // The mapping table behind this endpoint is the only source of truth.
       // Never scan /kb for a same-named/shared library: that can select a
       // personal, builtin, or unrelated project's KB.
-      const library = await request<{ id: number; name: string }>('/kb/project-archive')
+      const library = await request<{
+        id: number
+        name: string
+        document_count?: number
+        archive_pending_count?: number
+      }>('/kb/project-archive')
+      const archived = Number(library.document_count || 0)
+      const pending = Number(library.archive_pending_count || 0)
       this.setData({
         projectArchiveKbId: library.id || 0,
         projectArchiveKbName: library.name || '',
+        projectArchiveMeta: `已归档 ${archived} 份${pending ? ` · 待同步 ${pending} 份` : ''}`,
       })
     } catch {
-      this.setData({ projectArchiveKbId: 0, projectArchiveKbName: '' })
+      this.setData({
+        projectArchiveKbId: 0,
+        projectArchiveKbName: '',
+        projectArchiveMeta: '',
+      })
     }
   },
 

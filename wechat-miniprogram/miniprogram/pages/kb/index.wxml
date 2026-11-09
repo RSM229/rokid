@@ -10,13 +10,14 @@
       <view class="project-archive-copy">
         <text class="project-archive-title">项目资料库</text>
         <text class="project-archive-name">{{projectArchiveKbName}}</text>
+        <text wx:if="{{projectArchiveMeta}}" class="project-archive-meta">{{projectArchiveMeta}}</text>
       </view>
       <text class="project-archive-arrow">›</text>
     </view>
 
     <!-- 面包屑：非根层显示，可点「全部」回到根 -->
     <view wx:if="{{currentFolderId !== 0}}" class="breadcrumb">
-      <text class="crumb root" data-id="0" bindtap="goBreadcrumb">全部</text>
+      <text class="crumb root" data-id="0" bindtap="goBreadcrumb">根目录</text>
       <text wx:for="{{breadcrumb}}" wx:key="id" class="crumb" data-id="{{item.id}}" bindtap="goBreadcrumb">{{item.name}}</text>
     </view>
 

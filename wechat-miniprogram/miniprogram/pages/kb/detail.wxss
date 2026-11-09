@@ -10,6 +10,12 @@
 .kb-actions { display: flex; gap: 14rpx; margin-top: 18rpx; flex-wrap: wrap; }
 .builtin-tip { margin-top: 16rpx; padding: 14rpx 18rpx; border-radius: 12rpx; background: rgba(var(--wash-rgb, 234,243,255), 0.85); color: var(--brand-d, #0b5fd0); font-size: 23rpx; line-height: 1.5; }
 
+.archive-tip { display: flex; align-items: center; gap: 16rpx; margin-bottom: 14rpx; padding: 18rpx 22rpx; border-radius: 16rpx; background: rgba(var(--wash-rgb, 234,243,255), 0.9); border: 2rpx solid rgba(var(--brand-rgb, 22,119,255), 0.14); }
+.archive-tip-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4rpx; }
+.archive-tip-title { color: var(--brand-d, #0b5fd0); font-size: 24rpx; font-weight: 600; }
+.archive-tip-sub { color: #5c6e84; font-size: 21rpx; line-height: 1.4; }
+.archive-sync-btn { flex: none; }
+
 .tabs { display: flex; gap: 10rpx; margin-bottom: 18rpx; padding: 8rpx; border-radius: 20rpx; background: rgba(230,236,245, 0.7); }
 .tabs view { flex: 1; padding: 16rpx 0; text-align: center; border-radius: 16rpx; color: #5c6e84; font-size: 25rpx; font-weight: 500; }
 .tabs .active { color: #fff; background: linear-gradient(135deg, var(--brand-l, #3b8cff), var(--brand-d, #0b5fd0)); font-weight: 700; }

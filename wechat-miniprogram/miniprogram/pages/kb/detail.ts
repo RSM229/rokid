@@ -12,8 +12,10 @@ interface KbDetail {
   is_owner: boolean
   is_builtin?: boolean
   is_public?: boolean
+  is_project_archive?: boolean
   invite_code?: string
   document_count: number
+  archive_pending_count?: number
   member_count: number
 }
 
@@ -81,6 +83,8 @@ Page(themed({
     roleLabel: ROLE_LABEL,
     canUpload: false,
     canManage: false,
+    backfilling: false,
+    archivePending: 0,
     tab: 'docs' as 'docs' | 'qa' | 'members',
 
     docs: [] as Array<KbDoc & { sizeText: string }>,
@@ -242,10 +246,52 @@ Page(themed({
         kb,
         canUpload: !builtin && level >= 2,
         canManage: !builtin && level >= 3,
+        archivePending: kb.archive_pending_count || 0,
       })
       wx.setNavigationBarTitle({ title: kb.name || '资料库' })
     } catch (error) {
       wx.showToast({ title: (error as Error).message, icon: 'none' })
+    }
+  },
+
+  /** 项目归档库：把部署归档能力之前生成的历史文书补进资料库。 */
+  syncArchiveBackfill() {
+    if (this.data.backfilling) return
+    const pending = this.data.archivePending
+    wx.showModal({
+      title: '同步历史文书',
+      content: pending > 0
+        ? `将把本项目 ${pending} 份已生成但尚未归档的文书补进资料库，不会修改或删除原文书。`
+        : '当前没有待同步的历史文书。',
+      confirmText: pending > 0 ? '开始同步' : '知道了',
+      showCancel: pending > 0,
+      success: (result) => {
+        if (result.confirm && pending > 0) void this.runArchiveBackfill()
+      },
+    })
+  },
+
+  async runArchiveBackfill() {
+    this.setData({ backfilling: true })
+    wx.showLoading({ title: '正在同步…', mask: true })
+    try {
+      const res = await request<{
+        total: number
+        synced: number
+        failed: number
+        remaining: number
+      }>('/kb/project-archive/backfill', { method: 'POST' })
+      const parts = [`已同步 ${res.synced} 份`]
+      if (res.failed) parts.push(`${res.failed} 份失败`)
+      if (res.remaining) parts.push(`剩余 ${res.remaining} 份`)
+      wx.showToast({ title: parts.join('，'), icon: 'none' })
+      await this.loadKb()
+      this.loadFolders()
+    } catch (error) {
+      wx.showToast({ title: (error as Error).message, icon: 'none' })
+    } finally {
+      wx.hideLoading()
+      this.setData({ backfilling: false })
     }
   },
 
