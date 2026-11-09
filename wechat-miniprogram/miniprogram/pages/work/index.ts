@@ -370,6 +370,7 @@ Page(themed({
           ...item,
           image_url: absoluteMediaUrl(item.image_path || ''),
           evidence_text: (item.evidence || []).join('；'),
+          displayTime: humanTime(item.created_at),
         }))
         this.setData({ records: (result.records || []).map(decorateRecord), hazards: hazardItems })
       } else {
@@ -391,6 +392,7 @@ Page(themed({
       ...item,
       image_url: absoluteMediaUrl(item.image_path || ''),
       evidence_text: (item.evidence || []).join('；'),
+      displayTime: humanTime(item.created_at),
     }))
     this.setData({ records: [], hazards: items })
   },

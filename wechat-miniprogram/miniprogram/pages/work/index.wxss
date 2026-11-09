@@ -47,6 +47,7 @@
 /* ---- 结构化记录卡（时间+部位+事项 / 状态可见 / 摘要已清洗 / 一键补填成文） ---- */
 .rec-top { display: flex; align-items: center; justify-content: space-between; gap: 16rpx; margin-bottom: 14rpx; }
 .rec-time { font-size: 23rpx; color: #8795a6; flex-shrink: 0; }
+.hazard-time { font-size: 23rpx; color: #8795a6; margin-bottom: 10rpx; }
 .rec-chips { display: flex; align-items: center; gap: 10rpx; flex-shrink: 0; }
 .rec-chip { padding: 5rpx 14rpx; border-radius: 10rpx; font-size: 21rpx; font-weight: 600; line-height: 1.4; }
 .rec-chip.rec-type { color: #2f6fd0; background: rgba(47, 111, 208, 0.12); }

@@ -72,6 +72,7 @@
             <view class="hazard-title">{{item.top1_risk || item.risk_category || '现场隐患'}}</view>
             <view class="status">{{item.status}}</view>
           </view>
+          <view wx:if="{{item.displayTime}}" class="hazard-time">{{item.displayTime}}</view>
           <view class="muted">#{{item.id}} · {{item.section || '未填写区域'}} · {{item.location || '未填写位置'}}</view>
           <view wx:if="{{item.evidence_text}}" class="evidence">依据：{{item.evidence_text}}</view>
         </view>
@@ -96,6 +97,7 @@
             <view class="hazard-title">{{item.top1_risk || item.risk_category || '现场隐患'}}</view>
             <view class="status">{{item.status}}</view>
           </view>
+          <view wx:if="{{item.displayTime}}" class="hazard-time">{{item.displayTime}}</view>
           <view class="muted">#{{item.id}} · {{item.section || '未填写区域'}} · {{item.location || '未填写位置'}}</view>
           <view wx:if="{{item.evidence_text}}" class="evidence">依据：{{item.evidence_text}}</view>
         </view>
