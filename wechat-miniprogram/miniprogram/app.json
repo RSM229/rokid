@@ -42,8 +42,6 @@
     "pages/visa/index",
     "pages/equipment/index",
     "pages/archive/index",
-    "pages/call/index",
-    "pages/contacts/index",
     "pages/guide/index"
   ],
   "window": {
