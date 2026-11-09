@@ -1331,9 +1331,16 @@ async def _agent_chat_impl(
         # 首次执行只做合同校验并保存待确认草稿；用户确认后才放行工具写入。
         if tool == "create_work_record":
             awaiting = bool((draft.get("args") or {}).get("_awaiting_confirmation"))
+            # 草稿已整理好、只差确认时，用户明确说「按草稿生成」「直接生成」
+            # 同样是一次授权；旧白名单只认「确认」字样，「按当前草稿生成」
+            # 会被当成又一轮草稿整理（模型还接话「收到，已生成」，实际没写库）。
+            _confirm_tokens = (
+                "确认生成", "确认保存", "保存并生成", "确认建档",
+                "按当前草稿生成", "按草稿生成", "直接生成", "生成吧",
+            )
             confirmed = awaiting and (
                 structured_submit
-                or any(token in message for token in ("确认生成", "确认保存", "保存并生成", "确认建档"))
+                or any(token in message for token in _confirm_tokens)
             )
             args["_require_confirmation"] = not confirmed
             if confirmed:
@@ -1382,11 +1389,23 @@ async def _agent_chat_impl(
             # 模板 reply 只在 answer 缺失/过于机械时才兜底。两者绝不叠加，避免机械感。
             _model_answer = str((parsed or {}).get("answer") or "").strip()
             _tool_reply = str(result.get("reply") or "").strip()
+            _awaiting_final = (
+                tool == "create_work_record"
+                and "最终确认" in [str(x) for x in (result.get("need_more") or [])]
+            )
             if result.get("ask_block"):
                 # 「一起询问」：全部验收询问项必须完整呈现，不能被模型自然接话覆盖。
                 result["reply"] = _tool_reply
             elif _model_answer and not _is_mechanical_reply(_model_answer):
+                # 最终确认是写库前唯一的安全网：模型接话常说「收到，已生成」，
+                # 会把系统的「请回复确认生成」盖掉，用户以为建档成功却查不到记录
+                # （2026-11-09 生产实测）。保留自然接话，但必须补上状态与操作指引。
                 result["reply"] = _model_answer
+                if _awaiting_final:
+                    result["reply"] += (
+                        "\n\n还没写入正式记录：回复「确认生成」，"
+                        "或点下方「确认并生成记录」即可建档。"
+                    )
             elif _tool_reply:
                 result["reply"] = _tool_reply
             await agent_tools.stash_pending(

@@ -134,5 +134,59 @@ class AcceptanceContractTest(unittest.TestCase):
         self.assertTrue(any(isinstance(row, WorkRecord) for row in ctx2.db.rows))
 
 
+class ConfirmationUxTest(unittest.TestCase):
+    """路由层确认闸：用户说「生成」却查不到记录的交互回归。
+
+    2026-11-09 生产实测：合同修复后草稿正确停在「最终确认」，但模型接话
+    「收到，已生成」把系统追问盖掉；用户再回「按当前草稿生成」又因白名单
+    只认「确认」字样被当成新一轮整理，记录始终没写库。
+    """
+
+    @staticmethod
+    def _agent_source() -> str:
+        from pathlib import Path
+        path = Path(__file__).resolve().parents[1] / "app" / "routers" / "agent.py"
+        return path.read_text(encoding="utf-8")
+
+    @classmethod
+    def _confirm_tokens(cls) -> set[str]:
+        import ast
+        tree = ast.parse(cls._agent_source())
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Assign) and any(
+                isinstance(t, ast.Name) and t.id == "_confirm_tokens"
+                for t in node.targets
+            ):
+                return set(ast.literal_eval(node.value))
+        raise AssertionError("_confirm_tokens 未在路由层定义")
+
+    def test_draft_generation_phrases_are_treated_as_confirmation(self):
+        tokens = self._confirm_tokens()
+        for phrase in ("确认生成", "按当前草稿生成", "按草稿生成", "直接生成", "生成吧"):
+            self.assertIn(phrase, tokens)
+        self.assertTrue(any(t in "收到，按当前草稿生成验收工作记录" for t in tokens))
+
+    def test_generation_phrase_unlocks_record_creation(self):
+        tokens = self._confirm_tokens()
+        message = "按当前草稿生成"
+        awaiting = True  # 草稿已停在「最终确认」
+        confirmed = awaiting and any(t in message for t in tokens)
+        self.assertTrue(confirmed)
+
+        args = _draft()
+        args["_require_confirmation"] = not confirmed
+        args["_execution_confirmed"] = confirmed
+        ctx = _context()
+        result = asyncio.run(agent_tools._create_work_record(ctx, args))
+        self.assertTrue(result["ok"])
+        self.assertTrue(any(isinstance(row, WorkRecord) for row in ctx.db.rows))
+
+    def test_final_confirmation_reply_keeps_explicit_action_hint(self):
+        src = self._agent_source()
+        self.assertIn("_awaiting_final", src)
+        self.assertIn("还没写入正式记录", src)
+        self.assertIn("确认并生成记录", src)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
