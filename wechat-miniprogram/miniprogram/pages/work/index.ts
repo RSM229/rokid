@@ -366,12 +366,19 @@ Page(themed({
           CACHE_KEYS.HAZARD_LIST,
           () => request<HazardItem[]>('/hazard/list'),
         )
-        const hazardItems = hazards.map((item) => ({
-          ...item,
-          image_url: absoluteMediaUrl(item.image_path || ''),
-          evidence_text: (item.evidence || []).join('；'),
-          displayTime: humanTime(item.created_at),
-        }))
+        // 隐患接口不支持日期过滤，前端按与工作记录相同的范围过滤，避免「今天」混入历史隐患
+        const hazardItems = hazards
+          .filter((item) => {
+            if (!range) return true
+            const date = (item.created_at || '').slice(0, 10)
+            return date >= range.start && date <= range.end
+          })
+          .map((item) => ({
+            ...item,
+            image_url: absoluteMediaUrl(item.image_path || ''),
+            evidence_text: (item.evidence || []).join('；'),
+            displayTime: humanTime(item.created_at),
+          }))
         this.setData({ records: (result.records || []).map(decorateRecord), hazards: hazardItems })
       } else {
         this.setData({ records: (result.records || []).map(decorateRecord) })
@@ -388,12 +395,19 @@ Page(themed({
       CACHE_KEYS.HAZARD_LIST,
       () => request<HazardItem[]>('/hazard/list'),
     )
-    const items = hazards.map((item) => ({
-      ...item,
-      image_url: absoluteMediaUrl(item.image_path || ''),
-      evidence_text: (item.evidence || []).join('；'),
-      displayTime: humanTime(item.created_at),
-    }))
+    const range = this.computeRange()
+    const items = hazards
+      .filter((item) => {
+        if (!range) return true
+        const date = (item.created_at || '').slice(0, 10)
+        return date >= range.start && date <= range.end
+      })
+      .map((item) => ({
+        ...item,
+        image_url: absoluteMediaUrl(item.image_path || ''),
+        evidence_text: (item.evidence || []).join('；'),
+        displayTime: humanTime(item.created_at),
+      }))
     this.setData({ records: [], hazards: items })
   },
 
