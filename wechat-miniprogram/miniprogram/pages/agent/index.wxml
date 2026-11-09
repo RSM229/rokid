@@ -297,7 +297,7 @@
               <text class="pref-suggest-sub">{{item.preferenceSuggestion.reason === 'repeated' ? '你之前提过类似要求' : '这条规矩以后每轮都适用'}}</text>
             </view>
             <text class="pref-suggest-rule">{{item.preferenceSuggestion.rule}}</text>
-            <view wx:if="{{item.preferenceSuggestion.saved}}" class="pref-suggest-done">已加入「我的 - AI 偏好」</view>
+            <view wx:if="{{item.preferenceSuggestion.saved}}" class="pref-suggest-done">已加入「我的 - AI 记忆」</view>
             <view wx:else class="pref-suggest-actions">
               <view class="pref-suggest-btn ghost" data-index="{{mi}}" bindtap="dismissPreferenceSuggestion">不用</view>
               <view class="pref-suggest-btn primary {{item.preferenceSuggestion.busy ? 'disabled' : ''}}" data-index="{{mi}}" bindtap="savePreferenceSuggestion">{{item.preferenceSuggestion.busy ? '保存中' : '记住'}}</view>

@@ -4,6 +4,12 @@
   min-height: 100vh;
   padding-bottom: 60rpx;
 }
+.memory-note {
+  margin: 24rpx 34rpx 0;
+  color: var(--color-text-secondary, #666);
+  font-size: 24rpx;
+  line-height: 36rpx;
+}
 
 .group-title {
   margin: 30rpx 34rpx 14rpx;
@@ -61,6 +67,11 @@
 }
 .add-btn[disabled] {
   opacity: 0.5;
+}
+.cancel-edit {
+  padding: 10rpx 18rpx;
+  color: var(--color-text-secondary, #666);
+  font-size: 26rpx;
 }
 
 /* ============ 鍋忓ソ鍒楄〃 ============ */
@@ -121,6 +132,11 @@
 .pref-del {
   font-size: 24rpx;
   color: #c0392b;
+  padding: 4rpx 8rpx;
+}
+.pref-edit {
+  font-size: 24rpx;
+  color: var(--brand, #0a2e5c);
   padding: 4rpx 8rpx;
 }
 
@@ -189,4 +205,68 @@
   padding: 26rpx;
   font-size: 30rpx;
   color: var(--color-text-secondary, #666);
+}
+
+/* ============ 项目记忆入口 / 作用域 / 发布 ============ */
+.project-link {
+  margin-top: 24rpx;
+}
+.entry-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 22rpx 24rpx;
+}
+.entry-title {
+  font-size: 28rpx;
+  color: var(--color-text-primary, #222);
+}
+.entry-desc {
+  margin-top: 6rpx;
+  font-size: 22rpx;
+  color: var(--color-text-tertiary, #999);
+}
+.cell-arrow {
+  color: var(--color-text-tertiary, #bbb);
+  font-size: 32rpx;
+}
+.scope-tag {
+  font-size: 20rpx;
+  color: var(--color-text-tertiary, #999);
+}
+.pref-publish {
+  font-size: 24rpx;
+  color: #13795b;
+  padding: 4rpx 8rpx;
+}
+.pref-publish.busy {
+  opacity: 0.4;
+}
+
+/* ============ 个人记忆作用域 ============ */
+.scope-row {
+  display: flex;
+  gap: 14rpx;
+  margin-top: 16rpx;
+}
+.scope-option {
+  flex: 1;
+  text-align: center;
+  padding: 12rpx 0;
+  font-size: 24rpx;
+  color: var(--color-text-secondary, #666);
+  background: var(--color-background-secondary, #f3f4f6);
+  border-radius: 10rpx;
+}
+.scope-option.active {
+  color: #fff;
+  background: var(--brand, #13795b);
+}
+.pref-scope {
+  font-size: 24rpx;
+  color: var(--color-text-secondary, #666);
+  padding: 4rpx 8rpx;
+}
+.pref-scope.busy {
+  opacity: 0.4;
 }

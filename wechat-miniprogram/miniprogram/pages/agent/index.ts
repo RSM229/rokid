@@ -396,6 +396,8 @@ interface ChatHistory {
   updatedAt: string
   messageCount?: number
   remote?: boolean
+  /** 归属项目：切换项目后本地历史只展示当前项目，避免跨项目串聊天记录。 */
+  projectId?: number
 }
 
 interface RemoteConversationSummary {
@@ -4966,6 +4968,7 @@ Page(themed({
       modelId: this.data.currentModel,
       messages,
       updatedAt: now,
+      projectId: this.data.currentProjectId || undefined,
     }
     wx.setStorageSync(storageKey, [entry, ...list.filter(h => h.id !== id)].slice(0, 30))
   },
@@ -4980,13 +4983,20 @@ Page(themed({
       updatedAt: item.updatedAt || '',
       messageCount: item.message_count,
       remote: true,
+      projectId: this.data.currentProjectId || undefined,
     }
   },
 
   async openHistory() {
     this.saveCurrentSession()
     const storageKey = historyStorageKey(session.getUser()?.user_id)
-    const local = (wx.getStorageSync(storageKey) || []) as ChatHistory[]
+    const activeProjectId = this.data.currentProjectId || 0
+    const cached = (wx.getStorageSync(storageKey) || []) as ChatHistory[]
+    // 🔴 项目隔离：本地缓存必须按当前项目过滤。老缓存没有 projectId 的记录
+    // 无法判定归属，进入项目后不再展示（服务端历史仍是真源，可正常恢复）。
+    const local = cached.filter(item =>
+      activeProjectId ? item.projectId === activeProjectId : !item.projectId,
+    )
     this.setData({
       historyList: local,
       showHistory: true,
@@ -5000,8 +5010,8 @@ Page(themed({
       })
       const remote = (result.conversations || []).map(item => {
         const summary = this.remoteSummaryToHistory(item)
-        const cached = local.find(history => history.conversationId === summary.conversationId)
-        return cached ? { ...summary, modelId: cached.modelId, messages: cached.messages } : summary
+        const cachedEntry = local.find(history => history.conversationId === summary.conversationId)
+        return cachedEntry ? { ...summary, modelId: cachedEntry.modelId, messages: cachedEntry.messages } : summary
       })
       const remoteIds = new Set(remote.map(item => item.conversationId))
       const localOnly = local.filter(item => !item.conversationId || !remoteIds.has(item.conversationId))

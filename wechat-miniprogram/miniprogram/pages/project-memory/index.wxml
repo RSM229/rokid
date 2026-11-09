@@ -1,0 +1,159 @@
+<!--
+  项目记忆（项目级共享记忆）· 2026-11-09 新建
+
+  与「我的 - AI 记忆」（个人记忆）的分工：
+    · 项目记忆：本项目总监设定、全项目共享的统一口径，注入每个成员的 AI 上下文；
+    · 个人记忆：只属于当前用户，跨会话跟随本人。
+
+  写权限由后端判定（project_members 中总监/总监代表；super_admin 兜底）：
+    · 可维护：直接新增/启停/删除，并审批成员建议；
+    · 普通成员：只能提交 pending 建议，等总监审批后生效。
+-->
+<view class="page" style="{{themeStyle}}">
+  <glass-nav-bar title="项目记忆" left="back" />
+
+  <view class="memory-note">
+    这里是本项目总监设定的统一口径，全项目成员共享；你自己的习惯请到「AI 记忆」。
+  </view>
+  <view class="maintainer-line" wx:if="{{maintainerText}}">维护人：{{maintainerText}}</view>
+
+  <!-- ① 新增 / 建议 -->
+  <view class="group-title">{{canManage ? '新增项目口径' : '建议给总监'}}</view>
+  <view class="section">
+    <view class="add-wrap">
+      <textarea
+        class="add-input"
+        value="{{inputValue}}"
+        placeholder="{{canManage ? '例如：本项目整改回复必须附前后对比照片' : '例如：建议本项目日志天气统一以现场实测为准'}}"
+        placeholder-class="add-placeholder"
+        maxlength="500"
+        bindinput="onInput"
+        auto-height
+      ></textarea>
+      <view class="add-row">
+        <view class="cat-picker" bindtap="openCategoryPicker">
+          <text class="cat-value">{{selectedCategoryLabel || '分类'}}</text>
+          <text class="cell-arrow">▾</text>
+        </view>
+        <button
+          class="add-btn"
+          size="mini"
+          loading="{{adding}}"
+          disabled="{{adding || !inputValue}}"
+          bindtap="submitMemory"
+        >{{canManage ? '加入项目记忆' : '提交建议'}}</button>
+      </view>
+      <view class="add-hint" wx:if="{{!canManage}}">只有项目总监/总监代表可以直接生效，你的建议会先进入待审批。</view>
+    </view>
+  </view>
+
+  <!-- ② 待审批建议（仅维护人可见） -->
+  <block wx:if="{{canManage && pending.length}}">
+    <view class="group-title">待审批建议（{{pending.length}}）</view>
+    <view class="section">
+      <view class="cell pending-item" wx:for="{{pending}}" wx:key="id">
+        <view class="pref-main">
+          <view class="pref-head">
+            <text class="pref-cat">{{item.categoryLabel}}</text>
+            <text class="pending-author">{{item.author_name || '项目成员'}}</text>
+          </view>
+          <text class="pref-rule">{{item.content}}</text>
+        </view>
+        <view class="pending-actions">
+          <view class="approve-btn" data-id="{{item.id}}" data-approve="{{true}}" bindtap="approveMemory">通过</view>
+          <view class="reject-btn" data-id="{{item.id}}" data-approve="{{false}}" bindtap="approveMemory">驳回</view>
+        </view>
+      </view>
+    </view>
+  </block>
+
+  <!-- ③ 已生效 / 已停用 -->
+  <view class="group-title">项目记忆（{{memories.length}}）</view>
+  <view class="section" wx:if="{{memories.length}}">
+    <view class="cell pref-item" wx:for="{{memories}}" wx:key="id">
+      <view class="pref-main">
+        <view class="pref-head">
+          <text class="pref-cat">{{item.categoryLabel}}</text>
+          <text class="source-tag">{{item.sourceLabel}}</text>
+          <view class="pref-tag {{item.active ? 'on' : 'off'}}">{{item.active ? '生效中' : '已停用'}}</view>
+        </view>
+        <text class="pref-rule">{{item.content}}</text>
+        <text class="use-tag">已注入对话 {{item.use_count || 0}} 次</text>
+      </view>
+      <view class="pref-actions" wx:if="{{canManage}}">
+        <switch
+          checked="{{item.active}}"
+          data-id="{{item.id}}"
+          data-active="{{item.active}}"
+          bindchange="toggleMemory"
+          color="#13795b"
+        />
+        <view class="pref-del" data-id="{{item.id}}" bindtap="removeMemory">删除</view>
+      </view>
+    </view>
+  </view>
+  <view class="empty" wx:elif="{{!loading}}">
+    <text>{{canManage ? '还没有项目记忆。新增后，所有项目成员的 AI 都会遵守。' : '还没有项目记忆。'}}</text>
+  </view>
+  <view class="empty" wx:if="{{loading}}">
+    <text>加载中…</text>
+  </view>
+
+  <!-- ④ 使用统计（仅维护人） -->
+  <block wx:if="{{canManage && usage.length}}">
+    <view class="group-title">使用统计</view>
+    <view class="section">
+      <view class="cell stat-item" wx:for="{{usage}}" wx:key="id">
+        <view class="stat-main">
+          <text class="stat-text">{{item.content}}</text>
+          <text class="stat-meta">{{item.active ? '生效中' : '已停用'}} · 最近 {{item.lastUsedText || '未使用'}}</text>
+        </view>
+        <text class="stat-count">{{item.use_count}} 次</text>
+      </view>
+    </view>
+  </block>
+
+  <!-- ⑤ 变更 / 使用审计（仅维护人） -->
+  <block wx:if="{{canManage && audit.length}}">
+    <view class="group-title">最近变更 / 使用审计</view>
+    <view class="section">
+      <view class="cell audit-item" wx:for="{{audit}}" wx:key="id">
+        <text class="audit-action">{{item.actionLabel}}</text>
+        <text class="audit-actor">{{item.actor_name || '系统'}}</text>
+        <text class="audit-time">{{item.timeText}}</text>
+      </view>
+    </view>
+  </block>
+
+  <!-- ⑥ 个人记忆入口 -->
+  <view class="section personal-link">
+    <view class="cell entry-item" bindtap="openUserMemory">
+      <view class="entry-main">
+        <view class="entry-text">
+          <text class="entry-title">我的 AI 记忆</text>
+          <text class="entry-desc">只属于你、跨会话生效的个人习惯与规则</text>
+        </view>
+      </view>
+      <text class="cell-arrow">›</text>
+    </view>
+  </view>
+
+  <!-- 分类选择浮层（mask + sheet 平级兄弟，禁嵌 modal 进 mask） -->
+  <view class="overlay" wx:if="{{showCategoryPicker}}" catchtouchmove="true">
+    <view class="overlay-mask" bindtap="closeCategoryPicker"></view>
+    <view class="cat-sheet">
+      <view class="cat-sheet-title">选择分类</view>
+      <view
+        class="cat-option {{selectedCategory === item.value ? 'selected' : ''}}"
+        wx:for="{{categories}}"
+        wx:key="value"
+        data-value="{{item.value}}"
+        bindtap="onCategoryChange"
+      >
+        <text>{{item.label}}</text>
+        <text class="cat-check" wx:if="{{selectedCategory === item.value}}">✓</text>
+      </view>
+      <view class="cat-sheet-cancel" bindtap="closeCategoryPicker">取消</view>
+    </view>
+  </view>
+</view>

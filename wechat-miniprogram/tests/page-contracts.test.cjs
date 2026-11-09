@@ -8,6 +8,8 @@ const app = JSON.parse(fs.readFileSync(path.join(root, 'app.json'), 'utf8'))
 const agentPage = fs.readFileSync(path.join(root, 'pages/agent/index.ts'), 'utf8')
 const agentTemplate = fs.readFileSync(path.join(root, 'pages/agent/index.wxml'), 'utf8')
 const workTemplate = fs.readFileSync(path.join(root, 'pages/work/index.wxml'), 'utf8')
+const preferencesPage = fs.readFileSync(path.join(root, 'pages/preferences/index.ts'), 'utf8')
+const preferencesTemplate = fs.readFileSync(path.join(root, 'pages/preferences/index.wxml'), 'utf8')
 
 test('agent select controls store the selected label instead of the picker index', () => {
   assert.match(agentPage, /field\.control === 'select'[\s\S]{0,160}field\.options\[Number\(value\)\]/)
@@ -48,6 +50,14 @@ test('local history resumes unfinished persisted progress events', () => {
 
 test('inspection details show the saved inspector, not the record creator', () => {
   assert.match(workTemplate, /巡视监理人员[\s\S]{0,180}detail\.inspector/)
+})
+
+test('AI memory management keeps editing separate from session history', () => {
+  assert.match(preferencesTemplate, /AI 记忆/)
+  assert.match(preferencesTemplate, /会话记录用于回看对话/)
+  assert.match(preferencesTemplate, /bindtap="submitPreference"/)
+  assert.match(preferencesPage, /method: 'PUT'/)
+  assert.match(preferencesPage, /method: 'DELETE'/)
 })
 
 test('agent cards identify and navigate to parallel inspection records', () => {

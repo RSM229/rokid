@@ -17,6 +17,7 @@
     "pages/account-security/binding",
     "pages/account-security/credentials",
     "pages/preferences/index",
+    "pages/project-memory/index",
     "pages/work/index",
     "pages/dashboard/index",
     "pages/todo/index",

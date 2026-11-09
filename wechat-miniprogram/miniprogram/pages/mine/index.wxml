@@ -91,8 +91,18 @@
       <view class="entry-main">
         <view class="entry-icon ic-pref"></view>
         <view class="entry-text">
-          <text class="entry-title">AI 偏好</text>
-          <text class="entry-desc">告诉 AI 你的工作规矩，它会一直遵守</text>
+          <text class="entry-title">AI 记忆</text>
+          <text class="entry-desc">管理跨会话生效的个人工作规则</text>
+        </view>
+      </view>
+      <text class="cell-arrow">›</text>
+    </view>
+    <view class="cell entry-item entry-tint" bindtap="openProjectMemory">
+      <view class="entry-main">
+        <view class="entry-icon ic-board"></view>
+        <view class="entry-text">
+          <text class="entry-title">项目记忆</text>
+          <text class="entry-desc">本项目总监设定、全项目共享的统一口径</text>
         </view>
       </view>
       <text class="cell-arrow">›</text>

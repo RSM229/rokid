@@ -108,9 +108,14 @@ Page(themed({
     wx.navigateTo({ url: '/pages/settings/index' })
   },
 
-  /** AI 偏好：管理「用户长期偏好」——AI 跨会话遵守的做事规则 */
+  /** AI 记忆：管理跨会话生效的用户工作规则 */
   openPreferences() {
     wx.navigateTo({ url: '/pages/preferences/index' })
+  },
+
+  /** 项目记忆：本项目总监维护、全项目共享的统一口径 */
+  openProjectMemory() {
+    wx.navigateTo({ url: '/pages/project-memory/index' })
   },
 
   async loadProfile() {
