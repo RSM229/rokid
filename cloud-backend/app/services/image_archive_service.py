@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import json
 import os
 import re
 import shutil
@@ -212,5 +213,102 @@ def write_ledger_csv(upload_dir: Path, date: str, rows: list[dict],
         "public_path": public_path(upload_dir, path),
         "rows": len(ordered),
         "created": created,
+        "backup": backup_path,
+    }
+
+
+# ---------------------------------------------------------------- 项目分类标准口径
+# 截图里的「四处联动」之一：用户确认「本项目旁站清单不含沟槽/深基坑开挖」后，
+# 口径要写进分类标准，并且对**后续批次**持续生效，而不是只对当次照片做一次
+# override。这里用归档根目录下的一份 JSON 做持久化，避免为此改数据库表结构。
+
+RULES_FILENAME = "分类标准_项目口径.json"
+
+
+def rules_path(upload_dir: Path) -> Path:
+    """只读地算出项目口径文件路径（不创建目录，preview 不产生副作用）。"""
+    return Path(upload_dir) / ARCHIVE_ROOT / RULES_FILENAME
+
+
+def default_project_rules() -> dict:
+    return {
+        "version": 1,
+        "revision": 0,
+        "pangzhan_excluded": [],  # 空列表 = 归类引擎使用标准默认口径
+        "note": "",
+        "history": [],
+        "updated_at": None,
+    }
+
+
+def load_project_rules(upload_dir: Path) -> dict:
+    """读取项目口径；文件缺失/损坏时回退默认值，绝不阻断归档。"""
+    rules = default_project_rules()
+    path = rules_path(upload_dir)
+    if not path.is_file():
+        return rules
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, UnicodeError):
+        return rules
+    if isinstance(data, dict):
+        for key in rules:
+            if key in data:
+                rules[key] = data[key]
+    if not isinstance(rules.get("pangzhan_excluded"), list):
+        rules["pangzhan_excluded"] = []
+    if not isinstance(rules.get("history"), list):
+        rules["history"] = []
+    return rules
+
+
+def merge_project_rules(rules: dict, *, exclusions: Optional[list[str]] = None,
+                        note: str = "", actor: str = "",
+                        override_count: int = 0) -> dict:
+    """合并一次口径确认，返回新版本（revision +1、history 留最近 20 条）。"""
+    merged = dict(rules)
+    if exclusions is not None:
+        merged["pangzhan_excluded"] = list(dict.fromkeys(
+            str(x).strip()[:50] for x in exclusions if str(x).strip()
+        ))
+    if note:
+        merged["note"] = str(note).strip()[:1000]
+    merged["revision"] = int(rules.get("revision") or 0) + 1
+    stamp = datetime.now().isoformat(timespec="seconds")
+    history = list(rules.get("history") or [])
+    history.append({
+        "revision": merged["revision"],
+        "at": stamp,
+        "actor": str(actor or ""),
+        "note": merged.get("note") or "",
+        "pangzhan_excluded": list(merged.get("pangzhan_excluded") or []),
+        "override_count": int(override_count or 0),
+    })
+    merged["history"] = history[-20:]
+    merged["updated_at"] = stamp
+    return merged
+
+
+def save_project_rules(upload_dir: Path, rules: dict) -> dict:
+    """写项目口径：覆盖前留 .bak，临时文件 + os.replace 原子替换。"""
+    path = rules_path(upload_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    backup_path: Optional[str] = None
+    if path.is_file():
+        stamp = datetime.now().strftime("%Y%m%d%H%M%S")
+        backup = path.with_name(f"{RULES_FILENAME}.bak_{stamp}")
+        shutil.copy2(path, backup)
+        backup_path = str(backup)
+    temporary = path.with_name(f".{RULES_FILENAME}.{os.getpid()}.tmp")
+    try:
+        temporary.write_text(json.dumps(rules, ensure_ascii=False, indent=2),
+                             encoding="utf-8")
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return {
+        "path": str(path),
+        "public_path": public_path(upload_dir, path),
+        "revision": rules.get("revision"),
         "backup": backup_path,
     }

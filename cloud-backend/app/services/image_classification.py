@@ -17,7 +17,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from typing import Optional
+from typing import Optional, Sequence
 
 
 # ---------------------------------------------------------------- 标准数据
@@ -177,14 +177,27 @@ def _pangzhan_kw(name: str) -> list[str]:
     return extras
 
 
-def _excluded_from_pangzhan(content: str) -> bool:
-    return bool(content) and any(kw in content for kw in PANGZHAN_EXCLUSION_KEYWORDS)
+def _excluded_from_pangzhan(content: str,
+                            excluded_keywords: Optional[Sequence[str]] = None) -> bool:
+    """项目旁站清单排除项。
+
+    默认用标准/项目监理部 2026-11-03 确认的口径（沟槽、深基坑开挖不旁站）；
+    ``excluded_keywords`` 由「项目分类标准口径」文件提供，用户确认新口径后
+    后续批次自动生效，不必每张照片再手工 override。
+    """
+    keywords = (list(excluded_keywords) if excluded_keywords is not None
+                else list(PANGZHAN_EXCLUSION_KEYWORDS))
+    return bool(content) and any(kw and kw in content for kw in keywords)
 
 
 # ---------------------------------------------------------------- 主归类
 
-def classify_image(signal: ImageSignal) -> ClassificationResult:
-    """按标准给一张照片定唯一类别。详见标准第二、三、六章。"""
+def classify_image(signal: ImageSignal,
+                   *, excluded_keywords: Optional[Sequence[str]] = None) -> ClassificationResult:
+    """按标准给一张照片定唯一类别。详见标准第二、三、六章。
+
+    ``excluded_keywords`` = 项目级旁站清单排除项（见 ``_excluded_from_pangzhan``）。
+    """
     content = (signal.content or "").strip()
     labels: list[str] = []
 
@@ -238,7 +251,7 @@ def classify_image(signal: ImageSignal) -> ClassificationResult:
 
     # P 旁站（须同时满足：在旁站清单 + 施工中 + 非排除项）
     if signal.in_progress:
-        if _excluded_from_pangzhan(content):
+        if _excluded_from_pangzhan(content, excluded_keywords):
             # 项目口径：沟槽/深基坑开挖不旁站，按危大工程巡视
             return ClassificationResult(
                 "X", subcategory="X2", labels=["危大工程"],
@@ -543,7 +556,8 @@ def _apply_override(result: ClassificationResult, ov: dict) -> ClassificationRes
     return result
 
 
-def archive_batch(signals: list[ImageSignal], overrides: Optional[list[dict]] = None) -> dict:
+def archive_batch(signals: list[ImageSignal], overrides: Optional[list[dict]] = None,
+                  excluded_keywords: Optional[Sequence[str]] = None) -> dict:
     """一批照片一次产出：归档结果 + 影像台账 + 缺口报告 + 待确认项。
 
     对应截图里的「归档结果」表、「影像台账_YYYYMMDD.csv」与「三处资料缺口」。
@@ -552,6 +566,9 @@ def archive_batch(signals: list[ImageSignal], overrides: Optional[list[dict]] = 
     ``overrides`` 按序号给人工口径（category_code / subcategory / labels /
     related_doc_no / note / signals），用于「需要你确认的一处归类」这种交互；
     覆盖在建文件名之前生效，四处（归档结果/文件名/台账/统计）自动联动。
+
+    ``excluded_keywords`` 是项目级旁站清单排除项（来自「分类标准_项目口径」），
+    使「本项目旁站清单不含沟槽/深基坑开挖」这类确认过的口径对后续批次持续生效。
 
     命名遵循标准第七章：同类别内 ``seq`` 递增，同一事件（证据成套原则）
     共用 ``seq``、用 ``nn`` 区分帧。
@@ -580,7 +597,7 @@ def archive_batch(signals: list[ImageSignal], overrides: Optional[list[dict]] = 
             for key, value in ov["signals"].items():
                 if hasattr(sig, key):
                     sig = replace(sig, **{key: value})
-        result = classify_image(sig)
+        result = classify_image(sig, excluded_keywords=excluded_keywords)
         if ov:
             result = _apply_override(result, ov)
         results.append(result)
@@ -644,4 +661,8 @@ def archive_batch(signals: list[ImageSignal], overrides: Optional[list[dict]] = 
         },
         "gaps": gaps,
         "confirmations": confirmations,
+        "project_rules": {
+            "pangzhan_excluded": list(excluded_keywords)
+            if excluded_keywords is not None else list(PANGZHAN_EXCLUSION_KEYWORDS),
+        },
     }
