@@ -114,7 +114,7 @@ async def auto_create_record_document(
         async with db.begin_nested():
             doc = Document(
                 doc_type=RECORD_DOC_TYPES[record.record_type],
-                title=f"{record.record_type}记录_{record.id}",
+                title=f"工作记录_{business_date(record).strftime('%Y-%m-%d')}",
                 content=content,
                 section=record.section,
                 location=record.location,
@@ -1313,7 +1313,7 @@ async def generate_witness_report(
     if doc is None:
         doc = Document(
             doc_type=DocType.WITNESS_SAMPLING.value,
-            title=f"见证取样记录_{record.witness_material_name or record.id}",
+            title=f"工作记录_{business_date(record).strftime('%Y-%m-%d')}",
             content=content,
             section=record.section,
             location=record.location,
