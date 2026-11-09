@@ -77,6 +77,10 @@ async def lifespan(app: FastAPI):
     # This new, isolated table backs account-level chat history. It is safe to
     # create idempotently even when the rest of the shared-DB init is skipped.
     await ensure_agent_history_schema()
+    # 2026-11-09：会话/草稿/聊天记录按项目隔离；老数据回填当前项目（best-effort）。
+    from app.db import backfill_agent_project_columns
+
+    await backfill_agent_project_columns()
     # RAG 检索预热：把嵌入模型、分词器、索引缓存提前建好，
     # 否则首个检索请求要承担 95MB 模型加载 + 建 BM25 的全部开销。
     # 预热失败不影响服务启动，检索会自动回退关键词模式。

@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from typing import Any, Awaitable, Callable
 
-from sqlalchemy import delete, func, select, text as sql_text
+from sqlalchemy import delete, func, select, text as sql_text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.agent_draft import (
@@ -2508,15 +2508,28 @@ async def _navigate(ctx: ToolContext, args: dict) -> dict:
 # 存储：``agent_drafts`` 表（见 models/agent_draft.py）。早期版本放在进程内存，
 # 因 reload/重启即丢、多进程不安全，已改为落库；重载不再影响用户已填内容。
 _PENDING_TTL = timedelta(hours=24)
+def _project_condition(model, project_id: int | None):
+    """项目隔离谓词：None 表示「无项目上下文」，只匹配历史 NULL 行。"""
+    if project_id is None:
+        return model.project_id.is_(None)
+    return model.project_id == int(project_id)
+
+
 async def record_conversation_message(db: AsyncSession, user_id: Any,
                                       conversation_id: str | None,
                                       message: str,
-                                      images: list[str] | None = None) -> list[dict[str, str]]:
+                                      images: list[str] | None = None,
+                                      *,
+                                      project_id: int | None = None,
+                                      ) -> list[dict[str, str]]:
     """Persist a display turn and keep a bounded raw trail for model context.
 
     ``images``（可选）是随消息上传后的服务端媒体地址（相对路径即可），
     只进展示历史（content_json），不进模型上下文——模型读的是素材文字转述，
     不需要图片 URL。
+
+    ``project_id`` 是项目隔离键：读取方（列表/详情/注入）必须按同一项目过滤，
+    否则用户切换项目后会看到上一个项目的聊天与上下文。
     """
     if not user_id or not conversation_id:
         return []
@@ -2527,8 +2540,25 @@ async def record_conversation_message(db: AsyncSession, user_id: Any,
     stmt = select(AgentConversationMemory).where(
         AgentConversationMemory.user_id == int(user_id),
         AgentConversationMemory.conversation_id == conversation_id,
+        _project_condition(AgentConversationMemory, project_id),
     )
     row = (await db.execute(stmt)).scalars().first()
+    if row is None and project_id is not None:
+        # 升级前的老会话 project_id 为 NULL：没有项目归属。首次在当前项目续聊时
+        # 把整条会话（原话 + 展示历史）认领到当前项目，避免老用户被 409 挡住。
+        legacy = (await db.execute(select(AgentConversationMemory).where(
+            AgentConversationMemory.user_id == int(user_id),
+            AgentConversationMemory.conversation_id == conversation_id,
+            AgentConversationMemory.project_id.is_(None),
+        ))).scalars().first()
+        if legacy is not None:
+            legacy.project_id = int(project_id)
+            row = legacy
+            await db.execute(update(AgentConversationMessage).where(
+                AgentConversationMessage.user_id == int(user_id),
+                AgentConversationMessage.conversation_id == conversation_id,
+                AgentConversationMessage.project_id.is_(None),
+            ).values(project_id=int(project_id)))
     try:
         history = json.loads(row.messages_json or "[]") if row else []
     except (TypeError, ValueError):
@@ -2539,12 +2569,14 @@ async def record_conversation_message(db: AsyncSession, user_id: Any,
     if row is None:
         row = AgentConversationMemory(
             user_id=int(user_id), conversation_id=conversation_id,
+            project_id=int(project_id) if project_id is not None else None,
         )
         db.add(row)
     row.messages_json = json.dumps(history, ensure_ascii=False)
     row.updated_at = datetime.now()
     db.add(AgentConversationMessage(
         user_id=int(user_id), conversation_id=conversation_id,
+        project_id=int(project_id) if project_id is not None else None,
         role="user", created_at=datetime.now(),
         content_json=json.dumps({
             "role": "user", "text": str(message or "").strip(),
@@ -2561,7 +2593,9 @@ async def record_conversation_message(db: AsyncSession, user_id: Any,
 
 async def append_conversation_response(db: AsyncSession, user_id: Any,
                                        conversation_id: str | None,
-                                       response: dict[str, Any]) -> None:
+                                       response: dict[str, Any],
+                                       *,
+                                       project_id: int | None = None) -> None:
     """Persist the exact structured assistant result shown to the user."""
     if not user_id or not conversation_id:
         return
@@ -2574,6 +2608,7 @@ async def append_conversation_response(db: AsyncSession, user_id: Any,
     }
     db.add(AgentConversationMessage(
         user_id=int(user_id), conversation_id=conversation_id,
+        project_id=int(project_id) if project_id is not None else None,
         role="assistant", content_json=json.dumps(content, ensure_ascii=False),
         created_at=now,
     ))
@@ -2594,15 +2629,19 @@ def _conversation_content(row: AgentConversationMessage) -> dict[str, Any]:
 
 
 async def list_conversation_summaries(db: AsyncSession, user_id: Any,
-                                      limit: int = 30) -> list[dict[str, Any]]:
-    """List only the current user's conversations, newest first."""
+                                      limit: int = 30,
+                                      *,
+                                      project_id: int | None = None,
+                                      ) -> list[dict[str, Any]]:
+    """List only the current user's conversations in one project, newest first."""
     if not user_id:
         return []
     capped_limit = max(1, min(int(limit or 30), 100))
     latest_ids = select(
         func.max(AgentConversationMessage.id).label("max_id")
     ).where(
-        AgentConversationMessage.user_id == int(user_id)
+        AgentConversationMessage.user_id == int(user_id),
+        _project_condition(AgentConversationMessage, project_id),
     ).group_by(
         AgentConversationMessage.conversation_id
     ).subquery()
@@ -2614,6 +2653,7 @@ async def list_conversation_summaries(db: AsyncSession, user_id: Any,
     if conversation_ids:
         rows = (await db.execute(select(AgentConversationMessage).where(
             AgentConversationMessage.user_id == int(user_id),
+            _project_condition(AgentConversationMessage, project_id),
             AgentConversationMessage.conversation_id.in_(conversation_ids),
         ).order_by(AgentConversationMessage.id.asc()))).scalars().all()
     buckets: dict[str, list[AgentConversationMessage]] = {}
@@ -2639,6 +2679,7 @@ async def list_conversation_summaries(db: AsyncSession, user_id: Any,
     known_ids = {item["conversation_id"] for item in summaries}
     memory_rows = (await db.execute(select(AgentConversationMemory).where(
         AgentConversationMemory.user_id == int(user_id),
+        _project_condition(AgentConversationMemory, project_id),
     ).order_by(AgentConversationMemory.updated_at.desc()).limit(capped_limit))).scalars().all()
     for memory in memory_rows:
         if memory.conversation_id in known_ids:
@@ -2665,12 +2706,16 @@ async def list_conversation_summaries(db: AsyncSession, user_id: Any,
 
 
 async def get_conversation_detail(db: AsyncSession, user_id: Any,
-                                  conversation_id: str) -> dict[str, Any] | None:
-    """Return a conversation only when it belongs to ``user_id``."""
+                                  conversation_id: str,
+                                  *,
+                                  project_id: int | None = None,
+                                  ) -> dict[str, Any] | None:
+    """Return a conversation only when it belongs to ``user_id`` and the project."""
     if not user_id or not conversation_id:
         return None
     rows = (await db.execute(select(AgentConversationMessage).where(
         AgentConversationMessage.user_id == int(user_id),
+        _project_condition(AgentConversationMessage, project_id),
         AgentConversationMessage.conversation_id == conversation_id,
     ).order_by(AgentConversationMessage.id.asc()))).scalars().all()
     messages = [_conversation_content(row) for row in rows]
@@ -2678,6 +2723,7 @@ async def get_conversation_detail(db: AsyncSession, user_id: Any,
         # Compatibility for conversations recorded before display history existed.
         memory = (await db.execute(select(AgentConversationMemory).where(
             AgentConversationMemory.user_id == int(user_id),
+            _project_condition(AgentConversationMemory, project_id),
             AgentConversationMemory.conversation_id == conversation_id,
         ))).scalars().first()
         if memory:
@@ -2704,16 +2750,20 @@ async def get_conversation_detail(db: AsyncSession, user_id: Any,
 
 
 async def delete_conversation(db: AsyncSession, user_id: Any,
-                              conversation_id: str) -> bool:
+                              conversation_id: str,
+                              *,
+                              project_id: int | None = None) -> bool:
     """Delete display history and model context for one owned conversation."""
     if not user_id or not conversation_id:
         return False
     result = await db.execute(delete(AgentConversationMessage).where(
         AgentConversationMessage.user_id == int(user_id),
+        _project_condition(AgentConversationMessage, project_id),
         AgentConversationMessage.conversation_id == conversation_id,
     ))
     await db.execute(delete(AgentConversationMemory).where(
         AgentConversationMemory.user_id == int(user_id),
+        _project_condition(AgentConversationMemory, project_id),
         AgentConversationMemory.conversation_id == conversation_id,
     ))
     await db.commit()
@@ -2741,30 +2791,62 @@ def _draft_clean_args(args: dict | None) -> dict:
 
 
 async def _draft_row(db: AsyncSession, user_id: Any, tool: str,
-                     conversation_id: str | None = None) -> AgentDraft | AgentConversationDraft | None:
+                     conversation_id: str | None = None,
+                     project_id: int | None = None,
+                     ) -> AgentDraft | AgentConversationDraft | None:
     model = AgentConversationDraft if conversation_id else AgentDraft
     stmt = select(model).where(model.user_id == int(user_id), model.tool == tool)
     if conversation_id:
         stmt = stmt.where(model.conversation_id == conversation_id)
+        if project_id is not None:
+            stmt = stmt.where(model.project_id == int(project_id))
+    else:
+        stmt = stmt.where(_project_condition(model, project_id))
     return (await db.execute(stmt)).scalars().first()
+
+
+async def _drop_stale_legacy_drafts(db: AsyncSession, user_id: Any, tool: str,
+                                    project_id: int | None) -> None:
+    """删除属于其他项目的旧版草稿，避免切换项目后把 A 项目字段带进 B 项目。
+
+    旧版 ``agent_drafts`` 的唯一索引是 (user_id, tool)，不按项目区分；新草稿
+    写入前清掉不匹配项目的行，既保证隔离也避免唯一键冲突。草稿本身是
+    24 小时临时态，用户切换项目后重新补字段是可接受的。
+    """
+    conditions = [AgentDraft.user_id == int(user_id), AgentDraft.tool == tool]
+    if project_id is None:
+        conditions.append(AgentDraft.project_id.is_not(None))
+    else:
+        conditions.append(AgentDraft.project_id != int(project_id))
+    rows = (await db.execute(select(AgentDraft).where(*conditions))).scalars().all()
+    for row in rows:
+        await db.delete(row)
+    if rows:
+        await db.flush()
 
 
 async def stash_pending(db: AsyncSession, user_id: Any, tool: str,
                         args: dict | None, missing: list[str] | None,
                         *, message: str = "",
                         fact_args: dict | None = None,
-                        conversation_id: str | None = None) -> None:
+                        conversation_id: str | None = None,
+                        project_id: int | None = None) -> None:
     """need_more 时暂存「已收集参数 + 仍缺字段」，按会话与工具隔离。"""
     if not user_id or not tool:
         return
-    row = await _draft_row(db, user_id, tool, conversation_id)
+    row = await _draft_row(db, user_id, tool, conversation_id, project_id)
     if row is None:
         if conversation_id:
             row = AgentConversationDraft(
                 user_id=int(user_id), conversation_id=conversation_id, tool=tool,
+                project_id=int(project_id) if project_id is not None else None,
             )
         else:
-            row = AgentDraft(user_id=int(user_id), tool=tool)
+            await _drop_stale_legacy_drafts(db, user_id, tool, project_id)
+            row = AgentDraft(
+                user_id=int(user_id), tool=tool,
+                project_id=int(project_id) if project_id is not None else None,
+            )
         db.add(row)
     clean_args = _draft_clean_args(args)
     try:
@@ -2799,8 +2881,13 @@ async def stash_pending(db: AsyncSession, user_id: Any, tool: str,
 
 async def get_pending(db: AsyncSession, user_id: Any,
                       tool: str | None = None,
-                      conversation_id: str | None = None) -> tuple[str, dict] | None:
-    """取未过期草稿：(工具名, {args, missing})；tool 给定时只匹配该工具。过期即删。"""
+                      conversation_id: str | None = None,
+                      *,
+                      project_id: int | None = None) -> tuple[str, dict] | None:
+    """取未过期草稿：(工具名, {args, missing})；tool 给定时只匹配该工具。过期即删。
+
+    草稿也按项目隔离：切到其他项目后，旧项目未填完的草稿不会进入当前上下文。
+    """
     if not user_id:
         return None
     model = AgentConversationDraft if conversation_id else AgentDraft
@@ -2809,6 +2896,7 @@ async def get_pending(db: AsyncSession, user_id: Any,
         stmt = stmt.where(model.tool == tool)
     if conversation_id:
         stmt = stmt.where(model.conversation_id == conversation_id)
+    stmt = stmt.where(_project_condition(model, project_id))
     row = (await db.execute(stmt.order_by(model.updated_at.desc()))).scalars().first()
     if row is None:
         return None
@@ -2838,7 +2926,9 @@ async def get_pending(db: AsyncSession, user_id: Any,
 
 
 async def clear_pending(db: AsyncSession, user_id: Any, tool: str | None = None,
-                        conversation_id: str | None = None) -> None:
+                        conversation_id: str | None = None,
+                        *,
+                        project_id: int | None = None) -> None:
     """清空草稿：成功落库后、或用户切换了意图时调用。"""
     if not user_id:
         return
@@ -2850,6 +2940,7 @@ async def clear_pending(db: AsyncSession, user_id: Any, tool: str | None = None,
             stmt = stmt.where(model.tool == tool)
         if conversation_id:
             stmt = stmt.where(model.conversation_id == conversation_id)
+        stmt = stmt.where(_project_condition(model, project_id))
         for row in (await db.execute(stmt)).scalars().all():
             await db.delete(row)
             deleted = True
@@ -2889,8 +2980,10 @@ def _draft_form_code(tool: str, args: dict) -> str | None:
 
 
 async def list_pending(db: AsyncSession, user_id: Any,
-                       conversation_id: str | None = None) -> list[dict]:
-    """返回该用户所有未过期草稿（按 updated_at desc）。过期的就地删除并回收。"""
+                       conversation_id: str | None = None,
+                       *,
+                       project_id: int | None = None) -> list[dict]:
+    """返回该用户当前项目下所有未过期草稿（按 updated_at desc）。过期就地删除。"""
     if not user_id:
         return []
     models = [AgentConversationDraft] if conversation_id else [AgentConversationDraft, AgentDraft]
@@ -2899,6 +2992,7 @@ async def list_pending(db: AsyncSession, user_id: Any,
         stmt = select(model).where(model.user_id == int(user_id))
         if conversation_id:
             stmt = stmt.where(model.conversation_id == conversation_id)
+        stmt = stmt.where(_project_condition(model, project_id))
         rows.extend((model, row) for row in (await db.execute(
             stmt.order_by(model.updated_at.desc())
         )).scalars().all())

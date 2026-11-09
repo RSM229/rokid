@@ -173,6 +173,8 @@ async def ensure_agent_history_schema() -> None:
     from app.models.agent_draft import (
         AgentConversationMessage,
         AgentFlowInstance,
+        AgentProjectMemory,
+        AgentProjectMemoryAudit,
         AgentRequestTrace,
         AgentUserPreference,
     )
@@ -186,6 +188,8 @@ async def ensure_agent_history_schema() -> None:
                     AgentRequestTrace.__table__,
                     AgentFlowInstance.__table__,
                     AgentUserPreference.__table__,
+                    AgentProjectMemory.__table__,
+                    AgentProjectMemoryAudit.__table__,
                 ],
             )
     except SQLAlchemyError:
@@ -194,6 +198,43 @@ async def ensure_agent_history_schema() -> None:
         # migration once with a schema-owner account instead.
         logger.exception(
             "Agent 运行态表不可用；请使用 migrations 中的 SQL 以 schema-owner 账号初始化"
+        )
+
+
+async def backfill_agent_project_columns() -> None:
+    """把历史 agent 行绑定到用户“当前项目”，为项目隔离提供初始值。
+
+    2026-11-09 起会话记忆/草稿/聊天记录都带 ``project_id``。老数据为 NULL，
+    若不回填，升级后用户切换项目会看不到自己已有会话（或更糟：跨项目可见）。
+    个人记忆 ``agent_user_preferences`` 故意不回填：NULL 表示「跟人走、全局生效」。
+
+    这是 best-effort：共享只读库账号没有 UPDATE 权限时跳过，不阻断启动；
+    建表由 ``ensure_agent_history_schema`` / 迁移 SQL 负责。
+    """
+    statements = []
+    for table in (
+        "agent_conversation_messages",
+        "agent_conversation_memory",
+        "agent_conversation_drafts",
+        "agent_drafts",
+    ):
+        statements.append(
+            f"UPDATE {table} SET project_id = ("
+            f"SELECT users.project_id FROM users WHERE users.id = {table}.user_id"
+            f") WHERE project_id IS NULL AND ("
+            f"SELECT users.project_id FROM users WHERE users.id = {table}.user_id"
+            f") IS NOT NULL"
+        )
+    try:
+        async with engine.begin() as conn:
+            for statement in statements:
+                await conn.execute(text(statement))
+        logger.info("agent 记忆 project_id 历史数据回填完成")
+    except SQLAlchemyError:
+        logger.warning(
+            "agent 记忆 project_id 回填跳过（表未建或无写权限）；"
+            "请在部署时执行 migrations/2026-11-09_agent_memory_scope.sql",
+            exc_info=True,
         )
 
 

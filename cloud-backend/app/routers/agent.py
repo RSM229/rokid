@@ -31,8 +31,10 @@ from app.services import (
     agent_fact_model,
     agent_preference_suggest,
     agent_preferences,
+    agent_project_memories,
     agent_request_plan,
     agent_runtime,
+    agent_scope,
     agent_tools,
     model_gateway,
 )
@@ -875,7 +877,13 @@ async def _agent_chat_impl(
         "load_context", "running", "先看看当前项目的资料、刚才的对话，以及还没填完的草稿",
         {"conversation_id": req.conversation_id or "", "message_length": len(message)},
     )
-    project_id = getattr(user, "project_id", None)
+    # 作用域由服务端推导：项目取 users.project_id 并校验成员身份，会话禁止跨项目。
+    conversation_id = (req.conversation_id or "").strip()[:64] or None
+    try:
+        scope = await agent_scope.resolve_agent_scope(db, user, conversation_id)
+    except agent_scope.ConversationProjectMismatch as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    project_id = scope.project_id
     project = await db.get(Project, project_id) if project_id else None
     project_facts = project_context(project)
     system_facts = agent_fact_model.build_system_facts(
@@ -886,16 +894,45 @@ async def _agent_chat_impl(
         inspector=user.real_name or "",
     )
     prefill = req.prefill if isinstance(req.prefill, dict) else {}
-    conversation_id = (req.conversation_id or "").strip()[:64] or None
     earlier_messages = await agent_tools.record_conversation_message(
-        db, user.id, conversation_id, message, images=req.images
+        db, user.id, conversation_id, message, images=req.images,
+        project_id=project_id,
     )
 
     # Load durable draft context before the routing model runs.  Recent chat
     # history is not a substitute for this state: users often give date,
     # place and activity in separate turns.
-    pend_for_context = await agent_tools.get_pending(db, user.id, conversation_id=conversation_id)
+    pend_for_context = await agent_tools.get_pending(
+        db, user.id, conversation_id=conversation_id, project_id=project_id,
+    )
     draft_for_context = pend_for_context[1] if pend_for_context else {}
+    # 项目记忆（总监维护、全项目共享）+ 个人记忆（仅本人），各自独立 system message。
+    project_memories = (
+        await agent_project_memories.list_active_memories(db, project_id)
+        if project_id else []
+    )
+    personal_memories = await agent_preferences.list_active_preferences(
+        db, user.id, project_id=project_id,
+    )
+    project_memory_block = agent_project_memories.render_project_memories_block(
+        project_memories,
+    )
+    personal_memory_block = agent_preferences.render_preferences_block(
+        personal_memories,
+    )
+    # 使用统计：本轮实际注入的项目记忆记一次引用（失败不影响聊天）。
+    if project_memories:
+        try:
+            await agent_project_memories.record_usage(
+                db, project_id,
+                [row.id for row in project_memories],
+                actor_id=user.id,
+                conversation_id=conversation_id,
+            )
+            await db.commit()
+        except Exception:  # noqa: BLE001
+            await db.rollback()
+            logger.warning("项目记忆使用统计写入失败，本轮继续", exc_info=True)
     await report_progress(
         "load_context", "completed", "已了解项目背景和刚才的对话上下文",
         {
@@ -903,6 +940,8 @@ async def _agent_chat_impl(
             "has_pending_draft": bool(pend_for_context),
             "pending_tool": pend_for_context[0] if pend_for_context else "",
             "pending_fields": list(draft_for_context.get("missing") or [])[:24],
+            "project_memory_count": len(project_memories),
+            "personal_memory_count": len(personal_memories),
         },
     )
 
@@ -912,14 +951,13 @@ async def _agent_chat_impl(
         record_types=json.dumps(agent_request_plan.RECORD_TYPES, ensure_ascii=False),
     )
     messages: list[dict] = [{"role": "system", "content": system}]
-    # 🔴 用户长期偏好（跨会话）以独立 system message 注入，不合并进 _AGENT_SYSTEM
-    # 模板体——模板要保持字节稳定供跑分基线比对。偏好只是非破坏性基线：
-    # 具体落库前服务端仍做参数/权限/审计，偏好不能越权（对齐 agent_fact_model）。
-    preferences_block = agent_preferences.render_preferences_block(
-        await agent_preferences.list_active_preferences(db, user.id)
-    )
-    if preferences_block:
-        messages.append({"role": "system", "content": preferences_block})
+    # 🔴 项目记忆在前、个人记忆在后：项目统一口径优先于个人习惯；两块都独立成
+    # system message，不合并进 _AGENT_SYSTEM 模板体（模板保持字节稳定供跑分基线）。
+    # 具体落库前服务端仍做参数/权限/审计，记忆只是非破坏性基线，不能越权。
+    if project_memory_block:
+        messages.append({"role": "system", "content": project_memory_block})
+    if personal_memory_block:
+        messages.append({"role": "system", "content": personal_memory_block})
     if pend_for_context:
         messages.append({"role": "system", "content": render_context_summary(
             draft_for_context.get("args"), draft_for_context.get("facts"),
@@ -1228,6 +1266,7 @@ async def _agent_chat_impl(
         await agent_tools.stash_pending(
             db, user.id, "create_work_record", draft_args, ["记录类型"],
             message=message, fact_args=turn_fact_args, conversation_id=conversation_id,
+            project_id=project_id,
         )
 
     # 🔴 服务端接管：模型在「已带素材证据 + 已识别记录类型或存在字段冲突」时仍返回
@@ -1283,7 +1322,9 @@ async def _agent_chat_impl(
             args = agent_tools.normalize_extra_fields(args, _form)
         elif pending_tool and spec.risk != "read":
             # 用户换成了另一个写操作 → 旧草稿作废（纯查询/问答不清草稿，草稿有 24 小时 TTL）
-            await agent_tools.clear_pending(db, user.id, pending_tool, conversation_id)
+            await agent_tools.clear_pending(
+                db, user.id, pending_tool, conversation_id, project_id=project_id,
+            )
         # _prefill is durable context only; it is never a business field.
         args.pop("_prefill", None)
         # 普通聊天创建记录与整理计划统一采用“字段齐全 → 用户确认 → 正式写入”。
@@ -1354,6 +1395,7 @@ async def _agent_chat_impl(
                 if prefill and tool == "create_work_record" else args,
                 result.get("need_more"), message=message,
                 fact_args=turn_fact_args, conversation_id=conversation_id,
+                project_id=project_id,
             )
             if result.get("ask_block"):
                 # 「一起询问」：验收要点以对话块（ask_block）一次性呈现，用户一并
@@ -1368,7 +1410,9 @@ async def _agent_chat_impl(
                 result["input_components"] = _agent_input_components(form)
             result["input_channels"] = ["text", "voice", "image", "file"]
         elif result.get("ok"):
-            await agent_tools.clear_pending(db, user.id, tool, conversation_id)
+            await agent_tools.clear_pending(
+                db, user.id, tool, conversation_id, project_id=project_id,
+            )
             result["form"] = _agent_form(tool, args, result, message, str(getattr(project, "name", "") or ""))
         if auto_filled:
             # 让用户一眼看到「水印确实读到了、也确实填进表单了」，而不是被空问一句「要记什么」。
@@ -1429,8 +1473,13 @@ async def agent_chat(
 ):
     """Run one agent turn, then persist the exact assistant result for restore."""
     user_id = int(user.id)
-    project_id = getattr(user, "project_id", None)
     conversation_id = (req.conversation_id or "").strip()[:64] or None
+    # 作用域先解析一次：聊天落库/trace/进度都用同一个 project_id；会话跨项目直接拒绝。
+    try:
+        scope = await agent_scope.resolve_agent_scope(db, user, conversation_id)
+    except agent_scope.ConversationProjectMismatch as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    project_id = scope.project_id
     request_id = await agent_runtime.start_request(
         request_id=req.request_id,
         user_id=user_id,
@@ -1507,14 +1556,22 @@ async def agent_chat(
         # 再兜底做一次「同一句规矩说了两遍」的重复检测。只产生建议，绝不自动落库。
         try:
             existing_rules = [
-                row.rule for row in await agent_preferences.list_active_preferences(db, user_id)
+                row.rule for row in await agent_preferences.list_active_preferences(
+                    db, user_id, project_id=project_id,
+                )
             ]
+            if project_id:
+                existing_rules.extend(
+                    row.content for row in
+                    await agent_project_memories.list_active_memories(db, project_id)
+                )
             clean_reply, suggestion = await agent_preference_suggest.build_suggestion(
                 db,
                 user_id,
                 req.message,
                 str(result.get("reply") or ""),
                 existing_rules=existing_rules,
+                project_id=project_id,
             )
             if suggestion:
                 result["reply"] = clean_reply
@@ -1527,7 +1584,7 @@ async def agent_chat(
         result["conversation_id"] = conversation_id
         try:
             await agent_tools.append_conversation_response(
-                db, user.id, conversation_id, result,
+                db, user.id, conversation_id, result, project_id=project_id,
             )
         except Exception:  # noqa: BLE001
             # The business action may already be committed. Never turn a
@@ -1586,9 +1643,12 @@ async def agent_conversations(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """List conversations owned by the current account only."""
-    conversations = await agent_tools.list_conversation_summaries(db, user.id, limit)
-    return {"conversations": conversations}
+    """List conversations owned by the current account in the current project."""
+    scope = await agent_scope.resolve_agent_scope(db, user)
+    conversations = await agent_tools.list_conversation_summaries(
+        db, user.id, limit, project_id=scope.project_id,
+    )
+    return {"conversations": conversations, "project_id": scope.project_id}
 
 
 @router.get("/conversations/{conversation_id}")
@@ -1597,8 +1657,9 @@ async def agent_conversation_detail(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    scope = await agent_scope.resolve_agent_scope(db, user)
     detail = await agent_tools.get_conversation_detail(
-        db, user.id, conversation_id.strip()[:64],
+        db, user.id, conversation_id.strip()[:64], project_id=scope.project_id,
     )
     if not detail:
         raise HTTPException(status_code=404, detail="会话不存在")
@@ -1611,8 +1672,9 @@ async def agent_conversation_delete(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    scope = await agent_scope.resolve_agent_scope(db, user)
     deleted = await agent_tools.delete_conversation(
-        db, user.id, conversation_id.strip()[:64],
+        db, user.id, conversation_id.strip()[:64], project_id=scope.project_id,
     )
     if not deleted:
         raise HTTPException(status_code=404, detail="会话不存在")
@@ -1755,11 +1817,13 @@ async def agent_drafts(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """当前用户所有未过期草稿（聊天即操作的半成品，落库持久化、跨会话可见）。"""
+    """当前用户当前项目下所有未过期草稿（聊天即操作的半成品，落库持久化、跨会话可见）。"""
+    scope = await agent_scope.resolve_agent_scope(db, user)
     drafts = await agent_tools.list_pending(
-        db, user.id, (conversation_id or "").strip()[:64] or None
+        db, user.id, (conversation_id or "").strip()[:64] or None,
+        project_id=scope.project_id,
     )
-    return {"count": len(drafts), "drafts": drafts}
+    return {"count": len(drafts), "drafts": drafts, "project_id": scope.project_id}
 
 
 @router.post("/drafts/clear")
@@ -1768,9 +1832,11 @@ async def agent_clear_drafts(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """放弃草稿：清掉当前用户指定工具或全部待补全草稿。"""
+    """放弃草稿：清掉当前用户当前项目下指定工具或全部待补全草稿。"""
+    scope = await agent_scope.resolve_agent_scope(db, user)
     await agent_tools.clear_pending(
-        db, user.id, req.tool, (req.conversation_id or "").strip()[:64] or None
+        db, user.id, req.tool, (req.conversation_id or "").strip()[:64] or None,
+        project_id=scope.project_id,
     )
     return {"ok": True}
 
@@ -1815,10 +1881,15 @@ async def create_review_plan(
 ):
     """Create a persistent, unconfirmed multi-event review plan."""
     user_id = int(user.id)
-    project_id = getattr(user, "project_id", None)
     conversation_id = req.conversation_id.strip()[:64]
     if not conversation_id:
         raise HTTPException(400, "conversation_id 不能为空")
+    # 与 /agent/chat 同一作用域口径：项目/成员/会话绑定校验，禁止跨项目续写计划。
+    try:
+        scope = await agent_scope.resolve_agent_scope(db, user, conversation_id)
+    except agent_scope.ConversationProjectMismatch as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    project_id = scope.project_id
     request_plan = req.plan.get("request_plan") if isinstance(req.plan.get("request_plan"), dict) else {}
     request_id = agent_runtime.normalize_request_id(
         req.request_id or req.plan.get("request_id") or request_plan.get("request_id"),
@@ -1844,6 +1915,7 @@ async def create_review_plan(
                 db, user_id, conversation_id,
                 str(stored_plan.get("request_text") or ""),
                 images=req.images,
+                project_id=project_id,
             )
         except Exception:  # noqa: BLE001 - 历史落库失败不能挡记录整理
             logger.warning("persist review-plan user turn failed", exc_info=True)
@@ -2247,10 +2319,40 @@ class PreferenceCreateRequest(BaseModel):
     rule: str = Field(min_length=1, max_length=500)
     category: str = "general"
     source: str = "user_declared"
+    # None=全局个人记忆（跟人走）；非空=仅当前项目生效（必须等于服务端解析出的项目）
+    project_id: Optional[int] = None
 
 
 class PreferenceToggleRequest(BaseModel):
     active: bool
+
+
+class PreferenceUpdateRequest(BaseModel):
+    rule: str = Field(min_length=1, max_length=500)
+    category: str = "general"
+
+
+class PreferenceScopeRequest(BaseModel):
+    """个人记忆作用域：global=全局跟人走；project=仅当前项目生效。"""
+    scope: str = "global"
+
+
+class ProjectMemoryCreateRequest(BaseModel):
+    content: str = Field(min_length=1, max_length=500)
+    category: str = "general"
+    kind: str = "rule"
+
+
+class ProjectMemoryUpdateRequest(BaseModel):
+    content: Optional[str] = Field(default=None, max_length=500)
+    category: Optional[str] = None
+    kind: Optional[str] = None
+    active: Optional[bool] = None
+    pinned: Optional[bool] = None
+
+
+class ProjectMemoryApproveRequest(BaseModel):
+    approve: bool = True
 
 
 def _preference_payload(row: Any) -> dict[str, Any]:
@@ -2260,9 +2362,69 @@ def _preference_payload(row: Any) -> dict[str, Any]:
         "category": row.category,
         "source": row.source,
         "active": row.active,
+        "project_id": getattr(row, "project_id", None),
         "created_at": row.created_at.isoformat() if getattr(row, "created_at", None) else None,
         "updated_at": row.updated_at.isoformat() if getattr(row, "updated_at", None) else None,
     }
+
+
+async def _project_memory_payloads(db: AsyncSession, rows: list[Any]) -> list[dict[str, Any]]:
+    """项目记忆 payload；批量补 author_name，避免 N+1 查询。"""
+    author_ids = {
+        int(row.author_id) for row in rows
+        if getattr(row, "author_id", None) is not None
+    }
+    names: dict[int, str] = {}
+    if author_ids:
+        users = (await db.execute(
+            select(User).where(User.id.in_(author_ids))
+        )).scalars().all()
+        names = {int(item.id): (item.real_name or item.username or "") for item in users}
+    return [
+        {
+            "id": row.id,
+            "content": row.content,
+            "kind": row.kind,
+            "category": row.category,
+            "source": row.source,
+            "status": row.status,
+            "active": row.active,
+            "pinned": row.pinned,
+            "author_id": row.author_id,
+            "author_name": names.get(int(row.author_id or 0), ""),
+            "approved_by": row.approved_by,
+            "use_count": int(getattr(row, "use_count", 0) or 0),
+            "last_used_at": (
+                row.last_used_at.isoformat() if getattr(row, "last_used_at", None) else None
+            ),
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+            "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+        }
+        for row in rows
+    ]
+
+
+async def _project_memory_scope(db: AsyncSession, user: User):
+    """项目记忆接口的统一作用域：必须有当前项目且是成员/管理员。"""
+    try:
+        return await agent_scope.resolve_project_memory_scope(db, user)
+    except agent_scope.ProjectContextError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+def _source_for_project_memory(scope) -> str:
+    if scope.is_super_admin:
+        return "system"
+    if "chief_supervisor" in scope.role_codes:
+        return "chief_declared"
+    if "deputy_chief" in scope.role_codes:
+        return "deputy_declared"
+    return "member_suggested"
+
+
+async def _project_memory_payload_one(db: AsyncSession, row: Any) -> dict[str, Any]:
+    payloads = await _project_memory_payloads(db, [row])
+    return payloads[0] if payloads else {}
 
 
 @router.get("/preferences")
@@ -2271,13 +2433,21 @@ async def list_preferences(
     db: AsyncSession = Depends(get_db),
     category: str | None = None,
 ):
-    """List this user's preferences. ?category= filters; ?active=true/false
-    further narrows to active-only rows (used by the management page)."""
-    rows = await agent_preferences.list_all_preferences(db, user.id)
+    """List this user's personal memories visible in the current project."""
+    scope = await agent_scope.resolve_agent_scope(db, user)
+    rows = await agent_preferences.list_all_preferences(
+        db, user.id, project_id=scope.project_id,
+    )
     payload = [_preference_payload(r) for r in rows]
     if category:
         payload = [p for p in payload if p["category"] == category]
-    return {"preferences": payload}
+    project = await db.get(Project, scope.project_id) if scope.project_id else None
+    return {
+        "preferences": payload,
+        "project_id": scope.project_id,
+        "project_name": str(getattr(project, "name", "") or ""),
+        "can_manage_project_memory": scope.can_manage_project_memory,
+    }
 
 
 @router.post("/preferences")
@@ -2286,7 +2456,13 @@ async def create_preference(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Add (or reactivate) a persistent preference for the current user."""
+    """Add (or reactivate) a persistent personal memory for the current user."""
+    scope = await agent_scope.resolve_agent_scope(db, user)
+    binding_project_id: int | None = None
+    if req.project_id is not None:
+        if scope.project_id is None or int(req.project_id) != int(scope.project_id):
+            raise HTTPException(status_code=400, detail="只能把个人记忆绑定到当前项目")
+        binding_project_id = scope.project_id
     try:
         row = await agent_preferences.upsert_preference(
             db,
@@ -2294,11 +2470,75 @@ async def create_preference(
             req.rule,
             category=req.category,
             source=req.source,
+            project_id=binding_project_id,
         )
         await db.commit()
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return _preference_payload(row)
+
+
+@router.post("/preferences/{preference_id}/scope")
+async def set_personal_memory_scope(
+    preference_id: int,
+    req: PreferenceScopeRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """把个人记忆改为「全局」或「仅本项目生效」。"""
+    if req.scope not in {"global", "project"}:
+        raise HTTPException(status_code=422, detail="scope 只支持 global / project")
+    scope = await agent_scope.resolve_agent_scope(db, user)
+    target_project_id: int | None = None
+    if req.scope == "project":
+        if scope.project_id is None:
+            raise HTTPException(status_code=400, detail="当前没有项目，无法绑定到项目")
+        target_project_id = scope.project_id
+    try:
+        row = await agent_preferences.set_preference_scope(
+            db, user.id, preference_id, target_project_id,
+        )
+        if row is None:
+            raise HTTPException(status_code=404, detail="记忆不存在或不属于当前账号")
+        await db.commit()
+    except ValueError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return _preference_payload(row)
+
+
+@router.put("/preferences/{preference_id}")
+async def edit_preference(
+    preference_id: int,
+    req: PreferenceUpdateRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Edit one saved memory belonging to the current account."""
+    try:
+        row = await agent_preferences.update_preference(
+            db, user.id, preference_id, req.rule, category=req.category
+        )
+        if row is None:
+            raise HTTPException(status_code=404, detail="记忆不存在或不属于当前账号")
+        await db.commit()
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return _preference_payload(row)
+
+
+@router.delete("/preferences/{preference_id}")
+async def delete_preference(
+    preference_id: int,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Permanently delete one memory belonging to the current account."""
+    deleted = await agent_preferences.delete_preference(db, user.id, preference_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="记忆不存在或不属于当前账号")
+    await db.commit()
+    return {"ok": True, "id": preference_id}
 
 
 @router.patch("/preferences/{preference_id}")
@@ -2317,3 +2557,184 @@ async def toggle_preference(
         raise HTTPException(status_code=404, detail="偏好不存在或不属于当前用户")
     await db.commit()
     return {"ok": True, "id": preference_id, "active": req.active}
+
+
+# ---------------------------------------------------------------------------
+# 项目记忆（项目级共享记忆）—— 总监/总监代表维护，全项目成员读取
+# ---------------------------------------------------------------------------
+
+
+@router.get("/project-memories")
+async def list_project_memories(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """List project memories. Members read active only; managers also see
+    disabled rows and pending member suggestions."""
+    scope = await _project_memory_scope(db, user)
+    can_manage = scope.can_manage_project_memory
+    if can_manage:
+        rows = await agent_project_memories.list_management_memories(db, scope.project_id)
+        pending = await agent_project_memories.list_pending_memories(db, scope.project_id)
+        audit = await agent_project_memories.list_audit(db, scope.project_id)
+        usage = await agent_project_memories.usage_summary(db, scope.project_id)
+    else:
+        rows = await agent_project_memories.list_active_memories(db, scope.project_id)
+        pending = []
+        audit = []
+        usage = []
+    project = await db.get(Project, scope.project_id)
+    return {
+        "project_id": scope.project_id,
+        "project_name": str(getattr(project, "name", "") or ""),
+        "can_manage": can_manage,
+        "maintainers": await agent_project_memories.project_maintainers(db, scope.project_id),
+        "memories": await _project_memory_payloads(db, rows),
+        "pending": await _project_memory_payloads(db, pending),
+        "usage": usage,
+        "audit": audit,
+    }
+
+
+@router.post("/project-memories")
+async def create_project_memory(
+    req: ProjectMemoryCreateRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Create a project memory. Members create a pending suggestion instead."""
+    scope = await _project_memory_scope(db, user)
+    can_manage = scope.can_manage_project_memory
+    try:
+        row = await agent_project_memories.create_memory(
+            db,
+            scope.project_id,
+            req.content,
+            actor_id=user.id,
+            actor_roles=scope.role_codes,
+            category=req.category,
+            kind=req.kind,
+            status=(
+                agent_project_memories.STATUS_ACTIVE if can_manage
+                else agent_project_memories.STATUS_PENDING
+            ),
+            source=_source_for_project_memory(scope),
+        )
+        await db.commit()
+    except ValueError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {
+        "ok": True,
+        "pending": row.status == agent_project_memories.STATUS_PENDING,
+        "message": (
+            "已提交给项目总监确认"
+            if row.status == agent_project_memories.STATUS_PENDING
+            else "已加入项目记忆，全项目下一轮对话生效"
+        ),
+        "memory": await _project_memory_payload_one(db, row),
+    }
+
+
+@router.put("/project-memories/{memory_id}")
+@router.patch("/project-memories/{memory_id}")
+@router.post("/project-memories/{memory_id}")
+async def update_project_memory(
+    memory_id: int,
+    req: ProjectMemoryUpdateRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Edit / enable / disable / pin one project memory (manager only)."""
+    scope = await _project_memory_scope(db, user)
+    if not scope.can_manage_project_memory:
+        raise HTTPException(status_code=403, detail="只有项目总监/总监代表可以维护项目记忆")
+    try:
+        row = await agent_project_memories.update_memory(
+            db, scope.project_id, memory_id,
+            content=req.content, category=req.category, kind=req.kind,
+            pinned=req.pinned, actor_id=user.id,
+        )
+        if row is None:
+            raise HTTPException(status_code=404, detail="项目记忆不存在")
+        if req.active is not None:
+            row = await agent_project_memories.set_memory_active(
+                db, scope.project_id, memory_id, req.active, actor_id=user.id,
+            )
+        await db.commit()
+    except ValueError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"ok": True, "memory": await _project_memory_payload_one(db, row)}
+
+
+@router.delete("/project-memories/{memory_id}")
+async def delete_project_memory(
+    memory_id: int,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    scope = await _project_memory_scope(db, user)
+    if not scope.can_manage_project_memory:
+        raise HTTPException(status_code=403, detail="只有项目总监/总监代表可以维护项目记忆")
+    deleted = await agent_project_memories.delete_memory(
+        db, scope.project_id, memory_id, actor_id=user.id,
+    )
+    if not deleted:
+        raise HTTPException(status_code=404, detail="项目记忆不存在")
+    await db.commit()
+    return {"ok": True, "id": memory_id}
+
+
+@router.post("/project-memories/{memory_id}/approve")
+async def approve_project_memory(
+    memory_id: int,
+    req: ProjectMemoryApproveRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Approve/reject a member's pending project-memory suggestion."""
+    scope = await _project_memory_scope(db, user)
+    if not scope.can_manage_project_memory:
+        raise HTTPException(status_code=403, detail="只有项目总监/总监代表可以审批项目记忆")
+    try:
+        row = await agent_project_memories.approve_memory(
+            db, scope.project_id, memory_id,
+            approve=req.approve, approver_id=user.id,
+        )
+        if row is None:
+            raise HTTPException(status_code=404, detail="项目记忆不存在")
+        await db.commit()
+    except ValueError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"ok": True, "memory": await _project_memory_payload_one(db, row)}
+
+
+@router.post("/preferences/{preference_id}/publish-to-project")
+async def publish_preference_to_project(
+    preference_id: int,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """总监把自己的个人记忆发布为项目记忆（复制，保留来源 id）。"""
+    scope = await _project_memory_scope(db, user)
+    if not scope.can_manage_project_memory:
+        raise HTTPException(status_code=403, detail="只有项目总监/总监代表可以发布项目记忆")
+    preference = await agent_preferences.get_preference(db, user.id, preference_id)
+    if preference is None:
+        raise HTTPException(status_code=404, detail="个人记忆不存在或不属于当前账号")
+    try:
+        row = await agent_project_memories.publish_preference(
+            db, scope.project_id, preference,
+            actor_id=user.id, actor_roles=scope.role_codes,
+        )
+        await db.commit()
+    except ValueError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {
+        "ok": True,
+        "project_id": scope.project_id,
+        "memory": await _project_memory_payload_one(db, row),
+    }

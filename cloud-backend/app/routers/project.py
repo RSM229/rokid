@@ -1157,12 +1157,23 @@ async def reopen_project(
 
 # ============ 空壳项目物理删除（2026-10-22） ============
 
-# 这两张表在项目删除时由接口**主动清理**，不计入"有业务数据"的拦截项：
+# 这些表在项目删除时由接口**主动清理**，不计入"有业务数据"的拦截项：
 #   project_members     —— 创建项目时自动把创建者加为成员，空壳项目必然有 1 条
 #   users               —— users.project_id 只是"当前上下文"单值，置空即可
+#   agent_*             —— 智能体记忆/会话/草稿属于派生数据，随项目删除
 # 注：project_view_grants（跨项目查看授权）按「管理员」粒度存储，不绑定具体项目，
 #     故项目删除时无需、也不能按 project_id 清理，已从本集合移除。
-_CLEANUP_TABLES = {"project_members", "users"}
+# 注：agent_user_preferences（个人记忆）**不**列入：若用户把个人记忆绑定到本项目，
+#     删除项目不应静默删除用户的个人记忆，宁可拒绝删除并提示先解绑。
+_CLEANUP_TABLES = {
+    "project_members", "users",
+    "agent_project_memories",
+    "agent_project_memory_audit",
+    "agent_conversation_messages",
+    "agent_conversation_memory",
+    "agent_conversation_drafts",
+    "agent_drafts",
+}
 
 # fail-closed 阈值：生产 information_schema 应返回 25+ 张带 project_id 的表。
 # 若扫到的表数少于此，说明判定依据本身失效（库连错/metadata 未加载），
@@ -1347,6 +1358,18 @@ async def delete_project(
         if mu:
             member_names.append(f"{mu.real_name}({mu.username})")
     await db.execute(delete(ProjectMember).where(ProjectMember.project_id == project_id))
+    # 智能体派生数据（项目记忆 / 会话 / 草稿）随项目一起清理；只删库里真实存在
+    # 且列入 cleanup 的表，避免老库缺表时把删除流程打 500。
+    cleanup_tables = [
+        name for name in await _tables_with_project_id(db)
+        if name in _CLEANUP_TABLES - {"project_members", "users"}
+    ]
+    for name in cleanup_tables:
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+            continue
+        await db.execute(
+            text(f"DELETE FROM `{name}` WHERE project_id = :pid"), {"pid": project_id},
+        )
     cleared = (
         await db.execute(
             update(User).where(User.project_id == project_id).values(project_id=None)

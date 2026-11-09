@@ -39,6 +39,9 @@ class AgentDraft(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(Integer, index=True, comment="所属用户 id")
+    project_id: Mapped[int | None] = mapped_column(
+        Integer, nullable=True, index=True, comment="项目隔离键；NULL=老数据/无项目上下文",
+    )
     tool: Mapped[str] = mapped_column(String(64), comment="待完成的工具名，如 create_work_record")
     args_json: Mapped[str] = mapped_column(Text, comment="已收集参数 JSON（空值不入草稿）")
     missing_json: Mapped[str] = mapped_column(Text, comment="仍缺字段中文标签 JSON")
@@ -56,6 +59,9 @@ class AgentConversationDraft(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(Integer, index=True)
+    project_id: Mapped[int | None] = mapped_column(
+        Integer, nullable=True, index=True, comment="项目隔离键；与 conversation_id 同源",
+    )
     conversation_id: Mapped[str] = mapped_column(String(64), nullable=False)
     tool: Mapped[str] = mapped_column(String(64), nullable=False)
     args_json: Mapped[str] = mapped_column(Text, default="{}")
@@ -64,14 +70,22 @@ class AgentConversationDraft(Base):
 
 
 class AgentConversationMemory(Base):
-    """最近会话原话，独立于业务草稿保存，支持稍后回顾早先分段提供的信息。"""
+    """最近会话原话，独立于业务草稿保存，支持稍后回顾早先分段提供的信息。
+
+    ``project_id`` 是项目隔离键：同一用户切换项目后，旧项目的会话原话不再
+    进入新项目的模型上下文（读取方必须带当前项目过滤，见 agent_tools）。
+    """
     __tablename__ = "agent_conversation_memory"
     __table_args__ = (
         Index("ix_agent_conversation_memory_user_session", "user_id", "conversation_id", unique=True),
+        Index("ix_agent_conversation_memory_user_project", "user_id", "project_id"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(Integer, index=True)
+    project_id: Mapped[int | None] = mapped_column(
+        Integer, nullable=True, index=True, comment="项目隔离键；NULL=老数据/无项目",
+    )
     conversation_id: Mapped[str] = mapped_column(String(64), nullable=False)
     messages_json: Mapped[str] = mapped_column(Text, default="[]")
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, index=True)
@@ -85,11 +99,15 @@ class AgentConversationMessage(Base):
             "ix_agent_conversation_messages_user_session_id",
             "user_id", "conversation_id", "id",
         ),
+        Index("ix_agent_conversation_messages_user_project", "user_id", "project_id"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"), index=True,
+    )
+    project_id: Mapped[int | None] = mapped_column(
+        Integer, nullable=True, index=True, comment="项目隔离键；历史/恢复都按它过滤",
     )
     conversation_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     role: Mapped[str] = mapped_column(String(16), nullable=False)
@@ -158,19 +176,20 @@ class AgentRequestTrace(Base):
 
 
 class AgentUserPreference(Base):
-    """用户级长期业务偏好 —— 跨会话、跨项目生效。
+    """用户级长期记忆（个人记忆）—— 跨会话生效。
 
-    与 ``AgentConversationMemory``（会话级原话）不同，本表存的是**用户明示的、
-    希望以后一直遵守**的做事规则。来源两类：
+    与 ``AgentConversationMemory``（会话级原话）和 ``AgentProjectMemory``
+    （项目级共享记忆）不同，本表存的是**用户自己的、希望以后一直遵守**
+    的做事规则。来源两类：
     - ``user_declared``：用户在管理页/聊天中主动声明（如「整改回复必须附前后对比照片」）；
     - ``assistant_suggested``：助手发现用户重复表达同一习惯后建议沉淀（可被用户关闭）。
 
-    注入口径：只把 ``active=True`` 的规则注入 agent 系统上下文（见
-    ``app/services/agent_preferences.py``），每条按 ``user_id`` 隔离，
-    跨项目不串（与现有 agent 记忆同一隔离原则）。
+    作用域：按 ``user_id`` 隔离，跨项目不串。``project_id`` 为 NULL 表示
+    「跟人走、所有项目都生效」；非空表示「只在当前项目生效」，用于避免
+    A 项目的个人口径泄漏到 B 项目。默认（管理页/聊天建议）写 NULL。
 
-    迁移安全：新表由 ``db.init_db`` 的 ``create_all`` 直接建，
-    不动既有表结构，无需停机 ALTER（同 ``user_security_questions`` 套路）。
+    注入口径：只把 ``active=True`` 且（``project_id IS NULL`` 或等于当前项目）
+    的规则注入 agent 系统上下文（见 ``app/services/agent_preferences.py``）。
     """
     __tablename__ = "agent_user_preferences"
     __table_args__ = (
@@ -179,6 +198,10 @@ class AgentUserPreference(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(Integer, index=True, comment="所属用户 id")
+    project_id: Mapped[int | None] = mapped_column(
+        Integer, nullable=True, index=True,
+        comment="NULL=全局个人记忆；非空=仅该项目生效",
+    )
     rule: Mapped[str] = mapped_column(String(500), comment="偏好规则文本（注入 prompt 用）")
     category: Mapped[str] = mapped_column(String(32), default="general", comment="分类：general/rectification/record/writing")
     source: Mapped[str] = mapped_column(String(24), default="user_declared", comment="来源：user_declared/assistant_suggested")
@@ -187,6 +210,85 @@ class AgentUserPreference(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.now, onupdate=datetime.now, index=True,
     )
+
+
+class AgentProjectMemory(Base):
+    """项目级记忆 —— 由项目总监维护、全项目成员共享的长期口径。
+
+    设计口径（2026-11-09）
+    ---------------------
+    - **挂在项目上，不挂在人上**：换总监/总监离场不丢，新总监直接继承；
+      旧总监的个人记忆不会因此共享给项目。
+    - **写权限**：当前项目的 ``chief_supervisor`` / ``deputy_chief``（读
+      ``project_members`` 真源，不看全局 ``users.role``），``super_admin`` 兜底。
+    - **读权限**：本项目有效成员；公司管理员排障可读。个人记忆与项目记忆
+      物理分表，互不影响。
+    - **来源分层**：``chief_declared`` / ``deputy_declared`` / ``member_suggested``
+      / ``system``。成员只能“建议”，``status='pending'`` 等总监审批后才生效。
+
+    与 ``AgentUserPreference``（个人记忆）的注入优先级：项目记忆 > 个人记忆；
+    用户本轮的明确指令仍优先于两者（由 prompt 注入块里的说明约束模型）。
+    """
+    __tablename__ = "agent_project_memories"
+    __table_args__ = (
+        Index("ix_agent_project_memories_project_status", "project_id", "status"),
+        Index("ix_agent_project_memories_project_active", "project_id", "active"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    project_id: Mapped[int] = mapped_column(Integer, index=True, comment="项目隔离键（记忆跟项目走）")
+    content: Mapped[str] = mapped_column(String(500), comment="项目统一口径原文")
+    kind: Mapped[str] = mapped_column(String(16), default="rule", comment="rule/fact/template")
+    category: Mapped[str] = mapped_column(
+        String(32), default="general", comment="general/rectification/record/writing",
+    )
+    source: Mapped[str] = mapped_column(
+        String(24), default="chief_declared",
+        comment="chief_declared/deputy_declared/member_suggested/system",
+    )
+    status: Mapped[str] = mapped_column(
+        String(16), default="active", comment="pending/active/disabled/rejected",
+    )
+    active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    pinned: Mapped[bool] = mapped_column(Boolean, default=False, comment="置顶，预算截断时优先保留")
+    author_id: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="原提交人")
+    approved_by: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="审批人（总监/代管）")
+    origin_preference_id: Mapped[int | None] = mapped_column(
+        Integer, nullable=True, comment="由个人记忆发布而来时留痕",
+    )
+    # 使用统计：每轮注入时批量 +1，供管理页看「哪条口径真的在用」。
+    use_count: Mapped[int] = mapped_column(
+        Integer, default=0, server_default="0", comment="被注入到对话上下文的次数",
+    )
+    last_used_at: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True, index=True, comment="最近一次被注入的时间",
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.now, onupdate=datetime.now, index=True,
+    )
+
+
+class AgentProjectMemoryAudit(Base):
+    """项目记忆变更/使用审计流水。
+
+    - 变更类：create/suggest/update/enable/disable/delete/approve/reject/publish；
+    - 使用类：use（每轮注入一条，detail 里带 memory_ids 与 conversation_id）。
+
+    审计随项目删除清理；不存 500 字全文，只留摘要，避免审计表无限膨胀。
+    """
+    __tablename__ = "agent_project_memory_audit"
+    __table_args__ = (
+        Index("ix_agent_project_memory_audit_project_created", "project_id", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    project_id: Mapped[int] = mapped_column(Integer, index=True)
+    memory_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    action: Mapped[str] = mapped_column(String(24), comment="create/update/enable/disable/delete/approve/reject/publish/use")
+    actor_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    detail_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, index=True)
 
 
 class AgentFlowInstance(Base):

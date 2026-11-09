@@ -27,12 +27,16 @@ class _ExpiringUser:
     def __init__(self):
         self.expired = False
         self.project_id = 7
+        self.org_role = None
 
     @property
     def id(self):
         if self.expired:
             raise RuntimeError("ORM user id was expired after rollback")
         return 4
+
+    def is_super_admin(self):
+        return False
 
 
 class _Result:
@@ -44,6 +48,9 @@ class _Result:
 
     def first(self):
         return self.row
+
+    def all(self):
+        return []
 
 
 class _PlanDb:

@@ -3,6 +3,31 @@ import asyncio
 from app.routers import agent
 
 
+class _EmptyResult:
+    def scalars(self):
+        return self
+
+    def all(self):
+        return []
+
+    def first(self):
+        return None
+
+
+class _ScopeDb:
+    """只满足作用域解析里 project_members 查询的最小假 session。"""
+
+    async def execute(self, *_args, **_kwargs):
+        return _EmptyResult()
+
+
+def _fake_user(project_id=3):
+    return type("User", (), {
+        "id": 7, "project_id": project_id, "org_role": None,
+        "is_super_admin": lambda self: False,
+    })()
+
+
 def test_agent_chat_progress_completion_includes_single_card_without_error(monkeypatch):
     calls = {"events": [], "finished": []}
 
@@ -31,11 +56,11 @@ def test_agent_chat_progress_completion_includes_single_card_without_error(monke
     monkeypatch.setattr(agent.agent_runtime, "finish_request", finish_request)
     monkeypatch.setattr(agent, "_agent_chat_impl", run_chat)
 
-    user = type("User", (), {"id": 7, "project_id": 3})()
+    user = _fake_user(project_id=3)
     result = asyncio.run(agent.agent_chat(
         agent.AgentChatRequest(message="创建巡视记录", request_id="chat-progress-1"),
         user=user,
-        db=object(),
+        db=_ScopeDb(),
     ))
 
     assert result["request_id"] == "chat-progress-1"

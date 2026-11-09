@@ -133,11 +133,13 @@ async def detect_repeated_rule(
     message: str,
     *,
     existing_rules: list[str] | None = None,
+    project_id: int | None = None,
 ) -> dict[str, Any] | None:
     """A 通道：在历史用户发言里找「同一句话之前说过」。
 
-    只回看同一用户的历史消息（跨会话），并用 ``looks_like_rule`` 压掉
-    「再查一下今天的记录」这类普通重复。
+    只回看同一用户、**同一项目**的历史消息（跨会话），并用 ``looks_like_rule``
+    压掉「再查一下今天的记录」这类普通重复。加项目过滤是为了避免 A 项目说过的
+    规矩在 B 项目被建议成长期记忆（跨项目串味）。
     """
     current = str(message or "").strip()
     if not looks_like_rule(current):
@@ -149,12 +151,18 @@ async def detect_repeated_rule(
     if _is_duplicate(current, rules):
         return None
 
+    project_condition = (
+        AgentConversationMessage.project_id.is_(None)
+        if project_id is None
+        else AgentConversationMessage.project_id == int(project_id)
+    )
     rows = (
         await db.execute(
             select(AgentConversationMessage.content_json)
             .where(
                 AgentConversationMessage.user_id == int(user_id),
                 AgentConversationMessage.role == "user",
+                project_condition,
             )
             .order_by(AgentConversationMessage.id.desc())
             .limit(_HISTORY_LIMIT)
@@ -205,6 +213,7 @@ async def build_suggestion(
     reply: str,
     *,
     existing_rules: list[str] | None = None,
+    project_id: int | None = None,
 ) -> tuple[str, dict[str, Any] | None]:
     """统一入口：先剥 B 通道标记，没有再用 A 通道兜底。
 
@@ -217,5 +226,7 @@ async def build_suggestion(
         if _is_duplicate(suggestion["rule"], rules):
             return clean, None
         return clean, suggestion
-    repeat = await detect_repeated_rule(db, user_id, message, existing_rules=rules)
+    repeat = await detect_repeated_rule(
+        db, user_id, message, existing_rules=rules, project_id=project_id,
+    )
     return clean, repeat
