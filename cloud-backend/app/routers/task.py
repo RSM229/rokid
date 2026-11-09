@@ -193,7 +193,7 @@ async def create_task(
                     "thing2": {"value": user.real_name},
                     "phrase3": {"value": req.priority},
                 },
-                page=f"pages/task/detail?id={task.id}",
+                page=f"pages/todo/index?id={task.id}",
             )
         except Exception:
             pass  # 通知失败不影响派单
@@ -644,7 +644,7 @@ async def urge_task(
                     "thing1": {"value": task.title[:20]},
                     "thing2": {"value": user.real_name},
                 },
-                page=f"pages/task/detail?id={task.id}",
+                page=f"pages/todo/index?id={task.id}",
             )
         except Exception:
             pass

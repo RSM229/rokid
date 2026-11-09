@@ -309,7 +309,7 @@ async def _persist_detected_hazard(
                     "thing2": {"value": section_text},
                     "thing3": {"value": user.real_name},
                 },
-                page=f"pages/hazard/detail?id={hazard.id}",
+                page=f"pages/hazards/index?id={hazard.id}",
             )
     except Exception:
         pass
