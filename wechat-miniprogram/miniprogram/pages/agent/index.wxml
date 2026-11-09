@@ -103,8 +103,8 @@
               <text wx:if="{{cd.time}}" class="agent-card-time">{{cd.time}}</text>
             </view>
           </view>
-          <!-- 整理计划直接在对话中完成：识别日期是候选，点击后才确认，不再跳转独立页面。 -->
-          <view wx:if="{{item.reviewPlan}}" class="inline-review">
+          <!-- 用户要求：去掉填表形式，改纯对话。暂时用 wx:if=false 隐藏草稿卡片（数据逻辑保留，可随时恢复）。 -->
+          <view wx:if="{{false}}" class="inline-review">
             <view class="inline-review-head">
               <text class="inline-review-title">工作记录草稿</text>
               <text class="inline-review-meta">{{item.reviewPlan.evidence.length}} 张图片 · {{item.reviewPlan.events.length}} 个事项</text>
@@ -250,6 +250,9 @@
             <button wx:if="{{item.reviewPlan.status !== 'executed'}}" class="inline-review-confirm" disabled="{{item.reviewBusy}}" loading="{{item.reviewBusy}}" bindtap="confirmInlineReview" data-index="{{mi}}">{{item.reviewBusy ? '正在生成' : (item.reviewIssues && item.reviewIssues.length ? '先处理待确认项' : '确认并生成工作记录')}}</button>
             <text wx:if="{{item.reviewPlan.status === 'executed'}}" class="inline-review-done">已完成建档，正式记录已创建。</text>
           </view>
+          <!-- 纯对话下的轻量生成入口：草稿就绪且无待确认项时出现，复用 confirmInlineReview 建单 -->
+          <button wx:if="{{item.reviewPlan && item.reviewPlan.status !== 'executed' && item.reviewCanConfirm}}" class="chat-generate-btn" disabled="{{item.reviewBusy}}" loading="{{item.reviewBusy}}" bindtap="confirmInlineReview" data-index="{{mi}}">{{item.reviewBusy ? '正在生成…' : '生成工作记录'}}</button>
+          <text wx:if="{{item.reviewPlan && item.reviewPlan.status === 'executed'}}" class="chat-generate-done">已完成建档，正式记录已创建。</text>
           <view wx:if="{{item.hazardCandidates && item.hazardCandidates.length}}" class="inline-hazard-candidates">
             <view class="inline-hazard-head">
               <view>

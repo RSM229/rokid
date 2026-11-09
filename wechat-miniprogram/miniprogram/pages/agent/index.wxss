@@ -165,6 +165,9 @@
 .inline-review-confirm { margin: 18rpx 0 0; height: 72rpx; line-height: 72rpx; border-radius: 16rpx; color: #fff; background: #245f56; font-size: 25rpx; }
 .inline-review-confirm[disabled] { opacity: .55; }
 .inline-review-result, .inline-review-done { display: block; margin-top: 14rpx; font-size: 23rpx; color: #245f56; }
+.chat-generate-btn { display: inline-block; margin: 16rpx 0 0; padding: 0 30rpx; height: 60rpx; line-height: 60rpx; border-radius: 30rpx; font-size: 24rpx; color: #fff; background: #245f56; }
+.chat-generate-btn[disabled] { opacity: .55; }
+.chat-generate-done { display: block; margin-top: 14rpx; font-size: 23rpx; color: #245f56; }
 .inline-hazard-candidates { width: 100%; margin-top: 12rpx; padding: 18rpx; box-sizing: border-box; border: 1rpx solid rgba(39,66,81,.14); border-radius: 8rpx; background: rgba(255,255,255,.82); box-shadow: none; }
 .inline-hazard-head { display: flex; align-items: flex-start; flex-wrap: wrap; justify-content: space-between; gap: 8rpx 12rpx; margin-bottom: 12rpx; }
 .inline-hazard-head > view { min-width: 0; flex: 1; }
