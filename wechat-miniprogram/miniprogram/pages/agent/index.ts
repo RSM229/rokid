@@ -982,7 +982,7 @@ Page(themed({
     this.setData({
       messages: [{
         role: 'assistant',
-        text: '您好，我是白泽监理智能助手。可以询问规范流程、生成文书、管理隐患等。',
+        text: '您好，我是广东建设智慧监理智能助手。可以询问规范流程、生成文书、管理隐患等。',
         timeText: formatMessageTime(),
       }],
     })
@@ -1557,7 +1557,7 @@ Page(themed({
             temperature: selModel?.temperature ?? 0.7,
             provider: selModel?.provider || undefined,
             model: selModel?.model || undefined,
-            system_prompt: '你是建筑工程监理智能助手白泽，请基于用户提供的图片识别结果与文件内容，给出准确、可执行、简洁的结论与建议。注意：你只负责识别与建议，记录的入库由系统完成，禁止声称「已生成记录」「已保存」「已录入」。',
+            system_prompt: '你是广东建设智慧监理工程监理智能助手，请基于用户提供的图片识别结果与文件内容，给出准确、可执行、简洁的结论与建议。注意：你只负责识别与建议，记录的入库由系统完成，禁止声称「已生成记录」「已保存」「已录入」。',
           },
           timeout: 120000,
         })

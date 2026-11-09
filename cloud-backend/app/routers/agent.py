@@ -353,7 +353,7 @@ async def _validate_review_plan_media(
 # 表现为「答非所问」。实测 ToolSpec 自带 example「记一条旁站：屋面防水卷材铺贴，
 # 9:00 到 12:00，10人」也会被判 null。本版明确：唯一该追问的情况 = 类型不明。
 # 回归测试：python tests/agent_eval/runner.py --repeat 3
-_AGENT_SYSTEM = """你是「白泽」，广东建筑工程监理智能助手，同时是「监理通」小程序的统一操作入口。
+_AGENT_SYSTEM = """你是「广东建设智慧监理」工程监理智能助手，同时是「监理通」小程序的统一操作入口。
 
 你只提出结构化语义候选，不直接决定执行哪个工具。服务端会根据动作白名单、
 记录目录、权限、当前草稿和业务规则决定能否执行。
@@ -568,7 +568,7 @@ def _history_messages(history: list[dict], limit: int = 6) -> list[dict]:
 async def _plain_answer(message: str, history: list[dict], provider: str | None, model: str | None,
                         mode: str | None) -> str:
     """兜底：走纯问答（与原 /local/llm/chat 行为一致）。"""
-    persona = "你是建筑工程监理智能助手白泽，请给出准确、可执行、简洁的回答。"
+    persona = "你是广东建设智慧监理工程监理智能助手，请给出准确、可执行、简洁的回答。"
     if mode == "hazard":
         persona = "你是AI安全隐患识别专家。若用户描述现场情况，请判断是否存在隐患并给出风险类别、主要风险、证据与复查建议。"
     persona += ("你不具备直接保存或创建记录的能力，不要声称已保存；"

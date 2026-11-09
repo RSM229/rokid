@@ -2530,7 +2530,7 @@ async def download_user_import_template(
 
     buffer = io.BytesIO()
     workbook.save(buffer)
-    filename = "白泽_账号批量导入模板.xlsx"
+    filename = "广东建设智慧监理_账号批量导入模板.xlsx"
     return Response(
         content=buffer.getvalue(),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -2842,7 +2842,7 @@ async def export_users(
     workbook.save(buffer)
     # 指定了项目就把项目名放进文件名，避免同时导出多个项目时分不清谁是谁
     suffix = f"_{scope_project.name}" if scope_project else ""
-    filename = f"白泽_账号表{suffix}_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
+    filename = f"广东建设智慧监理_账号表{suffix}_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
     return Response(
         content=buffer.getvalue(),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
