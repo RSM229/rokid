@@ -81,6 +81,13 @@ def _field_maps(event: dict[str, Any]) -> Iterable[tuple[str, dict[str, Any]]]:
             for nested_key, nested in raw.items():
                 if isinstance(nested, dict) and "value" not in nested:
                     yield f"event.{key}.{nested_key}", nested
+                    # agent_tools 把「表上有、工具没单列参数」的字段统一收在
+                    # extra_fields 槽位里。合同校验若只展开一层，会把这些已填值
+                    # 全判为缺失：验收记录卡在「验收类型」、创建编号为空
+                    # （2026-11-09 真机复现）。这里把它当作合法字段输入再展开一层。
+                    extra = nested.get("extra_fields")
+                    if isinstance(extra, dict):
+                        yield f"event.{key}.{nested_key}.extra_fields", extra
 
 
 def suggest_form(record_type: str | None, forms: Any = None) -> str | None:
@@ -331,7 +338,10 @@ def resolve_event_form(
             "value": value,
             "source": source or ("missing" if required else ""),
             "status": status or ("filled" if value else "missing"),
-            "missing": required and not _usable(value),
+            # 「由系统生成=是」（kind=auto）的栏位由项目信息/文书渲染层带出，
+            # 不该算成用户没填：否则像「验收单位及人员」这类项目对象里没有
+            # 现成值的栏位会把建档永久卡住（2026-11-09 验收记录复现）。
+            "missing": required and kind != "auto" and not _usable(value),
             "conflict": any(item["canonical"] == canonical for item in conflicts),
             "auto_resolved": any(item["canonical"] == canonical for item in auto_resolutions),
             "candidates": candidates,
