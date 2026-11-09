@@ -496,16 +496,6 @@ Page(themed({
     })
   },
 
-  /** 卡片「生成监理日志 →」：按该记录的业务日期预置日志生成弹窗 */
-  onCardDailyLog(event: WechatMiniprogram.TouchEvent) {
-    const date = String(event.currentTarget.dataset.date || '')
-    this.setData({
-      showReportModal: true,
-      reportType: 'day' as 'day' | 'week' | 'month',
-      reportDate: date || this.data.reportDate,
-    })
-  },
-
   // ========== 批量操作 ==========
   generateReport() {
     this.setData({ showReportModal: true, generatingReport: false })

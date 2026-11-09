@@ -61,8 +61,7 @@
 .rec-foot { display: flex; align-items: center; justify-content: space-between; gap: 16rpx; padding-top: 16rpx; border-top: 1rpx solid rgba(var(--deep-rgb, 10, 46, 92), 0.08); }
 .rec-missing { font-size: 23rpx; color: #b26a12; font-weight: 600; padding: 6rpx 0; }
 .rec-complete { font-size: 23rpx; color: #13795b; }
-.rec-cta { font-size: 23rpx; color: var(--brand, #13795b); font-weight: 600; padding: 6rpx 0 6rpx 12rpx; }
-.rec-missing:active, .rec-cta:active { opacity: 0.6; }
+.rec-missing:active { opacity: 0.6; }
 
 .card-menu { position: absolute; right: 20rpx; top: 50%; transform: translateY(-50%); font-size: 40rpx; color: #9aa9bc; padding: 10rpx; z-index: 5; }
 .card-menu:active { color: var(--brand, #1677ff); }

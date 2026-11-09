@@ -54,7 +54,6 @@
         <view class="rec-foot" wx:if="{{!selectMode}}">
           <view wx:if="{{item.missingCount}}" class="rec-missing" catchtap="onCardFill" data-id="{{item.id}}" data-missing="{{item.missingHint}}" data-count="{{item.missingCount}}">待补充 {{item.missingCount}} 项 ›</view>
           <text wx:else class="rec-complete">信息齐全</text>
-          <view class="rec-cta" catchtap="onCardDailyLog" data-date="{{item.reportDate}}">生成监理日志 →</view>
         </view>
       </view>
       <view class="card-menu" wx:if="{{!selectMode}}" bindtap="openRecordMenu" data-type="record" data-id="{{item.id}}">⋯</view>
@@ -133,7 +132,6 @@
         <view class="rec-foot" wx:if="{{!selectMode}}">
           <view wx:if="{{item.missingCount}}" class="rec-missing" catchtap="onCardFill" data-id="{{item.id}}" data-missing="{{item.missingHint}}" data-count="{{item.missingCount}}">待补充 {{item.missingCount}} 项 ›</view>
           <text wx:else class="rec-complete">信息齐全</text>
-          <view class="rec-cta" catchtap="onCardDailyLog" data-date="{{item.reportDate}}">生成监理日志 →</view>
         </view>
       </view>
       <view class="card-menu" wx:if="{{!selectMode}}" bindtap="openRecordMenu" data-type="record" data-id="{{item.id}}">⋯</view>
