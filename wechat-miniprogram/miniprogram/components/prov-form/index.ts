@@ -30,6 +30,9 @@ interface ProvSchemaData {
   signoffs?: { role: string; required?: boolean }[]
 }
 
+import { config, absoluteMediaUrl } from '../../config'
+import { session } from '../../services/session'
+
 Component({
   properties: {
     schema: {
@@ -44,11 +47,38 @@ Component({
 
   data: {
     errors: {} as Record<string, string>,
+    /** 照片字段的预览绝对地址（按 image 类型键算，避免误把文本值当地址拼） */
+    absUrls: {} as Record<string, string>,
+    /** 各照片字段的上传中状态 */
+    uploading: {} as Record<string, boolean>,
+  },
+
+  observers: {
+    'schema, value'() {
+      const val = this.data.value as Record<string, string>
+      const imgKeys = this._imageKeys()
+      const absUrls: Record<string, string> = {}
+      const v = val || {}
+      for (const k of imgKeys) {
+        if (v[k]) absUrls[k] = absoluteMediaUrl(v[k])
+      }
+      this.setData({ absUrls })
+    },
   },
 
   methods: {
     _schema(): ProvSchemaData {
       return (this.data.schema as ProvSchemaData) || { sections: [], signoffs: [] }
+    },
+
+    _imageKeys(): string[] {
+      const keys: string[] = []
+      for (const sec of this._schema().sections || []) {
+        for (const f of sec.fields || []) {
+          if (f.type === 'image') keys.push(f.key)
+        }
+      }
+      return keys
     },
 
     _set(key: string, val: string) {
@@ -109,6 +139,10 @@ Component({
             continue
           }
           if (!val) continue
+          if (f.type === 'image') {
+            // 照片字段：非空即视为已上传，不再做格式/长度校验
+            continue
+          }
           if (f.type === 'select' && f.options && f.options.length && !f.options.includes(val)) {
             errors[f.key] = '取值不在可选范围内'
           } else if (f.type === 'number' && isNaN(Number(val))) {
@@ -127,6 +161,61 @@ Component({
       }
       this.setData({ errors })
       return { ok: Object.keys(errors).length === 0, errors, payload }
+    },
+
+    /** 照片字段：调起拍照/选图并上传，成功后把返回的媒体地址存进值 */
+    onChooseImage(event: WechatMiniprogram.TouchEvent) {
+      const key = String(event.currentTarget.dataset.key || '')
+      if (!key) return
+      const uploading = this.data.uploading as Record<string, boolean>
+      if (uploading[key]) return
+      wx.chooseMedia({
+        count: 1,
+        mediaType: ['image'],
+        sourceType: ['album', 'camera'],
+        camera: 'back',
+        success: (res) => {
+          const file = res.tempFiles && res.tempFiles[0]
+          if (file && file.tempFilePath) this._uploadImage(key, file.tempFilePath)
+        },
+      })
+    },
+
+    _uploadImage(key: string, filePath: string) {
+      const uploading = { ...(this.data.uploading as Record<string, boolean>), [key]: true }
+      this.setData({ uploading })
+      const done = (ok: boolean, msg?: string) => {
+        const u = { ...(this.data.uploading as Record<string, boolean>) }
+        u[key] = false
+        this.setData({ uploading: u })
+        if (!ok && msg) wx.showToast({ title: msg, icon: 'none' })
+      }
+      wx.uploadFile({
+        url: `${config.apiBaseUrl}/media/images`,
+        filePath,
+        name: 'file',
+        header: { Authorization: `Bearer ${session.getToken()}` },
+        success: (response) => {
+          try {
+            const data = JSON.parse(response.data) as { url?: string; detail?: string }
+            if (response.statusCode !== 200 || !data.url) {
+              throw new Error(typeof data.detail === 'string' ? data.detail : '照片上传失败')
+            }
+            this._set(key, data.url)
+            done(true)
+            wx.showToast({ title: '照片已上传', icon: 'success' })
+          } catch (error) {
+            done(false, (error as Error).message || '照片上传失败')
+          }
+        },
+        fail: () => done(false, '上传失败，请重试'),
+      })
+    },
+
+    onPreviewImage(event: WechatMiniprogram.TouchEvent) {
+      const key = String(event.currentTarget.dataset.key || '')
+      const url = (this.data.absUrls as Record<string, string>)[key]
+      if (url) wx.previewImage({ urls: [url], current: url })
     },
 
     clearErrors() {

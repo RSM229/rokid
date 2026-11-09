@@ -15,6 +15,7 @@ from app.config import settings
 from app.models.user import User
 from app.models.miniprogram import WechatUserBinding
 from app.models.wechat_subscription import WechatSubscription
+from app.services.subscribe_pages import normalize_subscribe_page
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +79,8 @@ async def send_subscribe_message(
         openid: 接收人 openid
         template_id: 模板ID
         data: 模板字段数据，如 {"thing1": {"value": "xxx"}, "time2": {"value": "2026-07-18"}}
-        page: 点击跳转的小程序页面
+        page: 点击跳转的小程序页面（须在 subscribe_pages.SUBSCRIBE_MESSAGE_PAGES 白名单内；
+              非法路径会被丢弃，避免微信整条返回错误导致通知收不到）
         miniprogram_state: formal / trial / developer
 
     Returns:
@@ -100,8 +102,9 @@ async def send_subscribe_message(
         "data": data,
         "miniprogram_state": miniprogram_state,
     }
-    if page:
-        payload["page"] = page
+    safe_page = normalize_subscribe_page(page)
+    if safe_page:
+        payload["page"] = safe_page
 
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:

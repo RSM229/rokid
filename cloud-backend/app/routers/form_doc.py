@@ -418,14 +418,21 @@ def _content_from_record(
 def _record_doc_title(record: WorkRecord, spec, content: dict) -> str:
     """工作记录生成文书的标题（在「工作文书」列表里展示的就是它）。
 
-    几类记录借用了别的统表版式（验收借平行检验、见证借材料台账），
-    标题仍应按记录本身命名，否则列表里看不懂。
+    命名规则：工作记录_<现场业务日期>，让列表一眼看出是何时的记录，
+    不再用「表式_类型_序号」这种机器味命名。
     """
-    if record.record_type == "见证":
-        return f"见证取样记录_{record.witness_material_name or record.id}"
-    if record.record_type == "验收":
-        return f"验收记录_{(record.content_json or {}).get('acceptance_type') or record.id}"
-    return f"{spec.name}_{record.record_type}_{record.id}"
+    return f"工作记录_{_record_business_date(record)}"
+
+
+def _record_business_date(record: WorkRecord) -> str:
+    """取工作记录的业务时间：优先现场业务日期，其次巡视开始时间，再其次创建时间。"""
+    if record.record_date is not None:
+        if isinstance(record.record_date, str):
+            return record.record_date
+        return record.record_date.strftime("%Y-%m-%d")
+    if getattr(record, "inspection_start_time", None) is not None:
+        return record.inspection_start_time.strftime("%Y-%m-%d")
+    return record.created_at.strftime("%Y-%m-%d")
 
 
 async def generate_form_from_record(

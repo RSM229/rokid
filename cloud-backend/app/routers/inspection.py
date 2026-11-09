@@ -545,7 +545,7 @@ async def capture(
                         "thing2": {"value": section_text},
                         "thing3": {"value": user.real_name},
                     },
-                    page=f"pages/hazard/detail?id={outcome['hazard_id']}",
+                    page=f"pages/hazards/index?id={outcome['hazard_id']}",
                 )
     except Exception:
         pass

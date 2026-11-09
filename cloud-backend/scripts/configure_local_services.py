@@ -35,9 +35,9 @@ import json
 from app.config import settings
 allowed = (
     "wechat_", "default_llm_", "default_vlm_", "default_stt_", "default_tts_",
-    "huagong_", "ai_center_", "vlm_", "sms_tencent_", "trtc_", "weather_",
+    "huagong_", "ai_center_", "vlm_", "sms_tencent_", "weather_",
 )
-names = {"rtc_provider", "model_config_encryption_key", "allow_wechat_registration",
+names = {"model_config_encryption_key", "allow_wechat_registration",
          "allow_public_registration", "public_registration_roles"}
 values = {key.upper(): value for key, value in settings.model_dump().items()
           if key.startswith(allowed) or key in names}

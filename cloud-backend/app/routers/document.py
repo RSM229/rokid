@@ -162,6 +162,9 @@ async def create_document_from_schema(
     project_id = require_project_id(user)
     project = await db.get(Project, project_id)
     content = provform_schema.build_content_from_fields(req.form_code, req.fields, project)
+    # 表单里拍照/选图上传的照片地址落到 attached_images，文书详情页「关联影像」
+    # 与导出 PDF/docx 的附图都从这里取（否则只在 content['photo'] 里会出现裸 URL）
+    attached_images = provform_schema.image_field_urls(req.form_code, req.fields)
     doc = Document(
         doc_type=doc_type_for(req.form_code),
         title=req.title or schema["name"],
@@ -170,6 +173,7 @@ async def create_document_from_schema(
         project_id=project_id,
         creator_id=user.id,
         status=DocStatus.DRAFT.value,
+        attached_images=attached_images,
     )
     db.add(doc)
     await db.commit()
@@ -206,7 +210,26 @@ async def update_document_from_schema(
         if (doc.content or {}).get(key) is not None:
             new_content[key] = (doc.content or {})[key]
     invalidate_document(doc)
+    # 旧照片地址（重拍/换图时从 attached_images 剔除旧图，避免残留）
+    old_content = doc.content or {}
+    old_schema = provform_schema.get_schema(doc.form_code) if doc.form_code else None
+    old_map = provform_schema.CONTENT_MAP.get(doc.form_code, {}) if doc.form_code else {}
+    old_images: list[str] = []
+    if old_schema:
+        for sec in old_schema.get("sections") or []:
+            for f in sec.get("fields") or []:
+                if f.get("type") != "image":
+                    continue
+                val = str(old_content.get(old_map.get(f["key"], f["key"])) or "").strip()
+                if val.startswith("/uploads/") or val.startswith("http"):
+                    old_images.append(val)
     doc.content = new_content
+    # 表单重传照片时同步更新影像列表；无照片字段的表不动既有影像（保留聊天补的图）
+    form_images = provform_schema.image_field_urls(doc.form_code, req.fields)
+    if form_images or old_images:
+        existing = [u for u in (doc.attached_images or [])
+                    if isinstance(u, str) and u not in old_images]
+        doc.attached_images = list(dict.fromkeys(form_images + existing))
     if req.title is not None:
         doc.title = req.title
     await db.commit()
@@ -542,7 +565,7 @@ async def approve_document(
                 "thing1": {"value": doc.title[:20]},
                 "thing2": {"value": user.real_name},
             },
-            page=f"pages/document/detail?id={doc.id}",
+            page=f"pages/documents/detail?id={doc.id}",
         )
     except Exception:
         pass
@@ -604,7 +627,7 @@ async def reject_document(
                 "thing1": {"value": doc.title[:20]},
                 "thing2": {"value": user.real_name},
             },
-            page=f"pages/document/detail?id={doc.id}",
+            page=f"pages/documents/detail?id={doc.id}",
         )
     except Exception:
         pass

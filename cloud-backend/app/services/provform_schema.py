@@ -175,7 +175,7 @@ SCHEMAS: dict[str, dict] = {
                           _f("6_06", "验收内容（验收要点）", "text", True),
                           _f("6_07", "施工单位自检结论", "text", True),
                           _f("6_08", "监理验收结论", "text", True),
-                          _f("6_09", "举牌验收照片", "text", True)),
+                          _f("6_09", "举牌验收照片", "image", True)),
             _sec("签章",
                           _f("6_10", "验收单位及人员", "text", True))
         ],
@@ -841,6 +841,28 @@ def is_system_field(form_code: str, field: dict) -> bool:
     if not field.get("system"):
         return False
     return canonical_key(form_code, field["key"]) in PROJECT_SYSTEM_KEYS
+
+
+def image_field_urls(form_code: str, fields: dict) -> list[str]:
+    """从提交的字段值里挑出 image 类型字段的媒体地址，供文书 attached_images 使用。
+
+    表单的「拍照/选图」上传后把 /media/images 返回的 url（/uploads/...）存进字段值；
+    这里按 schema 里 type == \"image\" 的键收集，避免把普通文本框误当影像。
+    """
+    schema = SCHEMAS.get(form_code)
+    if not schema:
+        return []
+    urls: list[str] = []
+    for section in schema.get("sections") or []:
+        for field in section.get("fields") or []:
+            if field.get("type") != "image":
+                continue
+            raw = (fields or {}).get(str(field.get("key") or ""))
+            val = "" if raw is None else str(raw).strip()
+            if val.startswith("/uploads/") or val.startswith("http://") or val.startswith("https://"):
+                urls.append(val)
+    # 去重保序
+    return list(dict.fromkeys(urls))
 
 
 def build_content_from_fields(form_code: str, fields: dict, project) -> dict:

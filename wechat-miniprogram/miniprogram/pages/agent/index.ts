@@ -36,6 +36,9 @@ let activeProgressRequestId = ''
 let activeProgressMessageIndex = -1
 let activeProgressSequence = 0
 let activeProgressPollInFlight = false
+/** 进度轮询遇到 404/403 的宽限期：新建轮次的首个 GET 可能早于 POST 建追踪（竞态），
+ *  追踪会在毫秒级出现，故仅在「已开始超过该时长仍 404/403」才判定失效并停轮询。 */
+const PROGRESS_404_GRACE_MS = 8000
 
 const PROGRESS_FIELD_LABELS: Record<string, string> = {
   record_date: '业务日期', date: '日期', start_time: '开始时间', end_time: '结束时间',
@@ -510,6 +513,9 @@ Page(themed({
   /** 当前会话在本地历史里的 id（稳定不变，重复保存=覆盖同一条，避免产生重复历史） */
   currentSessionId: 0,
   inlinePlanSaveQueues: {} as Record<string, Promise<void>>,
+  /** 页面正在卸载（切 tab / 切后台 / 关闭）：此时在飞的请求会被微信中止，
+   *  属预期，catch 里据此不打刺眼「调用失败」。 */
+  pageUnloading: false,
 
   data: {
     messages: [] as Message[],
@@ -728,6 +734,7 @@ Page(themed({
   },
 
   onUnload() {
+    this.pageUnloading = true
     this.stopAgentProgressTimers()
     this.saveCurrentSession()
     player.stop()
@@ -833,8 +840,25 @@ Page(themed({
         this.updateAgentProgressMessage(requestId, message => ({ ...message, progressTerminal: true, progressExpanded: false }))
         if (activeProgressRequestId === requestId) this.stopAgentProgressTimers()
       }
-    } catch {
-      // Keep the last received events; the next poll resumes from its sequence.
+    } catch (error) {
+      const statusCode = (error as { statusCode?: number })?.statusCode
+      // 404=服务端无此请求追踪；403=追踪不属于当前用户。两者都意味着这条进度轮次
+      // 永远轮询不到（典型：本地/远端遗留的未终态轮次，其追踪未落库到当前后端，或已被清理）。
+      // 若不停下，会每 1.2s 打一次 404 刷屏且空耗请求。
+      if ((statusCode === 404 || statusCode === 403) && activeProgressRequestId === requestId) {
+        const startedAt = this.data.messages.find(m => m.progressRequestId === requestId)?.progressStartedAt || 0
+        const elapsed = startedAt ? Date.now() - startedAt : Number.MAX_SAFE_INTEGER
+        if (elapsed >= PROGRESS_404_GRACE_MS) {
+          this.stopAgentProgressTimers()
+          this.updateAgentProgressMessage(requestId, message => ({
+            ...message,
+            progressTerminal: true,
+            progressHeadline: message.progressHeadline || (statusCode === 403 ? '该轮次无权查看' : '该轮次进度记录已失效'),
+          }))
+          return
+        }
+      }
+      // 其余错误（网络抖动/超时）保持原策略：保留已收到的事件，下一轮从断点续轮询。
     } finally {
       activeProgressPollInFlight = false
     }
@@ -3014,8 +3038,17 @@ Page(themed({
         },
       )
     } catch (error) {
-      this.addMessage({ role: 'assistant', text: `调用失败：${(error as Error).message}` })
-      await this.finishAgentProgress(requestId, 'failed', 'Agent 请求失败，未返回成功结果', { error: (error as Error).message })
+      const errMsg = (error as Error).message || ''
+      const aborted = /abort/i.test(errMsg)
+      // 用户已切走/切后台时请求被微信中止属预期，不打刺眼「调用失败」；
+      // 仍在页内却被中断（偶发抖动）给柔和提示，真错误仍原样上报。
+      if (!(aborted && this.pageUnloading)) {
+        this.addMessage({
+          role: 'assistant',
+          text: aborted ? '请求被中断，请重新发送消息重试。' : `调用失败：${errMsg}`,
+        })
+      }
+      await this.finishAgentProgress(requestId, 'failed', 'Agent 请求失败，未返回成功结果', { error: errMsg })
     } finally {
       this.setData({ loading: false })
       void this.loadPendingDrafts()
@@ -3533,8 +3566,17 @@ Page(themed({
           response_excerpt: String(result.reply || '').slice(0, 900) },
       )
     } catch (error) {
-      this.addMessage({ role: 'assistant', text: `调用失败：${(error as Error).message}` })
-      await this.finishAgentProgress(requestId, 'failed', 'Agent 请求失败，未返回成功结果', { error: (error as Error).message })
+      const errMsg = (error as Error).message || ''
+      const aborted = /abort/i.test(errMsg)
+      // 用户已切走/切后台时请求被微信中止属预期，不打刺眼「调用失败」；
+      // 仍在页内却被中断（偶发抖动）给柔和提示，真错误仍原样上报。
+      if (!(aborted && this.pageUnloading)) {
+        this.addMessage({
+          role: 'assistant',
+          text: aborted ? '请求被中断，请重新发送消息重试。' : `调用失败：${errMsg}`,
+        })
+      }
+      await this.finishAgentProgress(requestId, 'failed', 'Agent 请求失败，未返回成功结果', { error: errMsg })
     } finally {
       this.setData({ loading: false })
       void this.loadPendingDrafts()

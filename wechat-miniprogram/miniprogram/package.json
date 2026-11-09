@@ -4,7 +4,6 @@
   "private": true,
   "description": "小程序运行时依赖。必须放在 miniprogramRoot 内，否则开发者工具「构建 npm」会报 __NO_NODE_MODULES__。构建产物为 miniprogram/miniprogram_npm，由开发者工具生成，不入库。",
   "dependencies": {
-    "@babel/runtime": "^8.0.5",
-    "trtc-wx-sdk": "1.1.15"
+    "@babel/runtime": "^8.0.5"
   }
 }

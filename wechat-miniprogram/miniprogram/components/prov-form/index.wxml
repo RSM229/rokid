@@ -62,6 +62,29 @@
         <view class="pf-picker {{value[f.key] ? '' : 'pf-picker-empty'}}">{{value[f.key] || '请选择'}}</view>
       </picker>
 
+      <view wx:elif="{{f.type === 'image'}}" class="pf-image">
+        <image
+          wx:if="{{absUrls[f.key]}}"
+          class="pf-img"
+          src="{{absUrls[f.key]}}"
+          mode="aspectFill"
+          data-key="{{f.key}}"
+          bindtap="onPreviewImage" />
+        <view wx:if="{{uploading[f.key]}}" class="pf-img-loading">上传中…</view>
+        <button
+          wx:if="{{!absUrls[f.key] && !uploading[f.key]}}"
+          class="pf-img-btn"
+          size="mini"
+          data-key="{{f.key}}"
+          bindtap="onChooseImage">拍照 / 选图</button>
+        <button
+          wx:if="{{absUrls[f.key] && !uploading[f.key]}}"
+          class="pf-img-btn ghost"
+          size="mini"
+          data-key="{{f.key}}"
+          bindtap="onChooseImage">重拍 / 重选</button>
+      </view>
+
       <view class="pf-error" wx:if="{{errors[f.key]}}">{{errors[f.key]}}</view>
     </view>
   </view>

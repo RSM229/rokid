@@ -114,6 +114,8 @@ _SEMANTIC_ALIASES = {
     "建设单位名称": "owner_unit", "施工单位名称": "construction_unit",
     "部位": "section", "施工部位": "section",
     "危大名称": "hazard_name", "危大工程名称": "hazard_name",
+    # 2026-11-09 工程影像分类：水印相机的「内容/工序」字段，供归类引擎消费
+    "内容": "content", "施工内容": "content", "工序": "content", "工序对象": "content",
     "备注": "remark",
     "项目简称": "project_name",
 }
