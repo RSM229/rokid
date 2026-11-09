@@ -4,9 +4,9 @@
     <el-aside :width="isCollapse ? '64px' : '200px'" class="app-sider">
       <div class="sider-header">
         <span class="sider-logo-window">
-          <img src="/baize-logo.png" alt="白泽 Logo" class="sider-logo" />
+          <img src="/app-logo.png" alt="广东建设智慧监理 Logo" class="sider-logo" />
         </span>
-        <span v-if="!isCollapse" class="brand-name">白泽</span>
+        <span v-if="!isCollapse" class="brand-name">广东建设智慧监理</span>
       </div>
       <el-menu
         :default-active="$route.path"

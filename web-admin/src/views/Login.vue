@@ -3,9 +3,9 @@
     <div class="login-left">
       <div class="brand">
         <div class="brand-logo-window">
-          <img src="/baize-logo.png" alt="白泽 Logo" class="brand-logo" />
+          <img src="/app-logo.png" alt="广东建设智慧监理 Logo" class="brand-logo" />
         </div>
-        <h1>白泽</h1>
+        <h1>广东建设智慧监理</h1>
         <p>AI 工程监理智能体</p>
       </div>
     </div>

@@ -3,7 +3,7 @@
     <div class="page-header">
       <div>
         <h2>用户管理</h2>
-        <p>创建白泽账号、分配角色与项目，并查看微信绑定状态。</p>
+        <p>创建广东建设智慧监理账号、分配角色与项目，并查看微信绑定状态。</p>
       </div>
       <div class="header-actions">
         <!-- 次要操作收进下拉，避免一排六个按钮抢视线；「新增用户」是主操作，单独留在外面。
@@ -1139,7 +1139,7 @@ function openImport() {
 
 async function downloadTemplate() {
   try {
-    saveBlob((await authApi.userImportTemplate()) as any, '白泽_账号批量导入模板.xlsx')
+    saveBlob((await authApi.userImportTemplate()) as any, '广东建设智慧监理_账号批量导入模板.xlsx')
   } catch (error: any) {
     ElMessage.error(await blobErrorText(error, '模板下载失败'))
   }
@@ -1223,7 +1223,7 @@ function exportFileName(projectId?: number | null) {
   const name = projectId ? projectName(projectId) : ''
   const safe = name.replace(/[\\/:*?"<>|#]/g, '_').slice(0, 40)
   const part = safe ? `_${safe}` : ''
-  return `白泽_账号表${part}_${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}.xlsx`
+  return `广东建设智慧监理_账号表${part}_${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}.xlsx`
 }
 
 onMounted(async () => {

@@ -5,13 +5,13 @@
       <div class="voice-delivery-mode">
         <div class="voice-delivery-title">
           <el-icon><Microphone /></el-icon>
-          <span>白泽语音交付</span>
+          <span>广东建设智慧监理语音交付</span>
           <el-tag size="small" :type="currentTab === 'auto' ? 'info' : 'success'">
             {{ currentTabLabel }}
           </el-tag>
         </div>
         <div class="voice-delivery-desc">
-          无需选择业务模块，白泽会根据语音自动归类并执行现场工作。
+          无需选择业务模块，广东建设智慧监理会根据语音自动归类并执行现场工作。
         </div>
       </div>
       
@@ -57,7 +57,7 @@
               <div>施工区域：{{ sectionName || '未设置' }}</div>
               <div>拍摄时间：{{ currentTime }}</div>
               <div>天气：{{ weather || '-' }}</div>
-              <div>智能体：白泽</div>
+              <div>智能体：广东建设智慧监理</div>
             </div>
           </div>
 
@@ -123,7 +123,7 @@
           >
             <template #default>
               <div>当前自动识别业务：{{ currentTabLabel }}</div>
-              <div>直接说出工作内容，白泽会自动分类：</div>
+              <div>直接说出工作内容，广东建设智慧监理会自动分类：</div>
               <ul>
                 <li>“开始巡视三号楼”“验收地下室防水”“开始旁站混凝土浇筑”</li>
                 <li>“记录钢筋见证取样”“发现质量问题”“开始安全巡检”“复查整改闭环”</li>
@@ -263,12 +263,12 @@ const photos = ref<PhotoItem[]>([])
 const photoDetailVisible = ref(false)
 const photoDetailIndex = ref(0)
 
-// 展示白泽最近一次自动判断的业务类型。
+// 展示广东建设智慧监理最近一次自动判断的业务类型。
 const currentModuleInfo = computed(() => {
   const info: Record<string, { title: string; description: string }> = {
     auto: {
       title: '综合现场识别',
-      description: '直接通过语音交付工作，白泽将自动判断业务类型并关联照片、流程指引和语音回执。',
+      description: '直接通过语音交付工作，广东建设智慧监理将自动判断业务类型并关联照片、流程指引和语音回执。',
     },
     inspection: {
       title: '巡视记录',
@@ -495,7 +495,7 @@ async function startVoiceRecognition() {
     isListening.value = true
     voiceResult.value = ''
     voiceLoading.value = false
-    ElMessage.success('白泽正在聆听，请直接说出现场工作...')
+    ElMessage.success('广东建设智慧监理正在聆听，请直接说出现场工作...')
 
   } catch (e: any) {
     ElMessage.error('启动语音识别失败：' + e.message)
@@ -615,7 +615,7 @@ async function speakReply(text: string) {
       await audio.play()
     }
   } catch (error) {
-    console.warn('白泽语音回执播放失败', error)
+    console.warn('广东建设智慧监理语音回执播放失败', error)
   }
 }
 
@@ -628,7 +628,7 @@ function showWorkflowGuide(text: string) {
 
 async function showCurrentWorkflow() {
   if (currentTab.value === 'auto') {
-    ElMessage.info('请先通过语音说明要进行的现场工作，白泽会自动识别对应流程')
+    ElMessage.info('请先通过语音说明要进行的现场工作，广东建设智慧监理会自动识别对应流程')
     return
   }
   try {
@@ -690,7 +690,7 @@ function capturePhoto() {
     `施工区域：${sectionName.value || '未设置'}`,
     `时间：${currentTime.value}`,
     `天气：${weather.value || '-'}`,
-    '智能体：白泽',
+    '智能体：广东建设智慧监理',
   ].join('\n')
 
   ctx.fillStyle = 'rgba(255, 255, 255, 0.8)'

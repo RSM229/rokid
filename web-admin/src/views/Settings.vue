@@ -263,9 +263,9 @@
 
           <!-- 关于 -->
           <div v-if="activeMenu === 'about'">
-            <h3 class="section-title">关于白泽</h3>
-            <img src="/baize-logo.png" alt="白泽 Logo" class="about-logo" />
-            <p>白泽 — AI 工程监理智能体</p>
+            <h3 class="section-title">关于广东建设智慧监理</h3>
+            <img src="/app-logo.png" alt="广东建设智慧监理 Logo" class="about-logo" />
+            <p>广东建设智慧监理 — AI 工程监理智能体</p>
             <p style="color: #999; margin-top: 8px;">版本：v1.0.0</p>
           </div>
 
@@ -533,7 +533,7 @@ async function exportPersonalData() {
     const url = URL.createObjectURL(blob)
     const anchor = document.createElement('a')
     anchor.href = url
-    anchor.download = `白泽个人数据_${new Date().toISOString().slice(0, 10)}.json`
+    anchor.download = `广东建设智慧监理个人数据_${new Date().toISOString().slice(0, 10)}.json`
     anchor.click()
     URL.revokeObjectURL(url)
   } catch {

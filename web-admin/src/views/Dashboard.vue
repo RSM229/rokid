@@ -14,8 +14,8 @@
     <el-card shadow="never" class="chat-section">
       <div class="chat-header">
         <el-icon size="28"><ChatDotRound /></el-icon>
-        <img src="/baize-logo.png" alt="" class="chat-agent-logo" />
-        <span class="chat-title">白泽</span>
+        <img src="/app-logo.png" alt="" class="chat-agent-logo" />
+        <span class="chat-title">广东建设智慧监理</span>
         <el-tag size="small" type="info" effect="plain" style="margin-left: 8px;">
           {{ currentLevel1 || '主页' }}{{ currentLevel2 ? ' / ' + currentLevel2 : '' }}{{ currentLevel3 ? ' / ' + currentLevel3 : '' }}
         </el-tag>
@@ -172,7 +172,7 @@ const router = useRouter()
 
 // ===== 聊天相关 =====
 const chatMessages = ref<any[]>([
-  { role: 'assistant', content: '您好！我是白泽，您的 AI 工程监理智能体。\n您可以通过语音或文字指令进行操作。\n\n可用指令：\n• "新建巡视记录" - 进入巡视记录创建\n• "启动隐患识别" - 在对话中导入现场图片识别\n• "生成监理日志" - 自动生成当日监理日志\n• "知识库" - 前往信息库\n• "返回" - 返回上一级' },
+  { role: 'assistant', content: '您好！我是广东建设智慧监理，您的 AI 工程监理智能体。\n您可以通过语音或文字指令进行操作。\n\n可用指令：\n• "新建巡视记录" - 进入巡视记录创建\n• "启动隐患识别" - 在对话中导入现场图片识别\n• "生成监理日志" - 自动生成当日监理日志\n• "知识库" - 前往信息库\n• "返回" - 返回上一级' },
 ])
 const chatInput = ref('')
 const messagesRef = ref<HTMLElement | null>(null)
