@@ -1612,6 +1612,15 @@ def fill_acceptance(doc: DocxDocument, data: dict) -> None:
     def cell_of(i: int, j: int) -> _Cell:
         return _Cell(trs[i].findall(qn("w:tc"))[j], table)
 
+    # 照片字段现在存的是上传后的媒体 URL（表单拍照/选图），不能把裸 /uploads/...
+    # 路径塞进表格单元格；真实照片由 _append_images 在文末「附：现场影像」呈现。
+    photo_raw = data.get("photo") or data.get("photos")
+    photo_text = str(photo_raw or "").strip()
+    if photo_text.startswith("/uploads/") or photo_text.startswith("http"):
+        photo_cell: Any = "见附：现场影像" if _collect_image_urls(data) else ""
+    else:
+        photo_cell = photo_raw
+
     layout: tuple[tuple[int, int, Any, bool], ...] = (
         (0, 1, data.get("date") or data.get("acceptance_date"), True),
         (0, 3, data.get("acceptance_type"), False),
@@ -1619,7 +1628,7 @@ def fill_acceptance(doc: DocxDocument, data: dict) -> None:
         (2, 1, data.get("acceptance_content") or data.get("content"), False),
         (3, 1, data.get("self_check_conclusion"), False),
         (4, 1, data.get("conclusion") or data.get("supervision_conclusion"), False),
-        (5, 1, data.get("photo") or data.get("photos"), False),
+        (5, 1, photo_cell, False),
         (6, 1, data.get("acceptance_participants"), False),
     )
     for i, j, value, as_date in layout:
