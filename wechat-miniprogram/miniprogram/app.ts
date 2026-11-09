@@ -8,11 +8,15 @@ const ONBOARD_KEY = 'gdjl_onboarded_v1'
 // 首次启动展示新手指引；看完/跳过后写 storage，后续不再弹
 function maybeShowGuide(): void {
   try {
-    if (!wx.getStorageSync(ONBOARD_KEY)) {
-      setTimeout(() => {
-        wx.reLaunch({ url: '/pages/guide/index' })
-      }, 0)
-    }
+    if (wx.getStorageSync(ONBOARD_KEY)) return
+    // 服务通知 / 分享携带业务参数（id、item_id）冷启动时，先把目标页送达，
+    // 否则下面 setTimeout 里的 reLaunch 会用引导页覆盖通知跳转。
+    // 这里不写 ONBOARD_KEY：下次从主入口正常启动时仍会展示新手指引。
+    const query = wx.getLaunchOptionsSync().query || {}
+    if (query.id || query.item_id) return
+    setTimeout(() => {
+      wx.reLaunch({ url: '/pages/guide/index' })
+    }, 0)
   } catch (e) {
     void e
   }
