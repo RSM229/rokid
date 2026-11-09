@@ -67,6 +67,7 @@
               v-model="selectedProjectId"
               class="project-select"
               size="small"
+              filterable
               :loading="switching"
               :disabled="switching"
               placeholder="选择项目"
