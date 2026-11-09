@@ -16,7 +16,7 @@
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Optional
 
 
@@ -128,6 +128,7 @@ class ClassificationResult:
     confidence: float = 1.0            # 1.0=硬规则；<1=启发式/存疑
     needs_confirm: bool = False
     candidates: list[tuple[str, str]] = field(default_factory=list)  # 边界候选 (code, reason)
+    human_confirmed: bool = False       # 人工确认/修正过口径
 
     @property
     def category_name(self) -> str:
@@ -511,11 +512,46 @@ def model_fields(result: ClassificationResult, filename: str = "",
     }
 
 
-def archive_batch(signals: list[ImageSignal]) -> dict:
+def _apply_override(result: ClassificationResult, ov: dict) -> ClassificationResult:
+    """人工确认口径后覆盖归类结论（截图里「沟槽开挖是危大工程巡视，不用旁站」）。
+
+    在 ``archive_batch`` 内、建文件名与台账之前生效，所以文件名、类别统计、
+    缺口、台账行会一起联动重算，不会出现「表改了文件名没改」。
+    """
+    code = str(ov.get("category_code") or "").strip().upper()
+    changed = bool(code or "subcategory" in ov or ov.get("note"))
+    if code and code in CATEGORIES:
+        result.category_code = code
+        result.archive_dir = CATEGORIES[code][1]
+    if "subcategory" in ov:
+        value = str(ov.get("subcategory") or "").strip().upper() or None
+        result.subcategory = value if value in X_SUBCATEGORIES else None
+    elif code and code != result.category_code:
+        result.subcategory = None  # 改了一级类，旧二级类不能残留
+    if result.category_code != "X":
+        result.subcategory = None  # X1~X5 只对巡视有效，也避免污染序号分组
+    extra_labels = ov.get("labels")
+    if extra_labels:
+        result.labels = list(dict.fromkeys(result.labels + [str(x) for x in extra_labels]))
+    if changed:
+        note = str(ov.get("note") or "").strip()
+        result.reason = (note or "人工确认归类口径") + "（人工确认）；原判定：" + result.reason
+        result.confidence = 1.0
+        result.needs_confirm = False
+        result.candidates = []
+        result.human_confirmed = True
+    return result
+
+
+def archive_batch(signals: list[ImageSignal], overrides: Optional[list[dict]] = None) -> dict:
     """一批照片一次产出：归档结果 + 影像台账 + 缺口报告 + 待确认项。
 
     对应截图里的「归档结果」表、「影像台账_YYYYMMDD.csv」与「三处资料缺口」。
     这是纯计算，**不落盘、不写库**；落盘/建文档/同步资料库由上层编排决定。
+
+    ``overrides`` 按序号给人工口径（category_code / subcategory / labels /
+    related_doc_no / note / signals），用于「需要你确认的一处归类」这种交互；
+    覆盖在建文件名之前生效，四处（归档结果/文件名/台账/统计）自动联动。
 
     命名遵循标准第七章：同类别内 ``seq`` 递增，同一事件（证据成套原则）
     共用 ``seq``、用 ``nn`` 区分帧。
@@ -527,9 +563,26 @@ def archive_batch(signals: list[ImageSignal]) -> dict:
     seq_by_cat: dict[str, int] = {}
     group_seq: dict[tuple, int] = {}
     group_nn: dict[tuple, int] = {}
+    override_by_index: dict[int, dict] = {}
+    for ov in overrides or []:
+        try:
+            idx = int(ov.get("序号") or ov.get("index") or 0)
+        except (TypeError, ValueError):
+            continue
+        if idx > 0:
+            override_by_index[idx] = ov
 
     for index, sig in enumerate(signals, start=1):
+        ov = override_by_index.get(index) or {}
+        if ov.get("related_doc_no") is not None:
+            sig = replace(sig, related_doc_no=str(ov["related_doc_no"]) or None)
+        if isinstance(ov.get("signals"), dict):
+            for key, value in ov["signals"].items():
+                if hasattr(sig, key):
+                    sig = replace(sig, **{key: value})
         result = classify_image(sig)
+        if ov:
+            result = _apply_override(result, ov)
         results.append(result)
         date = (sig.taken_at or "")[:10].replace("-", "") or "00000000"
         # 序号按「类别码」走：X 家族用二级类（X1/X2）独立编号，保证同组连续；
@@ -574,6 +627,7 @@ def archive_batch(signals: list[ImageSignal]) -> dict:
             "文件名": filename,
             "标签": result.labels,
             "状态": status,
+            "人工确认": result.human_confirmed,
         })
         ledger_rows.append(build_ledger_row(index, sig, result, seq, nn, filename))
         ledger_rows[-1]["备注"] = result.reason + ("；" + "；".join(notes) if notes else "")

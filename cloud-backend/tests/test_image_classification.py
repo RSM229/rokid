@@ -166,6 +166,39 @@ def run_end_to_end():
     return ok
 
 
+def run_overrides():
+    """人工改口径 → 归档结果/文件名/台账/统计四处联动（截图「需要你确认的一处归类」）。"""
+    sigs = [
+        ImageSignal(content="过路支管回填", unit="沙盛四路", section="k300~k500",
+                    taken_at="2026-11-03T09:15", in_progress=True),
+        ImageSignal(content="沟槽开挖", unit="大兴路", section="dxy10-11",
+                    taken_at="2026-11-03T09:20", in_progress=True, is_hazard=True),
+    ]
+    before = archive_batch(sigs)
+    ok = before["summary"]["by_category"] == {"P": 1, "X": 1}
+
+    batch = archive_batch(sigs, overrides=[{
+        "序号": 1, "category_code": "X", "subcategory": "X2",
+        "related_doc_no": "巡视记录-1103-02", "note": "按项目口径改为危大工程巡视",
+    }])
+    r0, l0 = batch["records"][0], batch["ledger_rows"][0]
+    print("\n== 改口径后联动 ==")
+    print("  归档结果:", r0["归类"], "|", r0["文件名"], "| 状态", r0["状态"])
+    print("  台账行:  ", l0["类别码"], l0["子类"], l0["关联资料编号"])
+    print("  统计:    ", batch["summary"], "| 缺口", batch["gaps"]["missing"],
+          "| 待确认", len(batch["confirmations"]))
+    ok &= "X2" in r0["归类"] and r0["人工确认"] is True
+    ok &= r0["文件名"].startswith("20261103_X201_")
+    ok &= r0["状态"] == "confirmed"
+    ok &= l0["类别码"] == "X" and l0["子类"] == "X2"
+    ok &= l0["关联资料编号"] == "巡视记录-1103-02"
+    ok &= "人工确认" in l0["备注"] or "按项目口径" in l0["备注"]
+    ok &= batch["summary"]["by_category"] == {"X": 2}
+    ok &= "P" in batch["gaps"]["missing"]
+    ok &= len(batch["confirmations"]) == 1  # 只剩第 2 张缺关联编号
+    return ok
+
+
 if __name__ == "__main__":
     ok = True
     ok &= run_cases()
@@ -173,5 +206,6 @@ if __name__ == "__main__":
     ok &= run_ledger_and_gap()
     ok &= run_heuristic()
     ok &= run_end_to_end()
+    ok &= run_overrides()
     print("\nRESULT:", "ALL PASS" if ok else "HAS FAILURES")
     sys.exit(0 if ok else 1)

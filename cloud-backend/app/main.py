@@ -31,6 +31,7 @@ from app.routers import stats_company
 from app.routers import files
 from app.routers import role_permissions
 from app.routers import agent
+from app.routers import image_archive
 from app.services.rtc_service import timeout_worker
 from app.services.period_report_service import daily_report_worker
 from app.db import close_db, ensure_agent_history_schema, init_db
@@ -197,6 +198,7 @@ app.include_router(
     tags=["微信小程序认证"],
 )
 app.include_router(media.router, prefix="/api/media", tags=["统一媒体"])
+app.include_router(image_archive.router, prefix="/api/image-archive", tags=["工程影像归档"])
 app.include_router(signature.router, prefix="/api", tags=["电子签章"])
 app.include_router(inspection.router, prefix="/api/inspection", tags=["云端巡检"])
 app.include_router(ws.router, prefix="/api/ws", tags=["WebSocket实时推送"])
