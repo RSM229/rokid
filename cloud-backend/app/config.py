@@ -172,16 +172,6 @@ class Settings(BaseSettings):
         "hazard_detected": os.getenv("WECHAT_TEMPLATE_HAZARD_DETECTED", ""),
     }
 
-    # TRTC secrets remain server-side. Advanced room permission control is mandatory.
-    rtc_provider: str = ""
-    trtc_sdk_app_id: int = 0
-    trtc_secret_key: str = ""
-    trtc_private_map_key_enabled: bool = False
-    rtc_credential_ttl_seconds: int = 300
-    rtc_ring_timeout_seconds: int = 45
-    rtc_disconnect_timeout_seconds: int = 60
-    rtc_max_call_seconds: int = 7200
-
     public_api_base_url: str = os.getenv("PUBLIC_API_BASE_URL", "http://localhost:8000")
     public_ws_base_url: str = os.getenv("PUBLIC_WS_BASE_URL", "ws://localhost:8000")
 

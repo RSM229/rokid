@@ -38,7 +38,7 @@ async def main() -> None:
         knowledge_graph, ledger, meeting, miniprogram, model_config, note,
         notification, organization, parallel, permission_catalog, progress,
         project, project_member, rectification, regulation_chunk,
-        regulation_version, resources, rtc, security_audit, security_question,
+        regulation_version, resources, security_audit, security_question,
         signature, task_assignment, user, video, visa, wechat_subscription,
         work_record,
     )

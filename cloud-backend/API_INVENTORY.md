@@ -104,8 +104,6 @@ cloud-backend/
 └── 知识库/                           # Knowledge base files (省统表, 安全文明用表)
 ```
 
-> **Note:** `rtc.py` and `rtc_service.py` exist only as stale `.pyc` files (module removed from source).
-
 ---
 
 ## 2. Router Index

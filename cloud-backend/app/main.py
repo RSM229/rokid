@@ -25,14 +25,12 @@ from app.routers import omni
 from app.routers import model_settings
 from app.routers import form_doc
 from app.routers import work_session
-from app.routers import rtc
 from app.routers import provform, meeting, progress, parallel, resources, visa, equipment, archive
 from app.routers import stats_company
 from app.routers import files
 from app.routers import role_permissions
 from app.routers import agent
 from app.routers import image_archive
-from app.services.rtc_service import timeout_worker
 from app.services.period_report_service import daily_report_worker
 from app.db import close_db, ensure_agent_history_schema, init_db
 
@@ -90,7 +88,6 @@ async def lifespan(app: FastAPI):
     except Exception as exc:  # noqa: BLE001
         logger.warning(f"[RAG] 预热失败，检索将回退关键词模式：{exc}")
 
-    rtc_timeouts = asyncio.create_task(timeout_worker())
     # 索引增量守护：让「系统使用过程中新积累的记录」自动进检索，无需人工重建。
     rag_refresh = (
         asyncio.create_task(rag.incremental_worker()) if rag is not None else None
@@ -105,9 +102,6 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
-        rtc_timeouts.cancel()
-        with suppress(asyncio.CancelledError):
-            await rtc_timeouts
         if rag_refresh is not None:
             rag_refresh.cancel()
             with suppress(asyncio.CancelledError):
@@ -176,7 +170,6 @@ app.mount(
 )
 
 # 路由注册
-app.include_router(rtc.router, prefix="/api/rtc", tags=["实时音视频"])
 app.include_router(auth.router, prefix="/api/auth", tags=["认证鉴权"])
 app.include_router(hazard.router, prefix="/api/hazard", tags=["隐患识别"])
 app.include_router(document.router, prefix="/api/document", tags=["监理文书"])
