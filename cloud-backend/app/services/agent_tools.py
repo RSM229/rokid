@@ -734,6 +734,44 @@ def _acceptance_type_from_entry(entry: dict) -> str:
     return ""
 
 
+_INQUIRY_CONTENT_MARKERS = ("是否", "这项符合吗", "符合吗？", "符合吗?", "吗？", "吗?")
+_ACCEPTANCE_CONCLUSION_MARKERS = ("—— 符合", "—— 不符合", "—— 不适用")
+
+
+def _is_inquiry_style_content(text) -> bool:
+    """验收内容栏是否被误填成「询问句清单」。
+
+    正式验收内容应是逐项判断结论：要点原文 + 「—— 符合/不符合/不适用」。
+    模型偶尔把「一起询问」的要点改写成「…是否一致／是否合格」预填进该栏，
+    合同只校验非空便放行，最终确认卡上就会出现一份问卷（2026-11-09 真机截图）。
+    已有结论标记时一律视为正式内容，避免误伤要点原文里含「是否」二字的情形。
+    """
+    s = str(text or "").strip()
+    if not s:
+        return False
+    if any(m in s for m in _ACCEPTANCE_CONCLUSION_MARKERS):
+        return False
+    return any(m in s for m in _INQUIRY_CONTENT_MARKERS)
+
+
+def _rule_aggregate_acceptance(items: list[str], reply_text: str) -> list[dict] | None:
+    """LLM 逐条归集失败时的规则兜底：只在监理人员明确说「全部符合」时下结论。
+
+    涉及否定、局部不符合、原因说明时一律不猜，交回用户重新说明，避免替监理
+    人员臆断验收结论。
+    """
+    s = str(reply_text or "").strip()
+    if not s or not items:
+        return None
+    if re.search(r"不符合|不合格|不通过|有问题|异常|整改", s):
+        return None
+    if re.search(r"都符合|全部符合|均符合|全都符合|都合格|全部合格|都行|没问题|"
+                 r"无异常|符合要求|可以|通过|OK|ok", s):
+        return [{"item_index": i, "conclusion": "符合", "note": ""}
+                for i in range(1, len(items) + 1)]
+    return None
+
+
 def _build_acceptance_content(entry: dict, aggregated: list[dict]) -> str:
     """把逐条归集结果汇成「验收内容」文本：要点原文 + 各条结论。"""
     originals = entry.get("验收要点_原文") or []
@@ -1423,6 +1461,34 @@ async def _create_work_record(ctx: ToolContext, args: dict) -> dict:
             result["ask_block"] = block
             result["ask_mode"] = "together"
             return result
+
+    # 🔴 验收内容不得是「询问式」清单（2026-11-09 真机截图）：模型会把
+    # 「一起询问」的要点改写成「…是否一致／是否合格」预填进该栏，合同只判非空
+    # 就放行，最终确认卡上便出现一份问卷。优先按用户明确的整体结论重建，
+    # 没有明确结论时停下来问一句，绝不把问卷写进正式记录。
+    if record_type == "验收":
+        _acc_check = _acceptance_content_field()
+        if _acc_check and _is_inquiry_style_content(_field_value(args, _acc_check)):
+            asked = args.get("_acceptance_asked")
+            entry = (_aat_find_entry(str(asked.get("div") or ""), str(asked.get("item") or ""))
+                     if isinstance(asked, dict) else None)
+            items = (entry.get("验收要点_询问式") or []) if entry else []
+            aggregated = _rule_aggregate_acceptance(items, ctx.message or "")
+            if entry and aggregated:
+                rebuilt = _build_acceptance_content(entry, aggregated)
+                args = _set_field_persist(orig_args, args, _acc_check, rebuilt)
+                concl_field = next(
+                    (f for f in record_field_spec.ask_fields("acceptance_record")
+                     if f.get("canonical") == "supervision_conclusion"), None)
+                if concl_field:
+                    args = _set_field_persist(
+                        orig_args, args, concl_field, _aat_generate_conclusion(aggregated))
+            else:
+                return _need_more(
+                    ["验收内容（验收要点）"],
+                    "验收内容现在还是逐项询问句，不能当正式记录用。请照实际情况说一句结论"
+                    "（例如「4 项都符合」或「第 2 项不符合，原因是…」），我来逐条整理成验收内容和结论。",
+                )
 
     # 旧聊天入口也必须经过同一份版本化合同。这里不让可选栏阻断旧有
     # “跳过”体验，但必填、冲突、格式错误与新整理计划保持完全相同的门槛。

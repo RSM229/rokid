@@ -66,14 +66,14 @@ class FakeDb:
         return None
 
 
-def _context():
+def _context(message: str = MESSAGE):
     return agent_tools.ToolContext(
         db=FakeDb(),
         user=SimpleNamespace(id=4, username="tester", project_id=7,
                              has_permission=lambda _p: True),
         project_id=7,
         project=_project(),
-        message=MESSAGE,
+        message=message,
         material="",
     )
 
@@ -186,6 +186,67 @@ class ConfirmationUxTest(unittest.TestCase):
         self.assertIn("_awaiting_final", src)
         self.assertIn("还没写入正式记录", src)
         self.assertIn("确认并生成记录", src)
+
+
+INQUIRY_CONTENT = (
+    "【预制管槽施工主体结构 — 管道基础】验收内容（共 4 项，系统按询问项逐项归集）：\n"
+    "1、① 核查管道基础形式（原状土/砂石/混凝土）与设计是否一致\n"
+    "2、② 检查基础标高、宽度、平整度及密实度是否合格\n"
+    "3、③ 混凝土（或砂石）垫层厚度、强度是否符合设计\n"
+    "4、④ 基础是否验收合格后方可下管铺设"
+)
+
+
+class AcceptanceInquiryGuardTest(unittest.TestCase):
+    """正式验收内容必须是逐项判断结论，不能是「是否…」询问句清单。
+
+    2026-11-09 真机截图：最终确认卡的「验收内容（验收要点）」里出现
+    「与设计是否一致／是否合格」的问卷，是模型把「一起询问」的要点预填进
+    字段、绕过了逐条归集。合同只校验非空，问卷因此能一路带到正式记录。
+    """
+
+    @staticmethod
+    def _args():
+        args = _draft()
+        args["extra_fields"]["acceptance_content"] = INQUIRY_CONTENT
+        args["_require_confirmation"] = False
+        args["_execution_confirmed"] = True
+        return args
+
+    @staticmethod
+    def _stored_content(ctx) -> str:
+        row = next(r for r in ctx.db.rows if isinstance(r, WorkRecord))
+        return str((row.content_json.get("prov_fields") or {}).get("acceptance_content") or "")
+
+    def test_inquiry_text_is_detected_but_conclusions_are_not(self):
+        self.assertTrue(agent_tools._is_inquiry_style_content(INQUIRY_CONTENT))
+        self.assertFalse(agent_tools._is_inquiry_style_content(_draft()["extra_fields"]["acceptance_content"]))
+        # 要点原文里含「是否」但已带逐项结论 → 不得误伤
+        self.assertFalse(agent_tools._is_inquiry_style_content(
+            "1、① 检查是否按方案施工 —— 符合"))
+        self.assertFalse(agent_tools._is_inquiry_style_content(""))
+
+    def test_rule_aggregate_only_for_explicit_all_pass(self):
+        items = ["① A", "② B", "③ C", "④ D"]
+        self.assertEqual(len(agent_tools._rule_aggregate_acceptance(items, "4 项都符合")), 4)
+        self.assertIsNone(agent_tools._rule_aggregate_acceptance(items, "第 2 项不符合"))
+        self.assertIsNone(agent_tools._rule_aggregate_acceptance(items, "确认生成"))
+        self.assertIsNone(agent_tools._rule_aggregate_acceptance([], "都符合"))
+
+    def test_inquiry_content_is_rebuilt_from_explicit_conclusion(self):
+        ctx = _context("4 项都符合")
+        result = asyncio.run(agent_tools._create_work_record(ctx, self._args()))
+        self.assertTrue(result["ok"])
+        stored = self._stored_content(ctx)
+        self.assertIn("—— 符合", stored)
+        self.assertNotIn("是否", stored)
+        self.assertIn("与设计一致", stored)
+
+    def test_inquiry_content_without_conclusion_is_rejected(self):
+        ctx = _context("确认生成")
+        result = asyncio.run(agent_tools._create_work_record(ctx, self._args()))
+        self.assertEqual(result["need_more"], ["验收内容（验收要点）"])
+        self.assertFalse(any(isinstance(r, WorkRecord) for r in ctx.db.rows))
 
 
 if __name__ == "__main__":
