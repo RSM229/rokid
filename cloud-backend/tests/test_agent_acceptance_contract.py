@@ -181,11 +181,19 @@ class ConfirmationUxTest(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertTrue(any(isinstance(row, WorkRecord) for row in ctx.db.rows))
 
-    def test_final_confirmation_reply_keeps_explicit_action_hint(self):
+    def test_final_confirmation_reply_is_plain_text_no_form(self):
         src = self._agent_source()
         self.assertIn("_awaiting_final", src)
-        self.assertIn("还没写入正式记录", src)
-        self.assertIn("确认并生成记录", src)
+        # 2026-11-09 用户「不要核对表格，只要纯文本」：去掉「最终核对」表单卡，
+        # 最终确认轮只下发纯文字指引，不再出现「确认并生成记录」按钮。
+        self.assertIn("回复「确认生成」即可建档", src)
+        self.assertNotIn("确认并生成记录", src)
+
+    def test_final_confirmation_form_card_removed(self):
+        src = self._agent_source()
+        # 「最终核对」表单卡已移除：need_more 阶段（含「最终确认」）一律不下发表单卡。
+        self.assertNotIn("work_record_confirm", src)
+        self.assertNotIn('"title": f"{record_type}记录 · 最终核对"', src)
 
 
 INQUIRY_CONTENT = (

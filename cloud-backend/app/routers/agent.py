@@ -204,18 +204,20 @@ def _agent_form(
     """把一次回执变成聊天内的卡片。
 
     2026-11-06 用户「我不要这些选择，我要完全交互」：缺项/选类型阶段一律
-    纯文字一问一答，不再下发下拉框、候选或待填字段卡；这里只保留
-    - 最终确认卡（生成正式记录前的安全网，文字确认同样可用）；
+    纯文字一问一答，不再下发下拉框、候选或待填字段卡。
+    2026-11-09 用户「我不要核对和填写表格，只要纯文本对话」：建记录前的
+    「最终核对」表单卡也去掉，改为纯文字确认（回复「确认生成」即可建档），
+    安全网从「表单按钮」改为「文字确认」。这里只保留
     - 记录已建后的补充照片框，并附文书/记录的文字链接。
     """
-    missing = [str(x) for x in (result.get("need_more") or [])]
     options = result.get("options") or {}
     form_code = _record_form_code(tool, args, message)
 
     # 2026-11-06 用户「我不要这些选择，我要完全交互」：缺项 / 选记录类型一律
     # 用文字气泡一问一答，不再下发下拉框、候选字段或「还差 X」待填卡片。
-    # 仅保留「最终确认」卡（生成正式记录前的安全网，走文字确认同样可用）。
-    if result.get("need_more") and "最终确认" not in missing:
+    # 2026-11-09 用户「我不要核对和填写表格，只要纯文本对话」：need_more 阶段
+    # （含「最终确认」）一律不下发表单卡，改用纯文字确认（回复「确认生成」即可建档）。
+    if result.get("need_more"):
         return None
 
     if tool == "create_work_record" and not form_code:
@@ -266,29 +268,8 @@ def _agent_form(
             ],
         }
 
-    if tool == "create_work_record" and "最终确认" in missing and form_code:
-        fields = [
-            agent_tools.field_view(field, agent_tools._field_value(args, field))
-            for field in agent_tools.record_field_spec.ask_fields(form_code)
-        ]
-        record_type = agent_tools._norm_record_type(str(args.get("record_type") or "")) or "工作"
-        return {
-            "id": f"work_record_confirm:{form_code}",
-            "kind": "work_record",
-            "schema_version": 1,
-            "field_schema": "record_field_spec.v1",
-            "form_code": form_code,
-            "title": f"{record_type}记录 · 最终核对",
-            "hint": "请逐项核对；可直接修改字段。点击确认后，服务端会再次校验合同并创建记录。",
-            "fields": fields,
-            "filled": [],
-            "attachments": _attachment_block(),
-            "submit_label": "确认并生成记录",
-            "skippable": False,
-            "actions": [],
-        }
-
-    # need_more 分支已在函数开头统一拦截（纯文字一问一答，不下发表单卡）。
+    # need_more 阶段已在函数开头统一返回 None（纯文字一问一答，不下发表单卡）；
+    # 「最终核对」表单卡已于 2026-11-09 移除，建记录前改为纯文字确认。
     return None
 
 
@@ -1403,8 +1384,7 @@ async def _agent_chat_impl(
                 result["reply"] = _model_answer
                 if _awaiting_final:
                     result["reply"] += (
-                        "\n\n还没写入正式记录：回复「确认生成」，"
-                        "或点下方「确认并生成记录」即可建档。"
+                        "\n\n信息已整理完毕，回复「确认生成」即可建档。"
                     )
             elif _tool_reply:
                 result["reply"] = _tool_reply
