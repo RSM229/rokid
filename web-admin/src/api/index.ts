@@ -593,6 +593,16 @@ export const modelSettingsApi = {
     http.post<ModelSetting>(`/model-settings/${modelType}/reset`),
 }
 
+// 工程影像归档（分类标准 → 预览/改口径 → 落盘 → 文档同步资料库）
+// 端点均为项目隔离：写操作在「全部项目」视角下由请求拦截器带 X-Project-Id。
+export const imageArchiveApi = {
+  standard: () => http.get('/image-archive/standard'),
+  listImages: (limit = 100) =>
+    http.get('/media', { params: { media_type: 'image', limit } }),
+  preview: (data: any) => http.post('/image-archive/preview', data),
+  commit: (data: any) => http.post('/image-archive/commit', data),
+}
+
 /**
  * 带鉴权的文件下载（取代 window.open(file_url)）。
  * 后端 /uploads、/exports 已改为受控端点，必须带 Bearer token 才能取文件；

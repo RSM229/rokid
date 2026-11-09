@@ -259,6 +259,11 @@ const menuItems = computed(() => {
     items.push({ path: '/camera-simulator', title: '现场识别', icon: 'VideoCamera' })
   }
 
+  // 工程影像归档（水印照片 → 归类 → 台账/缺口 → 两份文书同步资料库）
+  if (perm('work_record')) {
+    items.push({ path: '/image-archive', title: '影像归档', icon: 'Picture' })
+  }
+
   const workChildren: any[] = []
   if (perm('inspection')) workChildren.push({ path: '/work-record/inspection', title: '巡视记录' })
   if (perm('acceptance')) workChildren.push({ path: '/work-record/acceptance', title: '验收管理' })

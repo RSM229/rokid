@@ -215,6 +215,14 @@ const routes = [
         meta: { title: '档案管理', icon: 'FolderOpened', permission: 'work_record' },
       },
 
+      // ---- 工程影像归档 ----
+      {
+        path: 'image-archive',
+        name: 'ImageArchive',
+        component: () => import('@/views/ImageArchive.vue'),
+        meta: { title: '影像归档', icon: 'Picture', permission: 'work_record' },
+      },
+
       // 兜底：未匹配路由（典型=在已下线页面如 /role-permissions 上刷新）
       // 一律重定向回工作台，否则 router-view 无匹配 → 整页白屏（2026-10-20 踩过）
       { path: '/:pathMatch(.*)*', redirect: '/dashboard' },
