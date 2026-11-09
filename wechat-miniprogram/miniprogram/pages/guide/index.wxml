@@ -27,8 +27,8 @@
     <view class="help-li" wx:for="{{item.items}}" wx:for-item="li" wx:key="*this">{{li}}</view>
   </view>
   <view class="help-links">
-    <button class="link-btn" bindtap="goKnowledge">前往知识库查验收指引</button>
+    <button class="link-btn" bindtap="goKnowledge">前往规范资料库查验收指引</button>
     <button class="link-btn" bindtap="goSettings">前往设置看隐私指引</button>
   </view>
-  <view class="help-foot">遇到问题可联系项目管理员，或在「我的」中查看账号安全。</view>
+  <view class="help-foot">遇到问题可联系项目管理员，或在「我」中查看账号安全。</view>
 </scroll-view>
