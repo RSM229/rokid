@@ -313,6 +313,8 @@ interface AgentChatResponse {
   actions?: { type: string; label: string; url?: string }[]
   need_more?: string[]
   options?: Record<string, string[]>
+  /** 服务端下发的快速动作 chips（如最终确认态「确认生成」），点击即以该词发送 */
+  chips?: string[]
   input_components?: Array<{ field: string; label: string; control: string; required?: boolean; options?: string[] }>
   recommendations?: Array<{ field: string; value: string; reason?: string }>
   form?: AgentForm | null
@@ -3074,6 +3076,12 @@ Page(themed({
           if (!chips.includes(opt)) chips.push(opt)
         }
       }
+    }
+    // 服务端显式下发的动作 chips（如最终确认态「确认生成」快捷键，2026-11-10：
+    // 用户要求确认生成免打字）。与 options 生成的候选 chips 区分：这是单一动作
+    // 按钮，点击即以该词发送 → 命中确认白名单直接建档。
+    for (const chip of result.chips || []) {
+      if (!chips.includes(chip)) chips.push(chip)
     }
     // 主气泡已含追问/接话文案时不再重复「还需要补充：」小字标签（2026-11-04）
     const missing = result.need_more && result.need_more.length && !(result.reply && result.reply.trim())

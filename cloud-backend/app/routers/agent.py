@@ -1391,6 +1391,13 @@ async def _agent_chat_impl(
                 tool == "create_work_record"
                 and "最终确认" in [str(x) for x in (result.get("need_more") or [])]
             )
+            # 🎯 最终确认快捷键：只要进入最终确认态，本条气泡必下发「确认生成」chip，
+            # 前端点击即以该词发送（命中后方 _confirm_tokens 白名单直接建档），免打字。
+            # 与字段候选 chips 不同（字段候选已按 2026-11-06 纯文字需求禁用）——这是
+            # 用户主动要求的单一动作快捷键（2026-11-10）。放在分支外统一兜底，模型
+            # 无论接不接话，快捷键都出现。
+            if _awaiting_final and not result.get("ask_block"):
+                result["chips"] = ["确认生成"]
             if result.get("ask_block"):
                 # 「一起询问」：全部验收询问项必须完整呈现，不能被模型自然接话覆盖。
                 result["reply"] = _tool_reply
@@ -1404,11 +1411,6 @@ async def _agent_chat_impl(
                     result["reply"] += (
                         "\n\n信息已整理完毕，回复「确认生成」即可建档。"
                     )
-                    # 🎯 最终确认快捷键：本条气泡下发「确认生成」chip，前端点击即以该词
-                    # 发送（命中下方 _confirm_tokens 白名单直接建档），免去逐字打字。
-                    # 与字段候选 chips 不同（字段候选已按 2026-11-06 纯文字需求禁用）——
-                    # 这是用户主动要求的单一动作快捷键（2026-11-10）。
-                    result["chips"] = ["确认生成"]
                 elif tool == "create_work_record":
                     _missing_labels = [str(x) for x in (result.get("need_more") or [])]
                     _missing_labels = [m for m in _missing_labels if m != "最终确认"]
