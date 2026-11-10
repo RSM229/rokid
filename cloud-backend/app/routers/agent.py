@@ -1404,6 +1404,11 @@ async def _agent_chat_impl(
                     result["reply"] += (
                         "\n\n信息已整理完毕，回复「确认生成」即可建档。"
                     )
+                    # 🎯 最终确认快捷键：本条气泡下发「确认生成」chip，前端点击即以该词
+                    # 发送（命中下方 _confirm_tokens 白名单直接建档），免去逐字打字。
+                    # 与字段候选 chips 不同（字段候选已按 2026-11-06 纯文字需求禁用）——
+                    # 这是用户主动要求的单一动作快捷键（2026-11-10）。
+                    result["chips"] = ["确认生成"]
                 elif tool == "create_work_record":
                     _missing_labels = [str(x) for x in (result.get("need_more") or [])]
                     _missing_labels = [m for m in _missing_labels if m != "最终确认"]

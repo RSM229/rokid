@@ -189,6 +189,16 @@ class ConfirmationUxTest(unittest.TestCase):
         self.assertIn("回复「确认生成」即可建档", src)
         self.assertNotIn("确认并生成记录", src)
 
+    def test_final_confirmation_ships_confirm_generation_chip(self):
+        """最终确认态下发「确认生成」chip，点击即以该词发送 → 命中白名单直接建档。
+
+        2026-11-10 用户要求：确认生成做成快捷键（免打字）。前端已有 chips 渲染
+        （agent-chip: 点击即以该词作为新消息发送），服务端只需在「最终确认」轮
+        下发 chips=['确认生成']。
+        """
+        src = self._agent_source()
+        self.assertIn('result["chips"] = ["确认生成"]', src)
+
     def test_final_confirmation_form_card_removed(self):
         src = self._agent_source()
         # 「最终核对」表单卡已移除：need_more 阶段（含「最终确认」）一律不下发表单卡。
