@@ -2161,6 +2161,32 @@ def fill_yinhuan(doc: DocxDocument, data: dict) -> None:
 
 FILLERS.update({"gd_b_215_tongzhi": fill_tongzhi, "gdaq_30308_yinhuan": fill_yinhuan})
 
+# 市政工程统表（市政监-24/9/11、AQSZ-J-2.2、AQSZ-J-2.5-1~7）官方版式填充器。
+# 本 import 放在文件末尾附近：municipal_fillers 顶层 import 的 form_renderer 辅助函数
+# 此时均已定义；不会出现循环依赖导致的符号缺失。
+from app.services.municipal_fillers import (  # noqa: E402
+    fill_aqsz_2_2_anquan_rizhi,
+    fill_aqsz_weida,
+    fill_shijian_11_xunshi,
+    fill_shijian_24_rizhi,
+    fill_shijian_9_pangzhan,
+)
+
+FILLERS.update({
+    "shijian_24_rizhi": fill_shijian_24_rizhi,
+    "shijian_9_pangzhan": fill_shijian_9_pangzhan,
+    "shijian_11_xunshi": fill_shijian_11_xunshi,
+    "aqsz_2_2_anquan_rizhi": fill_aqsz_2_2_anquan_rizhi,
+    # AQSZ-J-2.5-1~7 七张模板结构相同、仅检查项清单不同，共用一个通用填充器
+    "aqsz_2_5_1_weida": fill_aqsz_weida,
+    "aqsz_2_5_2_weida": fill_aqsz_weida,
+    "aqsz_2_5_3_weida": fill_aqsz_weida,
+    "aqsz_2_5_4_weida": fill_aqsz_weida,
+    "aqsz_2_5_5_weida": fill_aqsz_weida,
+    "aqsz_2_5_6_weida": fill_aqsz_weida,
+    "aqsz_2_5_7_weida": fill_aqsz_weida,
+})
+
 
 #: 通用 fallback 的标签→字段映射（用于未专门编写填充器的模板）
 GENERIC_FIELD_MAP = {
@@ -2348,6 +2374,8 @@ def render_form(form_code: str, data: dict, output_dir: Path | None = None) -> P
         if spec.folder == "sheng_tong_biao"
         else settings.knowledge_base_path / "第三节安全监理用表" / "安全监理用表"
         if spec.folder == "safety"
+        else settings.knowledge_base_path / "市政统表word版"
+        if spec.folder == "municipal"
         else settings.knowledge_base_path
     )
     template_path = folder / spec.template
@@ -2358,6 +2386,8 @@ def render_form(form_code: str, data: dict, output_dir: Path | None = None) -> P
             if spec.folder == "sheng_tong_biao"
             else bundled_root / "第三节安全监理用表" / "安全监理用表"
             if spec.folder == "safety"
+            else bundled_root / "市政统表word版"
+            if spec.folder == "municipal"
             else bundled_root
         )
         fallback_path = fallback_folder / spec.template
@@ -2547,6 +2577,8 @@ def list_available_template_files() -> list[dict]:
             if spec.folder == "sheng_tong_biao"
             else settings.knowledge_base_path / "第三节安全监理用表" / "安全监理用表"
             if spec.folder == "safety"
+            else settings.knowledge_base_path / "市政统表word版"
+            if spec.folder == "municipal"
             else settings.knowledge_base_path
         )
         result.append({"form_code": spec.form_code, "exists": (folder / spec.template).exists()})
