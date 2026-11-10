@@ -9,7 +9,8 @@
     该接口内部真实调用**付费大模型**，等于把「匿名刷额度」开在公网上。
     这类漏挂在代码里看不出来（少一行 Depends 而已），只能靠清单比对兜住。
 
-判据：OpenAPI 里 ``security`` 为空的 operation 必须**恰好**等于下面的白名单。
+判据：OpenAPI 里 ``security`` 为空的 operation 必须**恰好**等于下面的白名单，
+    或落在 MANUAL_AUTH_ENDPOINTS（自定义 Depends 手动鉴权，OpenAPI 不认）。
     多一个 = 新写了免登录接口没经评审；少一个 = 白名单过期，顺手删掉。
 
 新增免登录接口时必须显式加进 ``PUBLIC_ENDPOINTS`` 并说明理由，
@@ -40,6 +41,17 @@ PUBLIC_ENDPOINTS: dict[str, str] = {
     "POST /api/omni/tts": "占位接口，当前直接返回 501，无副作用",
 }
 
+# 这些端点在 OpenAPI 里 ``security`` 为空，但**不是**匿名接口：
+# app/routers/files.py 用自定义 Depends(_user_from_file_request) 手动校验 token
+# （同时接受 ?access_token=，供小程序 <image> 标签携带凭证）。FastAPI 只会把
+# SecurityScheme 写进 security 字段，自定义依赖不会被识别，故清单比对需显式豁免。
+# 🔴 豁免不等于放行：下面 test_manual_auth_endpoints_reject_anonymous 会真实
+# 打一次 401；谁把 Depends 摘了，那条测试立刻变红。
+MANUAL_AUTH_ENDPOINTS: dict[str, str] = {
+    "GET /uploads/{rest}": "受控上传文件：_user_from_file_request 校验 token",
+    "GET /exports/{rest}": "受控导出文件：_user_from_file_request 校验 token",
+}
+
 
 def _collect_public() -> dict[str, list[str]]:
     """返回 {公开 operation: [摘要]}。"""
@@ -56,12 +68,15 @@ def _collect_public() -> dict[str, list[str]]:
 class PublicEndpointWhitelistTests(unittest.TestCase):
     def test_no_unexpected_public_endpoint(self) -> None:
         found = _collect_public()
-        unexpected = sorted(set(found) - set(PUBLIC_ENDPOINTS))
+        unexpected = sorted(
+            set(found) - set(PUBLIC_ENDPOINTS) - set(MANUAL_AUTH_ENDPOINTS)
+        )
         self.assertEqual(
             unexpected,
             [],
-            "以下接口无需登录即可访问，且不在白名单内。"
+            "以下接口无需登录即可访问，且不在白名单/手动鉴权例外内。"
             "若确实应该公开，请加进 PUBLIC_ENDPOINTS 并写明理由；"
+            "若走自定义 Depends 鉴权，请加进 MANUAL_AUTH_ENDPOINTS 并补 401 验证；"
             "否则补上 Depends(get_current_user)：\n  " + "\n  ".join(unexpected),
         )
 
@@ -74,6 +89,40 @@ class PublicEndpointWhitelistTests(unittest.TestCase):
             [],
             "白名单里这些条目已经不存在或已改为需要登录，请删除：\n  " + "\n  ".join(stale),
         )
+
+    def test_manual_auth_whitelist_has_no_stale_entry(self) -> None:
+        """手动鉴权例外同样要防过期，否则改名后会留一个永久豁免后门。"""
+        found = _collect_public()
+        stale = sorted(set(MANUAL_AUTH_ENDPOINTS) - set(found))
+        self.assertEqual(
+            stale,
+            [],
+            "这些手动鉴权端点已不存在或已改用 SecurityScheme，请同步例外表：\n  "
+            + "\n  ".join(stale),
+        )
+
+    def test_manual_auth_endpoints_reject_anonymous(self) -> None:
+        """豁免不是放行：无 token 访问受控文件必须 401。
+
+        _user_from_file_request 在拿不到凭证时立即抛 401，早于任何 DB 查询，
+        所以这里用 TestClient 实打实请求也不会连库，可以安全当上线门禁。
+        """
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")  # starlette TestClient 的 httpx 兼容警告
+            from fastapi.testclient import TestClient
+
+            client = TestClient(app)
+            for key in MANUAL_AUTH_ENDPOINTS:
+                path = key.split(" ", 1)[1].replace("{rest}", "__probe_not_exist__.bin")
+                with self.subTest(path=path):
+                    response = client.get(path)
+                    self.assertEqual(
+                        response.status_code,
+                        401,
+                        f"{path} 无 token 未返回 401，受控文件服务可能失去鉴权",
+                    )
 
     def test_paid_llm_endpoints_require_auth(self) -> None:
         """防回归：直接烧钱的接口必须登录。

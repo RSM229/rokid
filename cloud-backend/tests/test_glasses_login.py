@@ -42,6 +42,13 @@ class FakeUser:
     project_id = None
     is_active = True
     password_hash = "x"
+    must_change_password = False
+    # Step 2：扫码登录会走 effective_permissions 的权限合成，判据来自
+    # org_role + is_super_admin()（超管判据唯一来源），桩必须跟上。
+    org_role = None
+
+    def is_super_admin(self) -> bool:
+        return False
 
 
 TICKETS = {}
