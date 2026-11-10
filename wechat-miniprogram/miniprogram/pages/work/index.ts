@@ -426,11 +426,6 @@ Page(themed({
     this.setData({ records, hazards })
   },
 
-  /** 抽屉移除「工作文书」后，保留明确、稳定的文书管理入口。 */
-  openDocuments() {
-    wx.navigateTo({ url: '/pages/documents/index' })
-  },
-
   /** 点击卡片/复选框切换勾选（不依赖 checkbox 的 change 事件） */
   toggleSelectById(type: string, id: number) {
     if (type === 'hazard') {
@@ -772,7 +767,7 @@ Page(themed({
       wx.hideLoading()
       wx.showModal({
         title: '文书已生成',
-        content: `${title ? `《${title}》` : '文书'}已归档到「我的资料库 / 项目文件夹 / 工作记录与表单」，并可在文书管理中查看、签认和导出。`,
+        content: `${title ? `《${title}》` : '文书'}已归档到「我的资料库 / 项目文件夹 / 工作记录与表单」，并可在资料库中查看、签认和导出。`,
         showCancel: false,
       })
     } catch (error) {

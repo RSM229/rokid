@@ -3789,7 +3789,7 @@ Page(themed({
       }
       this.addMessage({
         role: 'assistant',
-        text: `✅ 已生成文书《${res.title}》，并归档到「我的资料库 / 项目文件夹 / 工作记录与表单」；可在文书管理中查看、签认并导出 PDF / Word。`,
+        text: `✅ 已生成文书《${res.title}》，并归档到「我的资料库 / 项目文件夹 / 工作记录与表单」；可在资料库中查看、签认并导出 PDF / Word。`,
         actions: [
           { label: '查看文书', command: `navigate:/pages/documents/detail?id=${res.doc_id}` },
           ...(archiveKbId ? [{ label: '打开我的资料库', command: `navigate:/pages/kb/detail?id=${archiveKbId}` }] : []),
@@ -5116,7 +5116,7 @@ Page(themed({
   },
 
   /** 侧边栏分组折叠：当前仅「历史对话」。
-   *  工作文书组已移除，文书管理入口保留在工作记录页；资料库为底栏 tab。 */
+   *  工作文书组已移除，文书管理统一收敛到资料库；资料库为底栏 tab。 */
   toggleDrawerGroup(event: WechatMiniprogram.TouchEvent) {
     const group = String((event.currentTarget.dataset as { group?: string }).group || '')
     if (group === 'history') {

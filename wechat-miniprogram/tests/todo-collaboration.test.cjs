@@ -115,9 +115,9 @@ test('kb home no longer exposes a separate project archive library', () => {
   assert.match(agentPage, /request<\{ id: number \}>\('\/kb\/mine'\)/)
 })
 
-test('work-record page retains a visible document-management entry after the drawer change', () => {
-  assert.match(workTemplate, /bindtap="openDocuments"[\s\S]{0,40}文书管理/)
-  assert.match(workPage, /openDocuments\(\)[\s\S]{0,120}\/pages\/documents\/index/)
+test('work-record page no longer exposes a separate document-management entry', () => {
+  assert.doesNotMatch(workTemplate, /文书管理|openDocuments/)
+  assert.doesNotMatch(workPage, /openDocuments\(\)/)
 })
 
 test('todo badge refreshes after project switch and clears on lookup failure', () => {
