@@ -50,6 +50,7 @@ const TYPED_DOC_TYPES = DOC_CATEGORIES.map((item) => item.docType).filter(Boolea
 const KNOWN_DOC_TYPES = [
   ...TYPED_DOC_TYPES,
   '监理日志',
+  '监理日记',
   '监理周报',
   '监理月报',
   '安全隐患整改通知单',
@@ -64,6 +65,7 @@ const SHORT_TYPE_BADGES: Record<string, string> = {
   '见证取样记录': '见证',
   '验收记录': '验收',
   '监理日志': '日志',
+  '监理日记': '日记',
   '安全监理日志': '安全日志',
   '监理周报': '周报',
   '监理月报': '月报',

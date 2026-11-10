@@ -304,7 +304,7 @@
       <text>日期/范围</text>
       <input value="{{reportDate}}" placeholder="YYYY-MM-DD" bindinput="onReportDateChange" />
     </view>
-    <view wx:if="{{reportType !== 'day'}}" class="report-options-row">
+    <view wx:if="{{reportType === 'week' || reportType === 'month'}}" class="report-options-row">
       <label class="checkbox-label">
         <checkbox value="{{useLlm}}" checked="{{useLlm}}" bindchange="onLlmChange" />
         <text>使用 AI 润色内容</text>
