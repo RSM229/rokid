@@ -67,6 +67,7 @@ PROVFORM_CHOICES = (
     ("gd_b_215_tongzhi", "监理工程师通知单"),
     ("acceptance_record", "验收记录"),
     ("gd_b_220_rizhi", "监理日志"),
+    ("jianli_riji", "监理日记"),
     ("gd_b_221_yuebao", "监理月报"),
     ("gd_b_219_cailiao", "材料台账"),
     ("gdaq_30306_weida", "危大工程巡视记录"),
@@ -1893,6 +1894,7 @@ def _provform_name_index() -> list[tuple[str, str]]:
     # 会静默退化成普通监理日志）。
     extra_aliases: dict[str, tuple[str, ...]] = {
         "anquan_jianli_rizhi": ("安全日志", "安全监理日记"),
+        "jianli_riji": ("我的日记", "个人日记"),
     }
     pairs: list[tuple[str, str]] = []
     seen: set[tuple[str, str]] = set()
@@ -2167,8 +2169,54 @@ async def _generate_document(ctx: ToolContext, args: dict) -> dict:
     form_code = str(args.get("form_code") or "").strip() or None
     if form_code:
         form_code = resolve_provform_form_code(form_code) or form_code
-    if period in period_map:
-        from app.services.period_report_service import generate_aggregate_doc
+    if period in period_map or form_code == "jianli_riji":
+        from app.services.period_report_service import generate_aggregate_doc, generate_supervision_log, now_cn
+        # 🔴 个人监理日记：用户说「生成我的监理日记 / 今天的监理日记」时，
+        # form_code 已归一为 jianli_riji。日记=个人维度，必须走 generate_supervision_log
+        # 并限定 author_id=ctx.user.id（只聚合本人当日记录，落款本人），
+        # 不能走 generate_aggregate_doc 的项目级聚合（会把全项目记录混进来）。
+        if form_code == "jianli_riji":
+            diary_date = str(args.get("date") or "").strip()
+            try:
+                target = (
+                    datetime.strptime(diary_date, "%Y-%m-%d").date()
+                    if diary_date else now_cn().date()
+                )
+            except ValueError:
+                return _need_more(["date"], "日期格式不对，请给 YYYY-MM-DD 或直接说「生成我的监理日记」。")
+            raw_extra = args.get("extra_fields")
+            extra_fields = {}
+            if isinstance(raw_extra, dict):
+                extra_fields = (
+                    normalize_extra_fields({"extra_fields": raw_extra}, "jianli_riji").get("extra_fields") or {}
+                )
+            narrative = ctx.message if len(ctx.message or "") > 40 else None
+            try:
+                result = await generate_supervision_log(
+                    ctx.db, ctx.project_id, target,
+                    supervisor=ctx.user, force=True,
+                    extra_fields=extra_fields or None,
+                    narrative=narrative,
+                    author_id=ctx.user.id,
+                )
+            except (ValueError, RuntimeError, OSError) as exc:
+                return _ok(f"监理日记生成失败：{exc}。可到「省统表录入」核对记录后重试。")
+            doc_id = result.get("doc_id")
+            await _audit(ctx.db, ctx.user, "agent_write", {
+                "tool": "generate_document", "entity": "document", "id": doc_id,
+            })
+            await ctx.db.commit()
+            return _ok(
+                f"已生成你的「监理日记」#{doc_id}（{result.get('doc_number') or '编号待生成'}），"
+                f"已归档到资料库「工作记录与表单/监理日记」，可在「文书」页导出。",
+                card={"kind": "document", "id": doc_id, "title": result.get("title") or "",
+                      "sub": "监理日记", "status": "草稿", "time": str(datetime.now().date())},
+                cards=[{"kind": "document", "id": doc_id, "title": result.get("title") or "",
+                        "sub": "监理日记", "status": "草稿", "time": str(datetime.now().date())}],
+                actions=[{"type": "navigate", "label": "查看文书", "url": "/pages/documents/index"}],
+                undo={"tool": "generate_document", "entity": "document", "id": doc_id},
+                data=result,
+            )
         # extra_fields（天气/上级检查/其他事项等）透传到聚合文书，先归一到 canonical 键
         raw_extra = args.get("extra_fields")
         extra_fields = {}
@@ -3251,11 +3299,14 @@ TOOLS: tuple[ToolSpec, ...] = (
         "生成监理文书，有两条互斥路径，按用户指的是「某一条记录」还是「一段时间」来选："
         "①用户指代**某条具体记录**（「这条记录」「刚才那条」「上面那单」，通常前文刚建过记录、"
         "话里带得到它的 ID）→ 只传 record_id，把那条记录渲染成对应的省统表；"
-        "②用户给的是**时间范围**（「今天的」「本周」「本月」「10月的」）→ 只传 period（+可选 date），"
+        "③用户给的是**时间范围**（「今天的」「本周」「本月」「10月的」）→ 只传 period（+可选 date），"
         "按日/周/月聚合当天/当周/当月的全部记录成监理日志、周报或月报。"
         "🔴 判据是「有没有指代到单条记录」，不是文书名叫什么：「把这条记录生成监理日志」走①传 record_id；"
-        "「生成今天的监理日志」走②传 period=day。两者不要同时传。"
-        "🔴 路径②里「安全监理日志」是**独立表式**（form_code=anquan_jianli_rizhi），"
+        "「生成今天的监理日志」走③传 period=day。两者不要同时传。"
+        "🔴 **监理日志 vs 监理日记**：用户说「监理日记 / 我的日记 / 个人日记」= 个人维度，"
+        "period=day 且 form_code=jianli_riji（只聚合该用户当天自己的记录，落款本人）；"
+        "说「监理日志」= 项目维度，不带 form_code。两者不要混。"
+        "🔴 路径③里「安全监理日志」是**独立表式**（form_code=anquan_jianli_rizhi），"
         "不要退化成普通监理日志：用户说「生成今天的安全监理日志 / 安全日志」时，"
         "period=day 且必须同时传 form_code（表名或 code 都可，服务端会归一）。"
         "🔴 extra_fields 只放**系统取不到、用户当场补充**的字段（如上级/质监站检查情况、"

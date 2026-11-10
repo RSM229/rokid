@@ -10,6 +10,7 @@ class DocType(str, enum.Enum):
     """文书类型"""
     SIDE_STATION = "旁站记录"
     SUPERVISION_LOG = "监理日志"
+    SUPERVISION_DIARY = "监理日记"
     NOTICE_QUALITY = "监理工程师通知单（质量类）"
     RECTIFICATION = "安全隐患整改通知单"
     RECTIFY_REPLY = "安全隐患整改回复单"

@@ -76,6 +76,7 @@ FORMS: list[FormSpec] = [
     # 21监理日志-房建新.docx（9 列网格，工程名称/编号在表内首行）。
     # 填充器 fill_rizhi 双版式自适应，回退旧模板无需改代码。
     _spec("gd_b_220_rizhi", "监理日志", "21监理日志-房建新.docx", "sheng_tong_biao", "GD-B-220", "日志报告", "aggregate", (), "监理日志_{date}"),
+    _spec("jianli_riji", "监理日记", "21监理日志-房建新.docx", "sheng_tong_biao", "GD-B-220", "日志报告", "aggregate", (), "监理日记_{date}"),
     _spec("anquan_jianli_rizhi", "安全监理日志", "安全监理日志表格.docx", "safety", "安全监理日志", "日志报告", "aggregate", (), "安全监理日志_{date}"),
     _spec("gd_b_221_yuebao", "监理月报", "22监理月报.docx", "sheng_tong_biao", "GD-B-221", "日志报告", "aggregate", (), "监理月报_{period}"),
     _spec("gd_b_223_zhoubao", "监理周报", None, "none", "GD-B-223", "日志报告", "aggregate", (), "监理周报_{period}"),

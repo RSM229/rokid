@@ -989,3 +989,54 @@ async def generate_daily_log(
         },
         force=True,
     )
+
+
+@router.post("/generate-daily-diary")
+async def generate_daily_diary(
+    date: str = Query(..., description="日期，格式 YYYY-MM-DD"),
+    author_id: Optional[int] = Query(None, description="日记归属人 ID，缺省为当前登录用户"),
+    extras: Optional[DailyLogExtras] = None,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """生成指定作者、指定日期的监理日记（个人维度，PDF，GD-B-220 版式）。
+
+    只聚合该作者当日的工作记录 / 隐患 / 平行检查 / 会议 / 发文，落款为作者本人，
+    自动归档到资料库「项目文件夹/工作记录与表单/监理日记」。
+    ``author_id`` 缺省为当前登录用户；传入他人 ID 时需是该项目的在读成员
+    （跨项目读取受权限网关约束），落款仍用作者本人。
+    """
+    try:
+        target_date = datetime.strptime(date, "%Y-%m-%d").date()
+    except ValueError:
+        raise HTTPException(status_code=400, detail="日期格式错误，需 YYYY-MM-DD")
+
+    project_id = require_project_id(user)
+    # 校验 author_id 属于当前项目成员（防越权读取他人工作记录）
+    if author_id is not None and author_id != user.id:
+        from app.models.project_member import ProjectMember
+        member = (
+            await db.execute(
+                select(ProjectMember).where(
+                    ProjectMember.project_id == project_id,
+                    ProjectMember.user_id == author_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if member is None:
+            raise HTTPException(status_code=403, detail="不能为该项目外的成员生成日记")
+    target_author = author_id if author_id is not None else user.id
+    ex = extras or DailyLogExtras()
+    return await generate_supervision_log(
+        db,
+        project_id,
+        target_date,
+        supervisor=user,
+        extras={
+            "weather": ex.weather,
+            "temp_low": ex.temp_low,
+            "temp_high": ex.temp_high,
+        },
+        force=True,
+        author_id=target_author,
+    )

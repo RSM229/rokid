@@ -81,6 +81,7 @@ def doc_type_for(form_code: str, record_type: str | None = None) -> str:
         "gd_b_214_xunshi": DocType.INSPECTION.value,
         "gd_b_213_pingxing": "平行检查记录",
         "gd_b_220_rizhi": DocType.SUPERVISION_LOG.value,
+        "jianli_riji": DocType.SUPERVISION_DIARY.value,
         "gd_b_221_yuebao": DocType.MONTHLY.value,
         "gd_b_223_zhoubao": DocType.WEEKLY.value,
         "gd_b_215_tongzhi": DocType.NOTICE_QUALITY.value,
@@ -374,15 +375,22 @@ async def generate_supervision_log(
     extra_fields: dict | None = None,
     force: bool = True,
     narrative: str | None = None,
+    author_id: Optional[int] = None,
 ) -> dict:
-    """生成指定项目、指定日期的监理日志（PDF，GD-B-220 版式）。
+    """生成指定项目、指定日期的监理日志（PDF，GD-B-220 版式）或监理日记。
 
-    聚合当日工作记录、安全隐患、整改记录，按模板分区成文。
+    ``author_id`` 为空 = 项目级监理日志（现状）：聚合当日全项目的工作记录、
+    安全隐患、整改记录，按模板分区成文。
+    ``author_id`` 有值 = 个人级监理日记：只聚合该作者当日的工作记录
+    （WorkRecord.creator_id）、隐患（Hazard.reporter_id）、平行检查与会议
+    （user_id），落款为作者本人；渲染复用 GD-B-220 版式。
     ``force=True``（手动接口）每次都新建；``force=False``（定时任务）在当天
     已有同名日志时直接返回 skipped —— 既避免多 worker 重复触发堆件，也避免
     覆盖客户端已复核/已编辑过的那一份。
     """
-    title = f"监理日志_{target_date.isoformat()}"
+    is_diary = author_id is not None
+    kind_label = "监理日记" if is_diary else "监理日志"
+    title = f"{kind_label}_{target_date.isoformat()}"
     if not force:
         existing = await _find_existing(
             db, project_id, title=title, doc_type=DocType.SUPERVISION_LOG.value
@@ -406,6 +414,7 @@ async def generate_supervision_log(
             and_(
                 WorkRecord.project_id == project_id,
                 or_(WorkRecord.record_date == target_date, and_(WorkRecord.record_date.is_(None), WorkRecord.created_at >= day_start, WorkRecord.created_at < day_end)),
+                *((WorkRecord.creator_id == author_id,) if is_diary else ()),
             )
         )
         .order_by(WorkRecord.created_at)
@@ -419,6 +428,7 @@ async def generate_supervision_log(
                 Hazard.project_id == project_id,
                 Hazard.created_at >= day_start,
                 Hazard.created_at < day_end,
+                *((Hazard.reporter_id == author_id,) if is_diary else ()),
             )
         )
         .order_by(Hazard.created_at)
@@ -431,6 +441,7 @@ async def generate_supervision_log(
             or_(and_(RectificationRecord.created_at >= day_start, RectificationRecord.created_at < day_end),
                 and_(RectificationRecord.rectified_at >= day_start, RectificationRecord.rectified_at < day_end),
                 and_(RectificationRecord.recheck_at >= day_start, RectificationRecord.recheck_at < day_end)),
+            *((Hazard.reporter_id == author_id,) if is_diary else ()),
         )
     )
     rectifications = rectifications_result.scalars().all()
@@ -438,8 +449,20 @@ async def generate_supervision_log(
     proj_result = await db.execute(select(Project).where(Project.id == project_id))
     project = proj_result.scalar_one_or_none()
     project_name = project.name if project else ""
-    parallels = list((await db.execute(select(ParallelInspection).where(ParallelInspection.project_id == project_id, ParallelInspection.inspect_date == target_date.isoformat()))).scalars().all())
-    meetings = list((await db.execute(select(MeetingMinute).where(MeetingMinute.project_id == project_id, MeetingMinute.meeting_date == target_date.isoformat()))).scalars().all())
+    parallels = list((await db.execute(
+        select(ParallelInspection).where(
+            ParallelInspection.project_id == project_id,
+            ParallelInspection.inspect_date == target_date.isoformat(),
+            *((ParallelInspection.user_id == author_id,) if is_diary else ()),
+        )
+    )).scalars().all())
+    meetings = list((await db.execute(
+        select(MeetingMinute).where(
+            MeetingMinute.project_id == project_id,
+            MeetingMinute.meeting_date == target_date.isoformat(),
+            *((MeetingMinute.user_id == author_id,) if is_diary else ()),
+        )
+    )).scalars().all())
 
     weekday = WEEKDAY_CN[target_date.weekday()]
 
@@ -582,6 +605,35 @@ async def generate_supervision_log(
         text = str(r.work_content or r.remark or "")
         buckets[category_bucket.get(cat, "其他")].append(text)
 
+    # ===== 当日发出的监理文书（通知单/整改单等「发的单」）进「重要发文」栏 =====
+    # 项目日志收全项目当日新发的单；个人日记只收作者本人当日创建的。
+    try:
+        issued_docs = (
+            await db.execute(
+                select(Document)
+                .where(
+                    Document.project_id == project_id,
+                    Document.created_at >= day_start,
+                    Document.created_at < day_end,
+                    Document.doc_type.in_((
+                        DocType.NOTICE_QUALITY.value,
+                        DocType.RECTIFICATION.value,
+                        DocType.RECTIFY_REPLY.value,
+                        "安全监理日志",
+                        "危大工程巡视记录",
+                    )),
+                    *((Document.creator_id == author_id,) if is_diary else ()),
+                )
+                .order_by(Document.created_at)
+            )
+        ).scalars().all()
+        for dd in issued_docs:
+            dd_no = (dd.content or {}).get("doc_number") or f"#{dd.id}"
+            dd_title = dd.title or dd.doc_type
+            buckets["重要发文"].append(f"{dd.doc_type} {dd_title}（{dd_no}）")
+    except Exception as exc:  # noqa: BLE001 - 发文归集失败不阻断生成
+        logger.warning("监理日志/日记发文归集失败，跳过：%s", exc)
+
     from app.services.weather import daily_weather
     ex = await daily_weather(project, target_date, extras)
     parallel_section = "\n".join(f"{p.part} {p.item}：{p.result_detail}，结论：{p.conclusion}，依据：{p.basis}，方法：{p.method or ''}" for p in parallels) or "当日无平行检查记录。"
@@ -591,6 +643,13 @@ async def generate_supervision_log(
         raise ValueError(
             f"项目 {project_id} 下没有成员，无法确定监理日志的创建人"
         )
+    # 日记：落款必须回到作者本人（supervisor 可能是定时任务推断的他人，
+    # 或生成人不是作者本人——作者是过滤维度，落款与过滤必须同一个人）。
+    if is_diary:
+        if author_id:
+            me = await db.get(User, author_id)
+            if me is not None:
+                signer = me
     supervisor_name = signer.real_name or ""
     supervisor_level = signer.supervisor_level or ""
 
@@ -610,7 +669,7 @@ async def generate_supervision_log(
 
     content = {
         "project_name": project_name,
-        "doc_number": f"GD-JL-{project_id}-{target_date.strftime('%Y%m%d')}",
+        "doc_number": f"{'GD-JL-RJ' if is_diary else 'GD-JL'}-{project_id}-{target_date.strftime('%Y%m%d')}",
         "date": target_date.isoformat(),
         "weekday": weekday,
         "temperature_high": ex.get("temp_high", ""),
@@ -659,10 +718,10 @@ async def generate_supervision_log(
             )
 
     doc = Document(
-        doc_type=DocType.SUPERVISION_LOG.value,
+        doc_type=DocType.SUPERVISION_DIARY.value if is_diary else DocType.SUPERVISION_LOG.value,
         title=title,
         content=content,
-        form_code="gd_b_220_rizhi",
+        form_code="jianli_riji" if is_diary else "gd_b_220_rizhi",
         project_id=project_id,
         creator_id=signer.id,
         status=DocStatus.DRAFT.value,
@@ -673,13 +732,14 @@ async def generate_supervision_log(
 
     # 产物与省统表同源：render_form 渲 GD-B-220 docx 挂 docx_path，PDF 由 docx 转换；
     # 任一步失败回退旧的自绘日报版式（文书均已入库，不影响主流程）。
+    diary_suffix = "监理日记" if is_diary else "监理日志"
     try:
         from app.services.form_renderer import render_form
         docx_out = await asyncio.to_thread(render_form, "gd_b_220_rizhi", content)
         doc.docx_path = f"/exports/{docx_out.name}"
         await db.commit()
         from app.services.docx2pdf import convert_docx_to_pdf
-        pdf_filename = f"doc_{doc.id}_监理日志_{target_date.isoformat()}.pdf"
+        pdf_filename = f"doc_{doc.id}_{diary_suffix}_{target_date.isoformat()}.pdf"
         pdf_path = settings.export_dir / pdf_filename
         await asyncio.to_thread(convert_docx_to_pdf, str(docx_out), str(pdf_path))
         docx_out.unlink(missing_ok=True)
@@ -690,7 +750,7 @@ async def generate_supervision_log(
         logger.warning("监理日志省统表 docx/PDF 生成失败，回退自绘日报版式（文书已入库）：%s", exc)
         try:
             from app.services.doc_generator import generate_daily_log_pdf
-            pdf_filename = f"doc_{doc.id}_监理日志_{target_date.isoformat()}.pdf"
+            pdf_filename = f"doc_{doc.id}_{diary_suffix}_{target_date.isoformat()}.pdf"
             pdf_path = settings.export_dir / pdf_filename
             generate_daily_log_pdf(doc, str(pdf_path), target_date)
             doc.pdf_path = f"/exports/{pdf_filename}"

@@ -190,6 +190,7 @@ PRESET_FOLDER_TREE: list[dict] = [
                     {"name": "材料进场记录"},
                     {"name": "检监测记录"},
                     {"name": "监理日志"},
+                    {"name": "监理日记"},
                     {"name": "监理月报"},
                     {"name": "监理通知单"},
                     {"name": "见证记录"},
