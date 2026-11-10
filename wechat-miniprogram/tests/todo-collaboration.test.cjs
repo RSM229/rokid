@@ -12,6 +12,7 @@ const todoTemplate = fs.readFileSync(path.join(root, 'pages/todo/index.wxml'), '
 const composePage = fs.readFileSync(path.join(root, 'pages/todo/compose.ts'), 'utf8')
 const composeTemplate = fs.readFileSync(path.join(root, 'pages/todo/compose.wxml'), 'utf8')
 const kbPage = fs.readFileSync(path.join(root, 'pages/kb/index.ts'), 'utf8')
+const kbTemplate = fs.readFileSync(path.join(root, 'pages/kb/index.wxml'), 'utf8')
 const workPage = fs.readFileSync(path.join(root, 'pages/work/index.ts'), 'utf8')
 const workTemplate = fs.readFileSync(path.join(root, 'pages/work/index.wxml'), 'utf8')
 
@@ -108,10 +109,10 @@ test('compose separates responsibility, signoff and non-blocking CC semantics', 
   assert.match(composeTemplate, /membersError/)
 })
 
-test('project archive entry uses the dedicated project-scoped API, not a library-name scan', () => {
-  assert.match(kbPage, /request<\{[\s\S]{0,200}?\}>\('\/kb\/project-archive'\)/)
-  assert.match(kbPage, /archive_pending_count/)
-  assert.doesNotMatch(kbPage, /find\(\(item\) => item\.kb_type === 'shared' && item\.project_id === projectId\)/)
+test('kb home no longer exposes a separate project archive library', () => {
+  assert.doesNotMatch(kbPage, /kb\/project-archive/)
+  assert.doesNotMatch(kbTemplate, /项目资料库|projectArchiveKbId/)
+  assert.match(agentPage, /request<\{ id: number \}>\('\/kb\/mine'\)/)
 })
 
 test('work-record page retains a visible document-management entry after the drawer change', () => {

@@ -366,7 +366,7 @@ async def retry_project_archive_sync(
     if not doc:
         raise HTTPException(status_code=404, detail="文书不存在")
     if doc.creator_id != user.id and not user.has_permission("document_approve"):
-        raise HTTPException(status_code=403, detail="无权重试项目资料库归档")
+        raise HTTPException(status_code=403, detail="无权重试资料库归档")
     if not (doc.docx_path or doc.pdf_path or doc.signed_pdf_path or doc.form_code):
         raise HTTPException(status_code=409, detail="文书尚无可归档的正式文件")
     await _sync_project_archive_copy(db, doc, user)

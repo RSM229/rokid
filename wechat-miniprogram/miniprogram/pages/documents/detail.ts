@@ -427,14 +427,14 @@ Page(themed({
   async retryArchive() {
     const id = this.data.doc?.id
     if (!id) return
-    wx.showLoading({ title: '同步项目资料库', mask: true })
+    wx.showLoading({ title: '同步资料库', mask: true })
     try {
       const result = await request<{ status: string; error?: string | null }>(
         `/document/${id}/archive-sync`, { method: 'POST', data: {} },
       )
       await this.loadDoc(id)
       if (result.status === 'synced') {
-        wx.showToast({ title: '已同步到项目资料库', icon: 'success' })
+        wx.showToast({ title: '已同步到资料库', icon: 'success' })
       } else {
         wx.showModal({ title: '同步未完成', content: result.error || '请稍后重试', showCancel: false })
       }

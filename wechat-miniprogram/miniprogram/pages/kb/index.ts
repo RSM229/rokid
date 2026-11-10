@@ -55,9 +55,6 @@ Page(themed({
   data: {
     kbId: 0,
     kbName: '资料库',
-    projectArchiveKbId: 0,
-    projectArchiveKbName: '',
-    projectArchiveMeta: '',
     canUpload: false,
     resolving: true,
 
@@ -143,7 +140,6 @@ Page(themed({
     }
     if (!this.data.kbId) this.resolveHome()
     else this.loadFolders()
-    void this.loadProjectArchiveLibrary()
   },
 
   onHide() {
@@ -227,47 +223,6 @@ Page(themed({
     } finally {
       this.setData({ resolving: false })
     }
-  },
-
-  async loadProjectArchiveLibrary() {
-    const projectId = Number(session.getUser()?.project_id || 0)
-    if (!projectId) {
-      this.setData({
-        projectArchiveKbId: 0,
-        projectArchiveKbName: '',
-        projectArchiveMeta: '',
-      })
-      return
-    }
-    try {
-      // The mapping table behind this endpoint is the only source of truth.
-      // Never scan /kb for a same-named/shared library: that can select a
-      // personal, builtin, or unrelated project's KB.
-      const library = await request<{
-        id: number
-        name: string
-        document_count?: number
-        archive_pending_count?: number
-      }>('/kb/project-archive')
-      const archived = Number(library.document_count || 0)
-      const pending = Number(library.archive_pending_count || 0)
-      this.setData({
-        projectArchiveKbId: library.id || 0,
-        projectArchiveKbName: library.name || '',
-        projectArchiveMeta: `已归档 ${archived} 份${pending ? ` · 待同步 ${pending} 份` : ''}`,
-      })
-    } catch {
-      this.setData({
-        projectArchiveKbId: 0,
-        projectArchiveKbName: '',
-        projectArchiveMeta: '',
-      })
-    }
-  },
-
-  openProjectArchiveLibrary() {
-    if (!this.data.projectArchiveKbId) return
-    wx.navigateTo({ url: `/pages/kb/detail?id=${this.data.projectArchiveKbId}` })
   },
 
   async resolveHomeFallback(): Promise<{ id: number; name: string } | null> {

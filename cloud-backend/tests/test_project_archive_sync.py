@@ -23,7 +23,7 @@ from app.routers.form_doc import export_form_doc
 from app.services import project_archive
 
 
-def test_project_archive_sync_is_project_scoped_stable_and_retryable(tmp_path, monkeypatch):
+def test_archive_sync_uses_creator_personal_library_and_is_retryable(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "knowledge_base_path", tmp_path / "knowledge")
     monkeypatch.setattr(settings, "export_dir", tmp_path / "exports")
     settings.export_dir.mkdir(parents=True)
@@ -76,21 +76,20 @@ def test_project_archive_sync_is_project_scoped_stable_and_retryable(tmp_path, m
             assert archived.source_revision == 1
             assert open(archived.path, "rb").read() == b"revision one"
 
-            mapping = (await db.execute(select(ProjectArchiveLibrary))).scalar_one()
+            # New archives live in the creator's own home library, not in a
+            # newly-created shared project library.
+            assert (await db.execute(select(ProjectArchiveLibrary))).scalars().all() == []
             kb = await db.get(KnowledgeBase, kb_id)
-            assert mapping.project_id == project.id
-            assert kb.project_id == project.id and kb.kb_type == "shared"
+            assert kb.kb_type == "personal"
+            assert kb.owner_id == owner.id
+            assert kb.project_id is None
             members = set((await db.execute(select(KnowledgeBaseMember.user_id).where(
                 KnowledgeBaseMember.kb_id == kb_id
             ))).scalars().all())
-            assert members == {owner.id, colleague.id}
+            assert members == {owner.id}
             assert outsider.id not in members
             libraries = await list_knowledge_bases(colleague, db)
-            assert any(
-                item["id"] == kb_id and item["project_id"] == project.id
-                and item["kb_type"] == "shared"
-                for item in libraries["items"]
-            )
+            assert not any(item["id"] == kb_id for item in libraries["items"])
             folder = await db.get(KbFolder, archived.folder_id)
             parent = await db.get(KbFolder, folder.parent_id)
             grandparent = await db.get(KbFolder, parent.parent_id)
@@ -138,7 +137,7 @@ def test_project_archive_sync_is_project_scoped_stable_and_retryable(tmp_path, m
             assert failed is None
             assert doc.archive_sync_status == "failed"
             # The DB session remains usable after the archive savepoint rolls back.
-            assert (await db.execute(select(ProjectArchiveLibrary))).scalar_one().kb_id == kb_id
+            assert (await db.execute(select(ProjectArchiveLibrary))).scalars().all() == []
 
             monkeypatch.setattr(project_archive.shutil, "copy2", original_copy)
             retried = await project_archive.sync_document_to_project_archive(db, doc, owner)
@@ -147,20 +146,16 @@ def test_project_archive_sync_is_project_scoped_stable_and_retryable(tmp_path, m
             assert retried.source_revision == 3
             assert doc.archive_sync_status == "synced"
 
-            former_owner_membership = (await db.execute(select(ProjectMember).where(
-                ProjectMember.project_id == project.id,
-                ProjectMember.user_id == owner.id,
-            ))).scalar_one()
-            await db.delete(former_owner_membership)
-            await db.flush()
-            await project_archive.sync_document_to_project_archive(db, doc, colleague)
+            # Archiving as another user still targets the creator's library and
+            # cannot redirect the copy into their own home library.
+            colleague_synced = await project_archive.sync_document_to_project_archive(
+                db, doc, colleague
+            )
             await db.commit()
             await db.refresh(kb)
-            assert kb.owner_id == colleague.id
-            remaining_members = set((await db.execute(select(KnowledgeBaseMember.user_id).where(
-                KnowledgeBaseMember.kb_id == kb_id
-            ))).scalars().all())
-            assert remaining_members == {colleague.id}
+            assert colleague_synced.id == original_archive_id
+            assert colleague_synced.kb_id == kb_id
+            assert kb.owner_id == owner.id
 
             def render_pdf(_docx_path):
                 output = settings.export_dir / "form-export.pdf"

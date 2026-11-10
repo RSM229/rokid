@@ -745,7 +745,7 @@ Page(themed({
     else wx.showToast({ title: '请先生成该记录的文书', icon: 'none' })
   },
 
-  /** 详情弹窗「生成文书」：记录 → 省统表文书并同步项目资料库；隐患 → 安全隐患整改通知单 */
+  /** 详情弹窗「生成文书」：记录 → 省统表文书并同步我的资料库；隐患 → 安全隐患整改通知单 */
   async generateRecordDocument(event?: WechatMiniprogram.TouchEvent) {
     const record = this.data.detail
     if (!record?.id || this.data.generatingDoc) return
@@ -779,7 +779,7 @@ Page(themed({
       wx.hideLoading()
       wx.showModal({
         title: '文书已生成',
-        content: `${title ? `《${title}》` : '文书'}已同步到项目资料库「项目文件夹 / 工作记录与表单」，并可在文书管理中查看、签认和导出。`,
+        content: `${title ? `《${title}》` : '文书'}已归档到「我的资料库 / 项目文件夹 / 工作记录与表单」，并可在文书管理中查看、签认和导出。`,
         showCancel: false,
       })
     } catch (error) {

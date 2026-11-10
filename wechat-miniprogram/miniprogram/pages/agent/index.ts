@@ -3770,7 +3770,7 @@ Page(themed({
     })
   },
 
-  /** 工作记录卡「生成文书」：/form-docs/generate → 同步到项目资料库对应目录 */
+  /** 工作记录卡「生成文书」：/form-docs/generate → 同步到我的资料库对应目录 */
   async generateDocFromRecord(recordId: number) {
     if (this.data.loading) return
     wx.showLoading({ title: '生成文书...', mask: true })
@@ -3782,17 +3782,17 @@ Page(themed({
       })
       let archiveKbId = 0
       try {
-        const library = await request<{ id: number }>('/kb/project-archive')
+        const library = await request<{ id: number }>('/kb/mine')
         archiveKbId = library.id || 0
       } catch {
         archiveKbId = 0
       }
       this.addMessage({
         role: 'assistant',
-        text: `✅ 已生成文书《${res.title}》，并同步到项目资料库「项目文件夹 / 工作记录与表单」；可在文书管理中查看、签认并导出 PDF / Word。`,
+        text: `✅ 已生成文书《${res.title}》，并归档到「我的资料库 / 项目文件夹 / 工作记录与表单」；可在文书管理中查看、签认并导出 PDF / Word。`,
         actions: [
           { label: '查看文书', command: `navigate:/pages/documents/detail?id=${res.doc_id}` },
-          ...(archiveKbId ? [{ label: '打开项目资料库', command: `navigate:/pages/kb/detail?id=${archiveKbId}` }] : []),
+          ...(archiveKbId ? [{ label: '打开我的资料库', command: `navigate:/pages/kb/detail?id=${archiveKbId}` }] : []),
         ],
       })
     } catch (error) {
@@ -3861,7 +3861,7 @@ Page(themed({
       if (result.undo) {
         actions.push({ label: '撤销', command: `agent-undo:${result.undo.entity}:${result.undo.id}` })
       }
-      // 工作记录卡：附「生成文书」（渲染省统表并同步到项目资料库）
+      // 工作记录卡：附「生成文书」（渲染省统表并同步到我的资料库）
       for (const cd of cards) {
         if (cd.kind === 'work_record' && cd.id) {
           actions.push({ label: '生成 PDF/Word', command: `gen-doc:${cd.id}` })
@@ -3924,7 +3924,7 @@ Page(themed({
       if (recordId) void this.attachPhotoToRecord(recordId)
       return
     }
-    // 工作记录卡「生成文书」：渲染省统表文书并同步到项目资料库
+    // 工作记录卡「生成文书」：渲染省统表文书并同步到我的资料库
     if (command.startsWith('gen-doc:')) {
       const recordId = Number(command.slice('gen-doc:'.length))
       if (recordId) void this.generateDocFromRecord(recordId)

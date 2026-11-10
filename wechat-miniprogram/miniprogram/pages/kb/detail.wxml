@@ -21,7 +21,7 @@
 
   <view wx:if="{{kb.is_project_archive}}" class="archive-tip">
     <view class="archive-tip-copy">
-      <text class="archive-tip-title">项目正式归档库</text>
+      <text class="archive-tip-title">归档资料库</text>
       <text class="archive-tip-sub">文书归档在「项目文件夹 / 工作记录与表单 / 对应类型」</text>
     </view>
     <button

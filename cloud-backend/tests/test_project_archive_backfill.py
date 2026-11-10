@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from app.config import settings
 from app.db import Base
 from app.models.document import Document
-from app.models.knowledge_base import KnowledgeDocument
+from app.models.knowledge_base import KnowledgeBase, KnowledgeDocument
 from app.models.project_archive import ProjectArchiveLibrary
 from app.models.project_member import ProjectMember
 from app.models.user import Project, User
@@ -92,11 +92,20 @@ def test_backfill_only_unsynced_revisions_and_is_idempotent(tmp_path, monkeypatc
             assert summary["synced"] == 2
             assert summary["failed"] == 0
 
-            mapping = (await db.execute(select(ProjectArchiveLibrary))).scalar_one()
+            # Backfill follows the same personal-library rule; no shared
+            # project archive library is created as a side effect.
+            assert (await db.execute(select(ProjectArchiveLibrary))).scalars().all() == []
+            home_kb = (await db.execute(
+                select(KnowledgeBase).where(
+                    KnowledgeBase.owner_id == owner.id,
+                    KnowledgeBase.kb_type == "personal",
+                )
+            )).scalar_one()
+            assert home_kb.project_id is None
             rows = (
                 await db.execute(
                     select(KnowledgeDocument).where(
-                        KnowledgeDocument.kb_id == mapping.kb_id
+                        KnowledgeDocument.kb_id == home_kb.id
                     )
                 )
             ).scalars().all()

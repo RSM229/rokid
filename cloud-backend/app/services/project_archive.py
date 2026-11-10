@@ -1,4 +1,4 @@
-"""Synchronize generated business documents into the project archive KB."""
+"""Synchronize generated business documents into the owner's personal KB."""
 from __future__ import annotations
 
 import asyncio
@@ -252,6 +252,51 @@ async def ensure_project_archive_library(
     await ensure_kb_folder_tree(db, kb.id, commit=False)
     return kb
 
+async def ensure_personal_archive_library(
+    db: AsyncSession, owner_id: int
+) -> KnowledgeBase:
+    """Return the owner's home KB, creating it with the preset tree if needed.
+
+    Business-document archiving intentionally targets the creator's personal
+    library (我的资料库 / 项目文件夹 / 工作记录与表单). There is exactly one
+    home library per user, so the lookup only uses owner_id + kb_type and never
+    a library name.
+    """
+    kb = (
+        await db.execute(
+            select(KnowledgeBase)
+            .where(
+                KnowledgeBase.owner_id == owner_id,
+                KnowledgeBase.kb_type == "personal",
+            )
+            .order_by(KnowledgeBase.id)
+        )
+    ).scalars().first()
+    if kb is None:
+        kb = KnowledgeBase(
+            name="我的资料库", kb_type="personal", owner_id=owner_id
+        )
+        db.add(kb)
+        await db.flush()
+
+    member = (
+        await db.execute(
+            select(KnowledgeBaseMember).where(
+                KnowledgeBaseMember.kb_id == kb.id,
+                KnowledgeBaseMember.user_id == owner_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if member is None:
+        db.add(
+            KnowledgeBaseMember(kb_id=kb.id, user_id=owner_id, role="owner")
+        )
+        await db.flush()
+    elif member.role != "owner":
+        member.role = "owner"
+    await ensure_kb_folder_tree(db, kb.id, commit=False)
+    return kb
+
 
 async def sync_project_archive_members(
     db: AsyncSession, project_id: int, actor_id: int | None = None
@@ -298,7 +343,7 @@ async def _target_folder_id(
         grand = by_id.get(parent.parent_id or 0) if parent else None
         if parent and parent.name == "工作记录与表单" and grand and grand.name == "项目文件夹":
             return row.id
-    raise RuntimeError(f"项目资料库缺少归档目录：{target_name}")
+    raise RuntimeError(f"资料库缺少归档目录：{target_name}")
 
 
 async def _ensure_document_file(
@@ -341,9 +386,10 @@ async def sync_document_to_project_archive(
     previous_path: Path | None = None
     try:
         async with db.begin_nested():
-            kb = await ensure_project_archive_library(
-                db, doc.project_id, actor.id
-            )
+            # New archives live in the creator's own library so they show up
+            # directly under 我的资料库 / 项目文件夹 / 工作记录与表单.
+            owner_id = doc.creator_id or actor.id
+            kb = await ensure_personal_archive_library(db, owner_id)
             folder_id = await _target_folder_id(
                 db, kb.id, doc.doc_type, doc.form_code
             )
@@ -386,6 +432,7 @@ async def sync_document_to_project_archive(
                 await db.flush()
             else:
                 archived.kb_id = kb.id
+                archived.uploader_id = kb.owner_id
                 archived.folder_id = folder_id
                 archived.name = doc.title
                 archived.filename = filename

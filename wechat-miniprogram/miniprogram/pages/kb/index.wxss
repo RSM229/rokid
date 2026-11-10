@@ -1,13 +1,6 @@
 /* 资料库首页：直接渲染分类树（去掉多库列表） */
 .page { padding: 0 24rpx calc(180rpx + env(safe-area-inset-bottom)); box-sizing: border-box; }
 
-.project-archive-entry { display: flex; align-items: center; justify-content: space-between; gap: 16rpx; min-height: 88rpx; padding: 12rpx 6rpx; border-bottom: 1rpx solid rgba(var(--brand-rgb, 22,119,255), 0.12); }
-.project-archive-copy { display: flex; flex-direction: column; gap: 4rpx; min-width: 0; }
-.project-archive-title { color: var(--ink-2, #243b55); font-size: 26rpx; font-weight: 600; }
-.project-archive-name { overflow: hidden; color: #718198; font-size: 22rpx; text-overflow: ellipsis; white-space: nowrap; }
-.project-archive-meta { color: #8a9bb0; font-size: 21rpx; }
-.project-archive-arrow { flex: none; color: #7b8ba0; font-size: 36rpx; }
-.project-archive-entry:active { background: rgba(var(--brand-rgb, 22,119,255), 0.05); }
 
 /* 搜索栏：输入即搜（300ms 防抖），清空恢复文件夹视图 */
 .search-bar { position: relative; display: flex; align-items: center; margin: 16rpx 0 20rpx; }

@@ -9,7 +9,7 @@
       <view class="status">{{doc.status}}</view>
       <view class="muted" wx:if="{{doc.doc_number}}">编号：{{doc.doc_number}}</view>
       <view class="muted" wx:if="{{doc.doc_type}}">类型：{{doc.doc_type}}</view>
-      <view wx:if="{{doc.archive_sync_status === 'failed'}}" class="muted">项目资料库同步失败：{{doc.archive_sync_error || '请重试'}}</view>
+      <view wx:if="{{doc.archive_sync_status === 'failed'}}" class="muted">资料库同步失败：{{doc.archive_sync_error || '请重试'}}</view>
       <button wx:if="{{doc.archive_sync_status === 'failed' && doc.can_retry_archive}}" size="mini" bindtap="retryArchive">重试归档</button>
     </view>
 
