@@ -290,7 +290,7 @@
       <text class="close" bindtap="closeReportModal">×</text>
     </view>
     <view class="report-options">
-      <view class="report-type" wx:for="{{reportTypes}}" wx:key="key" data-type="{{item.key}}" bindtap="selectReportType">
+      <view class="report-type {{reportType === item.key ? 'selected' : ''}}" wx:for="{{reportTypes}}" wx:key="key" data-type="{{item.key}}" bindtap="selectReportType">
         <view class="type-icon">{{item.icon}}</view>
         <view class="type-info">
           <view class="type-name">{{item.label}}</view>
