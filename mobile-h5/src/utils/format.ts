@@ -108,6 +108,7 @@ export const LEDGER_TYPE_MAP: Record<string, { label: string; type: string }> = 
   image: { label: '影像台账', type: 'primary' },
   旁站记录: { label: '旁站台账', type: 'warning' },
   监理日志: { label: '监理日志台账', type: 'success' },
+  监理日记: { label: '监理日记台账', type: 'success' },
   安全隐患整改通知单: { label: '整改通知单台账', type: 'danger' },
   hazard: { label: 'AI安全巡检台账', type: 'primary' },
   监理周报: { label: '周报台账', type: 'warning' },

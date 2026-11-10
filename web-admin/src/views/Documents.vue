@@ -53,6 +53,7 @@
           <el-select v-model="form.type" placeholder="请选择类型" style="width: 100%">
             <el-option label="监理通知单" value="监理工程师通知单（质量类）" />
             <el-option label="监理日志" value="监理日志" />
+            <el-option label="监理日记" value="监理日记" />
             <el-option label="监理周报" value="监理周报" />
             <el-option label="监理月报" value="监理月报" />
           </el-select>

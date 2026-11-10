@@ -15,6 +15,7 @@ const docType = ref('inspection')
 const docTypeOptions = [
   { text: '巡视记录', value: 'inspection' },
   { text: '监理日志', value: 'daily_log' },
+  { text: '监理日记', value: 'diary' },
   { text: '旁站记录', value: 'station' },
   { text: '见证取样', value: 'witness' },
   { text: '监理通知单', value: 'notice' },

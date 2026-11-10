@@ -40,6 +40,7 @@ const DOCUMENT_STATUS_FROM_BACKEND: Record<string, string> = {
 const DOCUMENT_TYPE_TO_BACKEND: Record<string, string> = {
   inspection: '巡视记录',
   daily_log: '监理日志',
+  diary: '监理日记',
   station: '旁站记录',
   witness: '见证取样记录',
   notice: '监理工程师通知单（质量类）',
