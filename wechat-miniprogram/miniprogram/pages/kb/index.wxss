@@ -126,3 +126,11 @@
 .tag-new-row { display: flex; align-items: center; gap: 14rpx; }
 .tag-new-row .field-input { flex: 1; }
 .tag-new-row .btn-plain { flex: none; height: 64rpx; line-height: 64rpx; margin: 0; }
+
+/* 监理日记生成入口：仅资料库「监理日记」文件夹内显示 */
+.diary-gen { margin-bottom: 26rpx; padding: 24rpx; background: rgba(255,255,255,0.40); border: 2rpx solid rgba(var(--brand-rgb, 22,119,255), 0.28); border-radius: 16rpx; box-shadow: 0 2rpx 8rpx rgba(0,0,0,0.04); }
+.diary-gen-title { font-size: 28rpx; font-weight: 700; color: var(--ink-2, #243b55); }
+.diary-gen-sub { margin-top: 8rpx; font-size: 22rpx; line-height: 1.5; color: #6b7c90; }
+.diary-gen-row { display: flex; align-items: center; gap: 16rpx; margin-top: 18rpx; }
+.diary-date { padding: 12rpx 18rpx; border-radius: 12rpx; font-size: 24rpx; color: var(--brand-d, #0b5fd0); background: rgba(var(--wash-rgb, 234,243,255), 0.85); }
+.diary-gen-row .btn-primary { flex: none; margin: 0; }

@@ -81,6 +81,18 @@
       </view>
     </view>
 
+    <!-- 监理日记：入口就在资料库对应的归档文件夹内，生成后自动落入本目录 -->
+    <view wx:if="{{inDiaryFolder && !searchKeyword && !tagFilterId && !selectMode && !showTrash}}" class="diary-gen">
+      <view class="diary-gen-title">📔 生成我的监理日记</view>
+      <view class="diary-gen-sub">按所选日期汇总我个人提交的工作记录、隐患与发文，生成后自动归档到「监理日记」文件夹。</view>
+      <view class="diary-gen-row">
+        <picker mode="date" value="{{diaryDate}}" bindchange="onDiaryDateChange">
+          <view class="diary-date">日期：{{diaryDate}}</view>
+        </picker>
+        <button class="btn-primary" size="mini" loading="{{generatingDiary}}" disabled="{{generatingDiary}}" bindtap="generateDiary">生成日记</button>
+      </view>
+    </view>
+
     <!-- 文档：有文档 / 搜索中 / 标签筛选中才出现；空文件夹整块隐藏，不占屏 -->
     <view wx:if="{{docs.length || searchKeyword || tagFilterId}}" class="sec">
       <view class="sec-head">

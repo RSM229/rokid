@@ -131,6 +131,11 @@ Page(themed({
     showTrash: false,
     trashDocs: [] as Array<KbDoc & { sizeText: string }>,
     trashLoading: false,
+
+    /** 监理日记：当前位于「监理日记」文件夹时显示生成入口 */
+    inDiaryFolder: false,
+    generatingDiary: false,
+    diaryDate: '',
   },
 
   onShow() {
@@ -345,8 +350,57 @@ Page(themed({
       const node = map[folderId]
       subs = node && node.children ? node.children : []
     }
-    this.setData({ breadcrumb: crumb, currentSubfolders: subs })
+    // 监理日记生成入口：仅位于「监理日记」文件夹时显示（按目录名判定，不依赖 kb 详情时序）
+    const node = folderId ? map[folderId] : undefined
+    const inDiary = !!node && node.name === '监理日记'
+    this.setData({
+      breadcrumb: crumb,
+      currentSubfolders: subs,
+      inDiaryFolder: inDiary,
+    })
+    if (inDiary && !this.data.diaryDate) {
+      const now = new Date()
+      const pad = (n: number) => String(n).padStart(2, '0')
+      this.setData({ diaryDate: `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}` })
+    }
     this.loadDocs(folderId)
+  },
+
+  /** 监理日记：在资料库「监理日记」文件夹内选日期 */
+  onDiaryDateChange(event: WechatMiniprogram.TouchEvent) {
+    const value = String(event.detail.value || '')
+    if (value) this.setData({ diaryDate: value })
+  },
+
+  /** 监理日记：个人维度文书（只汇总我当天的记录/隐患/发文），由后端自动归档到当前文件夹 */
+  async generateDiary() {
+    if (this.data.generatingDiary) return
+    const date = this.data.diaryDate
+    if (!date) {
+      wx.showToast({ title: '请先选择日期', icon: 'none' })
+      return
+    }
+    this.setData({ generatingDiary: true })
+    wx.showLoading({ title: '正在生成日记…', mask: true })
+    try {
+      await request<{ doc_id?: number; skipped?: boolean }>(
+        `/document/generate-daily-diary?date=${date}`,
+        { method: 'POST', data: {}, timeout: 180000 },
+      )
+      wx.hideLoading()
+      wx.showToast({ title: '已生成并归档', icon: 'success' })
+      // 后端把文书写进当前「监理日记」目录，刷新文件夹计数与文档列表
+      await this.loadFolders()
+    } catch (error) {
+      wx.hideLoading()
+      wx.showModal({
+        title: '生成失败',
+        content: (error as Error).message || '请稍后重试',
+        showCancel: false,
+      })
+    } finally {
+      this.setData({ generatingDiary: false })
+    }
   },
 
   onNavBack() {
