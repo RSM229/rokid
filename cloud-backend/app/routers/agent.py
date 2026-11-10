@@ -66,11 +66,13 @@ def _is_mechanical_reply(text: str) -> bool:
 
 # 模型自然接话里的「假成功」措辞：need_more（还没写库）时一旦命中，
 # 说明模型把「即将创建 / 已接收」吹成了既成事实，会盖掉系统追问
-# （2026-11-09 生产实测：缺「举牌验收照片」却回「服务端会据此创建并回执」）。
-# 此时必须退回工具话术，保证用户看到真实状态（还差什么 / 需要确认）。
+# （2026-11-09/11-10 生产实测：缺「举牌验收照片」却回「服务端会据此创建并回执」
+# 「按已确认信息直接发起这条验收记录创建」）。此时必须退回工具话术，
+# 保证用户看到真实状态（还差什么 / 需要确认）。
 _FAKE_SUCCESS_MARKERS = (
     "已创建", "已生成", "创建成功", "生成成功", "已提交生成", "服务端会据此创建",
     "已写入正式记录", "已建档", "保存成功", "已保存记录", "记录已生成",
+    "已发起这条", "已直接发起", "直接发起这条", "发起创建", "正在创建这条",
 )
 
 
@@ -1393,14 +1395,24 @@ async def _agent_chat_impl(
                 # 「一起询问」：全部验收询问项必须完整呈现，不能被模型自然接话覆盖。
                 result["reply"] = _tool_reply
             elif _model_answer and not _is_mechanical_reply(_model_answer) and not _sounds_like_success(_model_answer):
-                # 最终确认是写库前唯一的安全网：模型接话常说「收到，已生成」，
-                # 会把系统的「请回复确认生成」盖掉，用户以为建档成功却查不到记录
-                # （2026-11-09 生产实测）。保留自然接话，但必须补上状态与操作指引。
+                # 模型自然接话常说「收到，已生成」「按已确认信息直接发起这条…创建」，
+                # 会把系统的真实追问（还差哪一项 / 还需确认）盖掉，用户以为建档成功
+                # 却查不到记录（2026-11-09/11-10 生产实测）。保留自然接话，
+                # 但建记录时缺字段必须补上真实状态与下一步引导。
                 result["reply"] = _model_answer
                 if _awaiting_final:
                     result["reply"] += (
                         "\n\n信息已整理完毕，回复「确认生成」即可建档。"
                     )
+                elif tool == "create_work_record":
+                    _missing_labels = [str(x) for x in (result.get("need_more") or [])]
+                    _missing_labels = [m for m in _missing_labels if m != "最终确认"]
+                    if _missing_labels:
+                        result["reply"] += (
+                            "\n\n还没写入正式记录，还差「"
+                            + "、".join(_missing_labels[:3])
+                            + "」；回复补充一下，或发相应照片即可。"
+                        )
             elif _tool_reply:
                 result["reply"] = _tool_reply
             await agent_tools.stash_pending(

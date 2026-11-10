@@ -195,6 +195,23 @@ class ConfirmationUxTest(unittest.TestCase):
         self.assertNotIn("work_record_confirm", src)
         self.assertNotIn('"title": f"{record_type}记录 · 最终核对"', src)
 
+    def test_missing_photo_status_hint_kept_in_reply(self):
+        """建记录差必填字段（如举牌验收照片）时，模型接话后必须补真实缺项提示。"""
+        src = self._agent_source()
+        self.assertIn("还没写入正式记录，还差「", src)
+        self.assertIn("回复补充一下，或发相应照片即可", src)
+
+    def test_launch_creation_phrase_is_fake_success(self):
+        """「按已确认信息直接发起这条…创建」也是一种假成功话术，必须被识别拦截。
+
+        2026-11-10 生产实测：缺「举牌验收照片」时模型回
+        「收到，按已确认信息直接发起这条验收记录创建」，把缺项追问盖掉了。
+        """
+        src = self._agent_source()
+        self.assertIn("直接发起这条", src)
+        self.assertIn("发起创建", src)
+        self.assertIn("_sounds_like_success", src)
+
     def test_instruction_only_message_never_refills_missing_field(self):
         """「生成记录」这类指令词不是字段值，不能兜底填进缺失字段。
 
