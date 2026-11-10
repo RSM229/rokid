@@ -1343,7 +1343,7 @@ async def _agent_chat_impl(
             args["_require_confirmation"] = not confirmed
             if confirmed:
                 args["_execution_confirmed"] = True
-        ctx = agent_tools.ToolContext(db=db, user=user, project_id=project_id, project=project, message=message, material=material)
+        ctx = agent_tools.ToolContext(db=db, user=user, project_id=project_id, project=project, message=message, material=material, images=req.images)
         await report_progress(
             "tool_validation", "running", "确认要执行的动作，并核对字段是否齐全",
             {"tool": tool, "record_type": str(args.get("record_type") or ""), "form": _record_form_code(tool, args, message) or ""},

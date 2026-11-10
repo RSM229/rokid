@@ -130,6 +130,12 @@ class ToolContext:
     # 随消息发送的素材文本（图片交给视觉模型/水印 OCR 后的识别结果）。
     # 含水印原文，验收子类型等关键字段可从中按词命中，不必再追问用户。
     material: str = ""
+    # 随消息上传后的服务端媒体地址（相对路径，如 /uploads/...）。
+    # 模型看不到图片本身，无法自行填「举牌验收照片」等照片栏——
+    # 这里把用户发的图交给工具层，由服务端映射进记录照片字段，
+    # 否则照片必填项永远缺失、验收等记录永远建不出
+    # （2026-11-09/11-10 生产实测：用户明明发了图仍卡在缺照片）。
+    images: list[str] = field(default_factory=list)
 
 
 Handler = Callable[[ToolContext, dict], Awaitable[dict]]
@@ -1162,6 +1168,30 @@ async def _create_work_record(ctx: ToolContext, args: dict) -> dict:
     if _form:
         args = apply_canonical_form_fields(args, _form)
         args = normalize_extra_fields(args, _form)
+    # 🔴 用户随消息发来的现场照片：模型看不到图片，无法自行填「举牌验收照片」等照片栏，
+    # 不映射则照片必填项永远缺失、验收等记录永远建不出
+    # （2026-11-09/11-10 生产实测：用户明明发了图，仍卡在缺照片）。
+    # 照片来源=本轮消息带的图，或草稿持久化的图（确认轮/补类型轮 ctx.images 已空，
+    # 必须靠草稿里的 _agent_images 才能落到记录）。全部图片暂存到隐藏键 _agent_images，
+    # 供建记录时挂到 record.inspection_photos 渲染。
+    _pending_images = (
+        [str(u).strip() for u in (ctx.images or []) if str(u).strip()]
+        or [str(u).strip() for u in (args.get("_agent_images") or []) if str(u).strip()]
+    )
+    if _pending_images:
+        _photo_field = next(
+            (f for f in record_field_spec.fields_of(_form)
+             if str(f.get("canonical") or "") == "photo"
+             or str(f.get("key") or "").find("photo") >= 0
+             or str(f.get("kind") or "") == "image"),
+            None,
+        )
+        if _photo_field and not _field_value(args, _photo_field):
+            # 合同只认一个照片栏，填第一张即可满足必填；其余图片走 _agent_images 渲染。
+            args = _set_field_persist(orig_args, args, _photo_field, str(_pending_images[0]))
+        if not args.get("_agent_images"):
+            args["_agent_images"] = list(_pending_images)
+            orig_args["_agent_images"] = list(_pending_images)
     # 🔧 项目名误当部位兜底：「巡视XX项目…工程部位为YY」常被模型把项目名填进 section、
     # 部位清单进了 work_content。两类信号：① section≈本项目名；② section 以「项目/项目部」
     # 结尾（真部位如「3号楼二层临边防护」不会这样结尾）——命中且有内容时，用内容作部位
@@ -1606,6 +1636,16 @@ async def _create_work_record(ctx: ToolContext, args: dict) -> dict:
     args.pop(_ACCEPT_CANDS_KEY, None)
     args.pop(_ACCEPT_CANDS_ORDER, None)
     args.pop("_acceptance_ask_state", None)
+    _agent_images = [str(u).strip() for u in (args.pop("_agent_images", None) or []) if str(u).strip()]
+    inspection_photos = None
+    witness_photos = None
+    if _agent_images:
+        # 用户随消息发的现场照片：挂到记录的照片列表，详情/省统表即可渲染
+        # （验收/巡视/旁站/其他走 inspection_photos，见证走 witness_photos）。
+        if record_type == "见证":
+            witness_photos = list(_agent_images)
+        else:
+            inspection_photos = list(_agent_images)
 
     record = WorkRecord(
         record_type=record_type,
@@ -1631,6 +1671,9 @@ async def _create_work_record(ctx: ToolContext, args: dict) -> dict:
         station_start_time=_parse_time(args.get("station_start_time"), record_date),
         station_end_time=_parse_time(args.get("station_end_time"), record_date),
         acceptance_result=str(args.get("acceptance_result") or "")[:32] or None,
+        # 用户随消息发的现场照片：详情/省统表渲染用（验收/巡视/旁站/其他走 inspection_photos）
+        inspection_photos=inspection_photos,
+        witness_photos=witness_photos,
         acceptance_participants=str(args.get("acceptance_participants") or "").strip() or None,
         acceptance_basis=str(args.get("acceptance_basis") or ""),
         witness_material_name=str(args.get("witness_material_name") or "")[:128] or None,

@@ -250,6 +250,65 @@ class ConfirmationUxTest(unittest.TestCase):
         self.assertEqual(args.get("extra_fields", {}).get("photo"), "")
 
 
+class PhotoFromMessageTest(unittest.TestCase):
+    """用户随消息发来的现场照片必须映射进记录照片字段并挂到记录。
+
+    2026-11-10 生产根因：用户明明发了图，照片只存进对话消息附件，从未映射进
+    记录的「举牌验收照片」必填栏；模型又看不到图片，无法自行填——导致验收记录
+    永远建不出。服务端必须把 req.images 填进照片字段，并把全部图片挂到
+    record.inspection_photos 供详情/省统表渲染。
+    """
+
+    @staticmethod
+    def _ctx_with_images(images):
+        return agent_tools.ToolContext(
+            db=FakeDb(),
+            user=SimpleNamespace(id=4, username="tester", project_id=7,
+                                 has_permission=lambda _p: True),
+            project_id=7,
+            project=_project(),
+            message="请识别这1张图片",
+            material="举牌验收公示牌",
+            images=list(images),
+        )
+
+    def _acceptance_draft_no_photo(self) -> dict:
+        d = _draft()
+        # 真实场景：用户发了图，但照片字段仍空（模型看不到图，无法自己填）
+        d["extra_fields"] = {k: v for k, v in d["extra_fields"].items() if k != "photo"}
+        d["extra_fields"]["photo"] = ""
+        return d
+
+    def test_photo_from_message_fills_field_and_attaches(self):
+        images = ["/uploads/work-record/1/a.jpg", "/uploads/work-record/1/b.jpg"]
+        args = self._acceptance_draft_no_photo()
+        args["_require_confirmation"] = True
+        ctx = self._ctx_with_images(images)
+        preview = asyncio.run(agent_tools._create_work_record(ctx, args))
+        # 预览轮：服务端把第一张图填进照片字段，合同不再缺「举牌验收照片」
+        self.assertNotEqual(args.get("extra_fields", {}).get("photo"), "")
+        self.assertEqual(args["extra_fields"]["photo"], images[0])
+
+        # 确认轮：ctx.images 已空，但草稿里的 _agent_images 持久化、照片字段仍在
+        args["_execution_confirmed"] = True
+        ctx2 = self._ctx_with_images([])
+        result = asyncio.run(agent_tools._create_work_record(ctx2, args))
+        self.assertTrue(result["ok"])
+        record = next(r for r in ctx2.db.rows if isinstance(r, WorkRecord))
+        # 全部图片（不只第一张）都挂到记录的 inspection_photos，详情/省统表可渲染
+        self.assertEqual(record.inspection_photos, images)
+
+    def test_photo_field_not_overwritten_by_existing_value(self):
+        """用户已在草稿里填了照片，不应被重复覆盖。"""
+        images = ["/uploads/work-record/1/a.jpg"]
+        args = self._acceptance_draft_no_photo()
+        args["extra_fields"]["photo"] = "/uploads/work-record/1/existing.jpg"
+        ctx = self._ctx_with_images(images)
+        asyncio.run(agent_tools._create_work_record(ctx, args))
+        # 已有值不被覆盖（只填缺的）
+        self.assertEqual(args["extra_fields"]["photo"], "/uploads/work-record/1/existing.jpg")
+
+
 INQUIRY_CONTENT = (
     "【预制管槽施工主体结构 — 管道基础】验收内容（共 4 项，系统按询问项逐项归集）：\n"
     "1、① 核查管道基础形式（原状土/砂石/混凝土）与设计是否一致\n"
