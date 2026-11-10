@@ -3780,10 +3780,20 @@ Page(themed({
         data: { record_id: recordId },
         timeout: 60000,
       })
+      let archiveKbId = 0
+      try {
+        const library = await request<{ id: number }>('/kb/project-archive')
+        archiveKbId = library.id || 0
+      } catch {
+        archiveKbId = 0
+      }
       this.addMessage({
         role: 'assistant',
         text: `✅ 已生成文书《${res.title}》，并同步到项目资料库「项目文件夹 / 工作记录与表单」；可在文书管理中查看、签认并导出 PDF / Word。`,
-        actions: [{ label: '查看文书', command: `navigate:/pages/documents/detail?id=${res.doc_id}` }],
+        actions: [
+          { label: '查看文书', command: `navigate:/pages/documents/detail?id=${res.doc_id}` },
+          ...(archiveKbId ? [{ label: '打开项目资料库', command: `navigate:/pages/kb/detail?id=${archiveKbId}` }] : []),
+        ],
       })
     } catch (error) {
       this.addMessage({ role: 'assistant', text: `生成文书失败：${(error as Error).message}` })

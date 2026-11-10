@@ -1,5 +1,5 @@
 <view class="page" style="{{themeStyle}}">
-  <glass-nav-bar title="{{kbName}}" left="back" />
+  <glass-nav-bar title="{{kbName}}" left="back" custom-back bind:lefttap="onNavBack" />
   <!-- 2026-10-08 起「资料库」是底部第 4 个 tab，本页即其落点；已改为直接渲染分类树 -->
   <tab-bar active="kb" />
 

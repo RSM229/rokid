@@ -1,5 +1,5 @@
 <view class="page" style="{{themeStyle}}">
-  <glass-nav-bar title="知识详情" left="back" />
+  <glass-nav-bar title="知识详情" left="back" custom-back bind:lefttap="onNavBack" />
 
   <view class="card kb-head">
     <view class="kb-top">

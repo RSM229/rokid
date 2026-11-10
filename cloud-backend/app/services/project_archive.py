@@ -1,6 +1,7 @@
 """Synchronize generated business documents into the project archive KB."""
 from __future__ import annotations
 
+import asyncio
 import mimetypes
 import os
 import shutil
@@ -298,17 +299,41 @@ async def _target_folder_id(
     raise RuntimeError(f"项目资料库缺少归档目录：{target_name}")
 
 
+async def _ensure_document_file(
+    db: AsyncSession, doc: Document
+) -> Path | None:
+    """Return a current DOCX/PDF, rendering one for legacy rows when possible."""
+    source = _current_source_path(doc)
+    if source is not None:
+        return source
+    if not doc.form_code:
+        return None
+    try:
+        from app.services.form_renderer import render_form
+
+        rendered = await asyncio.to_thread(
+            render_form, doc.form_code, dict(doc.content or {})
+        )
+        doc.docx_path = f"/exports/{rendered.name}"
+        doc.pdf_path = None
+        doc.signed_pdf_path = None
+        doc.archive_sync_status = "pending"
+        doc.archive_sync_error = None
+        await db.flush()
+        return rendered
+    except Exception as exc:  # Rendering failure stays pending for an explicit retry.
+        doc.archive_sync_status = "pending"
+        doc.archive_sync_error = f"文书文件缺失，重新渲染失败：{exc}"[:1000]
+        return None
+
+
 async def sync_document_to_project_archive(
     db: AsyncSession, doc: Document, actor: User
 ) -> KnowledgeDocument | None:
-    source = next((candidate for candidate in (
-        _source_path(doc.signed_pdf_path),
-        _source_path(doc.pdf_path),
-        _source_path(doc.docx_path),
-    ) if candidate is not None and candidate.exists()), None)
+    source = await _ensure_document_file(db, doc)
     if source is None:
         doc.archive_sync_status = "pending"
-        doc.archive_sync_error = "文书尚无可归档的 DOCX 或 PDF 文件"
+        doc.archive_sync_error = doc.archive_sync_error or "文书尚无可归档的 DOCX 或 PDF 文件"
         return None
     target: Path | None = None
     previous_path: Path | None = None
@@ -414,8 +439,8 @@ async def list_archive_candidates(
 
     A document is considered up to date only when its stable archive row exists
     and the archived revision equals the business document's current revision.
-    Documents without a readable DOCX/PDF are excluded instead of being turned
-    into permanent ``pending`` rows by a backfill.
+    Documents with a known form template are included even when invalidation
+    cleared their file paths, because the sync can render the current content.
     """
     rows = (
         await db.execute(
@@ -424,7 +449,8 @@ async def list_archive_candidates(
                 Document.project_id == project_id,
                 (Document.docx_path.is_not(None))
                 | (Document.pdf_path.is_not(None))
-                | (Document.signed_pdf_path.is_not(None)),
+                | (Document.signed_pdf_path.is_not(None))
+                | (Document.form_code.is_not(None)),
             )
             .order_by(Document.id)
         )
@@ -438,7 +464,7 @@ async def list_archive_candidates(
             and doc.archive_synced_revision == revision
         ):
             continue
-        if _current_source_path(doc) is None:
+        if _current_source_path(doc) is None and not doc.form_code:
             continue
         candidates.append(doc)
     return candidates

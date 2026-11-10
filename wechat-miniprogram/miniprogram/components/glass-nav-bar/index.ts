@@ -6,6 +6,8 @@ Component({
     title: { type: String, value: '' },
     left: { type: String, value: 'back' }, // 'back' | 'menu' | 'none'
     spacer: { type: Boolean, value: true },
+    /** 页面自行处理返回（如资料库先返回上一级目录），组件只抛出 lefttap。 */
+    customBack: { type: Boolean, value: false },
   },
   data: {
     statusBarHeight: 20,
@@ -23,6 +25,10 @@ Component({
   methods: {
     onLeftTap() {
       if (this.data.left === 'back') {
+        if (this.data.customBack) {
+          this.triggerEvent('lefttap')
+          return
+        }
         const pages = getCurrentPages()
         if (pages.length > 1) {
           wx.navigateBack()

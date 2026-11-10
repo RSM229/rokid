@@ -1962,6 +1962,13 @@ async def update_work_record(
         linked_doc.status = DocStatus.DRAFT.value
         invalidate_document(linked_doc)
     await db.commit()
+    if linked_doc:
+        from app.services.project_archive import sync_document_to_project_archive
+
+        # Keep the project archive copy in step with record edits. The archive
+        # helper re-renders when invalidation removed the previous file.
+        await sync_document_to_project_archive(db, linked_doc, user)
+        await db.commit()
     return {"detail": "记录已更新"}
 
 

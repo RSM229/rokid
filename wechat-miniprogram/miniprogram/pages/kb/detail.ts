@@ -400,6 +400,25 @@ Page(themed({
     this.loadDocs(folderId)
   },
 
+  onNavBack() {
+    if (this.data.searchKeyword.trim()) {
+      this.clearSearch()
+      return
+    }
+    const folderId = this.data.currentFolderId
+    if (folderId) {
+      const parentId = this.data.folderMap[folderId]?.parent_id || 0
+      this.setData({ currentFolderId: parentId })
+      this.refreshCurrentFolder()
+      return
+    }
+    const pages = getCurrentPages()
+    if (pages.length > 1) {
+      wx.navigateBack()
+      return
+    }
+    wx.reLaunch({ url: '/pages/agent/index' })
+  },
   selectFolder(event: WechatMiniprogram.TouchEvent) {
     const id = Number(event.currentTarget.dataset.id)
     this.setData({ currentFolderId: id })

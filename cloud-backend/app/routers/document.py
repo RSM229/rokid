@@ -233,6 +233,7 @@ async def update_document_from_schema(
     if req.title is not None:
         doc.title = req.title
     await db.commit()
+    await _sync_project_archive_copy(db, doc, user)
     return {"doc_id": doc_id, "status": doc.status}
 
 
@@ -366,7 +367,7 @@ async def retry_project_archive_sync(
         raise HTTPException(status_code=404, detail="文书不存在")
     if doc.creator_id != user.id and not user.has_permission("document_approve"):
         raise HTTPException(status_code=403, detail="无权重试项目资料库归档")
-    if not (doc.docx_path or doc.pdf_path or doc.signed_pdf_path):
+    if not (doc.docx_path or doc.pdf_path or doc.signed_pdf_path or doc.form_code):
         raise HTTPException(status_code=409, detail="文书尚无可归档的正式文件")
     await _sync_project_archive_copy(db, doc, user)
     return {
@@ -426,6 +427,7 @@ async def update_document(
         doc.attached_images = req.attached_images
 
     await db.commit()
+    await _sync_project_archive_copy(db, doc, user)
     return {"doc_id": doc_id, "status": doc.status}
 
 

@@ -394,6 +394,32 @@ Page(themed({
     this.loadDocs(folderId)
   },
 
+  onNavBack() {
+    if (this.data.selectMode) {
+      this.setData({ selectMode: false })
+      this.applySelection([])
+      return
+    }
+    if (this.data.searchKeyword.trim() || this.data.tagFilterId) {
+      if (this.searchTimer) clearTimeout(this.searchTimer)
+      this.setData({ searchKeyword: '', tagFilterId: 0, tagFilterName: '' })
+      this.loadFolders()
+      return
+    }
+    const folderId = this.data.currentFolderId
+    if (folderId) {
+      const parentId = this.data.folderMap[folderId]?.parent_id || 0
+      this.setData({ currentFolderId: parentId })
+      this.refreshCurrentFolder()
+      return
+    }
+    const pages = getCurrentPages()
+    if (pages.length > 1) {
+      wx.navigateBack()
+      return
+    }
+    wx.reLaunch({ url: '/pages/agent/index' })
+  },
   selectFolder(event: WechatMiniprogram.TouchEvent) {
     const id = Number(event.currentTarget.dataset.id)
     // 多选模式下点文件夹只切换勾选，不进入

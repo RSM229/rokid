@@ -6,6 +6,7 @@ from app.models.hazard import HazardStatus
 from app.models.rectification import RectificationRecord
 from app.models.security_audit import SecurityAudit
 from app.routers.hazard import create_rectification_doc
+from app.services import project_archive
 
 
 class _Result:
@@ -46,7 +47,7 @@ class _Db:
         return None
 
 
-def test_gdaq30308_notice_keeps_hazard_link_and_deferred_receipt_fields():
+def test_gdaq30308_notice_keeps_hazard_link_and_deferred_receipt_fields(monkeypatch):
     hazard = SimpleNamespace(
         id=17, project_id=7, status=HazardStatus.REPORTED.value,
         rectification_doc_id=None, rectify_doc_id=None,
@@ -62,6 +63,12 @@ def test_gdaq30308_notice_keeps_hazard_link_and_deferred_receipt_fields():
         project_id=7,
     )
     db = _Db(hazard, project)
+
+    async def noop_archive(_db, _doc, _user):
+        _doc.archive_sync_status = "pending"
+        return None
+
+    monkeypatch.setattr(project_archive, "sync_document_to_project_archive", noop_archive)
 
     result = asyncio.run(create_rectification_doc(
         17, deadline="2026-10-30", user=user, db=db,
