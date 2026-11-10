@@ -317,9 +317,32 @@ def options_for(field: dict) -> list[str]:
     return ENUM_OPTIONS.get(field.get("canonical") or "", [])
 
 
-def form_for_record_type(record_type: str, is_weida: bool = False) -> str | None:
+def form_for_record_type(
+    record_type: str,
+    is_weida: bool = False,
+    project=None,
+) -> str | None:
+    """记录类型 -> 缺省表式 code（按工程类型路由）。
+
+    ``project`` 为市政项目时返回对应市政表式（危大 → AQSZ-J-2.5 通用表；
+    具体 2.5-x 由生成端按 hazard_type 细化），房建/缺省保持历史行为
+    （GD-B / GDAQ30306）。不传 project 时行为与旧版完全一致。
+    """
+    try:
+        from app.services.form_routing import (
+            BUILDING_WEIDA_DEFAULT,
+            MUNICIPAL_RECORD_DEFAULT,
+            MUNICIPAL_WEIDA_FALLBACK,
+            is_municipal,
+        )
+    except Exception:  # noqa: BLE001 - 路由异常不影响历史行为
+        BUILDING_WEIDA_DEFAULT, MUNICIPAL_WEIDA_FALLBACK, is_municipal, MUNICIPAL_RECORD_DEFAULT = (
+            "gdaq_30306_weida", "gdaq_30306_weida", lambda p: False, None,
+        )
     if is_weida and record_type == "巡视":
-        return "gdaq_30306_weida"
+        return MUNICIPAL_WEIDA_FALLBACK if is_municipal(project) else BUILDING_WEIDA_DEFAULT
+    if is_municipal(project) and MUNICIPAL_RECORD_DEFAULT:
+        return MUNICIPAL_RECORD_DEFAULT.get(record_type)
     return RECORD_TYPE_TO_FORM.get(record_type)
 
 

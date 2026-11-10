@@ -36,6 +36,12 @@ from app.routers.auth import (
 )
 from app.services.form_registry import FORMS, FORM_BY_CODE, form_groups
 from app.services.form_renderer import docx_to_pdf, render_form
+from app.services.form_routing import (
+    extra_record_forms,
+    is_municipal,
+    municipal_weida_code,
+    record_is_weida,
+)
 from app.services.project_archive import sync_document_to_project_archive
 from app.services.period_report_service import (
     doc_type_for as _doc_type_for,
@@ -107,8 +113,22 @@ async def list_record_forms(
     record = result.scalar_one_or_none()
     if not record:
         raise HTTPException(404, "工作记录不存在")
-    codes = RECORD_TYPE_EXTRA_FORMS.get(record.record_type, [])
-    forms = [FORM_BY_CODE[c] for c in codes if c in FORM_BY_CODE]
+    project = await db.get(Project, record.project_id) if record.project_id else None
+    codes = extra_record_forms(record.record_type, project, is_weida=record_is_weida(record))
+    forms = []
+    for c in codes:
+        spec = FORM_BY_CODE.get(c)
+        if spec:
+            forms.append(spec)
+    # 市政危大记录：按 hazard_type 额外提供 2.5-2~7 具体表（如「基坑」→ 2.5-2）
+    if is_municipal(project) and record_is_weida(record):
+        cj = record.content_json or {}
+        hazard = str(cj.get("hazard_type") or cj.get("hazard_name") or "").strip()
+        if hazard:
+            code = municipal_weida_code(hazard)
+            spec = FORM_BY_CODE.get(code)
+            if spec and not any(f.form_code == code for f in forms):
+                forms.append(spec)
     return {
         "record": {
             "id": record.id,
@@ -332,9 +352,12 @@ def _content_from_record(
             # JSON 列不能存 datetime，统表 time 字段用 HH:MM
             "start_time": start.isoformat(sep=" ", timespec="minutes") if start else "",
             "end_time": end.isoformat(sep=" ", timespec="minutes") if end else "",
+            # 市政监-9 第五格「监理情况」读 supervision 键（房建旁站用
+            # station_supervision_status，市政填充器读 supervision）。
             "content": record.station_content or work_content or extracted_content or "",
             "conclusion": record.station_conclusion or "",
             "problems": problem_text(record),
+            "supervision": record.station_supervision_status or record.station_content or "",
             "supervision_status": record.station_supervision_status or "",
         })
     elif rtype == "验收":
@@ -444,14 +467,22 @@ async def generate_form_from_record(
     doc_number: str | None = None,
 ) -> tuple[Document, object, dict]:
     """按记录渲染省统表 docx 并落库（复用于生成 / 上传 / 转发）。"""
-    # 确定表式
+    # 确定表式：不用 RECORD_TYPE_TO_FORM 硬编码，统一走工程类型路由。
+    # 显式 form_code 优先；否则用记录里保存的 code；再按记录类型路由（市政换表）。
     if form_code:
         spec = FORM_BY_CODE.get(form_code)
         if spec is None:
             raise HTTPException(400, f"未知表式 {form_code}")
     else:
-        saved_code = (record.content_json or {}).get("form_code") if isinstance(record.content_json, dict) else None
-        code = saved_code or RECORD_TYPE_TO_FORM.get(record.record_type)
+        from app.services.form_routing import effective_record_form_code, record_is_weida
+
+        saved_code = (
+            (record.content_json or {}).get("form_code")
+            if isinstance(record.content_json, dict) else None
+        )
+        code = effective_record_form_code(
+            saved_code, record.record_type, project=project, record=record,
+        )
         spec = FORM_BY_CODE.get(code) if code else None
         if spec is None:
             raise HTTPException(400, f"{record.record_type}记录暂无可用的默认表式，请指定 form_code")
@@ -501,8 +532,9 @@ async def generate_form_from_record(
     attached_photos = await _record_attach_photos(db, record)
     content["attached_images"] = attached_photos
 
-    # 危大巡视（GDAQ30306）：栏位比普通巡视多（风力/专业分包/危大类型/逐项检查结果）
-    if spec.form_code == "gdaq_30306_weida":
+    # 危大巡视（GDAQ30306 / 市政 AQSZ-J-2.5-1~7）：栏位比普通巡视多
+    # （风力/专业分包/危大类型/逐项检查结果）。市政危大表同一套字段补全。
+    if spec.form_code == "gdaq_30306_weida" or spec.form_code.startswith("aqsz_2_5_"):
         cj = record.content_json or {}
         content.update({
             "hazard_type": cj.get("hazard_type") or cj.get("hazard_name") or content.get("hazard_type") or "",
@@ -510,6 +542,7 @@ async def generate_form_from_record(
             "subcontract_unit": cj.get("subcontract_unit") or content.get("subcontract_unit") or "",
             "chief_supervisor": cj.get("chief_supervisor") or content.get("chief_supervisor") or "",
             "checklist_results": cj.get("checklist_results") or content.get("checklist_results") or {},
+            "checklist": cj.get("checklist") or content.get("checklist") or [],
             "start_time": record.inspection_start_time.isoformat(sep=" ", timespec="minutes")
             if record.inspection_start_time else content.get("start_time", ""),
             "end_time": record.inspection_end_time.isoformat(sep=" ", timespec="minutes")

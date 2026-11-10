@@ -39,6 +39,11 @@ from app.services.record_fields import problem_text, project_fields
 from app.services.doc_generator import generate_daily_log_pdf
 from app.services.form_registry import FORM_BY_CODE
 from app.services.form_renderer import render_form
+from app.services.form_routing import (
+    daily_log_form_code,
+    is_municipal,
+    safety_log_form_code,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +96,18 @@ def doc_type_for(form_code: str, record_type: str | None = None) -> str:
         "gd_b_219_cailiao": "材料台账",
         "gdaq_30306_weida": "危大工程巡视记录",
         "anquan_jianli_rizhi": "安全监理日志",
+        # 市政统表（市政监 / AQSZ 系列）→ 复用同义 DocType，便于前端旧逻辑检索
+        "shijian_24_rizhi": DocType.SUPERVISION_LOG.value,
+        "shijian_9_pangzhan": DocType.SIDE_STATION.value,
+        "shijian_11_xunshi": DocType.INSPECTION.value,
+        "aqsz_2_2_anquan_rizhi": "安全监理日志",
+        "aqsz_2_5_1_weida": "危大工程巡视记录",
+        "aqsz_2_5_2_weida": "危大工程巡视记录",
+        "aqsz_2_5_3_weida": "危大工程巡视记录",
+        "aqsz_2_5_4_weida": "危大工程巡视记录",
+        "aqsz_2_5_5_weida": "危大工程巡视记录",
+        "aqsz_2_5_6_weida": "危大工程巡视记录",
+        "aqsz_2_5_7_weida": "危大工程巡视记录",
     }
     return mapping.get(form_code, DocType.INSPECTION.value)
 
@@ -241,6 +258,82 @@ async def aggregate_records(
 
 def _json_dumps_zh(obj: dict) -> str:
     return json.dumps(obj, ensure_ascii=False, indent=1)
+
+
+def _municipal_rizhi_content(content: dict) -> dict:
+    """房建监-24 聚合产物 → 市政监-24 键映射。
+
+    市政监-24（官方版式）栏目与 GD-B-220 不同：作业面明细三行 +
+    七个整行大内容区（现场巡视发现问题/工程质量/材料试件/安全文明/
+    人员往来/监理主要工作/设计变更）+ 其它重要事项。聚合内容按栏目语义
+    分发，避免整段塞进单一格子。
+    """
+    # 聚合产物的「当日无…」占位语不属于业务事实：市政监-24 整行大内容区
+    # 留空更符合实地填写习惯（模板标签后不追加占位文案）。
+    _PLACEHOLDER = (
+        "当日无施工记录。",
+        "当日无材料进场及见证取样。",
+        "当日无旁站及巡视记录。",
+        "当日无验收记录。",
+        "当日无安全隐患及质量问题。",
+        "当日无平行检查记录。",
+        "当日无危大工程相关安全状况。",
+        "当日无需处理的安全问题。",
+        "当日无隐患整改事项。",
+        "无施工记录。",
+        "无安全隐患及质量问题。",
+        "无材料进场见证取样。",
+        "无旁站及巡视记录。",
+        "无验收记录。",
+        "无。",
+        "暂无。",
+    )
+
+    def _strip_placeholder(text: str) -> str:
+        out = str(text or "")
+        for ph in _PLACEHOLDER:
+            out = out.replace(ph, "").replace(f"{ph}\n", "").replace(f"\n{ph}", "")
+        return out.strip().strip("\n")
+
+    def _clean(key: str) -> str:
+        return _strip_placeholder(content.get(key))
+
+    section = _clean("supervision_section")
+    problems = _clean("problems_section")
+    acceptance = _clean("acceptance_section")
+    material = _clean("material_section")
+    other = _clean("other_work_section")
+    meeting = _clean("meeting_section")
+    document = _clean("document_section")
+    misc = _clean("misc_section")
+
+    # 作业面明细：施工进展按物理行拆入「作业面/进展」列，至多三行
+    surfaces = []
+    for line in _strip_placeholder(content.get("construction_progress")).splitlines():
+        line = line.strip()
+        if line:
+            surfaces.append({"surface": "", "progress": line, "workers": "", "machinery": ""})
+        if len(surfaces) >= 3:
+            break
+
+    def _join(*parts: str) -> str:
+        return "\n".join(p for p in parts if p and p.strip())
+
+    return {
+        **content,
+        "work_surfaces": surfaces,
+        "content_inspection": _join(section, problems),
+        "content_quality": acceptance,
+        "content_material": material,
+        "content_safety": _join(problems, other) if problems and problems not in (section, "") else "",
+        "content_personnel": meeting,
+        "content_supervision": _join(section, document),
+        "content_change": misc,
+        "content_other": other if other and other not in (section, problems) else "",
+        "weather": str(content.get("weather_morning") or content.get("weather") or ""),
+        "chief_supervisor": str(content.get("supervisor") or ""),
+        "recorder": str(content.get("recorder_name") or content.get("supervisor") or ""),
+    }
 
 
 async def llm_polish(agg: dict, period_label: str, form_name: str) -> dict:
@@ -727,7 +820,7 @@ async def generate_supervision_log(
         doc_type=DocType.SUPERVISION_DIARY.value if is_diary else DocType.SUPERVISION_LOG.value,
         title=title,
         content=content,
-        form_code="jianli_riji" if is_diary else "gd_b_220_rizhi",
+        form_code="jianli_riji" if is_diary else daily_log_form_code(project),
         project_id=project_id,
         creator_id=signer.id,
         status=DocStatus.DRAFT.value,
@@ -741,10 +834,13 @@ async def generate_supervision_log(
     diary_suffix = "监理日记" if is_diary else "监理日志"
     try:
         from app.services.form_renderer import render_form
-        # 日记走自己的表式（抬头「监理日记」+ 个人编号 + 记录人签名），
-        # 与项目日志的 gd_b_220_rizhi 分开，避免两份 PDF 看起来一模一样。
-        render_code = "jianli_riji" if is_diary else "gd_b_220_rizhi"
-        docx_out = await asyncio.to_thread(render_form, render_code, content)
+        municipal = is_municipal(project) and not is_diary
+        # 市政项目日志渲染市政监-24（官方版式）：内容按市政栏目重新分发。
+        render_code = daily_log_form_code(project) if municipal else (
+            "jianli_riji" if is_diary else "gd_b_220_rizhi"
+        )
+        render_content = _municipal_rizhi_content(content) if municipal else content
+        docx_out = await asyncio.to_thread(render_form, render_code, render_content)
         doc.docx_path = f"/exports/{docx_out.name}"
         await db.commit()
         from app.services.docx2pdf import convert_docx_to_pdf
@@ -840,9 +936,14 @@ async def generate_safety_log(
     聚合当日数据，并复用 fill_anquan_rizhi 渲染。
     """
     title = f"安全监理日志_{target_date.isoformat()}"
+    proj_result = await db.execute(select(Project).where(Project.id == project_id))
+    project = proj_result.scalar_one_or_none()
+    project_name = project.name if project else ""
+    # 市政项目渲染 AQSZ-J-2.2（官方版式），其余渲染房建 anquan_jianli_rizhi。
+    code = safety_log_form_code(project)
     if not force:
         existing = await _find_existing(
-            db, project_id, title=title, doc_type=doc_type_for("anquan_jianli_rizhi"),
+            db, project_id, title=title, doc_type=doc_type_for(code),
         )
         if existing is not None:
             return {
@@ -851,7 +952,7 @@ async def generate_safety_log(
                 "status": existing.status,
                 "pdf_url": existing.pdf_path,
                 "docx_url": existing.docx_path,
-                "form_code": "anquan_jianli_rizhi",
+                "form_code": code,
                 "form_name": "安全监理日志",
                 "skipped": True,
                 "summary": {"reason": "当日安全日志已存在"},
@@ -887,10 +988,6 @@ async def generate_safety_log(
         )
     )
     rectifications = rectifications_result.scalars().all()
-
-    proj_result = await db.execute(select(Project).where(Project.id == project_id))
-    project = proj_result.scalar_one_or_none()
-    project_name = project.name if project else ""
 
     weekday = WEEKDAY_CN[target_date.weekday()]
 
@@ -1024,7 +1121,7 @@ async def generate_safety_log(
     }
 
     # extra_fields 透传（安全日志也可用归一后的 canonical 键覆盖，如 weather）
-    extra_fields = _canon_extra_fields(extra_fields, "anquan_jianli_rizhi")
+    extra_fields = _canon_extra_fields(extra_fields, code)
     if extra_fields:
         w = extra_fields.get("weather")
         if w:
@@ -1034,10 +1131,10 @@ async def generate_safety_log(
             content["weather_night"] = w
 
     doc = Document(
-        doc_type=doc_type_for("anquan_jianli_rizhi"),
+        doc_type=doc_type_for(code),
         title=title,
         content=content,
-        form_code="anquan_jianli_rizhi",
+        form_code=code,
         project_id=project_id,
         creator_id=signer.id,
         status=DocStatus.DRAFT.value,
@@ -1047,7 +1144,7 @@ async def generate_safety_log(
     await db.refresh(doc)
 
     try:
-        docx_out = await asyncio.to_thread(render_form, "anquan_jianli_rizhi", content)
+        docx_out = await asyncio.to_thread(render_form, code, content)
         doc.docx_path = f"/exports/{docx_out.name}"
         await db.commit()
         try:
@@ -1078,7 +1175,7 @@ async def generate_safety_log(
         "status": doc.status,
         "pdf_url": doc.pdf_path,
         "docx_url": doc.docx_path,
-        "form_code": "anquan_jianli_rizhi",
+        "form_code": code,
         "form_name": "安全监理日志",
         "skipped": False,
         "summary": summary,
@@ -1103,6 +1200,17 @@ async def generate_aggregate_doc(
     与 ``generate_supervision_log`` 同理：``force=False`` 时同周期已有文书则跳过。
     """
     start, end, period_label = parse_period_range(period, ref)
+    project = await db.get(Project, project_id)
+    municipal = is_municipal(project)
+    # 市政项目：显式房建 code 翻译成对应市政表式；未显式指定时按工程类型路由。
+    if period == "day":
+        if form_code == "gd_b_220_rizhi" and municipal:
+            form_code = daily_log_form_code(project)
+        if form_code == "anquan_jianli_rizhi" and municipal:
+            form_code = safety_log_form_code(project)
+        if not form_code:
+            # 手动接口不传 form_code（默认监理日志）→ 市政项目出市政监-24
+            form_code = daily_log_form_code(project) if municipal else PERIOD_FORM_CODES["day"]
     code = form_code or PERIOD_FORM_CODES[period]
     spec = FORM_BY_CODE.get(code)
     if spec is None:
@@ -1111,7 +1219,7 @@ async def generate_aggregate_doc(
         raise ValueError(f"{spec.name} 不是聚合生成类文书")
 
     if period == "day":
-        if code == "anquan_jianli_rizhi":
+        if code in ("anquan_jianli_rizhi", "aqsz_2_2_anquan_rizhi"):
             return await generate_safety_log(
                 db, project_id, start, supervisor=supervisor, force=force,
                 extra_fields=extra_fields, narrative=narrative,
@@ -1125,8 +1233,9 @@ async def generate_aggregate_doc(
         # 模板缺失时必须只丢 docx 附件、不能让整张文书判失败：2026-11-03 生产缺
         # 21监理日志-房建新.docx 时抛 TemplateNotFoundError（FileNotFoundError 子类），
         # 工具层只捕 ValueError/RuntimeError，结果整单被报成「执行…时出错」。
+        daily_code = (daily_doc.form_code if daily_doc else None) or daily_log_form_code(project)
         try:
-            docx_file = await asyncio.to_thread(render_form, "gd_b_220_rizhi", daily_doc.content)
+            docx_file = await asyncio.to_thread(render_form, daily_code, daily_doc.content)
             daily_doc.docx_path = f"/exports/{docx_file.name}"
             await db.commit()
         except Exception as exc:  # noqa: BLE001
@@ -1135,7 +1244,7 @@ async def generate_aggregate_doc(
         from app.services.project_archive import sync_document_to_project_archive
         await sync_document_to_project_archive(db, daily_doc, supervisor)
         await db.commit()
-        return {**daily, "docx_url": daily_doc.docx_path, "form_code": "gd_b_220_rizhi", "form_name": "监理日志"}
+        return {**daily, "docx_url": daily_doc.docx_path, "form_code": daily_code, "form_name": "监理日志"}
 
     title = spec.default_title.format(date=start.isoformat(), period=period_label) or (
         f"{spec.name}_{period_label}"
@@ -1158,7 +1267,6 @@ async def generate_aggregate_doc(
             }
 
     agg = await aggregate_records(db, project_id, start, end)
-    project = await db.get(Project, project_id)
     signer = supervisor if supervisor is not None else await pick_creator(db, project_id)
     if signer is None:
         raise ValueError(f"项目 {project_id} 下没有成员，无法确定文书的创建人")
