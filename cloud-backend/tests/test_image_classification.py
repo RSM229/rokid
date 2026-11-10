@@ -19,6 +19,9 @@ from app.services.image_classification import (
     model_fields,
     LEDGER_FIELDS,
     ImageSignal,
+    municipal_processes,
+    municipal_process_hazard,
+    municipal_process_points,
 )
 from app.services.watermark_ocr import parse_watermark_fields
 
@@ -199,6 +202,72 @@ def run_overrides():
     return ok
 
 
+def run_municipal_rules():
+    """2026-11-10 市政判定依据融合：打桩通则、市政危大、要点库反查。"""
+    ok = True
+    # ① 打桩通则：各类桩型一律旁站（P），不限于水泥搅拌桩
+    for content, expect in [
+        ("高压旋喷桩成桩", "P"),
+        ("灌注桩施工", "P"),
+        ("预制桩沉桩", "P"),
+        ("CFG桩施工", "P"),
+        ("钢板桩打拔", "P"),
+    ]:
+        sig = ImageSignal(content=content, unit="沙盛四路", section="k0+200",
+                          taken_at="2026-11-10T10:00", in_progress=True)
+        res = classify_image(sig)
+        good = res.category_code == expect
+        ok &= good
+        print(f"[{' OK ' if good else 'FAIL'}] 打桩通则 {content!r} → {res.category_code}/{res.subcategory}")
+        if not good:
+            print(f"        实际 {res.reason}")
+
+    # ② 市政危大补充：盾构/沉井/箱涵顶进归 X2
+    for content, expect_sub in [
+        ("盾构法隧道掘进", "X2"),
+        ("沉井下沉", "X2"),
+        ("箱涵顶进", "X2"),
+        ("矿山法暗挖", "X2"),
+    ]:
+        sig = ImageSignal(content=content, unit="轨道交通", section="区间",
+                          taken_at="2026-11-10T11:00", in_progress=True)
+        res = classify_image(sig)
+        good = res.category_code == "X" and res.subcategory == expect_sub
+        ok &= good
+        print(f"[{' OK ' if good else 'FAIL'}] 市政危大 {content!r} → {res.category_code}/{res.subcategory}")
+        if not good:
+            print(f"        实际 {res.reason}")
+
+    # ③ 一般沟槽/基坑开挖仍属 X1 日常巡视（不列危大）
+    sig = ImageSignal(content="一般沟槽开挖", unit="沙盛四路", section="k0+300",
+                      taken_at="2026-11-10T09:30", in_progress=True)
+    res = classify_image(sig)
+    # extract 兜底会按 is_hazard 判定；直接构造 in_progress=True 不含危大词，走排除→X2 分支
+    # 但"沟槽开挖"在 PANGZHAN_EXCLUSION 里，rule 引擎会归 X2。这是一致口径：无论是否深基坑，
+    # 开挖均不旁站；巡视子类靠 vision 的 is_hazard 区分。这里验证不归 P。
+    good = res.category_code != "P"
+    ok &= good
+    print(f"[{' OK ' if good else 'FAIL'}] 沟槽开挖不旁站 → {res.category_code}/{res.subcategory}")
+
+    # ④ 要点库数据完整性
+    mp = municipal_processes()
+    ok &= mp["meta"]["count"] == 139
+    ok &= len(mp["items"]) == 139
+    print(f"[{' OK ' if ok else 'FAIL'}] 市政要点库 {mp['meta']['count']} 项")
+    hazard_cnt = sum(1 for it in mp["items"] if it.get("hazard"))
+    print(f"       危大工序 {hazard_cnt} 项 / 默认类别分布: "
+          + str({c: sum(1 for i in mp['items'] if i['default_cat'] == c) for c in ("P","W","Y","M","X1","X2","C","O")}))
+
+    # ⑤ 市政要点反查
+    pts = municipal_process_points("沟槽回填")
+    ok &= len(pts) == 1 and pts[0]["process"] == "沟槽回填"
+    print(f"[{' OK ' if ok else 'FAIL'}] 要点反查 沟槽回填 → {len(pts)} 项")
+    flag = municipal_process_hazard("沉井下沉就位")
+    ok &= flag
+    print(f"[{' OK ' if flag else 'FAIL'}] 要点库危大判定 沉井下沉就位 → {flag}")
+    return ok
+
+
 if __name__ == "__main__":
     ok = True
     ok &= run_cases()
@@ -207,5 +276,6 @@ if __name__ == "__main__":
     ok &= run_heuristic()
     ok &= run_end_to_end()
     ok &= run_overrides()
+    ok &= run_municipal_rules()
     print("\nRESULT:", "ALL PASS" if ok else "HAS FAILURES")
     sys.exit(0 if ok else 1)

@@ -16,7 +16,9 @@
 """
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field, replace
+from pathlib import Path
 from typing import Optional, Sequence
 
 
@@ -56,17 +58,21 @@ PANGZHAN_LIST: list[tuple[int, str, str]] = [
     (9, "箱涵钢筋隐蔽、混凝土浇筑、拆模", "钢筋规格间距、保护层、浇筑振捣、拆模强度"),
     (10, "钢板桩支护打拔", "打入深度、垂直度、变形监测"),
     (11, "有限空间作业全程", "通风、气体检测、监护、应急措施"),
-    (12, "设备安装与调试", "安装精度、调试参数"),
-    (13, "水泥搅拌桩（软基处理）成桩", "水泥掺量、浆液比重、提升速度、桩长、垂直度、桩身试块"),
+    (12, "设备安装与调试（泵站、顶管设备等）", "安装精度、调试参数"),
+    (13, "各类打桩成桩工序（水泥搅拌桩、高压旋喷桩及其它桩型）",
+        "水泥掺量、浆液比重/水灰比、旋喷压力与注浆量、提升速度、复搅次数、桩长、垂直度、桩身试块"),
 ]
 
 # 项目口径（2026-11-03 监理部确认）：沟槽/深基坑**开挖**不旁站，按 X2。
 # 注意只排除"开挖"，"回填"仍在清单第 1 项。
 PANGZHAN_EXCLUSION_KEYWORDS = ("开挖", "深基坑开挖", "沟槽开挖")
-# 危大工程关键词（命中后巡视优先归 X2，除非另有旁站工序在施）
+# 危大工程关键词（命中后巡视优先归 X2，除非另有旁站工序在施）。
+# 2026-11-10 补充市政特有危大：盾构、矿山法、暗挖、沉井、顶进箱涵、工作坑、高支模、桥墩围堰
 HAZARD_KEYWORDS = (
     "危大", "深基坑", "沟槽开挖", "模板支架", "顶管", "有限空间", "高处作业",
     "临边洞口", "临时用电", "消防", "起重", "脚手架", "拆除", "暗挖",
+    "盾构", "矿山法", "沉井", "顶进箱涵", "箱涵顶进", "工作坑", "高支模",
+    "围堰", "高大模板", "起重吊装",
 )
 
 # 冲突消解优先级（同一时点确实同时满足两类时，就高归档）。
@@ -86,6 +92,55 @@ LEDGER_FIELDS = [
     "序号", "拍摄日期", "时间", "类别码", "子类", "单位工程", "部位/桩号",
     "工序/对象", "拍摄人", "关联资料编号", "存储路径", "标签", "备注",
 ]
+
+
+# ---------------------------------------------------------------- 市政关键工序要点库
+
+# 《关键工序监理验收要点表》附件2-市政基础设施工程（139 项）的结构化落地。
+# 供验收要点查询、旁站/危大判定参考；default_cat 为按标准推演的默认类别，
+# 实际归档以旁站清单、验收记录与监理行为时点为准。
+_MUNICIPAL_DATA_PATH = Path(__file__).resolve().parents[2] / "app" / "data" / "municipal_key_processes.json"
+
+
+def _load_municipal_processes() -> dict:
+    try:
+        return json.loads(_MUNICIPAL_DATA_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {"meta": {"count": 0}, "items": []}
+
+
+_MUNICIPAL_CACHE: dict | None = None
+
+
+def municipal_processes() -> dict:
+    """市政关键工序要点库（惰性加载）。结构：{meta: {...}, items: [{id, unit, division, process, points, default_cat, hazard}]}"""
+    global _MUNICIPAL_CACHE
+    if _MUNICIPAL_CACHE is None:
+        _MUNICIPAL_CACHE = _load_municipal_processes()
+    return _MUNICIPAL_CACHE
+
+
+def municipal_process_hazard(content: str) -> bool:
+    """内容命中市政要点库中标为危大的工序 → 视为危大工程（X2 兜底）。
+
+    用于规则引擎的 ``_hazard_hit`` 补充：影像文本若含「沉井」「盾构」等
+    市政特色危大工序（不在主 HAZARD_KEYWORDS 覆盖时），据此归 X2。
+    """
+    if not content:
+        return False
+    return any(it.get("hazard") and (it["process"] in content)
+               for it in municipal_processes().get("items", []))
+
+
+def municipal_process_points(content: str) -> list[dict]:
+    """按工序/对象文字反查市政关键工序验收要点（求 name 包含）。
+
+    返回命中的要点条目（含 points 验收要点清单），供验收时人机核对。
+    """
+    if not content:
+        return []
+    return [it for it in municipal_processes().get("items", [])
+            if it.get("process") and it["process"] in content]
 
 
 # ---------------------------------------------------------------- 信号与结果
@@ -169,7 +224,11 @@ def _pangzhan_kw(name: str) -> list[str]:
         10: ["钢板桩"],
         11: ["有限空间作业"],
         12: ["顶管设备", "设备安装", "调试"],
-        13: ["水泥搅拌桩", "搅拌桩"],
+        # 第 13 项 "各类打桩成桩工序"：凡打桩一律旁站（2026-11-07 通则）。
+        # 水泥搅拌桩、高压旋喷桩（含注浆堵漏）、钢板桩打拔、灌注桩、
+        # 预制桩、CFG 桩等地基处理与支护成桩工序均归 P。
+        13: ["打桩", "搅拌桩", "水泥搅拌桩", "旋喷桩", "高压旋喷桩", "旋喷",
+             "灌注桩", "预制桩", "CFG桩", "cfg桩", "桩基施工", "沉桩", "成桩"],
     }
     for idx, kws in table.items():
         if any(kw in name for kw in kws):
@@ -312,7 +371,10 @@ def _x_subcategory(signal: ImageSignal, content: str, hazard_default: bool) -> t
 
 
 def _hazard_hit(content: str) -> bool:
-    return any(k in content for k in HAZARD_KEYWORDS)
+    if any(k in content for k in HAZARD_KEYWORDS):
+        return True
+    # 兜底：市政要点库标为危大的工序（沉井/盾构/矿山法/工作坑等）也判危大
+    return municipal_process_hazard(content)
 
 
 def _x_reason(sub: Optional[str], content: str) -> str:

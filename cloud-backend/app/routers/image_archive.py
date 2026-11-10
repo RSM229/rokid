@@ -43,6 +43,7 @@ from app.services.image_classification import (
     GAP_SUGGESTIONS,
     signal_from_watermark,
     archive_batch,
+    municipal_processes,
 )
 
 router = APIRouter()
@@ -102,6 +103,7 @@ def _standard(rules: Optional[dict] = None) -> dict:
             {"序号": idx, "工序": name, "主要控制点": points}
             for idx, name, points in PANGZHAN_LIST
         ],
+        "municipal_processes": municipal_processes(),
         "project_rules": {
             "pangzhan_excluded": list(PANGZHAN_EXCLUSION_KEYWORDS),
             "effective_excluded": (
@@ -111,7 +113,8 @@ def _standard(rules: Optional[dict] = None) -> dict:
             ),
             "revision": (rules or {}).get("revision") or 0,
             "note": "沟槽/深基坑开挖不实施旁站，按 X2 危大工程巡视归类（2026-11-03 项目监理部确认）；"
-                    "只排除开挖，回填仍属旁站清单第 1 项；水泥搅拌桩成桩属清单第 13 项。",
+                    "只排除开挖，回填仍属旁站清单第 1 项；各类打桩工序一律旁站（2026-11-07 确认）；"
+                    "市政关键工序验收要点见 municipal_processes（139 项，源自《关键工序监理验收要点表》附件2）。",
         },
         "conflict_priority": CONFLICT_PRIORITY,
         "labels": list(LABELS),
