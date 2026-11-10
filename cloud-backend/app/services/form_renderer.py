@@ -1312,6 +1312,15 @@ def _fill_rizhi_fangjian(doc: DocxDocument, table: Table, trs: list, data: dict)
     except IndexError:
         pass
 
+    # R9 记录人（签名）：项目日志留空走签认流程；个人监理日记回填作者本人，
+    # 让日记正文带上可辨识的个人标识（2026-11-10 修复「日记与日志肉眼一样」）。
+    recorder = str(data.get("recorder_name") or "").strip()
+    if recorder:
+        try:
+            _fill_signature_inline(_Cell(tcs_of(9)[0], table), "（签名）：", recorder)
+        except (IndexError, AttributeError):
+            pass
+
     # R10 审阅日期（签名格不回填姓名，走签认流程）
     if date_text:
         try:
@@ -1660,12 +1669,43 @@ FILLERS = {
     "gd_b_212_pangzhan": fill_pangzhan,
     "gd_b_213_pingxing": fill_pingxing,
     "gd_b_220_rizhi": fill_rizhi,
+    # 监理日记复用 GD-B-220 版式，但必须走同一填充器：未注册时会掉进
+    # fill_generic，二次导出（/document/{id}/export-pdf）会丢栏目。
+    "jianli_riji": fill_rizhi,
     "gdaq_30306_weida": fill_weida,
     "gd_b_219_cailiao": fill_cailiao,
     "anquan_jianli_rizhi": fill_anquan_rizhi,
     "gd_b_221_yuebao": fill_yuebao,
     "acceptance_record": fill_acceptance,
 }
+
+
+#: 复用同一模板、但抬头必须区分的表式。日记不是省统表，不冒用 GD-B-220 编号。
+FORM_HEADER_OVERRIDES = {"jianli_riji"}
+
+
+def _apply_header_override(doc: DocxDocument, form_code: str) -> None:
+    """把模板抬头「监理日志 / GD-B-220□□□」改写为日记抬头。
+
+    只改文档级段落（表格内的栏目名不动），保留首个 run 的字体与段落对齐；
+    文本被拆成多个 run 时合并到首 run，避免逐 run 替换漏字。
+    """
+    if form_code not in FORM_HEADER_OVERRIDES:
+        return
+    for para in doc.paragraphs:
+        text = para.text
+        if text.strip() == "监理日志":
+            new_text = text.replace("监理日志", "监理日记", 1)
+        elif "GD-B-220" in text:
+            new_text = re.sub(r"GD-B-220[□ \t]*", "GD-JL-RJ（个人监理记录）", text, count=1)
+        else:
+            continue
+        runs = para.runs
+        if not runs or new_text == text:
+            continue
+        runs[0].text = new_text
+        for run in runs[1:]:
+            run.text = ""
 
 
 def _fill_business_footer(doc, data):
@@ -2332,6 +2372,8 @@ def render_form(form_code: str, data: dict, output_dir: Path | None = None) -> P
         filler(doc, data)
     else:
         fill_generic(doc, data)
+    # 复用模板的表式（监理日记）改抬头，必须在填充器之后执行
+    _apply_header_override(doc, form_code)
     # 兜底：按 schema 字段标签回填（仅 CONTENT_MAP 登记的 11 类记录表式），
     # 保证所有录入字段在 docx 中不丢，且不影响既有专用填充器已填内容。
     try:

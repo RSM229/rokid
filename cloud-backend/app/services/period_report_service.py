@@ -669,7 +669,11 @@ async def generate_supervision_log(
 
     content = {
         "project_name": project_name,
-        "doc_number": f"{'GD-JL-RJ' if is_diary else 'GD-JL'}-{project_id}-{target_date.strftime('%Y%m%d')}",
+        # 日记按「项目+日期+作者」编号：同一天多人各写各的日记，不能重号。
+        "doc_number": (
+            f"GD-JL-RJ-{project_id}-{target_date.strftime('%Y%m%d')}-{author_id}"
+            if is_diary else f"GD-JL-{project_id}-{target_date.strftime('%Y%m%d')}"
+        ),
         "date": target_date.isoformat(),
         "weekday": weekday,
         "temperature_high": ex.get("temp_high", ""),
@@ -683,6 +687,8 @@ async def generate_supervision_log(
         "parallel_section": parallel_section,
         "supervisor": supervisor_name,
         "supervisor_level": supervisor_level,
+        # 仅日记带：渲染器据此在「记录人（签名）」格回填本人姓名。
+        **({"recorder_name": supervisor_name} if is_diary else {}),
         "construction_progress": construction_progress,
         "material_section": material_section,
         "supervision_section": supervision_section,
@@ -735,7 +741,10 @@ async def generate_supervision_log(
     diary_suffix = "监理日记" if is_diary else "监理日志"
     try:
         from app.services.form_renderer import render_form
-        docx_out = await asyncio.to_thread(render_form, "gd_b_220_rizhi", content)
+        # 日记走自己的表式（抬头「监理日记」+ 个人编号 + 记录人签名），
+        # 与项目日志的 gd_b_220_rizhi 分开，避免两份 PDF 看起来一模一样。
+        render_code = "jianli_riji" if is_diary else "gd_b_220_rizhi"
+        docx_out = await asyncio.to_thread(render_form, render_code, content)
         doc.docx_path = f"/exports/{docx_out.name}"
         await db.commit()
         from app.services.docx2pdf import convert_docx_to_pdf

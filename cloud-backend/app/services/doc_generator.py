@@ -420,6 +420,15 @@ def _get_log_styles():
     return styles
 
 
+def _log_title_for(doc) -> str:
+    """监理日记复用日志自绘版式，但抬头必须区分（回退路径同样不能串味）。"""
+    is_diary = (
+        getattr(doc, "doc_type", "") == "监理日记"
+        or getattr(doc, "form_code", "") == "jianli_riji"
+    )
+    return "监理日记" if is_diary else "监理日志"
+
+
 def generate_daily_log_pdf(doc, output_path: str, target_date: date_type = None):
     """生成监理日志报告 PDF
 
@@ -451,7 +460,9 @@ def generate_daily_log_pdf(doc, output_path: str, target_date: date_type = None)
     story = []
 
     # ===== 标题 =====
-    story.append(Paragraph("监理日志", styles["LogTitle"]))
+    # 自绘版式是省统表 docx→PDF 失败时的回退路径，日记同样要抬头正确，
+    # 否则回退时又变回「监理日志」（2026-11-10 修复）。
+    story.append(Paragraph(_log_title_for(doc), styles["LogTitle"]))
 
     # ===== 表头信息表格 =====
     header_data = [
