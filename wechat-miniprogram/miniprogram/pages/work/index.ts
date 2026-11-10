@@ -211,7 +211,7 @@ interface MenuItem {
 }
 
 interface ReportType {
-  key: 'diary' | 'day' | 'week' | 'month'
+  key: 'day' | 'week' | 'month'
   label: string
   desc: string
   icon: string
@@ -233,8 +233,7 @@ const TIME_RANGES = [
 ]
 
 const REPORT_TYPES: ReportType[] = [
-  { key: 'diary', label: '日记', desc: '生成我的监理日记（个人）', icon: '📔' },
-  { key: 'day', label: '日志', desc: '生成当日监理日志（项目）', icon: '📋' },
+  { key: 'day', label: '日志', desc: '生成当日监理日志', icon: '📋' },
   { key: 'week', label: '周报', desc: '生成本周监理周报', icon: '📊' },
   { key: 'month', label: '月报', desc: '生成本月监理月报', icon: '📈' },
 ]
@@ -292,7 +291,7 @@ Page(themed({
     // 报告生成弹窗
     showReportModal: false,
     reportTypes: REPORT_TYPES,
-    reportType: 'day' as 'diary' | 'day' | 'week' | 'month',
+    reportType: 'day' as 'day' | 'week' | 'month',
     reportDate: '',
     useLlm: true,
 
@@ -636,12 +635,6 @@ Page(themed({
         // 监理日志：后端按日期聚合当日工作记录与隐患生成（项目维度）
         result = await request<{ doc_id?: number }>(
           `/document/generate-daily-log?date=${this.data.reportDate}`,
-          { method: 'POST', data: {}, timeout: 180000 },
-        )
-      } else if (this.data.reportType === 'diary') {
-        // 监理日记：个人维度，只聚合当前用户当日记录，落款本人
-        result = await request<{ doc_id?: number }>(
-          `/document/generate-daily-diary?date=${this.data.reportDate}`,
           { method: 'POST', data: {}, timeout: 180000 },
         )
       } else {

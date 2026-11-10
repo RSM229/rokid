@@ -121,3 +121,11 @@
 .sec-head { display: flex; align-items: center; justify-content: space-between; padding: 14rpx 4rpx 16rpx; }
 .sec-title { font-size: 28rpx; font-weight: 700; color: var(--ink-2, #243b55); }
 .sec-count { font-size: 24rpx; color: #999; background: rgba(238,242,240,0.8); border-radius: 999rpx; padding: 4rpx 18rpx; }
+
+/* 监理日记生成入口：仅资料库「监理日记」文件夹内显示 */
+.diary-gen { border-color: rgba(var(--brand-rgb, 22,119,255), 0.28); }
+.diary-gen-title { font-size: 28rpx; font-weight: 700; color: var(--ink-2, #243b55); }
+.diary-gen-sub { margin-top: 8rpx; font-size: 22rpx; line-height: 1.5; color: #6b7c90; }
+.diary-gen-row { display: flex; align-items: center; gap: 16rpx; margin-top: 18rpx; }
+.diary-date { padding: 12rpx 18rpx; border-radius: 12rpx; font-size: 24rpx; color: var(--brand-d, #0b5fd0); background: rgba(var(--wash-rgb, 234,243,255), 0.85); }
+.diary-gen-row .btn-primary { flex: none; margin: 0; }
