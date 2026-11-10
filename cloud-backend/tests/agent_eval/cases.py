@@ -544,18 +544,6 @@ CASES: tuple[dict, ...] = (
         "note": "真机 2.6：光说页面名也该跳转，不该当成知识问答。",
     },
     {
-        "id": "G05", "group": "导航",
-        "say": "打开AI巡检",
-        "expect": {
-            "tool": "navigate",
-            "args_required": {"page": ["AI巡检"]},
-        },
-        "note": "🔴 只有精确说「AI巡检」才跳巡检页。_PAGE_ALIASES 收过「巡检」短别名，"
-                "但 RECORD_TYPES['巡视'].aliases 里「巡检」是巡视记录的同义词，且 _navigate 走"
-                "子串包含匹配 —— 收了就会把「记一条巡检：3号楼二层」劫持到 AI巡检页。"
-                "前端旧指令表当年也特意删过这条，两边口径必须一致。",
-    },
-    {
         "id": "G06", "group": "导航",
         "say": "记一条巡检：3号楼二层临边防护，上午9点到11点",
         "expect": {
@@ -563,8 +551,7 @@ CASES: tuple[dict, ...] = (
             "args_required": {"record_type": ["巡视"], "section": ["3号楼二层"]},
             "tool_forbidden": ["navigate"],
         },
-        "note": "🔴 G05 的反向守门：「巡检」是巡视记录同义词，这句必须建巡视记录，"
-                "绝不能因为含「巡检」二字被 navigate 劫持到 AI巡检页。"
+        "note": "「巡检」是巡视记录同义词，这句必须建巡视记录，不能被 navigate 当成页面名劫持。"
                 "对应 RECORD_TYPES['巡视'].aliases=('巡检','巡查','安全巡视','现场巡视')。",
     },
     {

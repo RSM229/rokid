@@ -105,11 +105,6 @@ _PAGE_ALIASES = {
     "知识库管理": "/pages/kb/index",
     "资料库管理": "/pages/kb/index",
     "规范查询": "/pages/knowledge/index",
-    # 🔴 只收「AI巡检」这个精确说法，**不收「巡检」**：
-    # RECORD_TYPES["巡视"].aliases 里「巡检」是巡视记录的同义词，而 _navigate 用
-    # 子串包含匹配，收了就会把「巡检3号楼二层，记一条」劫持到 AI巡检页。
-    # 前端旧指令表当年也特意删过这条（见 git 历史注释），两边口径保持一致。
-    "AI巡检": "/pages/inspection/index",
     "拍照识别": "/pages/capture/index",
     "拍照": "/pages/capture/index",
     "AI隐患识别": "/pages/capture/index?mode=hazard",
@@ -3377,7 +3372,7 @@ TOOLS: tuple[ToolSpec, ...] = (
     ),
     ToolSpec(
         "navigate",
-        "打开系统页面（工作记录/巡视记录/验收记录/旁站记录/见证记录/隐患/隐患识别/文书/监理文书/台账/AI巡检/规范查询/拍照识别/待办/看板/资料库/知识库/省统表录入/平行检验/我的）。"
+        "打开系统页面（工作记录/巡视记录/验收记录/旁站记录/见证记录/隐患/隐患识别/文书/监理文书/台账/规范查询/拍照识别/待办/看板/资料库/知识库/省统表录入/平行检验/我的）。"
         "用户说「打开XX」「查看XX」「XX页面」或只报一个页面名/功能名时用；不要追问用户想干什么，也不要当成知识问答。",
         {"*page": "页面名，如 工作记录/台账/规范查询"},
         None, "read", _navigate,
