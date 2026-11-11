@@ -1004,6 +1004,11 @@ Page(themed({
     this.setData({ showTimeSheet: true })
   },
 
+  /** 打开规范文书总列表（巡视/旁站/见证/验收/整改通知单/台账，支持按类型筛选） */
+  openDocList() {
+    wx.navigateTo({ url: '/pages/documents/index' })
+  },
+
   closeTimeSheet() {
     this.setData({ showTimeSheet: false })
   },
