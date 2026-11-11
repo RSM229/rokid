@@ -158,6 +158,30 @@ function mapResponse(resp: AgentChatResponse): AssistantMessage {
   return message
 }
 
+interface StoredMessage {
+  role: string
+  text: string
+  response?: Record<string, any>
+}
+
+/** 历史会话 → 消息：把落库的 reasoning/steps/citations/耗时一并还原 */
+function messageFromStored(item: StoredMessage): AssistantMessage {
+  const role = item.role === 'assistant' ? 'assistant' : 'user'
+  const message = blankMessage(role, item.text || '')
+  const response = item.response
+  if (role === 'assistant' && response && typeof response === 'object') {
+    applyResponse(message, response as AgentChatResponse)
+    const reasoning = String(response.reasoning || '')
+    if (reasoning.trim()) message.reasoning = reasoning
+    if (Array.isArray(response.steps)) message.steps = response.steps.map(String).slice(0, 12)
+    const thinkingMs = Number(response.thinking_ms || 0)
+    if (thinkingMs > 0) message.thinkingMs = thinkingMs
+    message.answerStarted = true
+  }
+  message.streaming = false
+  return message
+}
+
 export function useAssistant() {
   const route = useRoute()
   const router = useRouter()
@@ -215,11 +239,8 @@ export function useAssistant() {
       const detail = await assistantApi.conversation(conversationId.value)
       if (!detail.messages?.length) return
       messages.value = detail.messages
-        .filter((m) => m.text)
-        .map((m) => {
-          const message = blankMessage(m.role === 'assistant' ? 'assistant' : 'user', m.text)
-          return message
-        })
+        .filter((m) => m.text || m.response?.reply)
+        .map(messageFromStored)
     } catch {
       // 会话不存在或已切项目：静默开新会话，不打扰用户
       setConversation(uuid())
@@ -415,8 +436,8 @@ export function useAssistant() {
     try {
       const detail = await assistantApi.conversation(id)
       messages.value = detail.messages
-        .filter((m) => m.text)
-        .map((m) => blankMessage(m.role === 'assistant' ? 'assistant' : 'user', m.text))
+        .filter((m) => m.text || m.response?.reply)
+        .map(messageFromStored)
       setConversation(id)
       historyOpen.value = false
     } catch {

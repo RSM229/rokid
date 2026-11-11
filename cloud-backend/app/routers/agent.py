@@ -15,6 +15,7 @@ import contextvars
 import json
 import logging
 import re
+import time
 from datetime import datetime
 from typing import Any, Optional
 
@@ -59,11 +60,71 @@ _STREAM_EMITTER: contextvars.ContextVar = contextvars.ContextVar(
     "agent_stream_emitter", default=None
 )
 
+# 流式轮次的元信息（思考原文/步骤/耗时）：结束后随响应落进展示历史，
+# 这样重新打开历史会话时「已深度思考」和引用列表还能还原。
+_STREAM_META: contextvars.ContextVar = contextvars.ContextVar(
+    "agent_stream_meta", default=None
+)
+
+_REASONING_SAVE_LIMIT = 12000
+
+
+def _new_stream_meta() -> dict[str, Any]:
+    return {
+        "started": time.monotonic(),
+        "reasoning_parts": [],
+        "reasoning_chars": 0,
+        "steps": [],
+        "first_answer_ms": None,
+    }
+
+
+def _collect_stream_meta(event: dict[str, Any]) -> None:
+    meta = _STREAM_META.get()
+    if meta is None:
+        return
+    elapsed_ms = int((time.monotonic() - meta["started"]) * 1000)
+    kind = event.get("type")
+    if kind == "reasoning":
+        text = str(event.get("text") or "")
+        left = _REASONING_SAVE_LIMIT - int(meta.get("reasoning_chars") or 0)
+        if text and left > 0:
+            take = text[:left]
+            meta["reasoning_parts"].append(take)
+            meta["reasoning_chars"] = int(meta.get("reasoning_chars") or 0) + len(take)
+    elif kind == "answer":
+        if meta.get("first_answer_ms") is None:
+            meta["first_answer_ms"] = elapsed_ms
+    elif kind == "progress":
+        title = str(event.get("title") or "").strip()
+        steps = meta.setdefault("steps", [])
+        if title and len(steps) < 12 and (not steps or steps[-1] != title):
+            steps.append(title)
+
+
+def _attach_stream_meta(result: dict[str, Any]) -> None:
+    """把本轮思考原文/步骤/耗时附到回执上（只在流式轮次有 meta）。"""
+    meta = _STREAM_META.get()
+    if meta is None or not isinstance(result, dict):
+        return
+    reasoning = "".join(meta.get("reasoning_parts") or []).strip()
+    if reasoning:
+        result["reasoning"] = reasoning
+    steps = list(meta.get("steps") or [])[:12]
+    if steps:
+        result["steps"] = steps
+    elapsed = meta.get("first_answer_ms")
+    if elapsed is None:
+        elapsed = int((time.monotonic() - meta["started"]) * 1000)
+    if elapsed:
+        result["thinking_ms"] = int(elapsed)
+
 
 async def _emit_stream(event: dict[str, Any]) -> None:
     emitter = _STREAM_EMITTER.get()
     if emitter is None:
         return
+    _collect_stream_meta(event)
     try:
         await emitter(event)
     except Exception:  # noqa: BLE001 —— 推流失败不能影响主流程
@@ -1749,6 +1810,8 @@ async def agent_chat(
         result["reply"] = brief + "\n" + str(result.get("reply") or "").strip()
     if isinstance(result, dict):
         result["request_id"] = request_id
+        # 流式轮次：把思考原文/步骤/耗时附到回执上，随展示历史一起落库
+        _attach_stream_meta(result)
     if isinstance(result, dict):
         # 长期偏好自动沉淀：先剥掉模型打的 <<PREF ...>> 标记（用户不该看到），
         # 再兜底做一次「同一句规矩说了两遍」的重复检测。只产生建议，绝不自动落库。
@@ -1853,6 +1916,7 @@ async def agent_chat_stream(
 
     async def runner() -> None:
         token = _STREAM_EMITTER.set(emitter)
+        meta_token = _STREAM_META.set(_new_stream_meta())
         try:
             result = await agent_chat(req, user=user, db=db)
             await queue.put({"type": "done", "result": result})
@@ -1864,6 +1928,7 @@ async def agent_chat_stream(
             logger.exception("agent stream failed")
             await queue.put({"type": "error", "message": "服务异常，请稍后重试。"})
         finally:
+            _STREAM_META.reset(meta_token)
             _STREAM_EMITTER.reset(token)
 
     async def event_stream():

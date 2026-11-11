@@ -50,6 +50,8 @@ const seconds = computed(() => Math.max(1, Math.round(liveMs.value / 1000)))
 const label = computed(() => {
   if (!props.done && !props.answerStarted) return `思考中… ${seconds.value}s`
   const base = props.text ? '已深度思考' : '处理过程'
+  // 历史会话里没存到耗时的旧消息：只显示结论，不编一个 1 秒
+  if (props.done && !props.elapsedMs) return base
   return `${base}（${seconds.value} 秒）`
 })
 

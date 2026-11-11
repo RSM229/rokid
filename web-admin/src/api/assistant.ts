@@ -126,7 +126,14 @@ export interface ConversationDetail {
   title: string
   message_count: number
   updated_at: string
-  messages: Array<{ role: string; text: string; at?: string; images?: string[] }>
+  messages: Array<{
+    role: string
+    text: string
+    at?: string
+    images?: string[]
+    /** 完整回执（含 reasoning / steps / thinking_ms / citations），用于还原历史 */
+    response?: Record<string, any>
+  }>
 }
 
 export interface AgentStreamHandlers {
