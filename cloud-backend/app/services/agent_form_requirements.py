@@ -27,11 +27,21 @@ _INPUT_ALIASES: dict[str, tuple[str, ...]] = {
     "content": ("content", "work_content", "station_content", "inspection_content", "activity"),
     "problems": ("problems", "problem", "issue", "inspection_remark"),
     "treatment": ("treatment", "handling"),
-    "start_time": ("start_time", "inspection_start_time", "station_start_time", "taken_at"),
+    # 🔴 注意：taken_at（照片拍摄时间）不能出现在 date/time/sample_date 的别名里。
+    #   _CANONICAL_INPUT_FIELDS 是反向索引，同一个 alias 被多个 canonical 引用时
+    #   后定义者覆盖先定义者，taken_at 会从 start_time 漂到 sample_date，
+    #   导致巡视/旁站等记录的 date/start_time 仍判缺失、反过来问用户拍摄时间
+    #   （2026-11-11 真机：水印有时间却被问时间）。taken_at 由
+    #   resolve_event_form 的水印分支显式拆分到 record_date + start_time。
+    "start_time": ("start_time", "inspection_start_time", "station_start_time"),
     "end_time": ("end_time", "inspection_end_time", "station_end_time"),
-    "date": ("date", "record_date", "taken_at"),
-    "time": ("time", "date", "record_date", "taken_at"),
-    "sample_date": ("sample_date", "record_date", "taken_at"),
+    # 🔴 record_date 只能有一个反向目标（date）。若同时挂在 time/sample_date 下，
+    #   反向索引后定义者覆盖先定义者 → record_date → sample_date，同 taken_at 一样
+    #   把日期塞进没人看的字段、date 判缺失（2026-11-11 实测同一 bug）。
+    #   sample_date 是见证的「取样日期」，与 record_date（记录日期）语义不同，不做兜底。
+    "date": ("date", "record_date"),
+    "time": ("time",),
+    "sample_date": ("sample_date",),
     "material_name": ("material_name", "witness_material_name"),
     "material_spec": ("material_spec", "witness_material_spec", "spec"),
     "quantity": ("quantity", "witness_quantity"),
@@ -52,6 +62,33 @@ _EMPTY = {"", "null", "none", "unknown", "未知", "未识别", "待定", "n/a"}
 # 参建单位/项目身份字段：多来源不一致时按「用户明说 > 当前项目 > 水印」裁决，
 # 不再让用户逐项勾选（2026-11-03 用户要求「少输入、智能体帮忙思考」）。
 PROJECT_PARTY_FIELDS = {"project_name", "construction_unit", "supervision_unit", "supervision_org", "owner_unit"}
+
+# 水印拍摄时间「2026-10-19 15:42:10 / 2026-10-19T15:42 / 2026-10-19 15时42分」的解析。
+# 与 agent.py 的 _TIME_RE/_DATE_RE 同规则，但抽到本模块供 resolve_event_form 直接使用。
+_WM_DATE_RE = re.compile(r"(\d{4})\s*[-/年.]\s*(\d{1,2})\s*[-/月.]\s*(\d{1,2})")
+_WM_CLOCK_RE = re.compile(r"(\d{1,2})\s*[:：时]\s*(\d{2})")
+
+
+def _parse_watermark_date(value: Any) -> str:
+    """水印拍摄时间文本 → YYYY-MM-DD；取不到返回空串。"""
+    m = _WM_DATE_RE.search(str(value or ""))
+    if not m:
+        return ""
+    year, month, day = int(m.group(1)), int(m.group(2)), int(m.group(3))
+    if not (1 <= month <= 12 and 1 <= day <= 31):
+        return ""
+    return f"{year:04d}-{month:02d}-{day:02d}"
+
+
+def _parse_watermark_clock(value: Any) -> str:
+    """水印拍摄时间文本 → HH:MM；取不到返回空串。"""
+    m = _WM_CLOCK_RE.search(str(value or ""))
+    if not m:
+        return ""
+    hour, minute = int(m.group(1)), int(m.group(2))
+    if hour > 23 or minute > 59:
+        return ""
+    return f"{hour:02d}:{minute:02d}"
 
 
 def _text(value: Any) -> str:
@@ -192,6 +229,26 @@ def resolve_event_form(
             add(f"label:{label}", value, "watermark", "evidence_extracted") if label else None
         for key, value in (evidence.get("watermark_fields") or {}).items():
             add(str(key), value, "watermark", "evidence_extracted")
+
+        # 🔴 2026-11-11 水印拍摄时间（taken_at）→ 记录日期 + 本类型「开始时间」。
+        #    此前 taken_at 在反向别名索引里被 sample_date 抢占（date/time/sample_date
+        #    三处误挂、后定义者覆盖先定义者），巡视/旁站记录的 date 与 start_time
+        #    永远判缺失 → 系统反问「拍摄时间是多少」而用户明明已发带时间水印照片。
+        #    与 apply_prefill（agent.py）同规则：record_type 为旁站落 station_start_time，
+        #    否则落 start_time（巡视等）。date 落到 record_date（date 由事件级回填兜底）。
+        _wm_taken_raw = str(
+            (evidence.get("watermark_fields") or {}).get("taken_at") or ""
+        ).strip()
+        if _wm_taken_raw:
+            _wm_iso_date = _parse_watermark_date(_wm_taken_raw)
+            if _wm_iso_date:
+                add("record_date", _wm_iso_date, "watermark", "evidence_extracted")
+            _wm_clock = _parse_watermark_clock(_wm_taken_raw)
+            if _wm_clock:
+                if record_type == "旁站":
+                    add("station_start_time", _wm_clock, "watermark", "evidence_extracted")
+                else:
+                    add("start_time", _wm_clock, "watermark", "evidence_extracted")
 
     # The planning model may surface candidates from context beyond literal
     # watermark labels (for example, a role inferred from the surrounding
