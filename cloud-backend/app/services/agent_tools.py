@@ -109,7 +109,7 @@ _PAGE_ALIASES = {
     "拍照": "/pages/capture/index",
     "AI隐患识别": "/pages/capture/index?mode=hazard",
     "我的": "/pages/mine/index",
-    "省统表": "/pages/record-form/choose",
+    "省统表": "/pages/documents/index",
     "平行检验": "/pages/parallel/index",
 }
 
