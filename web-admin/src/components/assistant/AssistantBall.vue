@@ -62,7 +62,7 @@
             @card="openCard"
           />
 
-          <div v-if="busy" class="pending">
+          <div v-if="showPending" class="pending">
             <span class="pending-text">处理中</span>
             <span class="pending-dots"><i /><i /><i /></span>
           </div>
@@ -128,7 +128,7 @@
 </template>
 
 <script setup lang="ts">
-import { nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { ChatLineRound, Clock, Close, Picture, Promotion } from '@element-plus/icons-vue'
 import AssistantMessage from './AssistantMessage.vue'
 import { useAssistant } from '@/composables/useAssistant'
@@ -165,6 +165,11 @@ const inputRef = ref<HTMLTextAreaElement | null>(null)
 const fileRef = ref<HTMLInputElement | null>(null)
 const pendingFile = ref<File | null>(null)
 const pendingPreview = ref('')
+
+// 流式输出时消息自己会显示"思考中/正在生成"，底部就不再重复一个"处理中"
+const showPending = computed(
+  () => busy.value && !messages.value.some((message) => message.streaming),
+)
 
 function pickImage() {
   fileRef.value?.click()

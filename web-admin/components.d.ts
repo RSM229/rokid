@@ -14,6 +14,7 @@ declare module 'vue' {
     AssistantBall: typeof import('./src/components/assistant/AssistantBall.vue')['default']
     AssistantChart: typeof import('./src/components/assistant/AssistantChart.vue')['default']
     AssistantMessage: typeof import('./src/components/assistant/AssistantMessage.vue')['default']
+    AssistantReasoning: typeof import('./src/components/assistant/AssistantReasoning.vue')['default']
     ElAlert: typeof import('element-plus/es')['ElAlert']
     ElAside: typeof import('element-plus/es')['ElAside']
     ElAvatar: typeof import('element-plus/es')['ElAvatar']

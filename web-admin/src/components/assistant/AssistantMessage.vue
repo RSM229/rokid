@@ -3,8 +3,19 @@
   <div class="msg" :class="message.role">
     <div class="msg-role">{{ message.role === 'user' ? '我' : '助手' }}</div>
 
+    <AssistantReasoning
+      v-if="message.reasoning || message.steps.length"
+      :text="message.reasoning"
+      :steps="message.steps"
+      :elapsed-ms="message.thinkingMs"
+      :done="!message.streaming"
+      :answer-started="message.answerStarted"
+    />
+
     <img v-if="message.image" :src="message.image" class="msg-image" alt="" />
-    <p v-if="message.text" class="msg-text">{{ message.text }}</p>
+    <p v-if="message.text" class="msg-text" :class="{ streaming: message.streaming && message.answerStarted }">
+      {{ message.text }}
+    </p>
     <p v-if="message.hint" class="msg-hint">{{ message.hint }}</p>
 
     <AssistantChart v-if="message.chart" :spec="message.chart" />
@@ -60,6 +71,7 @@
 <script setup lang="ts">
 import { defineAsyncComponent } from 'vue'
 import { ArrowRight } from '@element-plus/icons-vue'
+import AssistantReasoning from './AssistantReasoning.vue'
 import type { AssistantMessage } from '@/composables/useAssistant'
 import type { AgentAction, AgentCard } from '@/api/assistant'
 
@@ -112,6 +124,15 @@ function cardMeta(card: AgentCard): string {
   padding: 8px 12px;
   border-radius: 10px;
   background: #f4f4f1;
+}
+.msg-text.streaming::after {
+  content: '▍';
+  margin-left: 1px;
+  color: #c2c6cc;
+  animation: caret-blink 1s steps(2, start) infinite;
+}
+@keyframes caret-blink {
+  50% { opacity: 0; }
 }
 .msg-hint {
   margin: 0;

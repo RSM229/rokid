@@ -9,6 +9,9 @@
 """
 from __future__ import annotations
 
+import asyncio
+import contextlib
+import contextvars
 import json
 import logging
 import re
@@ -20,6 +23,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.responses import StreamingResponse
 
 from app.db import get_db
 from app.models.user import Project, User
@@ -48,6 +52,30 @@ from app.services import agent_review_plan
 from app.services.text_clean import strip_markdown
 
 logger = logging.getLogger(__name__)
+
+# 流式对话（SSE）的发射器：设置后，模型调用点会把 reasoning/content 增量推给端点的队列。
+# 用 ContextVar 而不是层层加参数，避免改动 600 行的 _agent_chat_impl 签名。
+_STREAM_EMITTER: contextvars.ContextVar = contextvars.ContextVar(
+    "agent_stream_emitter", default=None
+)
+
+
+async def _emit_stream(event: dict[str, Any]) -> None:
+    emitter = _STREAM_EMITTER.get()
+    if emitter is None:
+        return
+    try:
+        await emitter(event)
+    except Exception:  # noqa: BLE001 —— 推流失败不能影响主流程
+        logger.debug("agent stream emit failed", exc_info=True)
+
+
+def _streaming_enabled() -> bool:
+    return _STREAM_EMITTER.get() is not None
+
+
+def _sse_pack(event: str, payload: dict[str, Any]) -> str:
+    return f"event: {event}\ndata: {json.dumps(payload, ensure_ascii=False, default=str)}\n\n"
 router = APIRouter()
 
 
@@ -600,6 +628,17 @@ async def _plain_answer(message: str, history: list[dict], provider: str | None,
     messages = [{"role": "system", "content": persona + _PLAINTEXT_SUFFIX}]
     messages.extend(_history_messages(history))
     messages.append({"role": "user", "content": message})
+    if _streaming_enabled():
+        parts: list[str] = []
+        async for event in model_gateway.stream_chat_completion(
+            messages, temperature=0.7, provider=provider, model=model
+        ):
+            if event["type"] == "reasoning":
+                await _emit_stream({"type": "reasoning", "text": event["text"]})
+            elif event["type"] == "content":
+                parts.append(event["text"])
+                await _emit_stream({"type": "answer", "text": event["text"]})
+        return strip_markdown("".join(parts))
     answer, _cfg = await model_gateway.chat_completion(
         messages, temperature=0.7, provider=provider, model=model
     )
@@ -1008,14 +1047,34 @@ async def _agent_chat_impl(
                 "intent_model", "running", "正在理解你想做什么，并从你的话里抽取关键字段",
                 {"provider": req.provider or "系统路由", "model": req.model or "系统选择", "response_mode": "structured_json"},
             )
-            raw, config = await model_gateway.chat_completion(
-                messages,
-                temperature=0.2,
-                provider=req.provider,
-                model=req.model,
-                response_format={"type": "json_object"},
-            )
-            model_id = config.model_id
+            if _streaming_enabled():
+                raw_parts: list[str] = []
+                config = None
+                async for event in model_gateway.stream_chat_completion(
+                    messages,
+                    temperature=0.2,
+                    provider=req.provider,
+                    model=req.model,
+                    response_format={"type": "json_object"},
+                    thinking=False,  # 路由只要 JSON，不要思考：更快且不展示内部规划
+                ):
+                    event_type = event.get("type")
+                    if event_type == "config":
+                        config = event.get("config")
+                    elif event_type == "content":
+                        # 路由模型的 content 是 JSON 规划，不展示；思考过程只从
+                        # 「回答模型」那条流里取（否则会把工具目录/提示词逻辑暴露给用户）。
+                        raw_parts.append(event["text"])
+                raw = "".join(raw_parts)
+            else:
+                raw, config = await model_gateway.chat_completion(
+                    messages,
+                    temperature=0.2,
+                    provider=req.provider,
+                    model=req.model,
+                    response_format={"type": "json_object"},
+                )
+            model_id = getattr(config, "model_id", "") or req.model or ""
             parsed = agent_tools._parse_json_object(raw)
             await report_progress(
                 "intent_model", "completed", "已读懂你的意图，正在核对可用的动作和字段",
@@ -1492,8 +1551,10 @@ async def _agent_chat_impl(
         }
 
     # 无工具 → 纯问答（把模型已生成的 answer 直接用；空则再调一次）
+    # 流式模式下强制再走一次可流式的回答模型：路由模型那条 JSON 里的 answer
+    # 没法逐字推给前端，而且它的思考过程不适合展示。
     answer = str((parsed or {}).get("answer") or "").strip()
-    if not answer:
+    if not answer or _streaming_enabled():
         try:
             answer = await _plain_answer(message, req.history, req.provider, req.model, req.mode)
         except model_gateway.ModelGatewayError as exc:
@@ -1542,6 +1603,8 @@ async def agent_chat(
             title=title,
             detail=detail,
         )
+        # 流式模式下同时把步骤推给前端（/chat 没有 emitter，这里是空操作）
+        await _emit_stream({"type": "progress", "stage": stage, "status": status, "title": title})
 
     try:
         result = await _agent_chat_impl(req, user=user, db=db, progress_hook=progress_hook)
@@ -1673,6 +1736,71 @@ async def agent_chat(
             model=str(result.get("model") or req.model or ""),
         )
     return result
+
+
+@router.post("/chat/stream")
+async def agent_chat_stream(
+    req: AgentChatRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """同 ``/chat``，但用 SSE 推送思考过程与正文增量，最后用 ``done`` 带回完整回执。
+
+    事件：``meta`` / ``progress`` / ``reasoning`` / ``answer`` / ``done`` / ``error``。
+    前端在拿不到 SSE 时应回退到 ``/chat``（本端点不复用其响应，两者可并存）。
+    """
+    queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+
+    async def emitter(event: dict[str, Any]) -> None:
+        await queue.put(event)
+
+    async def runner() -> None:
+        token = _STREAM_EMITTER.set(emitter)
+        try:
+            result = await agent_chat(req, user=user, db=db)
+            await queue.put({"type": "done", "result": result})
+        except HTTPException as exc:
+            await queue.put({"type": "error", "message": str(exc.detail)})
+        except model_gateway.ModelGatewayError as exc:
+            await queue.put({"type": "error", "message": str(exc)})
+        except Exception:  # noqa: BLE001 —— 错误要变成事件，不能让 SSE 静默断流
+            logger.exception("agent stream failed")
+            await queue.put({"type": "error", "message": "服务异常，请稍后重试。"})
+        finally:
+            _STREAM_EMITTER.reset(token)
+
+    async def event_stream():
+        task = asyncio.create_task(runner())
+        yield _sse_pack("meta", {
+            "conversation_id": req.conversation_id,
+            "request_id": req.request_id,
+        })
+        try:
+            while True:
+                event = await queue.get()
+                kind = event.get("type") or "message"
+                if kind == "done":
+                    yield _sse_pack("done", event.get("result") or {})
+                    break
+                if kind == "error":
+                    yield _sse_pack("error", {"message": event.get("message") or "服务异常"})
+                    break
+                yield _sse_pack(kind, event)
+        finally:
+            if not task.done():
+                task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
 
 
 @router.get("/conversations")

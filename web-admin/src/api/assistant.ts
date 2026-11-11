@@ -118,6 +118,84 @@ export interface ConversationDetail {
   messages: Array<{ role: string; text: string; at?: string; images?: string[] }>
 }
 
+export interface AgentStreamHandlers {
+  onMeta?: (payload: { conversation_id?: string; request_id?: string }) => void
+  onProgress?: (payload: { stage?: string; status?: string; title?: string }) => void
+  onReasoning?: (text: string) => void
+  onAnswer?: (text: string) => void
+  onDone?: (result: AgentChatResponse) => void
+  onError?: (message: string) => void
+}
+
+/**
+ * 流式对话（SSE over fetch）。
+ *
+ * 不用 EventSource：它不支持 POST + Authorization。这里按 `\n\n` 切事件块，
+ * 分发 meta/progress/reasoning/answer/done/error；传输层失败才抛错，
+ * 业务 error 事件通过 onError 回调，调用方据此决定是否降级到 /agent/chat。
+ */
+export async function chatStream(
+  payload: AgentChatPayload,
+  handlers: AgentStreamHandlers,
+  signal?: AbortSignal,
+): Promise<void> {
+  const token = localStorage.getItem('token') || ''
+  const response = await fetch('/api/agent/chat/stream', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify(payload),
+    signal,
+  })
+  if (!response.ok || !response.body) {
+    throw new Error(`stream_http_${response.status}`)
+  }
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder('utf-8')
+  let buffer = ''
+
+  const dispatch = (block: string) => {
+    let event = ''
+    const dataLines: string[] = []
+    for (const line of block.split('\n')) {
+      if (line.startsWith('event:')) event = line.slice(6).trim()
+      else if (line.startsWith('data:')) dataLines.push(line.slice(5).trim())
+    }
+    if (!event) return
+    let data: Record<string, any> = {}
+    if (dataLines.length) {
+      try {
+        data = JSON.parse(dataLines.join('\n'))
+      } catch {
+        return
+      }
+    }
+    if (event === 'meta') handlers.onMeta?.(data)
+    else if (event === 'progress') handlers.onProgress?.(data)
+    else if (event === 'reasoning') {
+      if (data.text) handlers.onReasoning?.(String(data.text))
+    } else if (event === 'answer') {
+      if (data.text) handlers.onAnswer?.(String(data.text))
+    } else if (event === 'done') handlers.onDone?.(data as AgentChatResponse)
+    else if (event === 'error') handlers.onError?.(String(data.message || '服务异常'))
+  }
+
+  while (true) {
+    const { value, done } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    let index = buffer.indexOf('\n\n')
+    while (index >= 0) {
+      dispatch(buffer.slice(0, index))
+      buffer = buffer.slice(index + 2)
+      index = buffer.indexOf('\n\n')
+    }
+  }
+  if (buffer.trim()) dispatch(buffer)
+}
+
 export const assistantApi = {
   // 工具轮（建记录/生成文书）可能跑 30~60s，默认 30s 不够
   chat: (payload: AgentChatPayload) => http.post<AgentChatResponse>('/agent/chat', payload, { timeout: 180000 }),

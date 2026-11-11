@@ -5,12 +5,13 @@
  * 会话 id 落 localStorage，后端按 user + project 存展示历史，
  * 打开面板时可以恢复上一次的对话。
  */
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { hazardApi } from '@/api'
 import {
   assistantApi,
+  chatStream,
   type AgentCard,
   type AgentAction,
   type AgentChatResponse,
@@ -25,6 +26,14 @@ export interface AssistantMessage {
   text: string
   hint: string
   image: string
+  /** 思考过程（纯文本，不渲染 Markdown） */
+  reasoning: string
+  /** 进度步骤（"正在查询工作记录…"这类，来自后端 progress 事件） */
+  steps: string[]
+  /** 开始出答案前的思考耗时（ms） */
+  thinkingMs: number
+  answerStarted: boolean
+  streaming: boolean
   cards: AgentCard[]
   actions: AgentAction[]
   chips: string[]
@@ -100,6 +109,11 @@ function blankMessage(role: 'user' | 'assistant', text: string): AssistantMessag
     text,
     hint: '',
     image: '',
+    reasoning: '',
+    steps: [],
+    thinkingMs: 0,
+    answerStarted: false,
+    streaming: false,
     cards: [],
     actions: [],
     chips: [],
@@ -111,17 +125,16 @@ function blankMessage(role: 'user' | 'assistant', text: string): AssistantMessag
   }
 }
 
-function mapResponse(resp: AgentChatResponse): AssistantMessage {
-  const message = blankMessage('assistant', resp.reply || '')
+/** 把 /agent/chat 的回执（含流式 done）落到一条消息上 */
+function applyResponse(message: AssistantMessage, resp: AgentChatResponse) {
   const cards = resp.cards?.length ? resp.cards : resp.card ? [resp.card] : []
   message.cards = cards
   message.actions = resp.actions || []
   message.chips = resp.chips || []
   message.undo = resp.undo ? { entity: resp.undo.entity, id: resp.undo.id } : null
   message.chart = resp.chart || null
-  if (resp.need_more?.length) {
-    message.hint = `还缺：${resp.need_more.join('、')}`
-  }
+  if (resp.need_more?.length) message.hint = `还缺：${resp.need_more.join('、')}`
+  if (resp.reply) message.text = resp.reply
   if (!message.text && !message.cards.length) {
     message.text = resp.kind === 'action' ? '已完成。' : '没有找到相关内容。'
   }
@@ -132,6 +145,11 @@ function mapResponse(resp: AgentChatResponse): AssistantMessage {
     conversationId.value = resp.conversation_id
     persistConversationId()
   }
+}
+
+function mapResponse(resp: AgentChatResponse): AssistantMessage {
+  const message = blankMessage('assistant', '')
+  applyResponse(message, resp)
   return message
 }
 
@@ -242,22 +260,83 @@ export function useAssistant() {
         ? '（用户已上传一张现场图片，但自动隐患识别服务暂时不可用，没有拿到识别结果。）'
         : undefined)
 
+    // 必须是 reactive 代理：流式期间要在 push 之后持续改这条消息（文本/思考/步骤），
+    // 直接改 push 进去的原始对象不会触发 Vue 重渲染。
+    const message = reactive(blankMessage('assistant', ''))
+    message.streaming = true
+    messages.value.push(message)
+    const startedAt = Date.now()
+    let receivedAny = false
+    let doneReceived = false
+
+    const payload = {
+      message: text || '根据这张图片的识别结果，告诉我下一步该做什么。',
+      conversation_id: ensureConversation(),
+      project_id: auth.currentProjectId ?? undefined,
+      mode: 'web',
+      material: materialText,
+    }
+
+    const fallback = async () => {
+      const resp = await assistantApi.chat(payload)
+      applyResponse(message, resp)
+      doneReceived = true
+    }
+
     try {
-      const resp = await assistantApi.chat({
-        message: text || '根据这张图片的识别结果，告诉我下一步该做什么。',
-        conversation_id: ensureConversation(),
-        project_id: auth.currentProjectId ?? undefined,
-        mode: 'web',
-        material: materialText,
+      await chatStream(payload, {
+        onMeta: (meta) => {
+          if (meta?.conversation_id) setConversation(meta.conversation_id)
+        },
+        onProgress: (progress) => {
+          const title = String(progress?.title || '').trim()
+          if (!title) return
+          if (message.steps[message.steps.length - 1] !== title) message.steps.push(title)
+        },
+        onReasoning: (chunk) => {
+          receivedAny = true
+          message.reasoning += chunk
+        },
+        onAnswer: (chunk) => {
+          receivedAny = true
+          if (!message.answerStarted) {
+            message.answerStarted = true
+            message.thinkingMs = Date.now() - startedAt
+          }
+          message.text += chunk
+        },
+        onDone: (result) => {
+          doneReceived = true
+          applyResponse(message, result)
+        },
+        onError: (detail) => {
+          message.error = true
+          message.text = detail || '服务异常'
+          message.retryText = text
+        },
       })
-      messages.value.push(mapResponse(resp))
+      if (!doneReceived && !message.error && !message.text) {
+        await fallback()
+      }
     } catch {
-      const message = blankMessage('assistant', '请求失败。')
-      message.error = true
-      message.retryText = text
-      message.hint = '网络或服务异常，可直接重试。'
-      messages.value.push(message)
+      // 传输层失败（老后端 / 网络 / 401）：没收到任何增量就回退普通接口
+      if (!receivedAny && !message.text && !message.answerStarted) {
+        try {
+          await fallback()
+        } catch {
+          message.error = true
+          message.text = '请求失败。'
+          message.retryText = text
+          message.hint = '网络或服务异常，可直接重试。'
+        }
+      } else {
+        message.error = true
+        message.retryText = text
+        if (!message.text) message.text = '连接中断，请重试。'
+      }
     } finally {
+      message.streaming = false
+      if (!message.answerStarted) message.thinkingMs = Date.now() - startedAt
       busy.value = false
     }
   }
