@@ -97,16 +97,6 @@
       </view>
       <text class="cell-arrow">›</text>
     </view>
-    <view class="cell entry-item entry-tint" bindtap="openKnowledge">
-      <view class="entry-main">
-        <view class="entry-icon ic-know"></view>
-        <view class="entry-text">
-          <text class="entry-title">规范资料库</text>
-          <text class="entry-desc">规范检索 · 知识图谱 · 验收流程指引</text>
-        </view>
-      </view>
-      <text class="cell-arrow">›</text>
-    </view>
     <view class="cell entry-item entry-tint" bindtap="openProjectMemory">
       <view class="entry-main">
         <view class="entry-icon ic-board"></view>

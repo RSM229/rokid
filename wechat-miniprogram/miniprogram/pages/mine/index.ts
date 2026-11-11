@@ -118,11 +118,6 @@ Page(themed({
     wx.navigateTo({ url: '/pages/project-memory/index' })
   },
 
-  /** 规范资料库：规范检索 / 知识图谱 / 验收流程指引 */
-  openKnowledge() {
-    wx.navigateTo({ url: '/pages/knowledge/index' })
-  },
-
   async loadProfile() {
     try {
       const me = await request<Record<string, unknown>>('/auth/me')
