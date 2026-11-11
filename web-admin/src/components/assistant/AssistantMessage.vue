@@ -90,7 +90,7 @@
     </div>
 
     <Teleport to="body">
-      <div v-if="activeCitation" class="cite-pop" :style="popStyle" @mousedown.stop>
+      <div v-if="activeCitation" ref="popRef" class="cite-pop" :style="popStyle" @mousedown.stop>
         <div class="cite-pop-head">
           <span class="cite-pop-kind">{{ activeCitation.sub || kindLabel(activeCitation.kind) }}</span>
           <button type="button" class="cite-pop-close" @click="activeCitation = null">关闭</button>
@@ -111,7 +111,7 @@
 </template>
 
 <script setup lang="ts">
-import { defineAsyncComponent, onBeforeUnmount, onMounted, ref } from 'vue'
+import { defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ArrowRight } from '@element-plus/icons-vue'
 import AssistantReasoning from './AssistantReasoning.vue'
@@ -135,7 +135,9 @@ const emit = defineEmits<{
 
 const router = useRouter()
 const activeCitation = ref<Citation | null>(null)
-const popStyle = ref<Record<string, string>>({})
+const popStyle = ref<Record<string, string>>({ visibility: 'hidden' })
+const popRef = ref<HTMLElement | null>(null)
+const anchorRect = ref<DOMRect | null>(null)
 
 const KIND_LABEL: Record<string, string> = {
   regulation: '规范',
@@ -154,28 +156,55 @@ function cardMeta(card: AgentCard): string {
   return [card.sub, card.status, card.time].filter(Boolean).join(' · ')
 }
 
-/** 把浮层放在角标下方；放不下就翻到上方，并夹在视口内 */
-function positionPop(rect: DOMRect) {
-  const width = 300
-  const estimatedHeight = 230
-  const left = Math.min(Math.max(8, rect.left), window.innerWidth - width - 8)
-  const below = rect.bottom + 8
-  const top = below + estimatedHeight > window.innerHeight
-    ? Math.max(8, rect.top - estimatedHeight - 8)
-    : below
-  popStyle.value = { left: `${left}px`, top: `${top}px`, width: `${width}px` }
+function clamp(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), Math.max(min, max))
+}
+
+/**
+ * 先渲染再量真实尺寸，然后按锚点位置摆：
+ * 默认放下方，下方放不下翻到上方，左右夹在视口内（避免贴边被裁掉）。
+ */
+async function placePop() {
+  const anchor = anchorRect.value
+  const el = popRef.value
+  if (!anchor || !el) return
+  const margin = 8
+  const vw = window.innerWidth
+  const vh = window.innerHeight
+  const width = el.offsetWidth
+  const height = el.offsetHeight
+  let left = anchor.left
+  if (left + width > vw - margin) left = vw - width - margin
+  if (left < margin) left = margin
+  // 锚点在屏幕下半部分时优先向上弹：避免盖住面板输入框
+  const above = anchor.top - height - margin
+  const below = anchor.bottom + margin
+  let top = anchor.top > vh * 0.55 && above >= margin ? above : below
+  if (top + height > vh - margin) top = above >= margin ? above : below
+  top = clamp(top, margin, vh - height - margin)
+  popStyle.value = {
+    left: `${Math.round(left)}px`,
+    top: `${Math.round(top)}px`,
+    visibility: 'visible',
+  }
+}
+
+async function showCitation(citation: Citation, event: MouseEvent) {
+  anchorRect.value = (event.currentTarget as HTMLElement).getBoundingClientRect()
+  activeCitation.value = citation
+  popStyle.value = { visibility: 'hidden' }
+  await nextTick()
+  await placePop()
 }
 
 function openCite(index: number, event: MouseEvent) {
   const citation = props.message.citations.find((item) => item.index === index)
   if (!citation) return
-  positionPop((event.currentTarget as HTMLElement).getBoundingClientRect())
-  activeCitation.value = citation
+  void showCitation(citation, event)
 }
 
 function openCiteRow(citation: Citation, event: MouseEvent) {
-  positionPop((event.currentTarget as HTMLElement).getBoundingClientRect())
-  activeCitation.value = citation
+  void showCitation(citation, event)
 }
 
 function goCitation(citation: Citation) {
@@ -198,14 +227,23 @@ function onDocumentKeydown(event: KeyboardEvent) {
   if (event.key === 'Escape') activeCitation.value = null
 }
 
+/** 面板内部滚动/窗口缩放会让浮层脱离锚点，直接关掉比错位好 */
+function closeOnViewportChange() {
+  if (activeCitation.value) activeCitation.value = null
+}
+
 onMounted(() => {
   document.addEventListener('mousedown', onDocumentMouseDown)
   document.addEventListener('keydown', onDocumentKeydown)
+  document.addEventListener('scroll', closeOnViewportChange, true)
+  window.addEventListener('resize', closeOnViewportChange)
 })
 
 onBeforeUnmount(() => {
   document.removeEventListener('mousedown', onDocumentMouseDown)
   document.removeEventListener('keydown', onDocumentKeydown)
+  document.removeEventListener('scroll', closeOnViewportChange, true)
+  window.removeEventListener('resize', closeOnViewportChange)
 })
 </script>
 
@@ -414,6 +452,12 @@ onBeforeUnmount(() => {
 .cite-pop {
   position: fixed;
   z-index: 3000;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  width: 300px;
+  max-width: calc(100vw - 16px);
+  max-height: min(340px, calc(100vh - 16px));
   padding: 12px 14px;
   border: 1px solid #e0e0dc;
   border-radius: 10px;
@@ -449,6 +493,8 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 .cite-pop-snippet {
+  flex: 1 1 auto;
+  min-height: 0;
   margin: 6px 0 0;
   max-height: 150px;
   overflow-y: auto;
