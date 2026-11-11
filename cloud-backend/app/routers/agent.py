@@ -28,7 +28,8 @@ from starlette.responses import StreamingResponse
 
 from app.db import get_db
 from app.models.user import Project, User
-from app.models.agent_draft import AgentFlowInstance, AgentReviewPlan
+from app.models.agent_draft import AgentConversationMessage, AgentFlowInstance, AgentReviewPlan
+from app.models.document import Document
 from app.models.miniprogram import MediaRecord, MediaType
 from app.routers.auth import get_current_user
 from app.routers.local_ai import _PLAINTEXT_SUFFIX
@@ -700,6 +701,11 @@ _CITE_TARGET = {
     "regulation": "/knowledge-base",
 }
 
+# 指代类追问（这个/这份/这样/它/刚才…）：没有上一轮结果卡时不要硬检索
+_FOLLOWUP_REFERENCE_RE = re.compile(
+    r"(这个|这份|这条|那份|那个|它|上面|上述|刚才|这样|那样|这里|那里|该文|该表|该份)"
+)
+
 
 def _plain_persona(mode: str | None) -> str:
     persona = "你是广东建设智慧监理工程监理智能助手，请给出准确、可执行、简洁的回答。"
@@ -713,8 +719,21 @@ def _plain_persona(mode: str | None) -> str:
 
 
 def _plain_messages(message: str, history: list[dict], mode: str | None,
-                    cite_block: str = "") -> list[dict]:
+                    cite_block: str = "", context_hint: str = "",
+                    require_context_hint: bool = False) -> list[dict]:
     persona = _plain_persona(mode)
+    if context_hint:
+        persona += (
+            "\n\n【上一轮助手结果】上一轮助手返回过这些结果（用户说「这个 / 这份 / 这条 / 它」时，"
+            "优先指代其中最近的一个；问「为什么这样写」时先点明指的是哪份，再解释）：\n"
+            + context_hint
+        )
+    if require_context_hint:
+        persona += (
+            "\n\n用户这句话用了指代（这个/这份/这条/它/刚才/上面），但系统没有可对应的上一轮结果卡。"
+            "如果对话历史里也找不到明确对象：只请用户指明他指的是什么，不要猜测、不要展开其他话题、"
+            "不要引用任何材料。"
+        )
     if cite_block:
         persona += (
             "\n\n下面是系统从项目资料/规范库检索到的参考材料，材料编号就是引用号。"
@@ -752,7 +771,7 @@ async def _plain_answer(message: str, history: list[dict], provider: str | None,
 
 
 def _retrieve_citations(message: str, project_id: int | None,
-                        top_k: int = 5) -> tuple[list[dict], str]:
+                        top_k: int = 5, min_score: float = 0.0) -> tuple[list[dict], str]:
     """针对用户问题做一次混合检索，产出引用条目与资料块（失败静默降级为空）。"""
     try:
         from app.services import rag_index
@@ -765,6 +784,12 @@ def _retrieve_citations(message: str, project_id: int | None,
     blocks: list[str] = []
     seen_titles: set[str] = set()
     for hit in hits:
+        try:
+            score = float(hit.get("score") or 0.0)
+        except (TypeError, ValueError):
+            score = 0.0
+        if score < min_score:
+            continue
         title = str(hit.get("source_name") or "").strip()
         snippet = str(hit.get("snippet") or hit.get("content") or "").strip().replace("\n", " ")
         if not title or not snippet:
@@ -787,12 +812,112 @@ def _retrieve_citations(message: str, project_id: int | None,
     return citations, "\n\n".join(blocks)
 
 
+def _doc_excerpt(doc: Document | None) -> str:
+    """文书 content（字段字典）压成一行摘要，给模型解释「为什么这样写」用。"""
+    if doc is None or not isinstance(doc.content, dict):
+        return ""
+    parts: list[str] = []
+    for key, value in doc.content.items():
+        if len(parts) >= 10:
+            break
+        if value is None or isinstance(value, (list, dict)):
+            continue
+        text = str(value).strip()
+        if not text or text in ("无", "待补", "/"):
+            continue
+        parts.append(f"{key}={text[:40]}")
+    return "；".join(parts)[:500]
+
+
+async def _last_result_context(db: AsyncSession, user_id: Any, conversation_id: str | None,
+                               project_id: int | None) -> tuple[str, str]:
+    """取上一轮助手回执里的结果卡，作为指代消解上下文。
+
+    返回 (给模型看的结果摘要, 检索时补充的关键词)。没有上一轮或没有卡片时返回空。
+    """
+    if not conversation_id:
+        return "", ""
+    stmt = (
+        select(AgentConversationMessage)
+        .where(
+            AgentConversationMessage.user_id == int(user_id),
+            AgentConversationMessage.conversation_id == conversation_id,
+            AgentConversationMessage.role == "assistant",
+        )
+        .order_by(AgentConversationMessage.id.desc())
+        .limit(1)
+    )
+    if project_id is None:
+        stmt = stmt.where(AgentConversationMessage.project_id.is_(None))
+    else:
+        stmt = stmt.where(AgentConversationMessage.project_id == int(project_id))
+    row = (await db.execute(stmt)).scalars().first()
+    if row is None:
+        return "", ""
+    try:
+        content = json.loads(row.content_json or "{}")
+    except (TypeError, ValueError):
+        return "", ""
+    response = content.get("response") if isinstance(content, dict) else None
+    if not isinstance(response, dict):
+        return "", ""
+    cards = response.get("cards") if isinstance(response.get("cards"), list) else []
+    if not cards and isinstance(response.get("card"), dict):
+        cards = [response["card"]]
+    lines: list[str] = []
+    titles: list[str] = []
+    doc_excerpts: list[str] = []
+    for card in cards[:5]:
+        if not isinstance(card, dict):
+            continue
+        kind = str(card.get("kind") or "")
+        title = str(card.get("title") or "").strip()
+        sub = str(card.get("sub") or "").strip()
+        if not title:
+            continue
+        titles.append(f"{title} {sub}".strip())
+        lines.append(f"- {kind} #{card.get('id')}：{title}（{sub or kind}，{card.get('status') or ''}）")
+        if kind == "document":
+            try:
+                doc = await db.get(Document, int(card.get("id") or 0))
+            except (TypeError, ValueError):
+                doc = None
+            if doc is not None and (project_id is None or doc.project_id == project_id):
+                excerpt = _doc_excerpt(doc)
+                if excerpt:
+                    doc_excerpts.append(f"《{doc.title}》(#{doc.id}, {doc.doc_type}, {doc.status}) 内容：{excerpt}")
+    if not lines:
+        return "", ""
+    hint = "\n".join(lines[:5])
+    if doc_excerpts:
+        hint += "\n文书内容摘要：" + " | ".join(doc_excerpts[:2])
+    return hint[:1200], " ".join(titles[:3])
+
+
 async def _plain_answer_cited(message: str, history: list[dict], provider: str | None,
                               model: str | None, mode: str | None,
-                              project_id: int | None) -> tuple[str, list[dict]]:
-    citations, block = _retrieve_citations(message, project_id)
-    messages = _plain_messages(message, history, mode, cite_block=block)
+                              project_id: int | None,
+                              *, context_hint: str = "",
+                              query_extra: str = "",
+                              require_context: bool = False) -> tuple[str, list[dict]]:
+    if require_context:
+        # 有指代但系统没有可对应的结果卡：不检索、不引用，让模型只追问
+        citations: list[dict] = []
+        block = ""
+    else:
+        query = f"{message} {query_extra}".strip() if query_extra else message
+        citations, block = _retrieve_citations(query, project_id, min_score=0.3)
+    messages = _plain_messages(
+        message, history, mode, cite_block=block, context_hint=context_hint,
+        require_context_hint=require_context,
+    )
     answer = await _generate_plain(messages, provider, model)
+    # 只保留模型真正引用过的材料；它没引用就不展示「引用」列表（避免检索噪声冒充依据）
+    used = {int(num) for num in re.findall(r"\[\[(\d+)\]\]", answer or "")}
+    if used:
+        citations = [item for item in citations if int(item.get("index") or 0) in used]
+    else:
+        citations = []
     return answer, citations
 
 
@@ -1707,15 +1832,22 @@ async def _agent_chat_impl(
     answer = str((parsed or {}).get("answer") or "").strip()
     citations: list[dict] = []
     if not answer or _streaming_enabled():
+        # 上一轮的结果卡（文书 id/标题/摘要）作为指代上下文，否则「解释一下为什么这样写」会不知道指谁
+        context_hint, query_extra = await _last_result_context(
+            db, user.id, conversation_id, project_id,
+        )
+        require_context = bool(_FOLLOWUP_REFERENCE_RE.search(message)) and not context_hint
         try:
             answer, citations = await _plain_answer_cited(
                 message, req.history, req.provider, req.model, req.mode, project_id,
+                context_hint=context_hint, query_extra=query_extra,
+                require_context=require_context,
             )
         except model_gateway.ModelGatewayError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
     else:
-        # 非流式复用路由模型的 answer 时，只补一份引用列表（正文没有编号标记）
-        citations, _block = _retrieve_citations(message, project_id)
+        # 非流式复用路由模型的 answer 时，只补一份高相关引用列表（正文没有编号标记）
+        citations, _block = _retrieve_citations(message, project_id, min_score=0.6)
     return {"kind": "chat", "tool": None, "reply": strip_markdown(answer), "card": None,
             "cards": [], "actions": [], "need_more": [], "undo": None,
             "form": None, "model": model_id, "request_plan": incoming_plan,
