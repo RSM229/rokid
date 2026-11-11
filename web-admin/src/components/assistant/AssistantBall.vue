@@ -20,6 +20,11 @@
           <span class="head-context">{{ contextLabel }}</span>
         </div>
         <div class="head-actions">
+          <span
+            v-if="modelLabel"
+            class="head-model"
+            :title="`当前文本模型：${modelLabel}（在「系统设置 → 模型调用设置」修改）`"
+          >{{ modelLabel }}</span>
           <button type="button" class="icon-btn" :class="{ active: historyOpen }" title="历史会话" @click="toggleHistory">
             <el-icon :size="15"><Clock /></el-icon>
           </button>
@@ -64,20 +69,30 @@
         </div>
 
         <footer class="panel-foot">
+          <div v-if="pendingPreview" class="pending-image">
+            <img :src="pendingPreview" alt="" />
+            <button type="button" class="pending-image-close" title="移除" @click="clearPendingImage">
+              <el-icon :size="11"><Close /></el-icon>
+            </button>
+          </div>
           <div class="composer">
+            <button type="button" class="attach-btn" title="发送图片（自动做隐患识别）" @click="pickImage">
+              <el-icon :size="16"><Picture /></el-icon>
+            </button>
+            <input ref="fileRef" type="file" accept="image/jpeg,image/png,image/webp" class="file-input" @change="onFileChange" />
             <textarea
               ref="inputRef"
               v-model="input"
               class="composer-input"
               rows="1"
-              placeholder="说一句话，或点上面的示例"
+              placeholder="说一句话，或发一张现场图"
               @keydown.enter="onEnter"
               @input="autoGrow"
             />
             <button
               type="button"
               class="send-btn"
-              :disabled="busy || !input.trim()"
+              :disabled="busy || (!input.trim() && !pendingFile)"
               title="发送"
               @click="submit"
             >
@@ -114,11 +129,13 @@
 
 <script setup lang="ts">
 import { nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
-import { ChatLineRound, Clock, Close, Promotion } from '@element-plus/icons-vue'
+import { ChatLineRound, Clock, Close, Picture, Promotion } from '@element-plus/icons-vue'
 import AssistantMessage from './AssistantMessage.vue'
 import { useAssistant } from '@/composables/useAssistant'
 
 const suggestions = ['打开台账', '今天的记录有几条', '生成今天的监理日志', '未整改的隐患']
+
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024
 
 const {
   messages,
@@ -128,7 +145,9 @@ const {
   conversations,
   conversationsLoading,
   contextLabel,
+  modelLabel,
   send,
+  loadModelLabel,
   retry,
   toggle,
   close,
@@ -143,6 +162,36 @@ const {
 const input = ref('')
 const listRef = ref<HTMLElement | null>(null)
 const inputRef = ref<HTMLTextAreaElement | null>(null)
+const fileRef = ref<HTMLInputElement | null>(null)
+const pendingFile = ref<File | null>(null)
+const pendingPreview = ref('')
+
+function pickImage() {
+  fileRef.value?.click()
+}
+
+function clearPendingImage() {
+  if (pendingPreview.value) URL.revokeObjectURL(pendingPreview.value)
+  pendingPreview.value = ''
+  pendingFile.value = null
+  if (fileRef.value) fileRef.value.value = ''
+}
+
+function onFileChange(event: Event) {
+  const target = event.target as HTMLInputElement
+  const file = target.files?.[0]
+  if (!file) return
+  if (!file.type.startsWith('image/')) return
+  if (file.size > MAX_IMAGE_BYTES) {
+    window.alert('图片不要超过 10MB')
+    clearPendingImage()
+    return
+  }
+  if (pendingPreview.value) URL.revokeObjectURL(pendingPreview.value)
+  pendingFile.value = file
+  pendingPreview.value = URL.createObjectURL(file)
+  inputRef.value?.focus()
+}
 
 function scrollToBottom() {
   const el = listRef.value
@@ -157,8 +206,13 @@ function submitText(text: string) {
 
 function submit() {
   const text = input.value.trim()
-  if (!text || busy.value) return
-  submitText(text)
+  const image = pendingFile.value
+  if (busy.value || (!text && !image)) return
+  input.value = ''
+  autoGrow()
+  const file = image || undefined
+  clearPendingImage()
+  void send(text, { image: file })
 }
 
 function onEnter(event: KeyboardEvent) {
@@ -197,7 +251,10 @@ watch(open, (value) => {
   })
 })
 
-onMounted(() => window.addEventListener('keydown', onWindowKeydown))
+onMounted(() => {
+  window.addEventListener('keydown', onWindowKeydown)
+  void loadModelLabel()
+})
 onUnmounted(() => window.removeEventListener('keydown', onWindowKeydown))
 </script>
 
@@ -295,6 +352,63 @@ onUnmounted(() => window.removeEventListener('keydown', onWindowKeydown))
   display: flex;
   align-items: center;
   gap: 2px;
+}
+.head-model {
+  max-width: 118px;
+  margin-right: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10.5px;
+  color: #b3b8bf;
+}
+.attach-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: #8a8f98;
+  cursor: pointer;
+}
+.attach-btn:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.file-input {
+  display: none;
+}
+.pending-image {
+  position: relative;
+  display: inline-block;
+  margin-bottom: 8px;
+}
+.pending-image img {
+  display: block;
+  max-width: 120px;
+  max-height: 90px;
+  border: 1px solid #ececea;
+  border-radius: 8px;
+  object-fit: cover;
+}
+.pending-image-close {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid #dcdcd8;
+  border-radius: 50%;
+  background: #fff;
+  color: #5b616b;
+  cursor: pointer;
 }
 .icon-btn {
   display: flex;

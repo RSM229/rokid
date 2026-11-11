@@ -119,7 +119,17 @@ export interface ConversationDetail {
 }
 
 export const assistantApi = {
-  chat: (payload: AgentChatPayload) => http.post<AgentChatResponse>('/agent/chat', payload),
+  // 工具轮（建记录/生成文书）可能跑 30~60s，默认 30s 不够
+  chat: (payload: AgentChatPayload) => http.post<AgentChatResponse>('/agent/chat', payload, { timeout: 180000 }),
+  /** 当前文本模型（只读；切换在「系统设置 → 模型调用设置」） */
+  modelStatus: () =>
+    http.get<{
+      configured?: boolean
+      enabled?: boolean
+      provider?: string
+      current_model?: string
+      model_available?: boolean
+    }>('/local/llm/status'),
   conversations: (limit = 30) =>
     http.get<{ conversations: ConversationSummary[]; project_id?: number | null }>(
       '/agent/conversations',

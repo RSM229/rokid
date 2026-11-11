@@ -264,7 +264,8 @@ export const hazardApi = {
   detect: (file: File) => {
     const form = new FormData()
     form.append('image', file)
-    return http.post('/hazard/detect', form)
+    // VLM 识别实测 15~140s 不等（供应商偶发慢/失败），默认 30s 会直接超时
+    return http.post('/hazard/detect', form, { timeout: 180000 })
   },
   detectAndSave: async (file: File, params?: any) => {
     const form = new FormData()

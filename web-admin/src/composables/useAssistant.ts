@@ -8,6 +8,7 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { hazardApi } from '@/api'
 import {
   assistantApi,
   type AgentCard,
@@ -23,6 +24,7 @@ export interface AssistantMessage {
   role: 'user' | 'assistant'
   text: string
   hint: string
+  image: string
   cards: AgentCard[]
   actions: AgentAction[]
   chips: string[]
@@ -43,6 +45,7 @@ const conversations = ref<ConversationSummary[]>([])
 const conversationsLoading = ref(false)
 const conversationId = ref<string>(localStorage.getItem(CONVERSATION_KEY) || '')
 const hydrated = ref(false)
+const modelLabel = ref('')
 
 let seq = 0
 function nextId(): string {
@@ -63,6 +66,29 @@ function nowLabel(): string {
   return new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
 }
 
+/** 隐患识别结果 → 对话里的一段文字（与旧工作台的展示口径一致） */
+function formatHazardResult(data: any): string {
+  const NA = new Set(['不适用', '无', '暂无', '不存在隐患'])
+  const clean = (value: unknown) => String(value ?? '').trim()
+  const riskStatus = clean(data?.risk_status)
+  const negative = /不存在隐患|未发现|无明显隐患/.test(riskStatus)
+  const lines: string[] = []
+  if (data?.has_hazard && !negative) lines.push('发现隐患')
+  const type = clean(data?.hazard_type) || clean(data?.risk_category) || clean(data?.top1_risk)
+  if (type && !NA.has(type)) lines.push(`风险：${type}`)
+  const description = clean(data?.description).replace(/证据：[\s\S]*$/, '').trim()
+  if (description && !NA.has(description) && !/^不适用/.test(description)) lines.push(description)
+  if (data?.suggestion) lines.push(`建议：${clean(data.suggestion)}`)
+  if (Array.isArray(data?.evidence) && data.evidence.length) {
+    lines.push(`证据：${data.evidence.join('、')}`)
+  }
+  if (Array.isArray(data?.recheck_suggestion) && data.recheck_suggestion.length) {
+    lines.push(`复查：${data.recheck_suggestion.join('、')}`)
+  }
+  if (!lines.length) lines.push('未识别到明显隐患。')
+  return lines.join('\n')
+}
+
 function persistConversationId() {
   if (conversationId.value) localStorage.setItem(CONVERSATION_KEY, conversationId.value)
 }
@@ -73,6 +99,7 @@ function blankMessage(role: 'user' | 'assistant', text: string): AssistantMessag
     role,
     text,
     hint: '',
+    image: '',
     cards: [],
     actions: [],
     chips: [],
@@ -176,23 +203,55 @@ export function useAssistant() {
     }
   }
 
-  async function send(raw: string, options: { echo?: boolean } = {}) {
+  async function send(raw: string, options: { echo?: boolean; image?: File } = {}) {
     const text = String(raw || '').trim()
-    if (!text || busy.value) return
+    const image = options.image
+    if ((!text && !image) || busy.value) return
     if (options.echo !== false) {
-      messages.value.push(blankMessage('user', text))
+      const userMessage = blankMessage('user', text)
+      if (image) userMessage.image = URL.createObjectURL(image)
+      messages.value.push(userMessage)
     }
     busy.value = true
     await nextTick()
+
+    // 图片先走 VLM 识别，识别文本作为 material 交给 Agent（模型看不到图，只能读素材）
+    let material = ''
+    let visionFailed = false
+    if (image) {
+      try {
+        const result = await hazardApi.detect(image)
+        material = formatHazardResult(result)
+        const recognition = blankMessage('assistant', material)
+        recognition.hint = '图片识别结果'
+        messages.value.push(recognition)
+      } catch (error: any) {
+        visionFailed = true
+        const detail =
+          error?.response?.data?.detail ||
+          error?.message ||
+          '识别服务暂时不可用。'
+        const message = blankMessage('assistant', '图片识别失败。')
+        message.hint = String(detail)
+        messages.value.push(message)
+      }
+    }
+    const materialText =
+      material ||
+      (visionFailed
+        ? '（用户已上传一张现场图片，但自动隐患识别服务暂时不可用，没有拿到识别结果。）'
+        : undefined)
+
     try {
       const resp = await assistantApi.chat({
-        message: text,
+        message: text || '根据这张图片的识别结果，告诉我下一步该做什么。',
         conversation_id: ensureConversation(),
         project_id: auth.currentProjectId ?? undefined,
         mode: 'web',
+        material: materialText,
       })
       messages.value.push(mapResponse(resp))
-    } catch (error) {
+    } catch {
       const message = blankMessage('assistant', '请求失败。')
       message.error = true
       message.retryText = text
@@ -200,6 +259,16 @@ export function useAssistant() {
       messages.value.push(message)
     } finally {
       busy.value = false
+    }
+  }
+
+  /** 面板头部展示当前文本模型（改模型在「系统设置 → 模型调用设置」） */
+  async function loadModelLabel() {
+    try {
+      const status: any = await assistantApi.modelStatus()
+      modelLabel.value = [status?.provider, status?.current_model].filter(Boolean).join(' / ')
+    } catch {
+      modelLabel.value = ''
     }
   }
 
@@ -292,7 +361,9 @@ export function useAssistant() {
     conversationsLoading,
     conversationId,
     contextLabel,
+    modelLabel,
     send,
+    loadModelLabel,
     retry,
     toggle,
     close,

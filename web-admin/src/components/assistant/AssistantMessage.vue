@@ -3,6 +3,7 @@
   <div class="msg" :class="message.role">
     <div class="msg-role">{{ message.role === 'user' ? '我' : '助手' }}</div>
 
+    <img v-if="message.image" :src="message.image" class="msg-image" alt="" />
     <p v-if="message.text" class="msg-text">{{ message.text }}</p>
     <p v-if="message.hint" class="msg-hint">{{ message.hint }}</p>
 
@@ -117,6 +118,13 @@ function cardMeta(card: AgentCard): string {
   font-size: 11.5px;
   line-height: 1.6;
   color: #9a9fa8;
+}
+.msg-image {
+  display: block;
+  max-width: 220px;
+  max-height: 160px;
+  border-radius: 8px;
+  object-fit: cover;
 }
 
 .result-list {
