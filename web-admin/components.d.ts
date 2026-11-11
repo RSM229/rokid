@@ -11,6 +11,7 @@ export {}
 /* prettier-ignore */
 declare module 'vue' {
   export interface GlobalComponents {
+    AssistantAnswer: typeof import('./src/components/assistant/AssistantAnswer.vue')['default']
     AssistantBall: typeof import('./src/components/assistant/AssistantBall.vue')['default']
     AssistantChart: typeof import('./src/components/assistant/AssistantChart.vue')['default']
     AssistantMessage: typeof import('./src/components/assistant/AssistantMessage.vue')['default']

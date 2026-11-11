@@ -21,6 +21,16 @@ export interface AgentAction {
   url?: string
 }
 
+export interface Citation {
+  index: number
+  kind: string
+  title: string
+  sub?: string
+  snippet?: string
+  target?: string
+  ref_id?: string | number | null
+}
+
 export interface AgentFormOption {
   value: string
   label: string
@@ -77,6 +87,7 @@ export interface AgentChatResponse {
   need_more?: string[]
   options?: Record<string, string[]>
   chips?: string[]
+  citations?: Citation[]
   form?: AgentForm | null
   undo?: AgentUndo | null
   model?: string | null

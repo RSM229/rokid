@@ -16,6 +16,7 @@ import {
   type AgentAction,
   type AgentChatResponse,
   type ChartSpec,
+  type Citation,
   type ConversationSummary,
 } from '@/api/assistant'
 import { resolveAgentUrl, resolveCardTarget } from '@/constants/agentPages'
@@ -37,6 +38,8 @@ export interface AssistantMessage {
   cards: AgentCard[]
   actions: AgentAction[]
   chips: string[]
+  /** 行内 [[n]] 角标与文末「引用」列表的数据源 */
+  citations: Citation[]
   undo: { entity: string; id: number } | null
   chart: ChartSpec | null
   retryText: string
@@ -117,6 +120,7 @@ function blankMessage(role: 'user' | 'assistant', text: string): AssistantMessag
     cards: [],
     actions: [],
     chips: [],
+    citations: [],
     undo: null,
     chart: null,
     retryText: '',
@@ -131,6 +135,7 @@ function applyResponse(message: AssistantMessage, resp: AgentChatResponse) {
   message.cards = cards
   message.actions = resp.actions || []
   message.chips = resp.chips || []
+  message.citations = resp.citations || []
   message.undo = resp.undo ? { entity: resp.undo.entity, id: resp.undo.id } : null
   message.chart = resp.chart || null
   if (resp.need_more?.length) message.hint = `还缺：${resp.need_more.join('、')}`

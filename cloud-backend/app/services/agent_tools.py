@@ -154,9 +154,16 @@ class ToolSpec:
 
 def _ok(reply: str, **kw) -> dict:
     base = {"ok": True, "reply": reply, "card": None, "cards": [], "actions": [],
-            "need_more": [], "options": {}, "undo": None, "data": {}}
+            "need_more": [], "options": {}, "undo": None, "data": {}, "citations": []}
     base.update(kw)
     return base
+
+
+def _cite(index: int, kind: str, title: str, *, sub: str = "", snippet: str = "",
+          target: str | None = None, ref_id: Any = None) -> dict:
+    """统一的引用条目：前端据此渲染行内角标与文末引用列表。"""
+    return {"index": index, "kind": kind, "title": title, "sub": sub,
+            "snippet": snippet, "target": target, "ref_id": ref_id}
 
 
 def _need_more(missing: list[str], reply: str = "",
@@ -174,7 +181,7 @@ def _need_more(missing: list[str], reply: str = "",
         else:
             reply = "请补充缺失信息。"
     return {"ok": False, "reply": reply, "card": None, "cards": [], "actions": [],
-            "need_more": missing, "options": {}, "undo": None, "data": {}}
+            "need_more": missing, "options": {}, "undo": None, "data": {}, "citations": []}
 
 
 def _parse_json_object(raw: str) -> dict | None:
@@ -2581,12 +2588,18 @@ async def _query_regulation(ctx: ToolContext, args: dict) -> dict:
     if not hits:
         return _ok(f"没有检索到与「{keyword}」相关的规范条目，换个说法或到「资料库」手动检索。")
     lines = [f"与「{keyword}」相关的规范依据（{len(hits)} 条）："]
+    citations: list[dict] = []
     for i, hit in enumerate(hits[:3], 1):
         name = hit.get("name") or hit.get("filename") or "规范"
         snippet = (hit.get("snippet") or "").strip().replace("\n", " ")
-        lines.append(f"{i}. {name}：{snippet[:150]}")
+        lines.append(f"{i}. {name}：{snippet[:150]} [[{i}]]")
+        citations.append(_cite(
+            i, "regulation", str(name),
+            sub="规范条文", snippet=snippet[:200], target="/knowledge-base",
+            ref_id=hit.get("source_id") or hit.get("filename") or hit.get("name"),
+        ))
     lines.append("完整条文请到「资料库」检索原文。")
-    return _ok("\n".join(lines), data={"count": len(hits)})
+    return _ok("\n".join(lines), data={"count": len(hits)}, citations=citations)
 
 
 async def _review_plan_doc(ctx: ToolContext, args: dict) -> dict:

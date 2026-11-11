@@ -615,9 +615,32 @@ def _history_messages(history: list[dict], limit: int = 6) -> list[dict]:
     return out
 
 
-async def _plain_answer(message: str, history: list[dict], provider: str | None, model: str | None,
-                        mode: str | None) -> str:
-    """兜底：走纯问答（与原 /local/llm/chat 行为一致）。"""
+_CITE_KIND_MAP = {
+    "knowledge_doc": "knowledge",
+    "work_record": "work_record",
+    "document": "document",
+    "note": "note",
+    "kg_entity": "knowledge",
+    "kg_checkpoint": "knowledge",
+    "severe_defect": "regulation",
+}
+_CITE_KIND_LABEL = {
+    "knowledge": "知识库",
+    "work_record": "工作记录",
+    "document": "监理文书",
+    "note": "笔记",
+    "regulation": "规范条文",
+}
+_CITE_TARGET = {
+    "knowledge": "/knowledge-base",
+    "work_record": "/work-record/inspection",
+    "document": "/documents",
+    "note": "/knowledge-base",
+    "regulation": "/knowledge-base",
+}
+
+
+def _plain_persona(mode: str | None) -> str:
     persona = "你是广东建设智慧监理工程监理智能助手，请给出准确、可执行、简洁的回答。"
     if mode == "hazard":
         persona = "你是AI安全隐患识别专家。若用户描述现场情况，请判断是否存在隐患并给出风险类别、主要风险、证据与复查建议。"
@@ -625,9 +648,25 @@ async def _plain_answer(message: str, history: list[dict], provider: str | None,
                 "需要留痕时引导用户到「工作记录」页点「+新建」，或直接说「记一条XXX」由系统落库。"
                 "你看不到图片本身，只有用户消息里给出图片识别结果时才能引用；"
                 "禁止凭空声称「经图片识别」「看图发现」「照片显示」。")
+    return persona
+
+
+def _plain_messages(message: str, history: list[dict], mode: str | None,
+                    cite_block: str = "") -> list[dict]:
+    persona = _plain_persona(mode)
+    if cite_block:
+        persona += (
+            "\n\n下面是系统从项目资料/规范库检索到的参考材料，材料编号就是引用号。"
+            "回答时只要用到了某条材料，就在那句话末尾标注 [[编号]]（如 [[1]]）；"
+            "不要编造材料里没有的依据，材料不足就直说没查到。\n\n" + cite_block
+        )
     messages = [{"role": "system", "content": persona + _PLAINTEXT_SUFFIX}]
     messages.extend(_history_messages(history))
     messages.append({"role": "user", "content": message})
+    return messages
+
+
+async def _generate_plain(messages: list[dict], provider: str | None, model: str | None) -> str:
     if _streaming_enabled():
         parts: list[str] = []
         async for event in model_gateway.stream_chat_completion(
@@ -643,6 +682,57 @@ async def _plain_answer(message: str, history: list[dict], provider: str | None,
         messages, temperature=0.7, provider=provider, model=model
     )
     return strip_markdown(answer or "")
+
+
+async def _plain_answer(message: str, history: list[dict], provider: str | None, model: str | None,
+                        mode: str | None) -> str:
+    """兜底：走纯问答（与原 /local/llm/chat 行为一致）。"""
+    return await _generate_plain(_plain_messages(message, history, mode), provider, model)
+
+
+def _retrieve_citations(message: str, project_id: int | None,
+                        top_k: int = 5) -> tuple[list[dict], str]:
+    """针对用户问题做一次混合检索，产出引用条目与资料块（失败静默降级为空）。"""
+    try:
+        from app.services import rag_index
+
+        hits = rag_index.search(message, top_k=top_k, project_id=project_id) or []
+    except Exception:  # noqa: BLE001 —— 检索不可用不应阻断聊天
+        logger.warning("引用检索失败", exc_info=True)
+        return [], ""
+    citations: list[dict] = []
+    blocks: list[str] = []
+    seen_titles: set[str] = set()
+    for hit in hits:
+        title = str(hit.get("source_name") or "").strip()
+        snippet = str(hit.get("snippet") or hit.get("content") or "").strip().replace("\n", " ")
+        if not title or not snippet:
+            continue
+        if title in seen_titles:
+            continue
+        seen_titles.add(title)
+        index = len(citations) + 1
+        kind = _CITE_KIND_MAP.get(str(hit.get("source_type") or ""), "knowledge")
+        citations.append({
+            "index": index,
+            "kind": kind,
+            "title": title[:120],
+            "sub": _CITE_KIND_LABEL.get(kind, "资料"),
+            "snippet": snippet[:220],
+            "target": _CITE_TARGET.get(kind),
+            "ref_id": hit.get("source_id"),
+        })
+        blocks.append(f"【材料{index}】{title}\n{snippet[:300]}")
+    return citations, "\n\n".join(blocks)
+
+
+async def _plain_answer_cited(message: str, history: list[dict], provider: str | None,
+                              model: str | None, mode: str | None,
+                              project_id: int | None) -> tuple[str, list[dict]]:
+    citations, block = _retrieve_citations(message, project_id)
+    messages = _plain_messages(message, history, mode, cite_block=block)
+    answer = await _generate_plain(messages, provider, model)
+    return answer, citations
 
 
 _SUPPLEMENT_SYSTEM = (
@@ -1554,14 +1644,21 @@ async def _agent_chat_impl(
     # 流式模式下强制再走一次可流式的回答模型：路由模型那条 JSON 里的 answer
     # 没法逐字推给前端，而且它的思考过程不适合展示。
     answer = str((parsed or {}).get("answer") or "").strip()
+    citations: list[dict] = []
     if not answer or _streaming_enabled():
         try:
-            answer = await _plain_answer(message, req.history, req.provider, req.model, req.mode)
+            answer, citations = await _plain_answer_cited(
+                message, req.history, req.provider, req.model, req.mode, project_id,
+            )
         except model_gateway.ModelGatewayError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
+    else:
+        # 非流式复用路由模型的 answer 时，只补一份引用列表（正文没有编号标记）
+        citations, _block = _retrieve_citations(message, project_id)
     return {"kind": "chat", "tool": None, "reply": strip_markdown(answer), "card": None,
             "cards": [], "actions": [], "need_more": [], "undo": None,
-            "form": None, "model": model_id, "request_plan": incoming_plan}
+            "form": None, "model": model_id, "request_plan": incoming_plan,
+            "citations": citations}
 
 
 @router.post("/chat")
