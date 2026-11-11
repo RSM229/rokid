@@ -76,10 +76,16 @@ BUILDING_WEIDA_DEFAULT = "gdaq_30306_weida"
 
 
 def _eng_type(project) -> str:
-    """取项目工程类型（空串兜底）。"""
+    """取项目工程类型（空串兜底）。
+
+    🔴 模型真源是 ``Project.eng_type``（projects.eng_type 列，房建/市政/其他）；
+    旧断言层曾用过 ``engineering_type`` 名称，这里双读兼容，避免路由读空。
+    """
     if project is None:
         return ""
-    return str(getattr(project, "engineering_type", "") or "").strip()
+    return (
+        str(getattr(project, "eng_type", "") or getattr(project, "engineering_type", "") or "").strip()
+    )
 
 
 def is_municipal(project) -> bool:
