@@ -4220,11 +4220,21 @@ Page(themed({
     wx.previewImage({ current: item.path, urls })
   },
 
-  /** 聊天记录里的图片点开预览 */
+  /** 聊天记录里的图片点开预览：同一消息的多张图传给 urls，支持左右滑动/上一张下一张 */
   previewImageUrl(event: WechatMiniprogram.TouchEvent) {
     const url = String(event.currentTarget.dataset.url || '')
     if (!url) return
-    wx.previewImage({ current: url, urls: [url] })
+    const mi = Number(event.currentTarget.dataset.mi)
+    const msg = this.data.messages[mi]
+    // 该消息的图片全集：优先多图数组，其次单图
+    const urls = msg && msg.images && msg.images.length
+      ? [...msg.images]
+      : (msg && msg.image ? [msg.image] : [url])
+    if (urls.length > 1) {
+      wx.previewImage({ current: url, urls })
+    } else {
+      wx.previewImage({ current: url, urls: [url] })
+    }
   },
 
   /** 消息内图片加载失败兜底：本地临时路径失效时切换到服务端远程地址（remoteImages）。
