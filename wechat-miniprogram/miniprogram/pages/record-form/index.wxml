@@ -15,6 +15,10 @@
       已按聊天内容预填 {{prefillCount}} 项，请核对后保存
     </view>
 
+    <view class="prefill-tip local" wx:if="{{localDraft}}">
+      已恢复本地草稿，保存前请核对
+    </view>
+
     <view class="stepbar" wx:if="{{steps.length > 1}}">
       <scroll-view scroll-x class="step-scroll" enhanced show-scrollbar="{{false}}">
         <view

@@ -1,6 +1,13 @@
 import { request } from '../../services/request'
 import { session } from '../../services/session'
 import { themed } from '../../utils/theme'
+import {
+  cacheFormSchema,
+  clearFormDraft,
+  loadCachedFormSchema,
+  loadFormDraft,
+  saveFormDraft,
+} from '../../services/formDraft'
 
 /** 后端 /provform/schemas/{code}/steps 返回的单个字段 */
 interface StepField {
@@ -67,6 +74,8 @@ Page(themed({
     title: '',
     loading: false,
     saving: false,
+    // 断网续填提示（本地草稿恢复时）
+    localDraft: false,
     // 分步
     steps: [] as Step[],
     stepIndex: 0,
@@ -83,6 +92,11 @@ Page(themed({
     prefillCount: 0,
     source: '',
   },
+
+  /** 输入防抖落盘的计时器 id（不放 data，避免无谓渲染） */
+  _draftTimer: -1,
+  /** 保存成功后置 true，防止 navigateBack 触发的 onHide/onUnload 把草稿复活 */
+  _draftSaved: false,
 
   onLoad(options: Record<string, string>) {
     if (!session.getToken()) {
@@ -107,32 +121,60 @@ Page(themed({
     try {
       const query = draftId ? `?draft_id=${draftId}` : ''
       const resp = await request<StepsResp>(`/provform/schemas/${this.data.code}/steps${query}`)
-      const steps = resp.steps || []
-      const values: FormValues = {}
-      for (const step of steps) {
-        for (const field of step.fields) values[field.key] = field.value || ''
-      }
-      // 编辑态下 loadValues 可能先返回：已回显的非空值优先，避免被空预填覆盖
-      const shown = this.data.formValues as FormValues
-      for (const key of Object.keys(shown)) {
-        if (String(shown[key] || '').trim()) values[key] = shown[key]
-      }
-      this.setData({
-        steps,
-        formValues: values,
-        signoffs: resp.signoffs || [],
-        title: this.data.isNew ? (resp.name || '') : this.data.title,
-        source: resp.source || '',
-        prefillSource: resp.prefill_source || '',
-        prefillCount: resp.prefill_count || 0,
-        loading: false,
-      })
-      this.applyStep(0)
-      this.refreshMissing()
+      cacheFormSchema(this.data.code, resp)
+      this.applyStepsResp(resp)
     } catch (error) {
+      // 断网兜底：用本地缓存的表式结构 + 本地草稿离线续填
+      const cached = loadCachedFormSchema<StepsResp>(this.data.code)
+      if (cached) {
+        const restored = !!loadFormDraft(this.data.code, this.data.docId)
+        this.applyStepsResp(cached)
+        if (restored) {
+          wx.showToast({ title: '暂无网络，已载入本地草稿', icon: 'none' })
+        } else {
+          wx.showToast({ title: '暂无网络，已载入离线表式', icon: 'none' })
+        }
+        return
+      }
       this.setData({ loading: false })
       wx.showToast({ title: (error as Error).message || '加载表式失败', icon: 'none' })
     }
+  },
+
+  /** 渲染表式结构并让本地草稿优先覆盖（断网续填的主入口） */
+  applyStepsResp(resp: StepsResp) {
+    const steps = resp.steps || []
+    const values: FormValues = {}
+    for (const step of steps) {
+      for (const field of step.fields) values[field.key] = field.value || ''
+    }
+    // 本地草稿 > 服务端草稿预填 > 编辑态回显
+    const local = loadFormDraft(this.data.code, this.data.docId)
+    if (local && local.values && Object.keys(local.values).length) {
+      for (const key of Object.keys(local.values)) {
+        const v = String(local.values[key] || '')
+        if (v) values[key] = v
+      }
+      if (this.data.isNew) this.setData({ title: local.title || resp.name || '' })
+    }
+    // 编辑态下 loadValues 可能先返回：已回显的非空值优先，避免被空预填覆盖
+    const shown = this.data.formValues as FormValues
+    for (const key of Object.keys(shown)) {
+      if (String(shown[key] || '').trim()) values[key] = shown[key]
+    }
+    this.setData({
+      steps,
+      formValues: values,
+      signoffs: resp.signoffs || [],
+      title: this.data.isNew ? (local?.title || resp.name || '') : this.data.title,
+      localDraft: !!(local && local.values && Object.keys(local.values).length),
+      source: resp.source || '',
+      prefillSource: resp.prefill_source || '',
+      prefillCount: resp.prefill_count || 0,
+      loading: false,
+    })
+    this.applyStep(0)
+    this.refreshMissing()
   },
 
   /** 编辑回显：把文书 content（canonical key）反查为 schema-key → 值 */
@@ -142,6 +184,14 @@ Page(themed({
         `/document/${id}/form-values`,
       )
       const merged = { ...(this.data.formValues as FormValues), ...(res.fields || {}) }
+      // 本地草稿优先：恢复用户未保存的本地更改（loadValues 可能晚于 applyStepsResp 返回）
+      const cached = loadFormDraft(this.data.code, id)
+      if (cached && cached.values) {
+        for (const key of Object.keys(cached.values)) {
+          const v = String(cached.values[key] || '')
+          if (v) merged[key] = v
+        }
+      }
       this.setData({ formValues: merged, title: res.title || this.data.title })
       this.refreshMissing()
     } catch (error) {
@@ -209,11 +259,36 @@ Page(themed({
 
   onTitleInput(event: WechatMiniprogram.Input) {
     this.setData({ title: event.detail.value })
+    this.scheduleDraft()
   },
 
   onFormChange(event: WechatMiniprogram.CustomEvent) {
     this.setData({ formValues: (event.detail.payload || {}) as FormValues })
     this.refreshMissing()
+    this.scheduleDraft()
+  },
+
+  /** 输入防抖 800ms 落盘，断网/杀进程也不丢（本地草稿按 form_code+docId 隔离） */
+  scheduleDraft() {
+    if (this._draftTimer !== -1) clearTimeout(this._draftTimer)
+    this._draftTimer = setTimeout(() => this.persistDraft(), 800) as unknown as number
+  },
+
+  persistDraft() {
+    if (this._draftTimer !== -1) {
+      clearTimeout(this._draftTimer)
+      this._draftTimer = -1
+    }
+    if (this._draftSaved) return
+    saveFormDraft(this.data.code, this.data.docId, this.data.title, this.data.formValues)
+  },
+
+  onUnload() {
+    this.persistDraft()
+  },
+
+  onHide() {
+    this.persistDraft()
   },
 
   /** 用组件自带校验把当前步的必填/格式问题挡在切换前 */
@@ -275,13 +350,18 @@ Page(themed({
           data: { form_code: this.data.code, title: this.data.title, fields: values },
         })
         this.setData({ docId: created.doc_id, isNew: false })
+        // 新建成功：docId 0→新 id，旧键草稿作废，新键草稿由下面统一清理
+        clearFormDraft(this.data.code, 0)
       } else {
         await request(`/document/${this.data.docId}/from-schema`, {
           method: 'PUT',
           data: { title: this.data.title, fields: values },
         })
       }
+      // 保存成功：标记+清草稿，防止 navigateBack 触发的 onHide/onUnload 复活草稿
+      this._draftSaved = true
       wx.hideLoading()
+      clearFormDraft(this.data.code, this.data.docId)
       wx.showToast({ title: '已保存', icon: 'success' })
       setTimeout(() => {
         wx.navigateBack({ fail: () => wx.reLaunch({ url: '/pages/work/index' }) })

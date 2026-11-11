@@ -24,6 +24,11 @@
   background: rgba(var(--brand-rgb, 22,119,255), 0.08);
   border-radius: 12rpx;
 }
+/* 本地草稿恢复提示：橙色调，区别于服务端预填的蓝色 */
+.prefill-tip.local {
+  color: var(--warn-d, #b25e00);
+  background: rgba(255, 152, 0, 0.12);
+}
 
 /* 步骤条 */
 .stepbar { margin-bottom: 16rpx; }
