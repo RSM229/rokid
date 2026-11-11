@@ -48,20 +48,21 @@ const segments = computed<Segment[]>(() => {
 <style scoped>
 .cite-inline {
   display: inline;
-  margin: 0 1px;
-  padding: 0 4px;
-  border: 1px solid #e2e2de;
-  border-radius: 4px;
-  background: #fff;
+  margin: 0 2px;
+  padding: 0 5px;
+  border: 1px solid #e0e0dc;
+  border-radius: 6px;
+  background: #f6f6f3;
   color: #5b616b;
   font-size: 10px;
-  line-height: 1.4;
+  line-height: 1.5;
   vertical-align: 1px;
   cursor: pointer;
   font-family: inherit;
 }
 .cite-inline:hover {
   border-color: #b9b9b4;
+  background: #fff;
   color: #1f2329;
 }
 </style>

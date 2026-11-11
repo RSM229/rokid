@@ -7,7 +7,7 @@
     </button>
     <div v-show="open" ref="bodyRef" class="reasoning-body" @scroll="onScroll">
       <div v-for="(step, index) in steps" :key="`${index}-${step}`" class="step">{{ step }}</div>
-      <pre v-if="text" class="reasoning-text">{{ text }}</pre>
+      <pre v-if="displayText" class="reasoning-text">{{ displayText }}</pre>
     </div>
   </div>
 </template>
@@ -28,6 +28,16 @@ const userToggled = ref(false)
 const follow = ref(true)
 const bodyRef = ref<HTMLElement | null>(null)
 const nowMs = ref(Date.now())
+
+/**
+ * 思考区展示的是模型草稿，里面会出现 [[n]] 这类内部引用标记。
+ * 这里把它们去掉（角标只属于正文），顺便收拾一下标点前的空格。
+ */
+const displayText = computed(() =>
+  props.text
+    .replace(/\[\[\s*\d+\s*\]\]/g, '')
+    .replace(/[ \t]+([。，；：！？、])/g, '$1'),
+)
 const mountedAt = Date.now()
 let timer: number | undefined
 
