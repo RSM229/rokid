@@ -4,7 +4,6 @@
 .toolbar-right { display: flex; align-items: center; gap: 16rpx; }
 .time-btn { padding: 10rpx 20rpx; border-radius: 20rpx; background: rgba(var(--wash-rgb, 234,243,255), 0.8); color: var(--brand, #1677ff); font-size: 24rpx; font-weight: 600; }
 .select-btn { padding: 10rpx 20rpx; border-radius: 20rpx; background: rgba(var(--wash-rgb, 234,243,255), 0.8); color: var(--brand, #1677ff); font-size: 24rpx; font-weight: 600; }
-.doc-entry-btn { padding: 10rpx 20rpx; border-radius: 20rpx; background: rgba(var(--brand-rgb, 22,119,255), 0.12); color: var(--brand, #1677ff); font-size: 24rpx; font-weight: 600; }
 .type-tabs-container { display: flex; align-items: center; gap: 16rpx; margin-bottom: 20rpx; overflow-x: auto; white-space: nowrap; }
 .type-tab { display: inline-flex; align-items: center; gap: 8rpx; padding: 12rpx 28rpx; border-radius: 28rpx; background: rgba(243, 246, 244, 0.75); color: #6b7c90; font-size: 26rpx; font-weight: 500; flex-shrink: 0; }
 .type-tab.active { background: linear-gradient(135deg, var(--brand-l, #3b8cff), var(--brand-d, #0b5fd0)); color: #fff; font-weight: 600; }

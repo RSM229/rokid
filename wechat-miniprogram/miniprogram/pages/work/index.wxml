@@ -5,7 +5,6 @@
   <view class="toolbar">
     <view class="title">工作记录</view>
     <view class="toolbar-right">
-      <view class="doc-entry-btn" bindtap="openDocList">📄 文书</view>
       <view class="time-btn" bindtap="openTimeSheet">{{timeRangeLabel}} ▾</view>
       <view class="select-btn" bindtap="toggleSelectMode">
         {{selectMode ? '完成' : '选择'}}
