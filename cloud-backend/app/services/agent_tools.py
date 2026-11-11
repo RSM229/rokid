@@ -87,12 +87,12 @@ _PAGE_ALIASES = {
     "隐患": "/pages/hazards/index",
     "隐患列表": "/pages/hazards/index",
     "隐患识别": "/pages/hazards/index",
-    "文书": "/pages/documents/index",
-    "文书列表": "/pages/documents/index",
-    "监理文书": "/pages/documents/index",
-    "文书审批": "/pages/documents/index",
-    "台账": "/pages/documents/index?tab=ledger",
-    "查看台账": "/pages/documents/index?tab=ledger",
+    "文书": "/pages/kb/index",
+    "文书列表": "/pages/kb/index",
+    "监理文书": "/pages/kb/index",
+    "文书审批": "/pages/kb/index",
+    "台账": "/pages/kb/index",
+    "查看台账": "/pages/kb/index",
     "工作台": "/pages/agent/index",
     "待办": "/pages/todo/index",
     "待办任务": "/pages/todo/index",
@@ -104,12 +104,12 @@ _PAGE_ALIASES = {
     "我的资料库": "/pages/kb/index",
     "知识库管理": "/pages/kb/index",
     "资料库管理": "/pages/kb/index",
-    "规范查询": "/pages/knowledge/index",
+    "规范查询": "/pages/kb/index",
     "拍照识别": "/pages/capture/index",
     "拍照": "/pages/capture/index",
     "AI隐患识别": "/pages/capture/index?mode=hazard",
     "我的": "/pages/mine/index",
-    "省统表": "/pages/documents/index",
+    "省统表": "/pages/kb/index",
     "平行检验": "/pages/parallel/index",
 }
 
@@ -1834,7 +1834,7 @@ async def _create_hazard_rectification_doc(ctx: ToolContext, args: dict) -> dict
               "sub": "GDAQ30308 安全隐患整改通知", "status": result.get("doc_status", "草稿")},
         cards=[{"kind": "document", "id": doc_id, "title": title,
                 "sub": "GDAQ30308 安全隐患整改通知", "status": result.get("doc_status", "草稿")}],
-        actions=[{"type": "navigate", "label": "查看整改通知", "url": "/pages/documents/index"},
+        actions=[{"type": "navigate", "label": "查看整改通知", "url": f"/pages/documents/detail?id={doc_id}"},
                  {"type": "navigate", "label": "查看隐患闭环", "url": f"/pages/hazards/index?id={hazard_id}"}],
         data={"doc_id": doc_id, "hazard_id": hazard_id,
               "form_code": "gdaq_30308_yinhuan", "hazard_status": result.get("hazard_status")},
@@ -2134,7 +2134,7 @@ async def _create_provform_doc(ctx: ToolContext, args: dict) -> dict:
     await ctx.db.commit()
 
     return _ok(
-        f"已创建省统表文书「{title}」#{doc.id}（{schema.get('name')}），编号 {doc.doc_number or '待生成'}。可在「文书」页导出 docx。",
+        f"已创建省统表文书「{title}」#{doc.id}（{schema.get('name')}），编号 {doc.doc_number or '待生成'}。可点下方「查看文书」查看并导出 docx。",
         card={
             "kind": "document", "id": doc.id, "title": title,
             "sub": str(schema.get("name") or ""), "status": doc.status,
@@ -2145,7 +2145,7 @@ async def _create_provform_doc(ctx: ToolContext, args: dict) -> dict:
             "sub": str(schema.get("name") or ""), "status": doc.status,
             "time": str(datetime.now().date()),
         }],
-        actions=[{"type": "navigate", "label": "查看文书", "url": "/pages/documents/index"}],
+        actions=[{"type": "navigate", "label": "查看文书", "url": f"/pages/documents/detail?id={doc.id}"}],
         undo={"tool": "create_provform_doc", "entity": "document", "id": doc.id},
         data={"doc_id": doc.id},
     )
@@ -2203,12 +2203,12 @@ async def _generate_document(ctx: ToolContext, args: dict) -> dict:
             await ctx.db.commit()
             return _ok(
                 f"已生成你的「监理日记」#{doc_id}（{result.get('doc_number') or '编号待生成'}），"
-                f"已归档到资料库「工作记录与表单/监理日记」，可在「文书」页导出。",
+                f"已归档到资料库「工作记录与表单/监理日记」，可点下方「查看文书」查看并导出。",
                 card={"kind": "document", "id": doc_id, "title": result.get("title") or "",
                       "sub": "监理日记", "status": "草稿", "time": str(datetime.now().date())},
                 cards=[{"kind": "document", "id": doc_id, "title": result.get("title") or "",
                         "sub": "监理日记", "status": "草稿", "time": str(datetime.now().date())}],
-                actions=[{"type": "navigate", "label": "查看文书", "url": "/pages/documents/index"}],
+                actions=[{"type": "navigate", "label": "查看文书", "url": f"/pages/documents/detail?id={doc_id}"}],
                 undo={"tool": "generate_document", "entity": "document", "id": doc_id},
                 data=result,
             )
@@ -2250,14 +2250,14 @@ async def _generate_document(ctx: ToolContext, args: dict) -> dict:
         })
         await ctx.db.commit()
         return _ok(
-            f"已生成「{result.get('form_name') or '监理文书'}」#{doc_id}（{result.get('doc_number') or '编号待生成'}），可在「文书」页导出 docx。",
+            f"已生成「{result.get('form_name') or '监理文书'}」#{doc_id}（{result.get('doc_number') or '编号待生成'}），可点下方「查看文书」查看并导出 docx。",
             card={"kind": "document", "id": doc_id, "title": result.get("title") or "",
                   "sub": result.get("form_name") or "", "status": "草稿",
                   "time": str(datetime.now().date())},
             cards=[{"kind": "document", "id": doc_id, "title": result.get("title") or "",
                     "sub": result.get("form_name") or "", "status": "草稿",
                     "time": str(datetime.now().date())}],
-            actions=[{"type": "navigate", "label": "查看文书", "url": "/pages/documents/index"}],
+            actions=[{"type": "navigate", "label": "查看文书", "url": f"/pages/documents/detail?id={doc_id}"}],
             undo={"tool": "generate_document", "entity": "document", "id": doc_id},
             data=result,
         )
@@ -2298,7 +2298,7 @@ async def _generate_document(ctx: ToolContext, args: dict) -> dict:
               "sub": spec.name, "status": doc.status, "time": str(datetime.now().date())},
         cards=[{"kind": "document", "id": doc.id, "title": doc.title,
                 "sub": spec.name, "status": doc.status, "time": str(datetime.now().date())}],
-        actions=[{"type": "navigate", "label": "查看文书", "url": "/pages/documents/index"}],
+        actions=[{"type": "navigate", "label": "查看文书", "url": f"/pages/documents/detail?id={doc.id}"}],
         undo={"tool": "generate_document", "entity": "document", "id": doc.id},
         data={"doc_id": doc.id, "record_id": record.id},
     )
@@ -2565,7 +2565,7 @@ async def _query_documents(ctx: ToolContext, args: dict) -> dict:
     return _ok("\n".join(lines), cards=[{
         "kind": "document", "id": d.id, "title": d.title, "sub": d.doc_type,
         "status": d.status, "time": str(d.created_at.date() if d.created_at else ""),
-    } for d in rows], actions=[{"type": "navigate", "label": "查看文书", "url": "/pages/documents/index"}])
+    } for d in rows])
 
 
 async def _query_regulation(ctx: ToolContext, args: dict) -> dict:
@@ -2661,7 +2661,7 @@ async def _navigate(ctx: ToolContext, args: dict) -> dict:
                 url, raw = val, key
                 break
     if not url:
-        return _ok("要打开哪个页面？可以说「打开工作记录」「打开隐患识别」「打开文书」「打开台账」「打开省统表录入」。")
+        return _ok("要打开哪个页面？可以说「打开工作记录」「打开隐患识别」「打开资料库」「打开待办」。")
     return _ok(f"已为你打开「{raw}」。", actions=[{"type": "navigate", "label": raw, "url": url}])
 
 

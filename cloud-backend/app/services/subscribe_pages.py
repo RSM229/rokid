@@ -19,7 +19,6 @@ logger = logging.getLogger(__name__)
 SUBSCRIBE_MESSAGE_PAGES = frozenset({
     "pages/todo/index",
     "pages/hazards/index",
-    "pages/documents/index",
     "pages/documents/detail",
     "pages/agent/index",
     "pages/work/index",
