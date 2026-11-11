@@ -18,7 +18,7 @@ import sys
 import urllib.error
 import urllib.request
 
-BASE = sys.argv[1] if len(sys.argv) > 1 else "https://www.baize.gdces.cn:4432/api"
+BASE = sys.argv[1] if len(sys.argv) > 1 else "https://www.baize.gdces.cn/api"
 ADMIN_PASS = sys.argv[2] if len(sys.argv) > 2 else "admin123"
 
 ok = 0
