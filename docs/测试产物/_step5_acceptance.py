@@ -19,7 +19,7 @@ try:
 except Exception:
     pass
 
-BASE = "https://www.baize.gdces.cn:4432"
+BASE = "https://www.baize.gdces.cn"
 TMP = Path("D:/rokid/.workbuddy/tmp")
 CTX = ssl.create_default_context()
 CTX.check_hostname = False

@@ -23,7 +23,7 @@ import sys
 import urllib.error
 import urllib.request
 
-BASE = "https://www.baize.gdces.cn:4432/api"
+BASE = "https://www.baize.gdces.cn/api"
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 PWD_FILE = os.path.join(ROOT, ".workbuddy", "账号密码清单-2026-10-12.txt")
 

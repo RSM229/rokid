@@ -20,7 +20,7 @@ import sys
 
 import httpx
 
-BASE = "https://www.baize.gdces.cn:4432"
+BASE = "https://www.baize.gdces.cn"
 ACCOUNTS = {
     "anonymous": None,
     "inspector": "admin123",
