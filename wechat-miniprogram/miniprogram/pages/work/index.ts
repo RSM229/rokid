@@ -223,6 +223,7 @@ const TYPE_TABS = [
   { label: '旁站', key: 'station' },
   { label: '见证', key: 'witness' },
   { label: '隐患', key: 'hazard' },
+  { label: '待定', key: 'pending' },
 ]
 
 const TIME_RANGES = [
