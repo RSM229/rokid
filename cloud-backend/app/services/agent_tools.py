@@ -3130,6 +3130,38 @@ def tool_label(tool: str) -> str:
     return _TOOL_LABELS.get(tool, tool)
 
 
+def _draft_real_missing_labels(form_code: str | None, args: dict | None) -> list[str]:
+    """草稿列表展示用：按其省统表 schema 复核真实缺项，覆盖「最终确认」等合成态。
+
+    只改展示，不改落库 missing——agent 补全逻辑仍用落库的 need_more 原值。
+    草稿里只有文本、照片栏注定要现场拍时，这里会如实显示「举牌验收照片」，
+    而不是误导性的「最终确认」。
+    """
+    if not form_code or not isinstance(args, dict):
+        return []
+    try:
+        from app.services import record_steps, provform_schema
+    except Exception:
+        return []
+    extra = args.get("extra_fields")
+    merged = {**(extra if isinstance(extra, dict) else {}), **args}
+    merged.pop("extra_fields", None)
+    try:
+        steps = record_steps.build_steps(form_code, merged)
+    except Exception:
+        return []
+    if not steps or not steps.get("missing_count"):
+        return []
+    schema = provform_schema.get_schema(form_code) or {}
+    label_by_key: dict[str, str] = {}
+    for sec in (schema.get("sections") or []):
+        for f in (sec.get("fields") or []):
+            k = f.get("key")
+            if k:
+                label_by_key[str(k)] = str(f.get("label") or k)
+    return [label_by_key.get(str(k), str(k)) for k in (steps.get("missing") or [])]
+
+
 def _draft_form_code(tool: str, args: dict) -> str | None:
     """草稿 → 省统表 form_code（供小程序「用表单填写」直接跳分步表单）。
 
@@ -3188,7 +3220,10 @@ async def list_pending(db: AsyncSession, user_id: Any,
             "label": tool_label(row.tool),
             "form_code": _draft_form_code(row.tool, args if isinstance(args, dict) else {}),
             "args": args if isinstance(args, dict) else {},
-            "missing": missing if isinstance(missing, list) else [],
+            "missing": _draft_real_missing_labels(
+                _draft_form_code(row.tool, args if isinstance(args, dict) else {}),
+                args if isinstance(args, dict) else {},
+            ) or (missing if isinstance(missing, list) else []),
             "facts": context.get("facts") if isinstance(context.get("facts"), list) else [],
             "version": int(context.get("version") or 1),
             "messages": context.get("messages") if isinstance(context.get("messages"), list) else [],
