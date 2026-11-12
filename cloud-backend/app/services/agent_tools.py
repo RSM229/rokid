@@ -1393,6 +1393,21 @@ def _split_watermark_fields(wms: list) -> tuple:
     return section, rec_date, (weather or None)
 
 
+# 分组建单的回执/卡片标题用省统表正式表名（与 form_registry 一致），
+# 不用「巡视记录 / 旁站记录」这种短称（2026-11-12 用户要求用正式表名）。
+_SPLIT_RECORD_DISPLAY = {
+    "巡视": "巡视检查记录",
+    "旁站": "旁站监理记录",
+    "验收": "验收记录",
+    "见证": "见证取样记录",
+    "平行检验": "平行检验记录",
+}
+
+
+def _split_record_display_name(rtype: str) -> str:
+    return _SPLIT_RECORD_DISPLAY.get(rtype) or f"{rtype}记录"
+
+
 async def _create_split_records(ctx: "ToolContext", groups: list) -> dict:
     """确认后循环建多条记录：每组一条，同类多图挂该条照片列表；待定组建极简草稿。
 
@@ -1443,14 +1458,14 @@ async def _create_split_records(ctx: "ToolContext", groups: list) -> dict:
     await ctx.db.commit()
 
     cards = [{
-        "kind": "work_record", "id": rec.id, "title": f"{rtype}记录",
+        "kind": "work_record", "id": rec.id, "title": _split_record_display_name(rtype),
         "sub": f"{len(photos)}张照片", "status": rec.status,
         "time": str(rec.record_date),
     } for rtype, rec, photos in created]
 
     lines = ["已按分组创建以下记录："]
     for rtype, rec, photos in created:
-        lines.append(f"· {rtype}记录 #{rec.id}（{len(photos)}张照片）")
+        lines.append(f"· {_split_record_display_name(rtype)} #{rec.id}（{len(photos)}张照片）")
     lines.append("施工部位、业务日期已按各张照片水印自动填入；具体位置等可继续在「工作记录」页补充。")
     return _ok(
         "\n".join(lines),
