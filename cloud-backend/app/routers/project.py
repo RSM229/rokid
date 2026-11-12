@@ -1358,7 +1358,7 @@ async def delete_project(
         if mu:
             member_names.append(f"{mu.real_name}({mu.username})")
     await db.execute(delete(ProjectMember).where(ProjectMember.project_id == project_id))
-    # 智能体派生数据（项目记忆 / 会话 / 草稿）随项目一起清理；只删库里真实存在
+    # 智能体派生数据（项目规约 / 会话 / 草稿）随项目一起清理；只删库里真实存在
     # 且列入 cleanup 的表，避免老库缺表时把删除流程打 500。
     cleanup_tables = [
         name for name in await _tables_with_project_id(db)

@@ -5,7 +5,7 @@
 2026-11-09 起记忆分成两层：
 
 - **个人记忆**（``agent_user_preferences``）：按 ``user_id`` 隔离；
-- **项目记忆**（``agent_project_memories``）：按 ``project_id`` 隔离，由项目
+- **项目规约**（``agent_project_memories``）：按 ``project_id`` 隔离，由项目
   总监维护、全项目成员共享。
 
 两者都不能信任客户端传来的 ``user_id`` / ``project_id``。作用域一律由服务端
@@ -34,7 +34,7 @@ from app.services.permissions import member_role_codes
 
 logger = logging.getLogger(__name__)
 
-#: 项目记忆的维护岗位：总监为主，总监代表可代管（与文书签认口径一致）。
+#: 项目规约的维护岗位：总监为主，总监代表可代管（与文书签认口径一致）。
 PROJECT_MEMORY_MANAGER_ROLES = frozenset({
     UserRole.CHIEF_SUPERVISOR.value,
     UserRole.DEPUTY_CHIEF.value,
@@ -134,7 +134,7 @@ async def resolve_agent_scope(
         roles = await member_role_codes(db, user_id, project_id)
         if not roles and not is_org_admin:
             # 脏数据（已离场但 users.project_id 未清）：降级为无项目上下文，
-            # 不阻断聊天，但项目记忆/项目会话全部不参与。
+            # 不阻断聊天，但项目规约/项目会话全部不参与。
             logger.warning(
                 "agent scope: 用户 %s 不是项目 %s 的有效成员，降级为无项目上下文",
                 user_id, project_id,
@@ -163,19 +163,19 @@ async def resolve_project_memory_scope(
     db: AsyncSession,
     user: User,
 ) -> AgentScope:
-    """项目记忆接口专用作用域：必须有当前项目，且是成员/管理员。
+    """项目规约接口专用作用域：必须有当前项目，且是成员/管理员。
 
-    与聊天不同，这里不能静默降级：读写项目记忆必须明确属于某个项目。
+    与聊天不同，这里不能静默降级：读写项目规约必须明确属于某个项目。
     """
     project_id = getattr(user, "project_id", None)
     if project_id is None:
-        raise ProjectContextError("请先加入或切换到项目，再管理项目记忆")
+        raise ProjectContextError("请先加入或切换到项目，再管理项目规约")
     org_role = getattr(user, "org_role", None)
     is_super_admin = bool(getattr(user, "is_super_admin", lambda: False)())
     is_org_admin = bool(org_role in ORG_ROLES) or is_super_admin
     roles = await member_role_codes(db, int(user.id), project_id)
     if not roles and not is_org_admin:
-        raise ProjectContextError("你不是当前项目的有效成员，无权访问项目记忆")
+        raise ProjectContextError("你不是当前项目的有效成员，无权访问项目规约")
     return AgentScope(
         user_id=int(user.id),
         project_id=project_id,
