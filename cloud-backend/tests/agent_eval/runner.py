@@ -634,6 +634,20 @@ def resolve_via_production(parsed: dict | None, message: str,
     tool = str(plan.get("selected_tool") or "").strip()
     if tool not in _tools_mod.TOOL_BY_NAME:
         tool = ""
+    # 🔴 与生产 agent.py:1477-1506 同步：多动作且无澄清（plan_only）时，
+    # 生产路由取「第一个可执行动作」接管执行，其余动作待续办。评测若不同步，
+    # 模型输出多动作会被误判成「工具错」（2026-11-12 多步编排升级）。
+    if not tool and plan.get("execution_mode") == "plan_only":
+        if not plan.get("clarifications"):
+            for _item in (plan.get("actions") or []):
+                if not isinstance(_item, dict):
+                    continue
+                _aid = str(_item.get("id") or "").strip()
+                _spec = _plan.ACTIONS.get(_aid)
+                _mtool = str((_spec or {}).get("tool") or "").strip() if _spec else ""
+                if _mtool and _mtool in _tools_mod.TOOL_BY_NAME:
+                    tool = _mtool
+                    break
     args = {**_fact_model.facts_to_args(plan.get("facts")), **semantic_args}
     if plan.get("record_type") and not str(args.get("record_type") or "").strip():
         args["record_type"] = plan["record_type"]

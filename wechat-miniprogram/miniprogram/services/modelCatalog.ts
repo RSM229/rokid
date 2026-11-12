@@ -35,15 +35,27 @@ export interface ModelItem {
 
 export const MODEL_CATALOG: ModelItem[] = [
   {
+    id: 'qwen3.7-plus',
+    provider: '',
+    providerName: '通义千问',
+    model: 'qwen3.7-plus',
+    name: '通义千问 3.7 Plus',
+    shortName: 'Qwen3.7 Plus',
+    desc: '智能理解、抽取字段更准（默认推荐）',
+    temperature: 0.7,
+    badges: ['推荐'],
+    capabilities: ['文本生成', '推理模型', '视觉理解'],
+  },
+  {
     id: 'qwen3.8-flash',
     provider: '',
     providerName: '通义千问',
     model: 'qwen3.8-flash',
     name: '通义千问 3.8 Flash',
     shortName: 'Qwen3.8 Flash',
-    desc: '高速全能，文本/推理/视觉',
+    desc: '高速全能，省钱首选',
     temperature: 0.7,
-    badges: ['New'],
+    badges: [],
     capabilities: ['文本生成', '推理模型', '视觉理解'],
   },
   {
@@ -55,7 +67,7 @@ export const MODEL_CATALOG: ModelItem[] = [
     shortName: 'DeepSeek V4.1',
     desc: '高速推理，文本/视觉全能',
     temperature: 0.7,
-    badges: ['New', '⚡ 限时夜间 5 折'],
+    badges: ['⚡ 限时夜间 5 折'],
     capabilities: ['文本生成', '推理模型', '视觉理解'],
   },
 ]

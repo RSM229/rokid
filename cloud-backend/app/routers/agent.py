@@ -489,7 +489,8 @@ _AGENT_SYSTEM = """你是「广东建设智慧监理」工程监理智能助手�
 facts 只记录用户原话明确提供的信息；图片、水印和视觉观察由服务端作为独立证据合并。
 args 可以放你已确认的工具参数，但服务端仍会重新抽取、校验和合并。水印/EXIF 中成功识别的
 日期、项目、地点、部位和天气优先于用户转述；冲突时用户值仍保留用于提示。图片缺失不能
-反向覆盖用户事实。可以返回多个动作；存在多个动作时服务端不会自动执行。
+反向覆盖用户事实。可以返回多个动作；存在多个动作时服务端将自动执行第一个可执行动作，
+并在办完后把剩余动作作为「一键续办」选项提示用户继续（无需你追问）。
 
 🔴 最高优先级：办事必须输出受控动作，缺字段交给服务端追问
 ----------------------------------------------------
@@ -1473,6 +1474,37 @@ async def _agent_chat_impl(
     tool = str(incoming_plan.get("selected_tool") or "").strip()
     if tool not in agent_tools.TOOL_BY_NAME:
         tool = ""
+
+    # 🔴 多步编排（2026-11-12）：模型给出多个动作（execution_mode="plan_only"）时，
+    # 不再整轮退化纯问答——自动执行第一个可执行动作，剩余动作在办完后以
+    # 「一键续办」chips 呈现（前端 chips 机制已有，点击即以该文本再发一轮）。
+    # 仅当计划无澄清、无需问记录类型时启用，避免与 needs_record_type /
+    # clarifications 的确定性追问打架。
+    multi_action_ids: list[str] = []
+    if not tool and incoming_plan.get("execution_mode") == "plan_only":
+        _plan_clarifications = [
+            item for item in (incoming_plan.get("clarifications") or [])
+            if isinstance(item, dict)
+        ]
+        if not _plan_clarifications:
+            _executables: list[tuple[str, str]] = []
+            for _item in (incoming_plan.get("actions") or []):
+                if not isinstance(_item, dict):
+                    continue
+                _action_id = str(_item.get("id") or "").strip()
+                _spec = agent_request_plan.ACTIONS.get(_action_id)
+                _map_tool = str((_spec or {}).get("tool") or "").strip() if _spec else ""
+                if _map_tool and _map_tool in agent_tools.TOOL_BY_NAME:
+                    _executables.append((_action_id, _map_tool))
+            if _executables:
+                _first_id, _first_tool = _executables[0]
+                tool = _first_tool
+                # 剩余动作 id 留到首个动作执行成功后再下发，避免打断补字段流程
+                multi_action_ids = [aid for aid, _ in _executables[1:]]
+                logger.info(
+                    "多步编排：首个动作 %s 已接管，剩余动作 %s 待续办",
+                    _first_id, multi_action_ids,
+                )
     fact_args = agent_fact_model.facts_to_args(incoming_plan.get("facts"))
     args = {**semantic_args, **fact_args}
     if incoming_plan.get("record_type") and not str(args.get("record_type") or "").strip():
@@ -1617,6 +1649,9 @@ async def _agent_chat_impl(
         draft_args.pop("record_type", None)
         if prefill:
             draft_args["_prefill"] = prefill
+        if multi_action_ids:
+            # 类型不明先问类型：剩余续办动作同样随草稿存下，等类型确认后下发
+            draft_args["_followup_actions"] = list(multi_action_ids)
         await agent_tools.stash_pending(
             db, user.id, "create_work_record", draft_args, ["记录类型"],
             message=message, fact_args=turn_fact_args, conversation_id=conversation_id,
@@ -1681,6 +1716,8 @@ async def _agent_chat_impl(
             )
         # _prefill is durable context only; it is never a business field.
         args.pop("_prefill", None)
+        # _followup_actions（多步编排续办）是路由层内部键，不是工具参数，绝不传给 handler。
+        args.pop("_followup_actions", None)
         # 普通聊天创建记录与整理计划统一采用“字段齐全 → 用户确认 → 正式写入”。
         # 首次执行只做合同校验并保存待确认草稿；用户确认后才放行工具写入。
         if tool == "create_work_record":
@@ -1778,10 +1815,16 @@ async def _agent_chat_impl(
                         )
             elif _tool_reply:
                 result["reply"] = _tool_reply
+            # 续办动作随草稿持久化：首动作若是写操作，本轮只进确认流程就 return，
+            # 剩余动作必须跨轮存活，等首动作确认成功后一并下发（2026-11-12）。
+            _stash_args = dict(args)
+            if prefill and tool == "create_work_record":
+                _stash_args["_prefill"] = prefill
+            if multi_action_ids:
+                _stash_args["_followup_actions"] = list(multi_action_ids)
             await agent_tools.stash_pending(
                 db, user.id, tool,
-                {**args, "_prefill": prefill}
-                if prefill and tool == "create_work_record" else args,
+                _stash_args,
                 result.get("need_more"), message=message,
                 fact_args=turn_fact_args, conversation_id=conversation_id,
                 project_id=project_id,
@@ -1799,6 +1842,12 @@ async def _agent_chat_impl(
                 result["input_components"] = _agent_input_components(form)
             result["input_channels"] = ["text", "voice", "image", "file"]
         elif result.get("ok"):
+            # 首动作确认成功：若草稿里留有续办动作（上一轮多步编排存下的
+            # _followup_actions），转交给下发逻辑，再清草稿（2026-11-12）。
+            if not multi_action_ids:
+                _draft_followup = (draft.get("args") or {}).get("_followup_actions")
+                if isinstance(_draft_followup, list):
+                    multi_action_ids = [str(x) for x in _draft_followup if str(x).strip()]
             await agent_tools.clear_pending(
                 db, user.id, tool, conversation_id, project_id=project_id,
             )
@@ -1816,6 +1865,26 @@ async def _agent_chat_impl(
                     rtype = agent_tools._norm_record_type(str(args.get("record_type") or "")) or "巡视"
                     head = f"已按「{rtype}」开始记录，{head}。"
                 result["reply"] = head + "\n" + str(result.get("reply") or "").strip()
+        # 🔴 多步编排续办：首个动作执行成功（无 need_more）后，把剩余动作变成
+        # 「一键续办」chips——前端点击即以该文本再发一轮（无需手打、不改前端）。
+        # 文案指向动作目录里的中文 label，避免暴露动作 id 给用户。
+        if multi_action_ids and not result.get("need_more") and result.get("ok"):
+            _pending_labels: list[str] = []
+            for _aid in multi_action_ids:
+                _spec = agent_request_plan.ACTIONS.get(_aid)
+                _label = str((_spec or {}).get("label") or "").strip() if _spec else ""
+                if _label:
+                    _pending_labels.append(_label)
+            if _pending_labels:
+                _suffix = "\n已记下还要" + "、".join(_pending_labels[:2]) + (
+                    "等" if len(_pending_labels) > 2 else ""
+                ) + "，点下面继续："
+                result["reply"] = str(result.get("reply") or "").strip() + _suffix
+                existing = list(result.get("chips") or [])
+                for _label in _pending_labels:
+                    if _label not in existing:
+                        existing.append(_label)
+                result["chips"] = existing
         return {"kind": "action", "tool": tool, "model": model_id,
                 "request_plan": incoming_plan, **result}
 
