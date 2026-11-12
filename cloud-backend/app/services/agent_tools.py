@@ -2843,27 +2843,90 @@ async def _query_regulation(ctx: ToolContext, args: dict) -> dict:
     keyword = str(args.get("keyword") or args.get("question") or ctx.message or "").strip()
     if not keyword:
         return _need_more(["检索关键词"], "想查哪条规范？例如「模板支撑验收要求」。")
+
+    # 「XX 规范怎么要求」的权威来源是内置验收指引，不是知识库文件。
+    # 知识库收录的是省统表/安全监理用表/验收记录/填写示例/操作指引等表式资料，
+    # 把它们当「规范依据」必然答非所问（现场实测：问模板支撑验收，回了一堆表式字段）。
+    from app.services import knowledge_service
+    guide = None
     try:
-        from app.services import knowledge_service
+        guide = knowledge_service.get_acceptance_guide(keyword)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("验收指引获取失败: %s", type(exc).__name__)
+
+    FORM_CATEGORIES = {"省统表", "安全监理用表"}
+    # 归到「其他资料」的验收记录/填写示例/操作指引同样是表式文件，按名称+正文特征一并剔除。
+    FORM_LIKE_HINTS = (
+        "验收记录", "检查记录", "旁站记录", "记录表", "表格模板", "表式",
+        "填写示例", "操作指引", "台账", "本表一式", "工程项目名称",
+        "验收部位", "编号：", "填表", "监理通知单", "监理日志", "举牌验收照片",
+    )
+
+    def _is_form_like(hit: dict) -> bool:
+        blob = " ".join(str(hit.get(k) or "") for k in ("name", "filename", "snippet"))
+        return any(hint in blob for hint in FORM_LIKE_HINTS)
+
+    try:
         hits = knowledge_service.search_by_content(keyword) or []
     except Exception as exc:  # noqa: BLE001
         logger.warning("规范检索失败: %s", type(exc).__name__)
         hits = []
-    if not hits:
-        return _ok(f"没有检索到与「{keyword}」相关的规范条目，换个说法或到「资料库」手动检索。")
-    lines = [f"与「{keyword}」相关的规范依据（{len(hits)} 条）："]
+    regulation_hits = [
+        h for h in hits
+        if h.get("category") not in FORM_CATEGORIES and not _is_form_like(h)
+    ]
+    form_hits = [
+        h for h in hits
+        if h.get("category") in FORM_CATEGORIES or _is_form_like(h)
+    ]
+
+    topic_hit = bool(
+        guide
+        and guide.get("regulation_basis")
+        and not str(guide["regulation_basis"][0]).startswith("请查询")
+    )
+    lines: list[str] = []
     citations: list[dict] = []
-    for i, hit in enumerate(hits[:3], 1):
-        name = hit.get("name") or hit.get("filename") or "规范"
-        snippet = (hit.get("snippet") or "").strip().replace("\n", " ")
-        lines.append(f"{i}. {name}：{snippet[:150]} [[{i}]]")
-        citations.append(_cite(
-            i, "regulation", str(name),
-            sub="规范条文", snippet=snippet[:200], target="/knowledge-base",
-            ref_id=hit.get("source_id") or hit.get("filename") or hit.get("name"),
-        ))
+    if topic_hit:
+        lines.append(f"「{keyword}」依据：{'；'.join(guide['regulation_basis'])}")
+        if guide.get("key_points"):
+            lines.append(f"验收要点：{'；'.join(guide['key_points'])}")
+        if guide.get("steps"):
+            lines.append("实施步骤：" + " → ".join(guide["steps"]))
+        if guide.get("common_violations"):
+            lines.append("常见问题：" + "、".join(guide["common_violations"]))
+        for m in guide.get("matched_docs", [])[:3]:
+            citations.append(_cite(
+                len(citations) + 1, "regulation", m,
+                sub="关联表式", target="/knowledge-base",
+            ))
+    # 命中内置指引时不再追加知识库「规范依据」：库内并无真规范条文，
+    # 追加只会把表式字段/示例重新混进答案。
+    if regulation_hits and not topic_hit:
+        lines.append(f"与「{keyword}」相关的规范依据（{len(regulation_hits)} 条）：")
+        for i, hit in enumerate(regulation_hits[:3], 1):
+            name = hit.get("name") or hit.get("filename") or "规范"
+            snippet = (hit.get("snippet") or "").strip().replace("\n", " ")
+            lines.append(f"{i}. {name}：{snippet[:150]} [[{len(citations) + i}]]")
+            citations.append(_cite(
+                len(citations) + i, "regulation", str(name),
+                sub="规范条文", snippet=snippet[:200], target="/knowledge-base",
+                ref_id=hit.get("source_id") or hit.get("filename") or hit.get("name"),
+            ))
+    if not topic_hit and not regulation_hits:
+        if form_hits:
+            return _ok(
+                f"资料库中与「{keyword}」相关的是表式/示例文件（{len(form_hits)} 份），不是规范条文。"
+                "内置规范指引覆盖：模板、混凝土、钢筋、脚手架、深基坑、防水、电气、"
+                "安全帽、临边洞口、临时用电；换个主题词再问，或到「资料库」查看表式。"
+            )
+        return _ok(
+            f"没有检索到与「{keyword}」相关的规范条文。内置规范指引覆盖：模板、混凝土、"
+            "钢筋、脚手架、深基坑、防水、电气、安全帽、临边洞口、临时用电；"
+            "也可到「资料库」手动检索原文。"
+        )
     lines.append("完整条文请到「资料库」检索原文。")
-    return _ok("\n".join(lines), data={"count": len(hits)}, citations=citations)
+    return _ok("\n".join(lines), data={"count": len(regulation_hits)}, citations=citations)
 
 
 async def _review_plan_doc(ctx: ToolContext, args: dict) -> dict:
