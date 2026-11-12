@@ -2353,6 +2353,184 @@ async def glasses_scan_login(
     )
 
 
+# ============ Web 扫码登录（小程序扫一扫） ============
+#
+# 与上面「眼镜端扫码登录」方向相反：web 未登录时生成二维码，小程序已登录用户
+# 扫码并确认后，web 轮询拿到同一账号的 Web TokenResponse。
+#
+# 安全要点：
+# - 二维码里只放 ticket + 校验码；secret 只回给 web（谁也拿不到 token）
+# - 小程序确认必须带登录态（get_current_user）；超管在小程序端已被拦截，因此
+#   扫码登录天然只覆盖项目级/管理员账号，超管继续用账号密码
+# - ticket 120 秒过期、一次性；确认后仅能用对应 secret 取一次 token
+
+_WEB_SCAN_TTL = 120
+_WEB_SCAN_TICKETS: dict[str, dict] = {}
+_WEB_SCAN_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+_WEB_SCAN_MAX_PENDING = 500
+
+
+def _scan_prune() -> None:
+    now = time.time()
+    for ticket in [key for key, value in _WEB_SCAN_TICKETS.items()
+                   if float(value.get("expires_at") or 0) <= now]:
+        _WEB_SCAN_TICKETS.pop(ticket, None)
+
+
+def _scan_entry(ticket: str) -> dict:
+    _scan_prune()
+    entry = _WEB_SCAN_TICKETS.get(ticket)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="二维码无效或已过期，请刷新后重试")
+    if float(entry.get("expires_at") or 0) <= time.time():
+        _WEB_SCAN_TICKETS.pop(ticket, None)
+        raise HTTPException(status_code=404, detail="二维码已过期，请刷新后重试")
+    return entry
+
+
+def _scan_mask_ip(ip: str) -> str:
+    parts = (ip or "").split(".")
+    if len(parts) == 4:
+        return ".".join(parts[:3] + ["*"])
+    return (ip or "")[:12]
+
+
+def _scan_client_label(user_agent: str) -> str:
+    ua = (user_agent or "").lower()
+    for key, label in (("edg", "Edge"), ("chrome", "Chrome"), ("safari", "Safari"),
+                       ("firefox", "Firefox"), ("microMessenger".lower(), "微信")):
+        if key in ua:
+            return label
+    return "未知浏览器"
+
+
+class ScanLoginLookupRequest(BaseModel):
+    ticket: str = Field(min_length=8, max_length=128)
+
+
+class ScanLoginConfirmRequest(BaseModel):
+    ticket: str = Field(min_length=8, max_length=128)
+    code: str | None = Field(default=None, max_length=8)
+
+
+@router.post("/scan-login/create")
+async def create_scan_login(request: Request):
+    """Web 未登录时生成一次性扫码登录二维码（公开接口）。"""
+    _scan_prune()
+    if len(_WEB_SCAN_TICKETS) >= _WEB_SCAN_MAX_PENDING:
+        raise HTTPException(status_code=429, detail="扫码登录请求过多，请稍后再试")
+    ticket = secrets.token_urlsafe(24)
+    secret = secrets.token_urlsafe(24)
+    code = "".join(secrets.choice(_WEB_SCAN_CODE_ALPHABET) for _ in range(4))
+    ua = request.headers.get("user-agent", "")
+    _WEB_SCAN_TICKETS[ticket] = {
+        "secret": secret,
+        "code": code,
+        "status": "pending",  # pending → confirmed → consumed
+        "user_id": None,
+        "expires_at": time.time() + _WEB_SCAN_TTL,
+        "client_label": _scan_client_label(ua),
+        "ip_masked": _scan_mask_ip(request.client.host if request.client else ""),
+        "created_at": time.time(),
+    }
+    return {
+        "ticket": ticket,
+        "secret": secret,
+        "code": code,
+        "expires_in": _WEB_SCAN_TTL,
+        "qr_text": f"GDJL-WEB-LOGIN:{ticket}:{code}",
+    }
+
+
+@router.post("/scan-login/lookup")
+async def lookup_scan_login(
+    req: ScanLoginLookupRequest,
+    user: User = Depends(get_current_user),
+):
+    """小程序扫码后先查一眼：确认是本系统发起的登录，并拿校验码给用户核对。"""
+    entry = _scan_entry(req.ticket)
+    if entry.get("status") == "consumed":
+        raise HTTPException(status_code=409, detail="该登录二维码已被使用，请刷新网页端二维码")
+    return {
+        "ticket": req.ticket,
+        "code": entry.get("code"),
+        "client_label": entry.get("client_label") or "未知浏览器",
+        "ip_masked": entry.get("ip_masked") or "",
+        "expires_in": max(0, int(float(entry.get("expires_at") or 0) - time.time())),
+        "user_name": user.real_name or user.username,
+    }
+
+
+@router.post("/scan-login/confirm")
+async def confirm_scan_login(
+    req: ScanLoginConfirmRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """小程序用户确认登录网页端：把 ticket 绑定到当前小程序账号。"""
+    entry = _scan_entry(req.ticket)
+    if entry.get("status") == "consumed":
+        raise HTTPException(status_code=409, detail="该登录二维码已被使用")
+    if not user.is_active:
+        raise HTTPException(status_code=403, detail="账号不存在或已禁用")
+    if user.audit_status != AUDIT_APPROVED:
+        raise HTTPException(status_code=403, detail="账号未通过审核，无法登录网页端")
+    if entry.get("status") == "confirmed" and entry.get("user_id") != user.id:
+        raise HTTPException(status_code=409, detail="该登录二维码已被其他账号确认")
+    entered = (req.code or "").strip().upper()
+    if entered and entered != str(entry.get("code") or ""):
+        raise HTTPException(status_code=400, detail="校验码不一致，请确认扫的是当前网页上的二维码")
+    entry["status"] = "confirmed"
+    entry["user_id"] = int(user.id)
+    entry["confirmed_at"] = time.time()
+    _logger_scan = logging.getLogger(__name__)
+    _logger_scan.info(
+        "scan-login confirmed ticket=%s… user_id=%s client=%s ip=%s",
+        req.ticket[:8], user.id, entry.get("client_label"), entry.get("ip_masked"),
+    )
+    return {
+        "ok": True,
+        "user_name": user.real_name or user.username,
+        "expires_in": max(0, int(float(entry.get("expires_at") or 0) - time.time())),
+    }
+
+
+@router.get("/scan-login/status")
+async def scan_login_status(
+    ticket: str = Query(min_length=8, max_length=128),
+    secret: str = Query(min_length=8, max_length=128),
+    db: AsyncSession = Depends(get_db),
+):
+    """Web 轮询扫码状态；确认后签发 Web 登录 token（一次性）。"""
+    entry = _WEB_SCAN_TICKETS.get(ticket)
+    if entry is None:
+        return {"status": "expired"}
+    if float(entry.get("expires_at") or 0) <= time.time():
+        _WEB_SCAN_TICKETS.pop(ticket, None)
+        return {"status": "expired"}
+    if not secrets.compare_digest(str(entry.get("secret") or ""), secret):
+        raise HTTPException(status_code=403, detail="无效的轮询凭证")
+    if entry.get("status") == "consumed":
+        return {"status": "used"}
+    if entry.get("status") != "confirmed":
+        return {
+            "status": "pending",
+            "expires_in": max(0, int(float(entry.get("expires_at") or 0) - time.time())),
+        }
+    user = await db.get(User, int(entry.get("user_id") or 0))
+    if user is None or not user.is_active:
+        _WEB_SCAN_TICKETS.pop(ticket, None)
+        raise HTTPException(status_code=403, detail="账号不存在或已禁用")
+    if user.audit_status != AUDIT_APPROVED:
+        _WEB_SCAN_TICKETS.pop(ticket, None)
+        raise HTTPException(status_code=403, detail="账号未通过审核，无法登录")
+    token = await _issue_token(user, db)
+    # 保留 consumed 状态到过期，让重复轮询拿到「已使用」而不是「已过期」的误导提示
+    entry["status"] = "consumed"
+    entry["consumed_at"] = time.time()
+    return {"status": "confirmed", **token.model_dump()}
+
+
 # ===========================================================================
 # 批量导入 / 导出账号（2026-10-20）
 #

@@ -242,6 +242,94 @@ async def chat_completion(
             await http_client.aclose()
 
 
+async def stream_chat_completion(
+    messages: list[dict],
+    *,
+    temperature: float = 0.7,
+    max_tokens: int = 4096,
+    response_format: dict | None = None,
+    client: httpx.AsyncClient | None = None,
+    provider: str | None = None,
+    model: str | None = None,
+    thinking: bool | None = None,
+):
+    """流式文本模型调用（SSE）。
+
+    逐块产出事件，调用方按 type 分流：
+
+    - ``{"type": "config", "config": ModelConfig}``：仅首个事件，用于拿 model_id
+    - ``{"type": "reasoning", "text": "..."}``：思考过程增量（思考模式模型才有）
+    - ``{"type": "content", "text": "..."}``：正文增量
+
+    供应商没有 reasoning_content 字段时只会收到 content，调用方无需区分。
+    """
+    config = await get_runtime_model_config("llm")
+    override = _provider_override(provider)
+    if override is not None:
+        config = override
+    if override is None and model:
+        config.model_id = model
+    _require_available(config)
+    payload: dict = {
+        "model": config.model_id,
+        "messages": messages,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "stream": True,
+    }
+    if response_format:
+        payload["response_format"] = response_format
+    if thinking is not None:
+        # DashScope/百炼：false=关闭思考（路由这类结构化任务更快、也不泄漏规划）
+        payload["enable_thinking"] = bool(thinking)
+    owns_client = client is None
+    http_client = client or httpx.AsyncClient(timeout=httpx.Timeout(300.0))
+    try:
+        yield {"type": "config", "config": config}
+        async with http_client.stream(
+            "POST",
+            _join_api_path(config.base_url, "chat/completions"),
+            headers={**_headers(config), "Content-Type": "application/json"},
+            json=payload,
+        ) as response:
+            if response.status_code >= 400:
+                await response.aread()
+                raise ModelGatewayError(_provider_http_error(response))
+            async for line in response.aiter_lines():
+                if not line or not line.startswith("data:"):
+                    continue
+                data = line[5:].strip()
+                if not data:
+                    continue
+                if data == "[DONE]":
+                    break
+                try:
+                    chunk = json.loads(data)
+                except ValueError:
+                    continue
+                choices = chunk.get("choices") or []
+                if not choices:
+                    continue
+                delta = choices[0].get("delta") or {}
+                reasoning = delta.get("reasoning_content")
+                if isinstance(reasoning, str) and reasoning:
+                    yield {"type": "reasoning", "text": reasoning}
+                content = delta.get("content")
+                if isinstance(content, str) and content:
+                    yield {"type": "content", "text": content}
+    except ModelGatewayError:
+        raise
+    except httpx.TimeoutException as exc:
+        logger.warning("LLM 流式调用超时: %s", type(exc).__name__)
+        raise ModelGatewayError("文本模型流式调用超时，请稍后重试。") from exc
+    except (httpx.HTTPError, ValueError, TypeError, KeyError) as exc:
+        logger.warning("LLM 流式调用失败: %s", type(exc).__name__)
+        raise ModelGatewayError("文本模型流式调用失败，请稍后重试。") from exc
+    finally:
+        if owns_client:
+            await http_client.aclose()
+
+
 async def observe_image(
     image_bytes: bytes,
     *,

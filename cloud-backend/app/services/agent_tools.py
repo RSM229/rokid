@@ -43,6 +43,7 @@ from app.models.security_audit import SecurityAudit
 from app.models.user import Project, User
 from app.models.work_record import WorkRecord, WorkRecordStatus
 from app.services import agent_request_plan, form_contracts, model_gateway, provform_schema, record_field_spec
+from app.services import multi_image_split
 from app.services.agent_context import (
     append_context_message,
     extract_explicit_message_facts,
@@ -87,12 +88,12 @@ _PAGE_ALIASES = {
     "隐患": "/pages/hazards/index",
     "隐患列表": "/pages/hazards/index",
     "隐患识别": "/pages/hazards/index",
-    "文书": "/pages/kb/index",
-    "文书列表": "/pages/kb/index",
-    "监理文书": "/pages/kb/index",
-    "文书审批": "/pages/kb/index",
-    "台账": "/pages/kb/index",
-    "查看台账": "/pages/kb/index",
+    "文书": "/pages/documents/index",
+    "文书列表": "/pages/documents/index",
+    "监理文书": "/pages/documents/index",
+    "文书审批": "/pages/documents/index",
+    "台账": "/pages/documents/index?tab=ledger",
+    "查看台账": "/pages/documents/index?tab=ledger",
     "工作台": "/pages/agent/index",
     "待办": "/pages/todo/index",
     "待办任务": "/pages/todo/index",
@@ -104,12 +105,12 @@ _PAGE_ALIASES = {
     "我的资料库": "/pages/kb/index",
     "知识库管理": "/pages/kb/index",
     "资料库管理": "/pages/kb/index",
-    "规范查询": "/pages/kb/index",
+    "规范查询": "/pages/knowledge/index",
     "拍照识别": "/pages/capture/index",
     "拍照": "/pages/capture/index",
     "AI隐患识别": "/pages/capture/index?mode=hazard",
     "我的": "/pages/mine/index",
-    "省统表": "/pages/kb/index",
+    "省统表": "/pages/record-form/choose",
     "平行检验": "/pages/parallel/index",
 }
 
@@ -132,6 +133,9 @@ class ToolContext:
     # 否则照片必填项永远缺失、验收等记录永远建不出
     # （2026-11-09/11-10 生产实测：用户明明发了图仍卡在缺照片）。
     images: list[str] = field(default_factory=list)
+    # 逐图结构化视觉信号（与 images 等长）：是否举牌/封样/危大/施工中…等，字段同
+    # image_classification.ImageSignal。多图按图自动分类分流时使用；旧入口不传则退化单记录。
+    image_signals: list[dict] = field(default_factory=list)
 
 
 Handler = Callable[[ToolContext, dict], Awaitable[dict]]
@@ -154,9 +158,16 @@ class ToolSpec:
 
 def _ok(reply: str, **kw) -> dict:
     base = {"ok": True, "reply": reply, "card": None, "cards": [], "actions": [],
-            "need_more": [], "options": {}, "undo": None, "data": {}}
+            "need_more": [], "options": {}, "undo": None, "data": {}, "citations": []}
     base.update(kw)
     return base
+
+
+def _cite(index: int, kind: str, title: str, *, sub: str = "", snippet: str = "",
+          target: str | None = None, ref_id: Any = None) -> dict:
+    """统一的引用条目：前端据此渲染行内角标与文末引用列表。"""
+    return {"index": index, "kind": kind, "title": title, "sub": sub,
+            "snippet": snippet, "target": target, "ref_id": ref_id}
 
 
 def _need_more(missing: list[str], reply: str = "",
@@ -174,7 +185,7 @@ def _need_more(missing: list[str], reply: str = "",
         else:
             reply = "请补充缺失信息。"
     return {"ok": False, "reply": reply, "card": None, "cards": [], "actions": [],
-            "need_more": missing, "options": {}, "undo": None, "data": {}}
+            "need_more": missing, "options": {}, "undo": None, "data": {}, "citations": []}
 
 
 def _parse_json_object(raw: str) -> dict | None:
@@ -1148,6 +1159,244 @@ def refill_missing_from_message(args: dict, missing_labels: list | None,
 # 写工具
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------- 多图分类分流（B 方案）
+
+def _reconstruct_signals_from_material(material: str, n_images: int) -> list[dict]:
+    """从聊天素材重建逐图 image_signals（前端视觉结果未填 image_signals 时的兜底）。
+
+    见 ``app.services.agent_vision_signals``。返回空列表表示无法重建（material 不含
+    逐图标记），调用方应回退到模型分组或单记录流程。
+    """
+    from app.services.agent_vision_signals import parse_material_signals
+    try:
+        return parse_material_signals(material, n_images)
+    except Exception as exc:  # noqa: BLE001 - 解析异常不应阻断建档，降级为无信号
+        import logging
+        logging.getLogger(__name__).warning("material→signals 重建失败（降级为无信号）: %s", exc)
+        return []
+
+
+async def _maybe_handle_multi_image_split(ctx: "ToolContext", args: dict, orig_args: dict) -> dict | None:
+    """多图 + 逐图视觉信号时，按图分类、分组、先确认后建；无信号则退化为单记录流程（返回 None）。
+
+    短路在单记录逻辑之前：避免「类型只能取一个 / 多图全挂一条」把多类照片误建为一条。
+    """
+    # 先消费已存的分组方案：确认轮用户只回肯定词、不带新图，必须在此短路之前判定，
+    # 否则「if not images: return None」会把确认轮直接吞掉，分组方案永不消费。
+    pending = args.get("_agent_pending_split")
+    if isinstance(pending, dict) and pending.get("groups"):
+        groups = [_group_from_dict(g) for g in pending["groups"]]
+        if multi_image_split.is_confirm(ctx.message):
+            return await _create_split_records(ctx, groups)
+        return _split_need_more(groups)
+
+    images = [str(u).strip() for u in (ctx.images or []) if str(u).strip()]
+    if not images:
+        return None
+    signals = list(getattr(ctx, "image_signals", None) or [])
+
+    # Path 2：前端把视觉结果放进了 material 但没填 image_signals（设计上的信号通道
+    # 一直空着）→ 后端从「水印字段 + 画面观察」重建逐图信号，激活 group_images。
+    # 仅多图时做（单图无需分流），且只在请求未直接给信号时补。
+    if not signals and len(images) >= 2 and getattr(ctx, "material", None):
+        recon = _reconstruct_signals_from_material(ctx.material, len(images))
+        if recon:
+            signals = recon
+            try:
+                ctx.image_signals = signals
+            except Exception:
+                pass
+
+    if signals:
+        groups = multi_image_split.group_images(images, signals)
+        if len(groups) > 1:
+            plan = {"groups": [_group_to_dict(g) for g in groups], "source": "vision"}
+            args["_agent_pending_split"] = plan
+            orig_args["_agent_pending_split"] = plan
+            return _split_need_more(groups)
+        # vision 只分出单组（含全部待定）→ 退化为模型按水印分组（Path 1）
+
+    # 无视觉信号 / vision 未分出多组：接受模型按水印文字分组（Path 1）。
+    model_groups = _parse_model_image_groups(args.get("image_groups"), images)
+    if model_groups:
+        if len(model_groups) <= 1:
+            return None  # 单一类型 → 普通单记录流程
+        plan = {"groups": [_group_to_dict(g) for g in model_groups], "source": "model_watermark"}
+        args["_agent_pending_split"] = plan
+        orig_args["_agent_pending_split"] = plan
+        return _split_need_more(model_groups)
+
+    return None  # 无逐图信号且未分组 → 普通单记录流程（多图挂同一条）
+
+
+def _norm_split_record_type(value) -> str | None:
+    """把模型给的分组类型归一为合法记录类型；识别不出归「待定」。"""
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    canonical = _norm_record_type(raw)
+    if canonical:
+        return canonical
+    alias = {
+        "巡查": "巡视", "巡视检查": "巡视",
+        "材料": "见证", "材料单据": "见证", "取样": "见证", "送检": "见证",
+        "举牌": "验收", "隐蔽": "验收",
+        "平行": "平行检验",
+    }
+    for k, v in alias.items():
+        if k in raw:
+            return v
+    return "待定"
+
+
+def _parse_model_image_groups(raw, images: list) -> list | None:
+    """模型按水印文字分组：image_groups=[{record_type, image_indices|images}] → ImageGroup 列表。
+
+    image_indices 为 1-based（对应消息里的「【图片 N】」），映射到 ctx.images 的 URL；
+    也接受直接给 URL。仅做结构解析与类型归一，不访问视觉。
+    """
+    if not isinstance(raw, list) or not raw:
+        return None
+    buckets: dict[str, "multi_image_split.ImageGroup"] = {}
+    order: list[str] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        rtype = _norm_split_record_type(item.get("record_type"))
+        if not rtype:
+            continue
+        idxs = item.get("image_indices") or item.get("images") or []
+        urls: list[str] = []
+        for ix in idxs:
+            if isinstance(ix, str) and ix.strip().lower().startswith("http"):
+                u = ix.strip()
+                if u:
+                    urls.append(u)
+                continue
+            try:
+                i = int(ix) - 1
+            except (TypeError, ValueError):
+                continue
+            if 0 <= i < len(images):
+                urls.append(images[i])
+        urls = [u for u in urls if u]
+        if not urls:
+            continue
+        grp = buckets.get(rtype)
+        if grp is None:
+            grp = multi_image_split.ImageGroup(record_type=rtype, images=[], hints=[])
+            buckets[rtype] = grp
+            order.append(rtype)
+        for u in urls:
+            if u not in grp.images:
+                grp.images.append(u)
+    if not buckets:
+        return None
+    result = [buckets[r] for r in order if r != "待定"]
+    if buckets.get("待定"):
+        result.append(buckets["待定"])
+    return result
+
+
+def _group_to_dict(g: "multi_image_split.ImageGroup") -> dict:
+    return {"record_type": g.record_type, "images": list(g.images), "hints": list(g.hints)}
+
+
+def _group_from_dict(d: dict) -> "multi_image_split.ImageGroup":
+    return multi_image_split.ImageGroup(
+        record_type=str(d.get("record_type") or ""),
+        images=[str(x) for x in (d.get("images") or [])],
+        hints=[str(x) for x in (d.get("hints") or [])],
+    )
+
+
+def _split_need_more(groups) -> dict:
+    summary = multi_image_split.summarize(groups)
+    return {
+        "ok": False,
+        "reply": summary,
+        "card": None, "cards": [], "actions": [],
+        "need_more": ["分组确认"],
+        # ask_block 触发路由把完整记录表单置空（否则 need_more 会让 create_work_record
+        # 渲染一整张空表单，与「只回一句分组汇总、等用户确认」的交互冲突）。
+        "ask_block": {"type": "multi_image_split", "summary": summary},
+        "options": {}, "undo": None, "data": {},
+    }
+
+
+async def _create_split_records(ctx: "ToolContext", groups: list) -> dict:
+    """确认后循环建多条记录：每组一条，同类多图挂该条照片列表；待定组建极简草稿。
+
+    不走完整字段合同（resolve_event_form）：照片是主要产物，类型字段留待用户在
+    工作记录详情页补全。记录均为草稿状态。
+    """
+    created: list[tuple[str, WorkRecord, list[str]]] = []
+    for g in groups:
+        rtype = g.record_type
+        photos = [str(u).strip() for u in g.images if str(u).strip()]
+        if not photos:
+            continue
+        is_witness = (rtype == "见证")
+        content = _split_content(g, rtype)
+        rec = WorkRecord(
+            record_type=rtype,
+            status=WorkRecordStatus.DRAFT.value,
+            creator_id=ctx.user.id,
+            project_id=ctx.project_id,
+            record_date=datetime.now().date(),
+            inspection_photos=(None if is_witness else photos),
+            witness_photos=(photos if is_witness else None),
+            work_content=(content[:2000] if content else None),
+            content_json={
+                "source": "agent_multi_image_split",
+                "photo_count": len(photos),
+                "auto_classified": True,
+            },
+        )
+        ctx.db.add(rec)
+        created.append((rtype, rec, photos))
+
+    if not created:
+        return _ok("没有可建的记录。")
+
+    await ctx.db.flush()
+    for rtype, rec, photos in created:
+        await _audit(ctx.db, ctx.user, "agent_write", {
+            "tool": "create_work_record", "entity": "work_record", "id": rec.id,
+            "split": True, "record_type": rtype,
+        })
+    await ctx.db.commit()
+
+    cards = [{
+        "kind": "work_record", "id": rec.id, "title": f"{rtype}记录",
+        "sub": f"{len(photos)}张照片", "status": rec.status,
+        "time": str(rec.record_date),
+    } for rtype, rec, photos in created]
+
+    lines = ["已按分组创建以下记录："]
+    for rtype, rec, photos in created:
+        lines.append(f"· {rtype}记录 #{rec.id}（{len(photos)}张照片）")
+    lines.append("可在「工作记录」页查看，并补全相关字段。")
+    return _ok(
+        "\n".join(lines),
+        cards=cards,
+        actions=[],
+        undo=None,
+        data={"record_ids": [rec.id for _, rec, _ in created], "split": True},
+    )
+
+
+def _split_content(g, rtype: str) -> str:
+    """分组记录的 content 草稿：优先用逐图内容提示拼接，否则给类型占位（待用户补全）。"""
+    hints = [str(h).strip() for h in (g.hints or []) if str(h).strip()]
+    if hints:
+        joined = "；".join(dict.fromkeys(hints))  # 去重保序
+        return joined[:2000]
+    if rtype == "待定":
+        return "待确认归类（由现场照片自动分组，待补充类型与内容）"
+    return f"{rtype}（由{len(g.images)}张现场照片自动归类，待补全内容）"
+
+
 async def _create_work_record(ctx: ToolContext, args: dict) -> dict:
     content = str(args.get("work_content") or args.get("content") or args.get("description") or "").strip()
     section = str(args.get("section") or "").strip()
@@ -1156,6 +1405,12 @@ async def _create_work_record(ctx: ToolContext, args: dict) -> dict:
     # 本函数内对 apply_canonical_form_fields 之后的本地副本做的字段写入不会自动回到该对象，
     # 故凡需跨轮保留的状态（验收内容/结论/类型/询问态）都通过 _set_field_persist 显式镜像回 orig_args。
     orig_args = args
+    # 🔀 多图逐张分类分流（B 方案）：本轮多张图且带逐图视觉信号时，先按图分类、同类合并；
+    # 多组或含待定组先回执确认，确认后循环建多条。该分支在单记录逻辑之前短路返回，
+    # 避免「类型只能取一个 / 多图全挂一条」把多类照片误建为一条。
+    _split_result = await _maybe_handle_multi_image_split(ctx, args, orig_args)
+    if _split_result is not None:
+        return _split_result
     # 🔧 槽位键归一：模型可能用表字段 key（10_14）写 extra_fields，服务端读 canonical（pm_onsite）。
     # 不改会误判「仍缺字段」→ 死循环追问（2026-10-16 真机：危大巡视「到岗」反复被问）。
     raw_type = _norm_record_type(str(args.get("record_type") or "")) or ""
@@ -1834,7 +2089,7 @@ async def _create_hazard_rectification_doc(ctx: ToolContext, args: dict) -> dict
               "sub": "GDAQ30308 安全隐患整改通知", "status": result.get("doc_status", "草稿")},
         cards=[{"kind": "document", "id": doc_id, "title": title,
                 "sub": "GDAQ30308 安全隐患整改通知", "status": result.get("doc_status", "草稿")}],
-        actions=[{"type": "navigate", "label": "查看整改通知", "url": f"/pages/documents/detail?id={doc_id}"},
+        actions=[{"type": "navigate", "label": "查看整改通知", "url": "/pages/documents/index"},
                  {"type": "navigate", "label": "查看隐患闭环", "url": f"/pages/hazards/index?id={hazard_id}"}],
         data={"doc_id": doc_id, "hazard_id": hazard_id,
               "form_code": "gdaq_30308_yinhuan", "hazard_status": result.get("hazard_status")},
@@ -2134,7 +2389,7 @@ async def _create_provform_doc(ctx: ToolContext, args: dict) -> dict:
     await ctx.db.commit()
 
     return _ok(
-        f"已创建省统表文书「{title}」#{doc.id}（{schema.get('name')}），编号 {doc.doc_number or '待生成'}。可点下方「查看文书」查看并导出 docx。",
+        f"已创建省统表文书「{title}」#{doc.id}（{schema.get('name')}），编号 {doc.doc_number or '待生成'}。可在「文书」页导出 docx。",
         card={
             "kind": "document", "id": doc.id, "title": title,
             "sub": str(schema.get("name") or ""), "status": doc.status,
@@ -2145,7 +2400,7 @@ async def _create_provform_doc(ctx: ToolContext, args: dict) -> dict:
             "sub": str(schema.get("name") or ""), "status": doc.status,
             "time": str(datetime.now().date()),
         }],
-        actions=[{"type": "navigate", "label": "查看文书", "url": f"/pages/documents/detail?id={doc.id}"}],
+        actions=[{"type": "navigate", "label": "查看文书", "url": "/pages/documents/index"}],
         undo={"tool": "create_provform_doc", "entity": "document", "id": doc.id},
         data={"doc_id": doc.id},
     )
@@ -2203,12 +2458,12 @@ async def _generate_document(ctx: ToolContext, args: dict) -> dict:
             await ctx.db.commit()
             return _ok(
                 f"已生成你的「监理日记」#{doc_id}（{result.get('doc_number') or '编号待生成'}），"
-                f"已归档到资料库「工作记录与表单/监理日记」，可点下方「查看文书」查看并导出。",
+                f"已归档到资料库「工作记录与表单/监理日记」，可在「文书」页导出。",
                 card={"kind": "document", "id": doc_id, "title": result.get("title") or "",
                       "sub": "监理日记", "status": "草稿", "time": str(datetime.now().date())},
                 cards=[{"kind": "document", "id": doc_id, "title": result.get("title") or "",
                         "sub": "监理日记", "status": "草稿", "time": str(datetime.now().date())}],
-                actions=[{"type": "navigate", "label": "查看文书", "url": f"/pages/documents/detail?id={doc_id}"}],
+                actions=[{"type": "navigate", "label": "查看文书", "url": "/pages/documents/index"}],
                 undo={"tool": "generate_document", "entity": "document", "id": doc_id},
                 data=result,
             )
@@ -2250,14 +2505,14 @@ async def _generate_document(ctx: ToolContext, args: dict) -> dict:
         })
         await ctx.db.commit()
         return _ok(
-            f"已生成「{result.get('form_name') or '监理文书'}」#{doc_id}（{result.get('doc_number') or '编号待生成'}），可点下方「查看文书」查看并导出 docx。",
+            f"已生成「{result.get('form_name') or '监理文书'}」#{doc_id}（{result.get('doc_number') or '编号待生成'}），可在「文书」页导出 docx。",
             card={"kind": "document", "id": doc_id, "title": result.get("title") or "",
                   "sub": result.get("form_name") or "", "status": "草稿",
                   "time": str(datetime.now().date())},
             cards=[{"kind": "document", "id": doc_id, "title": result.get("title") or "",
                     "sub": result.get("form_name") or "", "status": "草稿",
                     "time": str(datetime.now().date())}],
-            actions=[{"type": "navigate", "label": "查看文书", "url": f"/pages/documents/detail?id={doc_id}"}],
+            actions=[{"type": "navigate", "label": "查看文书", "url": "/pages/documents/index"}],
             undo={"tool": "generate_document", "entity": "document", "id": doc_id},
             data=result,
         )
@@ -2298,7 +2553,7 @@ async def _generate_document(ctx: ToolContext, args: dict) -> dict:
               "sub": spec.name, "status": doc.status, "time": str(datetime.now().date())},
         cards=[{"kind": "document", "id": doc.id, "title": doc.title,
                 "sub": spec.name, "status": doc.status, "time": str(datetime.now().date())}],
-        actions=[{"type": "navigate", "label": "查看文书", "url": f"/pages/documents/detail?id={doc.id}"}],
+        actions=[{"type": "navigate", "label": "查看文书", "url": "/pages/documents/index"}],
         undo={"tool": "generate_document", "entity": "document", "id": doc.id},
         data={"doc_id": doc.id, "record_id": record.id},
     )
@@ -2565,7 +2820,7 @@ async def _query_documents(ctx: ToolContext, args: dict) -> dict:
     return _ok("\n".join(lines), cards=[{
         "kind": "document", "id": d.id, "title": d.title, "sub": d.doc_type,
         "status": d.status, "time": str(d.created_at.date() if d.created_at else ""),
-    } for d in rows])
+    } for d in rows], actions=[{"type": "navigate", "label": "查看文书", "url": "/pages/documents/index"}])
 
 
 async def _query_regulation(ctx: ToolContext, args: dict) -> dict:
@@ -2581,12 +2836,18 @@ async def _query_regulation(ctx: ToolContext, args: dict) -> dict:
     if not hits:
         return _ok(f"没有检索到与「{keyword}」相关的规范条目，换个说法或到「资料库」手动检索。")
     lines = [f"与「{keyword}」相关的规范依据（{len(hits)} 条）："]
+    citations: list[dict] = []
     for i, hit in enumerate(hits[:3], 1):
         name = hit.get("name") or hit.get("filename") or "规范"
         snippet = (hit.get("snippet") or "").strip().replace("\n", " ")
-        lines.append(f"{i}. {name}：{snippet[:150]}")
+        lines.append(f"{i}. {name}：{snippet[:150]} [[{i}]]")
+        citations.append(_cite(
+            i, "regulation", str(name),
+            sub="规范条文", snippet=snippet[:200], target="/knowledge-base",
+            ref_id=hit.get("source_id") or hit.get("filename") or hit.get("name"),
+        ))
     lines.append("完整条文请到「资料库」检索原文。")
-    return _ok("\n".join(lines), data={"count": len(hits)})
+    return _ok("\n".join(lines), data={"count": len(hits)}, citations=citations)
 
 
 async def _review_plan_doc(ctx: ToolContext, args: dict) -> dict:
@@ -2661,7 +2922,7 @@ async def _navigate(ctx: ToolContext, args: dict) -> dict:
                 url, raw = val, key
                 break
     if not url:
-        return _ok("要打开哪个页面？可以说「打开工作记录」「打开隐患识别」「打开资料库」「打开待办」。")
+        return _ok("要打开哪个页面？可以说「打开工作记录」「打开隐患识别」「打开文书」「打开台账」「打开省统表录入」。")
     return _ok(f"已为你打开「{raw}」。", actions=[{"type": "navigate", "label": raw, "url": url}])
 
 
@@ -3130,38 +3391,6 @@ def tool_label(tool: str) -> str:
     return _TOOL_LABELS.get(tool, tool)
 
 
-def _draft_real_missing_labels(form_code: str | None, args: dict | None) -> list[str]:
-    """草稿列表展示用：按其省统表 schema 复核真实缺项，覆盖「最终确认」等合成态。
-
-    只改展示，不改落库 missing——agent 补全逻辑仍用落库的 need_more 原值。
-    草稿里只有文本、照片栏注定要现场拍时，这里会如实显示「举牌验收照片」，
-    而不是误导性的「最终确认」。
-    """
-    if not form_code or not isinstance(args, dict):
-        return []
-    try:
-        from app.services import record_steps, provform_schema
-    except Exception:
-        return []
-    extra = args.get("extra_fields")
-    merged = {**(extra if isinstance(extra, dict) else {}), **args}
-    merged.pop("extra_fields", None)
-    try:
-        steps = record_steps.build_steps(form_code, merged)
-    except Exception:
-        return []
-    if not steps or not steps.get("missing_count"):
-        return []
-    schema = provform_schema.get_schema(form_code) or {}
-    label_by_key: dict[str, str] = {}
-    for sec in (schema.get("sections") or []):
-        for f in (sec.get("fields") or []):
-            k = f.get("key")
-            if k:
-                label_by_key[str(k)] = str(f.get("label") or k)
-    return [label_by_key.get(str(k), str(k)) for k in (steps.get("missing") or [])]
-
-
 def _draft_form_code(tool: str, args: dict) -> str | None:
     """草稿 → 省统表 form_code（供小程序「用表单填写」直接跳分步表单）。
 
@@ -3220,10 +3449,7 @@ async def list_pending(db: AsyncSession, user_id: Any,
             "label": tool_label(row.tool),
             "form_code": _draft_form_code(row.tool, args if isinstance(args, dict) else {}),
             "args": args if isinstance(args, dict) else {},
-            "missing": _draft_real_missing_labels(
-                _draft_form_code(row.tool, args if isinstance(args, dict) else {}),
-                args if isinstance(args, dict) else {},
-            ) or (missing if isinstance(missing, list) else []),
+            "missing": missing if isinstance(missing, list) else [],
             "facts": context.get("facts") if isinstance(context.get("facts"), list) else [],
             "version": int(context.get("version") or 1),
             "messages": context.get("messages") if isinstance(context.get("messages"), list) else [],

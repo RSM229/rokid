@@ -9,9 +9,13 @@
 """
 from __future__ import annotations
 
+import asyncio
+import contextlib
+import contextvars
 import json
 import logging
 import re
+import time
 from datetime import datetime
 from typing import Any, Optional
 
@@ -20,10 +24,12 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.responses import StreamingResponse
 
 from app.db import get_db
 from app.models.user import Project, User
-from app.models.agent_draft import AgentFlowInstance, AgentReviewPlan
+from app.models.agent_draft import AgentConversationMessage, AgentFlowInstance, AgentReviewPlan
+from app.models.document import Document
 from app.models.miniprogram import MediaRecord, MediaType
 from app.routers.auth import get_current_user
 from app.routers.local_ai import _PLAINTEXT_SUFFIX
@@ -37,6 +43,7 @@ from app.services import (
     agent_scope,
     agent_tools,
     model_gateway,
+    multi_image_split,
 )
 from app.services.record_fields import project_context
 from app.services.agent_context import (
@@ -48,6 +55,90 @@ from app.services import agent_review_plan
 from app.services.text_clean import strip_markdown
 
 logger = logging.getLogger(__name__)
+
+# 流式对话（SSE）的发射器：设置后，模型调用点会把 reasoning/content 增量推给端点的队列。
+# 用 ContextVar 而不是层层加参数，避免改动 600 行的 _agent_chat_impl 签名。
+_STREAM_EMITTER: contextvars.ContextVar = contextvars.ContextVar(
+    "agent_stream_emitter", default=None
+)
+
+# 流式轮次的元信息（思考原文/步骤/耗时）：结束后随响应落进展示历史，
+# 这样重新打开历史会话时「已深度思考」和引用列表还能还原。
+_STREAM_META: contextvars.ContextVar = contextvars.ContextVar(
+    "agent_stream_meta", default=None
+)
+
+_REASONING_SAVE_LIMIT = 12000
+
+
+def _new_stream_meta() -> dict[str, Any]:
+    return {
+        "started": time.monotonic(),
+        "reasoning_parts": [],
+        "reasoning_chars": 0,
+        "steps": [],
+        "first_answer_ms": None,
+    }
+
+
+def _collect_stream_meta(event: dict[str, Any]) -> None:
+    meta = _STREAM_META.get()
+    if meta is None:
+        return
+    elapsed_ms = int((time.monotonic() - meta["started"]) * 1000)
+    kind = event.get("type")
+    if kind == "reasoning":
+        text = str(event.get("text") or "")
+        left = _REASONING_SAVE_LIMIT - int(meta.get("reasoning_chars") or 0)
+        if text and left > 0:
+            take = text[:left]
+            meta["reasoning_parts"].append(take)
+            meta["reasoning_chars"] = int(meta.get("reasoning_chars") or 0) + len(take)
+    elif kind == "answer":
+        if meta.get("first_answer_ms") is None:
+            meta["first_answer_ms"] = elapsed_ms
+    elif kind == "progress":
+        title = str(event.get("title") or "").strip()
+        steps = meta.setdefault("steps", [])
+        if title and len(steps) < 12 and (not steps or steps[-1] != title):
+            steps.append(title)
+
+
+def _attach_stream_meta(result: dict[str, Any]) -> None:
+    """把本轮思考原文/步骤/耗时附到回执上（只在流式轮次有 meta）。"""
+    meta = _STREAM_META.get()
+    if meta is None or not isinstance(result, dict):
+        return
+    reasoning = "".join(meta.get("reasoning_parts") or []).strip()
+    if reasoning:
+        result["reasoning"] = reasoning
+    steps = list(meta.get("steps") or [])[:12]
+    if steps:
+        result["steps"] = steps
+    elapsed = meta.get("first_answer_ms")
+    if elapsed is None:
+        elapsed = int((time.monotonic() - meta["started"]) * 1000)
+    if elapsed:
+        result["thinking_ms"] = int(elapsed)
+
+
+async def _emit_stream(event: dict[str, Any]) -> None:
+    emitter = _STREAM_EMITTER.get()
+    if emitter is None:
+        return
+    _collect_stream_meta(event)
+    try:
+        await emitter(event)
+    except Exception:  # noqa: BLE001 —— 推流失败不能影响主流程
+        logger.debug("agent stream emit failed", exc_info=True)
+
+
+def _streaming_enabled() -> bool:
+    return _STREAM_EMITTER.get() is not None
+
+
+def _sse_pack(event: str, payload: dict[str, Any]) -> str:
+    return f"event: {event}\ndata: {json.dumps(payload, ensure_ascii=False, default=str)}\n\n"
 router = APIRouter()
 
 
@@ -97,6 +188,10 @@ class AgentChatRequest(BaseModel):
     material: Optional[str] = None
     # 随消息上传图片的服务端媒体地址（仅用于展示历史回看；模型上下文不收）
     images: list[str] = Field(default_factory=list)
+    # 逐图结构化视觉信号（与 images 等长）：是否举牌/封样/危大/施工中…等，
+    # 字段同 image_classification.ImageSignal。由前端在「先把图交给视觉模型」后
+    # 一并带出；旧前端不传则退化为单记录流程（不影响现有行为）。
+    image_signals: list[dict] = Field(default_factory=list)
     # 素材里已确定的结构化字段（如照片水印的拍摄时间/地点/天气），建记录时直接并入 args
     prefill: dict = Field(default_factory=dict)
     # 聊天内表单一次提交：字段名 → 值。有它就不再让模型抽参，直接按字段表回填。
@@ -419,6 +514,8 @@ station_start_time=9:00、station_end_time=12:00、worker_count=10，结论留�
 
 判断口诀：**能确定是哪一类记录 → 返回 record_work；连类型都定不了 → record_work + 只问类型。**
 
+- 🔴 **多张照片跨多种类型时，用 image_groups 分建多条**：record_work 的 args 可带 image_groups，它是一个分组列表，每项含 record_type（这组图归哪类记录，只能取 巡视/旁站/验收/见证/平行检验/待定，巡查归巡视、材料/取样归见证）和 image_indices（这些图在消息里的 1-based 序号，对应「【图片 N】」，越界或不可达的图忽略；也接受直接给图片 URL）。系统会回执「分了 巡视X / 旁站Y / 待定Z，确认后建」并等你确认后**分别建多条记录**（确认前不建）。仅当照片确实跨多种类型才用；单一类型多图不要传 image_groups（直接建一条、多图挂同一条即可）。用户说「确认建 / 建吧」时再次返回 record_work 即可（不必重复传 image_groups，系统已记住分组）。
+
 其他硬约束
 ----------
 - args 只能包含该工具声明的参数；拿不准的参数不要编造，省略即可（服务端会追问缺失项）。
@@ -442,7 +539,7 @@ station_start_time=9:00、station_end_time=12:00、worker_count=10，结论留�
 🔴 图片与素材（最容易编造的地方）
 --------------------------------
 - 你**看不到图片/照片本身**。只有消息里出现「【图片 N】」素材段（系统已把图交给视觉模型）时，才能引用其中的识别结果。
-- 🔴 素材里一旦出现「【水印】」段：**必须先把水印内容逐项复述给用户**（拍摄时间、地点、天气…），再说明哪些信息已作为证据保存。若业务类型仍不明确，可以在复述后只问一个决定性问题，不能把水印识别失败说成用户没有提供信息。
+- 🔴 素材里一旦出现「【水印】」段：**必须先把水印内容逐项复述给用户**（拍摄时间、地点、天气…），再说明哪些信息已作为证据保存。**多张照片时，每张照片的复述单独写成一行、用换行符分隔，不要只用分号或逗号串成一大段**。若业务类型仍不明确，可以在复述后只问一个决定性问题，不能把水印识别失败说成用户没有提供信息。🔴 用户让你「看 / 识别 / 读」照片（没说要建记录）：先逐项复述水印（多张每行一张）。**若这批照片明显跨多种记录类型**（如同时有验收、旁站、巡视、材料单据等不同场景），应返回 record_work 并带上 image_groups，让系统回执「分了 巡视X / 旁站Y / 待定Z，确认后建」、经你确认后**分别建多条记录**——不要逼用户选「单一类别」去建一条。若只是单一类型或用户只想看不想建档，复述完即可、返回 chat。识别≠强制建档，但也不排斥顺带建档。
 - **严禁凭空说「经图片识别」「看图发现」「照片显示」**，也不要在没有素材时描述现场状况——那是编造，监理会据此签字。
 - 素材里没有识别到隐患，就照实说「素材中未提到隐患」，不要补一句「现场安全状况良好」。
 - 用户说「识别水印 / 先识别水印 / 看下水印」：
@@ -450,13 +547,13 @@ station_start_time=9:00、station_end_time=12:00、worker_count=10，结论留�
   · 本轮**带了素材但没读到【水印】** → 说「这张没读到水印，水印文字要清晰、别被裁掉，麻烦重拍一张或从相册选原图」；
   · 本轮**完全没有素材** → 说：「把带水印的照片发给我（点输入框的「+」选相册或拍照），我先读水印里的拍摄时间和地点。你要发的是哪张？」——**不许说「这张没读到水印」**，你根本没看到图；
   · **不要说「我接收不到图片」「无法识别图片」**。
-- 🔴 **用户只发照片、没明确记录类型时**：必须先**分析**——先按上文把水印客观信息（拍摄时间/地点/部位/天气/公示牌文字）逐项复述出来，再据此判断最可能的记录类型并**给一句依据**（如「水印是隐蔽工程验收公示牌，建议整理成验收记录」）——最后**请用户确认类别**（一次只问这一个决定性问题，如「确认按验收记录整理吗？还是旁站/巡视？」）。**严禁**直接列出待填字段清单、开多栏表单或建一堆事项——本轮模型返回 tool=null 即可，把分析和类别建议说清、问清类别，用户确认后再逐栏引导。
+- 🔴 **用户只发照片、没明确记录类型时**：必须先**分析**——先按上文把水印客观信息（拍摄时间/地点/部位/天气/公示牌文字）逐项复述出来（每张照片单独一行，用换行分隔，不要串成一段），再据此判断最可能的记录类型并**给一句依据**（如「水印是隐蔽工程验收公示牌，建议整理成验收记录」）——最后**请用户确认类别**（一次只问这一个决定性问题，如「确认按验收记录整理吗？还是旁站/巡视？」）。**严禁**直接列出待填字段清单、开多栏表单或建一堆事项——本轮模型返回 tool=null 即可，把分析和类别建议说清、问清类别，用户确认后再逐栏引导。🔴 **「识别 / 看 / 读这些照片」「请识别这 N 张图片」通常是「查看类」请求**：先把水印逐张复述给用户（这步不省）。但**若这批照片明显跨多种记录类型**（同时出现验收、旁站、巡视、材料单据等），**不要**逼用户选「单一类别」去建一条——应返回 record_work 并带 image_groups（按你从水印读出的类型把图分组：image_groups 的每项写 record_type 加 image_indices，例如把第 5、8 张归验收、第 1、3 张归巡视，就传两组，验收配序号 5 和 8、巡视配序号 1 和 3），由系统回执分组并等你确认后分别建多条记录（确认前不会私自建）。确实只想看不想建档时，复述完即可、不调 record_work。用户明确说「记一条 / 建记录 / 整理成记录 / 帮我存」同样返回 record_work（可带 image_groups）。
 
 「记录今天工作情况」这类模糊请求
 --------------------------------
 - 「记录今天工作情况 / 今天干了什么 / 记一下今天」= 要留痕。
 - 🔴 **先判文书、再判素材（顺序不能反）**：如果用户这条消息里是一段**完整的监理日报 / 监理日记 / 监理日志叙述正文**（描述当天施工内容与监理工作，且能抽出日期），**无论是否同时附了照片、水印或其它素材**，都按下面「粘贴叙述性监理日报」的规则返回 `generate_document`——照片只作附件保存，**不得因为带了照片就改走 record_work，更不得抽字段让用户逐项确认项目 / 单位 / 人员**。照片与项目资料对不上（水印是别的项目）时，只在回答里提一句「照片水印项目名与当前项目不一致」，不要把它变成待确认项。
-- **图片/水印素材不等于巡视，也不等于任何固定表式**。如果用户只发了照片、没说要建哪类记录，**且素材里也找不到类型词**：先按上文把水印客观信息逐项复述，再据此判断最可能的记录类型并给一句依据，最后在回答里**只问一个决定性问题确认类别**，例如：「从水印看像是隐蔽工程验收，建议整理成验收记录，你确认吗？还是旁站/巡视/见证/平行检验？」——**先给建议再确认，不要直接开字段清单**（本轮模型返回 tool=null 即可，问清类别后下一轮再建草稿）。素材里已有类型词时按上文规则直接定类型，不必再问。
+- **图片/水印素材不等于巡视，也不等于任何固定表式**。如果用户只发了照片、没说要建哪类记录，**且素材里也找不到类型词**：先按上文把水印客观信息逐项复述（每张照片单独一行，用换行分隔，不要串成一段），再据此判断最可能的记录类型并给一句依据，最后在回答里**只问一个决定性问题确认类别**，例如：「从水印看像是隐蔽工程验收，建议整理成验收记录，你确认吗？还是旁站/巡视/见证/平行检验？」——**先给建议再确认，不要直接开字段清单**（本轮模型返回 tool=null 即可，问清类别后下一轮再建草稿）🔴 注意：用户只说「识别 / 看 / 读 / 请识别这些照片」通常是查看类请求，先复述水印；但若照片明显跨多种类型，同样返回 record_work 并带 image_groups 让系统分组建多条（见上文），不要逼用户选一种。素材里已有明确单一类型词时按上文直接定类型、不必再问。
 - 用户明确说了记录类型时才填写 record_type 并进入记录候选。用户已经在前文说过日期、地点、时间、工作内容的，必须沿用，不得因图片没有识别到而说成缺失。
 - 错误示范（严禁）：直接回一段「今日工作情况结论与建议」，甚至还写「经图片识别」。这是答非所问。
 - 用户明确说「生成今天的监理日志 / 月报」时，才返回 generate_document 动作（args.period=day / month）。
@@ -587,9 +684,37 @@ def _history_messages(history: list[dict], limit: int = 6) -> list[dict]:
     return out
 
 
-async def _plain_answer(message: str, history: list[dict], provider: str | None, model: str | None,
-                        mode: str | None) -> str:
-    """兜底：走纯问答（与原 /local/llm/chat 行为一致）。"""
+_CITE_KIND_MAP = {
+    "knowledge_doc": "knowledge",
+    "work_record": "work_record",
+    "document": "document",
+    "note": "note",
+    "kg_entity": "knowledge",
+    "kg_checkpoint": "knowledge",
+    "severe_defect": "regulation",
+}
+_CITE_KIND_LABEL = {
+    "knowledge": "知识库",
+    "work_record": "工作记录",
+    "document": "监理文书",
+    "note": "笔记",
+    "regulation": "规范条文",
+}
+_CITE_TARGET = {
+    "knowledge": "/knowledge-base",
+    "work_record": "/work-record/inspection",
+    "document": "/documents",
+    "note": "/knowledge-base",
+    "regulation": "/knowledge-base",
+}
+
+# 指代类追问（这个/这份/这样/它/刚才…）：没有上一轮结果卡时不要硬检索
+_FOLLOWUP_REFERENCE_RE = re.compile(
+    r"(这个|这份|这条|那份|那个|它|上面|上述|刚才|这样|那样|这里|那里|该文|该表|该份)"
+)
+
+
+def _plain_persona(mode: str | None) -> str:
     persona = "你是广东建设智慧监理工程监理智能助手，请给出准确、可执行、简洁的回答。"
     if mode == "hazard":
         persona = "你是AI安全隐患识别专家。若用户描述现场情况，请判断是否存在隐患并给出风险类别、主要风险、证据与复查建议。"
@@ -597,13 +722,210 @@ async def _plain_answer(message: str, history: list[dict], provider: str | None,
                 "需要留痕时引导用户到「工作记录」页点「+新建」，或直接说「记一条XXX」由系统落库。"
                 "你看不到图片本身，只有用户消息里给出图片识别结果时才能引用；"
                 "禁止凭空声称「经图片识别」「看图发现」「照片显示」。")
+    return persona
+
+
+def _plain_messages(message: str, history: list[dict], mode: str | None,
+                    cite_block: str = "", context_hint: str = "",
+                    require_context_hint: bool = False) -> list[dict]:
+    persona = _plain_persona(mode)
+    if context_hint:
+        persona += (
+            "\n\n【上一轮助手结果】上一轮助手返回过这些结果（用户说「这个 / 这份 / 这条 / 它」时，"
+            "优先指代其中最近的一个；问「为什么这样写」时先点明指的是哪份，再解释）：\n"
+            + context_hint
+        )
+    if require_context_hint:
+        persona += (
+            "\n\n用户这句话用了指代（这个/这份/这条/它/刚才/上面），但系统没有可对应的上一轮结果卡。"
+            "如果对话历史里也找不到明确对象：只请用户指明他指的是什么，不要猜测、不要展开其他话题、"
+            "不要引用任何材料。"
+        )
+    if cite_block:
+        persona += (
+            "\n\n下面是系统从项目资料/规范库检索到的参考材料，材料编号就是引用号。"
+            "回答时只要用到了某条材料，就在那句话末尾标注 [[编号]]（如 [[1]]）；"
+            "不要编造材料里没有的依据，材料不足就直说没查到。\n\n" + cite_block
+        )
     messages = [{"role": "system", "content": persona + _PLAINTEXT_SUFFIX}]
     messages.extend(_history_messages(history))
     messages.append({"role": "user", "content": message})
+    return messages
+
+
+async def _generate_plain(messages: list[dict], provider: str | None, model: str | None) -> str:
+    if _streaming_enabled():
+        parts: list[str] = []
+        async for event in model_gateway.stream_chat_completion(
+            messages, temperature=0.7, provider=provider, model=model
+        ):
+            if event["type"] == "reasoning":
+                await _emit_stream({"type": "reasoning", "text": event["text"]})
+            elif event["type"] == "content":
+                parts.append(event["text"])
+                await _emit_stream({"type": "answer", "text": event["text"]})
+        return strip_markdown("".join(parts))
     answer, _cfg = await model_gateway.chat_completion(
         messages, temperature=0.7, provider=provider, model=model
     )
     return strip_markdown(answer or "")
+
+
+async def _plain_answer(message: str, history: list[dict], provider: str | None, model: str | None,
+                        mode: str | None) -> str:
+    """兜底：走纯问答（与原 /local/llm/chat 行为一致）。"""
+    return await _generate_plain(_plain_messages(message, history, mode), provider, model)
+
+
+def _retrieve_citations(message: str, project_id: int | None,
+                        top_k: int = 5, min_score: float = 0.0) -> tuple[list[dict], str]:
+    """针对用户问题做一次混合检索，产出引用条目与资料块（失败静默降级为空）。"""
+    try:
+        from app.services import rag_index
+
+        hits = rag_index.search(message, top_k=top_k, project_id=project_id) or []
+    except Exception:  # noqa: BLE001 —— 检索不可用不应阻断聊天
+        logger.warning("引用检索失败", exc_info=True)
+        return [], ""
+    citations: list[dict] = []
+    blocks: list[str] = []
+    seen_titles: set[str] = set()
+    for hit in hits:
+        try:
+            score = float(hit.get("score") or 0.0)
+        except (TypeError, ValueError):
+            score = 0.0
+        if score < min_score:
+            continue
+        title = str(hit.get("source_name") or "").strip()
+        snippet = str(hit.get("snippet") or hit.get("content") or "").strip().replace("\n", " ")
+        if not title or not snippet:
+            continue
+        if title in seen_titles:
+            continue
+        seen_titles.add(title)
+        index = len(citations) + 1
+        kind = _CITE_KIND_MAP.get(str(hit.get("source_type") or ""), "knowledge")
+        citations.append({
+            "index": index,
+            "kind": kind,
+            "title": title[:120],
+            "sub": _CITE_KIND_LABEL.get(kind, "资料"),
+            "snippet": snippet[:220],
+            "target": _CITE_TARGET.get(kind),
+            "ref_id": hit.get("source_id"),
+        })
+        blocks.append(f"【材料{index}】{title}\n{snippet[:300]}")
+    return citations, "\n\n".join(blocks)
+
+
+def _doc_excerpt(doc: Document | None) -> str:
+    """文书 content（字段字典）压成一行摘要，给模型解释「为什么这样写」用。"""
+    if doc is None or not isinstance(doc.content, dict):
+        return ""
+    parts: list[str] = []
+    for key, value in doc.content.items():
+        if len(parts) >= 10:
+            break
+        if value is None or isinstance(value, (list, dict)):
+            continue
+        text = str(value).strip()
+        if not text or text in ("无", "待补", "/"):
+            continue
+        parts.append(f"{key}={text[:40]}")
+    return "；".join(parts)[:500]
+
+
+async def _last_result_context(db: AsyncSession, user_id: Any, conversation_id: str | None,
+                               project_id: int | None) -> tuple[str, str]:
+    """取上一轮助手回执里的结果卡，作为指代消解上下文。
+
+    返回 (给模型看的结果摘要, 检索时补充的关键词)。没有上一轮或没有卡片时返回空。
+    """
+    if not conversation_id:
+        return "", ""
+    stmt = (
+        select(AgentConversationMessage)
+        .where(
+            AgentConversationMessage.user_id == int(user_id),
+            AgentConversationMessage.conversation_id == conversation_id,
+            AgentConversationMessage.role == "assistant",
+        )
+        .order_by(AgentConversationMessage.id.desc())
+        .limit(1)
+    )
+    if project_id is None:
+        stmt = stmt.where(AgentConversationMessage.project_id.is_(None))
+    else:
+        stmt = stmt.where(AgentConversationMessage.project_id == int(project_id))
+    row = (await db.execute(stmt)).scalars().first()
+    if row is None:
+        return "", ""
+    try:
+        content = json.loads(row.content_json or "{}")
+    except (TypeError, ValueError):
+        return "", ""
+    response = content.get("response") if isinstance(content, dict) else None
+    if not isinstance(response, dict):
+        return "", ""
+    cards = response.get("cards") if isinstance(response.get("cards"), list) else []
+    if not cards and isinstance(response.get("card"), dict):
+        cards = [response["card"]]
+    lines: list[str] = []
+    titles: list[str] = []
+    doc_excerpts: list[str] = []
+    for card in cards[:5]:
+        if not isinstance(card, dict):
+            continue
+        kind = str(card.get("kind") or "")
+        title = str(card.get("title") or "").strip()
+        sub = str(card.get("sub") or "").strip()
+        if not title:
+            continue
+        titles.append(f"{title} {sub}".strip())
+        lines.append(f"- {kind} #{card.get('id')}：{title}（{sub or kind}，{card.get('status') or ''}）")
+        if kind == "document":
+            try:
+                doc = await db.get(Document, int(card.get("id") or 0))
+            except (TypeError, ValueError):
+                doc = None
+            if doc is not None and (project_id is None or doc.project_id == project_id):
+                excerpt = _doc_excerpt(doc)
+                if excerpt:
+                    doc_excerpts.append(f"《{doc.title}》(#{doc.id}, {doc.doc_type}, {doc.status}) 内容：{excerpt}")
+    if not lines:
+        return "", ""
+    hint = "\n".join(lines[:5])
+    if doc_excerpts:
+        hint += "\n文书内容摘要：" + " | ".join(doc_excerpts[:2])
+    return hint[:1200], " ".join(titles[:3])
+
+
+async def _plain_answer_cited(message: str, history: list[dict], provider: str | None,
+                              model: str | None, mode: str | None,
+                              project_id: int | None,
+                              *, context_hint: str = "",
+                              query_extra: str = "",
+                              require_context: bool = False) -> tuple[str, list[dict]]:
+    if require_context:
+        # 有指代但系统没有可对应的结果卡：不检索、不引用，让模型只追问
+        citations: list[dict] = []
+        block = ""
+    else:
+        query = f"{message} {query_extra}".strip() if query_extra else message
+        citations, block = _retrieve_citations(query, project_id, min_score=0.3)
+    messages = _plain_messages(
+        message, history, mode, cite_block=block, context_hint=context_hint,
+        require_context_hint=require_context,
+    )
+    answer = await _generate_plain(messages, provider, model)
+    # 只保留模型真正引用过的材料；它没引用就不展示「引用」列表（避免检索噪声冒充依据）
+    used = {int(num) for num in re.findall(r"\[\[(\d+)\]\]", answer or "")}
+    if used:
+        citations = [item for item in citations if int(item.get("index") or 0) in used]
+    else:
+        citations = []
+    return answer, citations
 
 
 _SUPPLEMENT_SYSTEM = (
@@ -1008,14 +1330,34 @@ async def _agent_chat_impl(
                 "intent_model", "running", "正在理解你想做什么，并从你的话里抽取关键字段",
                 {"provider": req.provider or "系统路由", "model": req.model or "系统选择", "response_mode": "structured_json"},
             )
-            raw, config = await model_gateway.chat_completion(
-                messages,
-                temperature=0.2,
-                provider=req.provider,
-                model=req.model,
-                response_format={"type": "json_object"},
-            )
-            model_id = config.model_id
+            if _streaming_enabled():
+                raw_parts: list[str] = []
+                config = None
+                async for event in model_gateway.stream_chat_completion(
+                    messages,
+                    temperature=0.2,
+                    provider=req.provider,
+                    model=req.model,
+                    response_format={"type": "json_object"},
+                    thinking=False,  # 路由只要 JSON，不要思考：更快且不展示内部规划
+                ):
+                    event_type = event.get("type")
+                    if event_type == "config":
+                        config = event.get("config")
+                    elif event_type == "content":
+                        # 路由模型的 content 是 JSON 规划，不展示；思考过程只从
+                        # 「回答模型」那条流里取（否则会把工具目录/提示词逻辑暴露给用户）。
+                        raw_parts.append(event["text"])
+                raw = "".join(raw_parts)
+            else:
+                raw, config = await model_gateway.chat_completion(
+                    messages,
+                    temperature=0.2,
+                    provider=req.provider,
+                    model=req.model,
+                    response_format={"type": "json_object"},
+                )
+            model_id = getattr(config, "model_id", "") or req.model or ""
             parsed = agent_tools._parse_json_object(raw)
             await report_progress(
                 "intent_model", "completed", "已读懂你的意图，正在核对可用的动作和字段",
@@ -1246,6 +1588,15 @@ async def _agent_chat_impl(
             args = {**args, "record_type": candidate}
             turn_fact_args = dict(args)
 
+    # 多图分类分流的「确认」轮：上一轮已给出分组回执（草稿含 _agent_pending_split），
+    # 本轮用户只回肯定词（如「确认建」「建吧」）而无新素材，路由不会自动选工具，
+    # 会导致草稿被吞、分组方案永不消费。此处显式复用 create_work_record 草稿，
+    # 由 _create_work_record 顶层分流消费 _agent_pending_split 循环建多条。
+    if not tool and pending_tool == "create_work_record":
+        _pending_args = draft.get("args") or {}
+        if _pending_args.get("_agent_pending_split") and multi_image_split.is_confirm(message):
+            tool = "create_work_record"
+
     # 素材里已确定的结构化字段（照片水印的拍摄时间/地点/天气）并入建记录参数。
     # 日期、地点、部位和天气以水印/EXIF 客观证据为准；用户冲突描述保留在计划中。
     # 带素材不等于明确了记录类型。素材只提供证据；类型不明时保留澄清，
@@ -1348,7 +1699,7 @@ async def _agent_chat_impl(
             args["_require_confirmation"] = not confirmed
             if confirmed:
                 args["_execution_confirmed"] = True
-        ctx = agent_tools.ToolContext(db=db, user=user, project_id=project_id, project=project, message=message, material=material, images=req.images)
+        ctx = agent_tools.ToolContext(db=db, user=user, project_id=project_id, project=project, message=message, material=material, images=req.images, image_signals=req.image_signals)
         await report_progress(
             "tool_validation", "running", "确认要执行的动作，并核对字段是否齐全",
             {"tool": tool, "record_type": str(args.get("record_type") or ""), "form": _record_form_code(tool, args, message) or ""},
@@ -1492,15 +1843,31 @@ async def _agent_chat_impl(
         }
 
     # 无工具 → 纯问答（把模型已生成的 answer 直接用；空则再调一次）
+    # 流式模式下强制再走一次可流式的回答模型：路由模型那条 JSON 里的 answer
+    # 没法逐字推给前端，而且它的思考过程不适合展示。
     answer = str((parsed or {}).get("answer") or "").strip()
-    if not answer:
+    citations: list[dict] = []
+    if not answer or _streaming_enabled():
+        # 上一轮的结果卡（文书 id/标题/摘要）作为指代上下文，否则「解释一下为什么这样写」会不知道指谁
+        context_hint, query_extra = await _last_result_context(
+            db, user.id, conversation_id, project_id,
+        )
+        require_context = bool(_FOLLOWUP_REFERENCE_RE.search(message)) and not context_hint
         try:
-            answer = await _plain_answer(message, req.history, req.provider, req.model, req.mode)
+            answer, citations = await _plain_answer_cited(
+                message, req.history, req.provider, req.model, req.mode, project_id,
+                context_hint=context_hint, query_extra=query_extra,
+                require_context=require_context,
+            )
         except model_gateway.ModelGatewayError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
+    else:
+        # 非流式复用路由模型的 answer 时，只补一份高相关引用列表（正文没有编号标记）
+        citations, _block = _retrieve_citations(message, project_id, min_score=0.6)
     return {"kind": "chat", "tool": None, "reply": strip_markdown(answer), "card": None,
             "cards": [], "actions": [], "need_more": [], "undo": None,
-            "form": None, "model": model_id, "request_plan": incoming_plan}
+            "form": None, "model": model_id, "request_plan": incoming_plan,
+            "citations": citations}
 
 
 @router.post("/chat")
@@ -1542,6 +1909,8 @@ async def agent_chat(
             title=title,
             detail=detail,
         )
+        # 流式模式下同时把步骤推给前端（/chat 没有 emitter，这里是空操作）
+        await _emit_stream({"type": "progress", "stage": stage, "status": status, "title": title})
 
     try:
         result = await _agent_chat_impl(req, user=user, db=db, progress_hook=progress_hook)
@@ -1589,6 +1958,8 @@ async def agent_chat(
         result["reply"] = brief + "\n" + str(result.get("reply") or "").strip()
     if isinstance(result, dict):
         result["request_id"] = request_id
+        # 流式轮次：把思考原文/步骤/耗时附到回执上，随展示历史一起落库
+        _attach_stream_meta(result)
     if isinstance(result, dict):
         # 长期偏好自动沉淀：先剥掉模型打的 <<PREF ...>> 标记（用户不该看到），
         # 再兜底做一次「同一句规矩说了两遍」的重复检测。只产生建议，绝不自动落库。
@@ -1673,6 +2044,73 @@ async def agent_chat(
             model=str(result.get("model") or req.model or ""),
         )
     return result
+
+
+@router.post("/chat/stream")
+async def agent_chat_stream(
+    req: AgentChatRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """同 ``/chat``，但用 SSE 推送思考过程与正文增量，最后用 ``done`` 带回完整回执。
+
+    事件：``meta`` / ``progress`` / ``reasoning`` / ``answer`` / ``done`` / ``error``。
+    前端在拿不到 SSE 时应回退到 ``/chat``（本端点不复用其响应，两者可并存）。
+    """
+    queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+
+    async def emitter(event: dict[str, Any]) -> None:
+        await queue.put(event)
+
+    async def runner() -> None:
+        token = _STREAM_EMITTER.set(emitter)
+        meta_token = _STREAM_META.set(_new_stream_meta())
+        try:
+            result = await agent_chat(req, user=user, db=db)
+            await queue.put({"type": "done", "result": result})
+        except HTTPException as exc:
+            await queue.put({"type": "error", "message": str(exc.detail)})
+        except model_gateway.ModelGatewayError as exc:
+            await queue.put({"type": "error", "message": str(exc)})
+        except Exception:  # noqa: BLE001 —— 错误要变成事件，不能让 SSE 静默断流
+            logger.exception("agent stream failed")
+            await queue.put({"type": "error", "message": "服务异常，请稍后重试。"})
+        finally:
+            _STREAM_META.reset(meta_token)
+            _STREAM_EMITTER.reset(token)
+
+    async def event_stream():
+        task = asyncio.create_task(runner())
+        yield _sse_pack("meta", {
+            "conversation_id": req.conversation_id,
+            "request_id": req.request_id,
+        })
+        try:
+            while True:
+                event = await queue.get()
+                kind = event.get("type") or "message"
+                if kind == "done":
+                    yield _sse_pack("done", event.get("result") or {})
+                    break
+                if kind == "error":
+                    yield _sse_pack("error", {"message": event.get("message") or "服务异常"})
+                    break
+                yield _sse_pack(kind, event)
+        finally:
+            if not task.done():
+                task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
 
 
 @router.get("/conversations")
