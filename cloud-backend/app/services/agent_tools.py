@@ -1328,6 +1328,10 @@ def _split_need_more(groups, material: str | None = None, n_images: int = 0) -> 
         "reply": reply,
         "card": None, "cards": [], "actions": [],
         "need_more": ["分组确认"],
+        # 🎯 与普通记录「最终确认」对齐（2026-11-12）：多图分组确认同样下发「确认生成」
+        # 快捷键，点击即以该词发送（multi_image_split.is_confirm 命中→直接建多条），
+        # 免打字。路由层不会覆盖已有 chips（它只在「最终确认」态才额外注入）。
+        "chips": ["确认生成"],
         # ask_block 触发路由把完整记录表单置空（否则 need_more 会让 create_work_record
         # 渲染一整张空表单，与「只回一句分组汇总、等用户确认」的交互冲突）。
         "ask_block": {"type": "multi_image_split", "summary": summary,
