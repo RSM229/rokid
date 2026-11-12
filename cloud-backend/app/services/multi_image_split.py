@@ -38,6 +38,22 @@ _CONFIRM_NEEDS = ("C", "O")
 # 分组输出次序（待定永远排最后，回执更稳定）
 _RECORD_ORDER = ["巡视", "旁站", "验收", "见证", "平行检验", "待定"]
 
+# 记录类型校准（2026-11-12 真机：8 张照片被分成「巡视2 / 旁站5 / 验收1」）。
+# 影像 8 类引擎的判据是「拍摄瞬间监理行为」，而工作记录类型看的是「这次留痕归哪张表」，
+# 两者在两种水印写法上会分叉，这里只校准分组口径，不改影像归档类别。
+_ACCEPTANCE_NEG = ("未验收", "待验收", "验收前", "准备验收", "尚未验收")
+_SETTLEMENT_KW = ("收方", "计量", "工程量复核", "方量复核", "测量复核")
+
+
+def _looks_like_acceptance_content(content: str) -> bool:
+    """水印「内容」写了『××验收』但视觉没读到举牌牌面时，仍按验收记录留痕。"""
+    return "验收" in content and not any(n in content for n in _ACCEPTANCE_NEG)
+
+
+def _looks_like_settlement_content(content: str) -> bool:
+    """『钢板桩收方』这类计量复核不是旁站清单里的打拔施工。"""
+    return any(k in content for k in _SETTLEMENT_KW)
+
 
 def _coerce_signal(raw: dict) -> dict:
     """过滤非法键 + 把字符串布尔规整为 bool（前端可能传 "true"/"false"）。"""
@@ -67,6 +83,17 @@ def classify_to_record_type(raw_signal: dict) -> tuple[str, ClassificationResult
         res = ClassificationResult("O", reason="分类异常，归待定", confidence=0.9)
     if res.needs_confirm or res.category_code in _CONFIRM_NEEDS or res.confidence < 1.0:
         return "待定", res
+
+    content = str(coerced.get("content") or "").strip()
+    # ① 无牌面的「底板/顶板钢筋模板验收」原先落到 X 巡视（施工中但不在旁站清单）；
+    #    监理行为性质是验收，分组应归「验收」，否则验收照片被塞进巡视记录。
+    if res.category_code == "X" and _looks_like_acceptance_content(content):
+        return "验收", res
+    # ② 「9m 钢板桩收方」被清单第 10 项的裸词「钢板桩」命中成旁站；
+    #    收方是计量复核，不是打拔施工，按现场巡视留痕更贴切。
+    if res.category_code == "P" and _looks_like_settlement_content(content):
+        return "巡视", res
+
     # 材料验收（M）细分：举牌验收材料仍归「验收」；普通材料进场（无举牌）归「见证」，
     # 与系统别名「材料→见证」一致，使「材料单据」从「举牌验收」中单列出来。
     if res.category_code == "M":

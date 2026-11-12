@@ -71,6 +71,28 @@ class TestClassifyToRecordType(unittest.TestCase):
             multi_image_split.classify_to_record_type(
                 {"has_board": "true"})[0], "验收")
 
+    def test_acceptance_without_board_maps_to_acceptance(self):
+        """2026-11-12 真机：水印写『××验收』但视觉没读到举牌牌面时，仍按验收记录留痕。"""
+        self.assertEqual(
+            multi_image_split.classify_to_record_type(
+                {"content": "底板钢筋模板验收", "in_progress": True})[0], "验收")
+        self.assertEqual(
+            multi_image_split.classify_to_record_type(
+                {"content": "顶板钢筋模板验收", "in_progress": True})[0], "验收")
+        # 否定说法不该改判
+        self.assertEqual(
+            multi_image_split.classify_to_record_type(
+                {"content": "待验收的箱涵底板", "in_progress": True})[0], "巡视")
+
+    def test_settlement_is_not_pangzhan(self):
+        """『钢板桩收方』被清单第 10 项裸词命中，实为计量复核；真正的打拔仍是旁站。"""
+        self.assertEqual(
+            multi_image_split.classify_to_record_type(
+                {"content": "9m钢板桩收方", "in_progress": True})[0], "巡视")
+        self.assertEqual(
+            multi_image_split.classify_to_record_type(
+                {"content": "钢板桩支护打拔", "in_progress": True})[0], "旁站")
+
 
 class TestGroupImages(unittest.TestCase):
     def _signals(self):

@@ -66,7 +66,9 @@ def _extract_content(block: str, raw_text: str) -> str:
     """从水印原文里抽「内容/工序/对象」作为归类 content 线索。"""
     m = _CONTENT_KW.search(block)
     if m:
-        return m.group(1).strip()
+        # 水印原文里「施工内容」后面常紧跟「拍摄时间：…」等字段；截断掉再喂给
+        # 规则引擎，避免把无关字段文字当工序去命中旁站清单。
+        return re.split(r"\s+拍摄时间[:：]", m.group(1).strip(), maxsplit=1)[0].strip()
     # 退而求其次：用整段水印原文（截断）喂给规则引擎做子串匹配
     if raw_text:
         return raw_text.strip()[:80]
@@ -162,3 +164,57 @@ def parse_material_signals(material: str, n_images: int) -> list[dict]:
              if getattr(sig, k) is not None}
         out.append(d)
     return out
+
+
+# ---------------------------------------------------------------- 逐图水印复述
+# 与模型版「图片N：时间，地点，部位，内容，天气。」保持同一格式，但由后端从
+# material 确定性生成：分组确认分支会用工具回执覆盖模型 answer，模型写的复述
+# 会被丢掉（2026-11-12 真机「怎么这样回答呢」）。
+_WM_KV = re.compile(r"(拍摄时间|地点|项目|部位|天气|人员)[:：]\s*([^；;\n]*)")
+_RAW_CONTENT = re.compile(r"(?:施工内容|内容|工序|对象)[:：]\s*([^；;\n]{2,60})")
+
+
+def _split_blocks(material: str) -> dict[int, str]:
+    """按【图片 N】切出逐图块（与 parse_material_signals 同一套切分规则）。"""
+    parts = _IMG_HEADER.split(material)
+    blocks: dict[int, str] = {}
+    i = 1
+    while i < len(parts):
+        try:
+            num = int(parts[i])
+        except (TypeError, ValueError):
+            i += 2
+            continue
+        blocks.setdefault(num, parts[i + 1] if i + 1 < len(parts) else "")
+        i += 2
+    return blocks
+
+
+def watermark_lines(material: str, n_images: int) -> list[str]:
+    """逐图水印复述，每张一行；返回长度 == n_images。读不到水印的图也占一行。
+
+    只做文本解析，不调用模型、不下载图片。material 无【图片 N】标记时返回空列表，
+    调用方据此退化为只展示分组汇总。
+    """
+    if not material or n_images <= 0:
+        return []
+    blocks = _split_blocks(material)
+    if not blocks:
+        return []
+    lines: list[str] = []
+    for idx in range(n_images):
+        num = idx + 1
+        block = blocks.get(num, "")
+        if not block.strip():
+            lines.append(f"图片{num}：未读到水印。")
+            continue
+        wm_text, raw_text, _obs = _block_parts(block)
+        kv = {m.group(1): m.group(2).strip() for m in _WM_KV.finditer(wm_text)}
+        cm = _RAW_CONTENT.search(raw_text) or _RAW_CONTENT.search(block)
+        content = cm.group(1).strip() if cm else ""
+        if content:
+            content = re.split(r"\s+拍摄时间[:：]", content, maxsplit=1)[0].strip()
+        pieces = [kv.get("拍摄时间"), kv.get("地点"), kv.get("部位"), content, kv.get("天气")]
+        pieces = [p for p in pieces if p]
+        lines.append(f"图片{num}：" + ("，".join(pieces) if pieces else "水印字段未识别") + "。")
+    return lines

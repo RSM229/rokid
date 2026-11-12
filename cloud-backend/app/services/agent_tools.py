@@ -1213,7 +1213,7 @@ async def _maybe_handle_multi_image_split(ctx: "ToolContext", args: dict, orig_a
             plan = {"groups": [_group_to_dict(g) for g in groups], "source": "vision"}
             args["_agent_pending_split"] = plan
             orig_args["_agent_pending_split"] = plan
-            return _split_need_more(groups)
+            return _split_need_more(groups, getattr(ctx, "material", None), len(images))
         # vision 只分出单组（含全部待定）→ 退化为模型按水印分组（Path 1）
 
     # 无视觉信号 / vision 未分出多组：接受模型按水印文字分组（Path 1）。
@@ -1224,7 +1224,7 @@ async def _maybe_handle_multi_image_split(ctx: "ToolContext", args: dict, orig_a
         plan = {"groups": [_group_to_dict(g) for g in model_groups], "source": "model_watermark"}
         args["_agent_pending_split"] = plan
         orig_args["_agent_pending_split"] = plan
-        return _split_need_more(model_groups)
+        return _split_need_more(model_groups, getattr(ctx, "material", None), len(images))
 
     return None  # 无逐图信号且未分组 → 普通单记录流程（多图挂同一条）
 
@@ -1310,16 +1310,28 @@ def _group_from_dict(d: dict) -> "multi_image_split.ImageGroup":
     )
 
 
-def _split_need_more(groups) -> dict:
+def _split_need_more(groups, material: str | None = None, n_images: int = 0) -> dict:
     summary = multi_image_split.summarize(groups)
+    # 逐张水印复述由后端从 material 确定性生成：分组确认分支会用工具回执覆盖
+    # 模型的 answer，模型写的「图片1…图片8」会被整段丢掉（2026-11-12 真机反馈）。
+    # 放在同一个 reply 里，路由层再覆盖也不会丢；每张单独一行，保持换行格式。
+    lines: list[str] = []
+    if material and n_images:
+        try:
+            from app.services.agent_vision_signals import watermark_lines
+            lines = watermark_lines(material, n_images)
+        except Exception:  # noqa: BLE001 - 复述是增强，失败不阻断分组确认
+            lines = []
+    reply = ("\n".join(lines) + "\n\n" if lines else "") + summary
     return {
         "ok": False,
-        "reply": summary,
+        "reply": reply,
         "card": None, "cards": [], "actions": [],
         "need_more": ["分组确认"],
         # ask_block 触发路由把完整记录表单置空（否则 need_more 会让 create_work_record
         # 渲染一整张空表单，与「只回一句分组汇总、等用户确认」的交互冲突）。
-        "ask_block": {"type": "multi_image_split", "summary": summary},
+        "ask_block": {"type": "multi_image_split", "summary": summary,
+                      "watermark_lines": lines},
         "options": {}, "undo": None, "data": {},
     }
 
