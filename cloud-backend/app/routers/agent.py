@@ -319,10 +319,11 @@ def _agent_form(
     纯文字一问一答，不再下发下拉框、候选或待填字段卡。
     2026-11-09 用户「我不要核对和填写表格，只要纯文本对话」：建记录前的
     「最终核对」表单卡也去掉，改为纯文字确认（回复「确认生成」即可建档），
-    安全网从「表单按钮」改为「文字确认」。这里只保留
-    - 记录已建后的补充照片框，并附文书/记录的文字链接。
+    安全网从「表单按钮」改为「文字确认」。
+    2026-11-12 移除残留的「先选记录类型」卡（含重复的照片上传框）：
+    多图分组已按记录类型拆单并各自挂图，选类型一律走纯文字追问。
+    这里只保留 - 记录已建后的补充照片框，并附文书/记录的文字链接。
     """
-    options = result.get("options") or {}
     form_code = _record_form_code(tool, args, message)
 
     # 2026-11-06 用户「我不要这些选择，我要完全交互」：缺项 / 选记录类型一律
@@ -332,24 +333,10 @@ def _agent_form(
     if result.get("need_more"):
         return None
 
-    if tool == "create_work_record" and not form_code:
-        opts = [str(x) for x in (options.get("记录类型")
-                                or agent_tools.record_field_spec.RECORD_TYPE_TO_FORM)]
-        return {
-            "id": "record_type", "kind": "record_type",
-            "schema_version": 1, "field_schema": "record_field_spec.v1", "form_code": "",
-            "title": "先选记录类型",
-            "hint": "选好类型后按对应表格补齐；如还没发照片，也可随下一条消息一起上传。",
-            "fields": [{
-                "name": "record_type", "label": "记录类型", "control": "select",
-                "key": "record_type", "canonical": "record_type", "definition_source": "agent_action",
-                "required": True, "value": "", "options": opts,
-                "placeholder": "", "hint": "", "section": "",
-            }],
-            "attachments": _attachment_block("现场照片", "可多选；选好类型后一起建档"),
-            "submit_label": "继续", "skippable": False, "actions": [],
-        }
-
+    # 2026-11-12 移除「先选记录类型」表单卡：多图分组已能一次把照片按
+    # 巡视/旁站/验收拆成多条记录并各自挂图，再要求「先选一个类型 + 重新上传
+    # 照片 + 点继续」既重复又与分组冲突；选类型由 _missing_record_type_reply
+    # 纯文字一问一答覆盖。这里只保留「记录已建后的补充照片框」。
     if tool == "create_work_record" and result.get("ok"):
         record_id = ((result.get("data") or {}).get("record_id")
                      or (result.get("card") or {}).get("id"))
