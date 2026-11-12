@@ -35,15 +35,27 @@ export interface ModelItem {
 
 export const MODEL_CATALOG: ModelItem[] = [
   {
+    id: 'deepseek-v4.1-flash-1017',
+    provider: '',
+    providerName: 'DeepSeek',
+    model: 'deepseek-v4.1-flash-1017',
+    name: 'DeepSeek V4.1 Flash',
+    shortName: 'DeepSeek V4.1',
+    desc: '高速推理，文本/视觉全能（默认推荐）',
+    temperature: 0.7,
+    badges: ['⚡ 限时夜间 5 折'],
+    capabilities: ['文本生成', '推理模型', '视觉理解'],
+  },
+  {
     id: 'qwen3.7-plus',
     provider: '',
     providerName: '通义千问',
     model: 'qwen3.7-plus',
     name: '通义千问 3.7 Plus',
     shortName: 'Qwen3.7 Plus',
-    desc: '智能理解、抽取字段更准（默认推荐）',
+    desc: '智能理解、抽取字段更准',
     temperature: 0.7,
-    badges: ['推荐'],
+    badges: [],
     capabilities: ['文本生成', '推理模型', '视觉理解'],
   },
   {
