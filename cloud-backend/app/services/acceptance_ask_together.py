@@ -48,15 +48,57 @@ def _split_points(text: str) -> list[str]:
 
 
 def _to_inquiry(seg: str) -> str:
-    """陈述式 -> 纯文字询问式。
+    """陈述式 -> 嵌「是否」的是非问句。
 
-    2026-11-06 用户明确「我不要这些选择，我要完全交互」：不再渲染
-    「□符合　□不符合　□不适用（说明：____）」这类复选框/填空控件，
-    改成一句自然语言问句。①②③ 序号仍保留在 seg 里，aggregate_reply
-    靠序号逐条归集，业务闭环不变。
+    2026-11-06 用户明确「我不要这些选择，我要完全交互」：不再渲染复选框/填空控件，
+    改成自然语言问句；2026-11-10 进一步要求：把「是否」嵌进句子、不要在句尾追问
+    「这项符合吗」——要点原文多为「核查/检查…符合设计/合格/一致」的核查动作，
+    句尾硬拼「这项符合吗」既啰嗦又别扭。这里按谓语锚点（符合/一致/合格/齐全…）
+    把「是否」插到合适位置，①②③ 序号仍保留，aggregate_reply 靠序号逐条归集。
     """
     s = seg.strip().rstrip("；;。. ")
-    return f"{s}，这项符合吗？"
+    if not s:
+        return s
+    # 已是问句：原样保留（补问号）
+    if s.endswith(("吗", "呢", "？", "?")):
+        return s if s.endswith(("？", "?")) else s + "？"
+    # 拆出 ①②③… 序号，对正文做变换
+    m = re.match(r"^[①②③④⑤⑥⑦⑧⑨⑩]\s*", s)
+    prefix = s[: m.end()] if m else ""
+    body = s[m.end():] if m else s
+    # 去掉句首祈使动词（核查/检查…），让主语成为话题，问句更自然
+    for v in ("核查", "检查", "复核", "确认", "核对", "查验", "审查",
+              "检验", "检测", "见证", "旁站", "量测", "测定"):
+        if body.startswith(v):
+            body = body[len(v):].lstrip("：: ")
+            break
+    new_body: str | None = None
+    # 1) 与…一致 / 与…相同 / 与…相符
+    mm = re.search(r"与[^，。；]{1,24}?(一致|相同|相符)", body)
+    if mm:
+        new_body = body[: mm.start()] + "是否" + body[mm.start():]
+    else:
+        # 2) 硬性谓语锚点：直接插入「是否」
+        _HARD = ("符合", "满足", "合格", "无渗漏", "无裂缝", "无积水",
+                 "无塌陷", "无松动", "无变形", "无缺陷")
+        for p in _HARD:
+            idx = body.find(p)
+            if idx != -1:
+                new_body = body[:idx] + "是否" + body[idx:]
+                break
+    if new_body is None:
+        # 3) 状态形容词：可作名词（后接 性/度/率），需排除该情况再插「是否」
+        _SOFT = ("齐全", "完整", "准确", "到位", "有效", "通畅", "稳定",
+                 "牢固", "平顺", "均匀", "正确", "正常", "达标")
+        for p in _SOFT:
+            m2 = re.search(re.escape(p) + r"(?!性|度|率|量|数)", body)
+            if m2:
+                new_body = body[: m2.start()] + "是否" + body[m2.start():]
+                break
+    if new_body is None:
+        # 4) 无明显谓语：补「是否符合要求」
+        new_body = body + "是否符合要求"
+    return prefix + new_body + "？"
 
 
 def _build_index() -> None:
