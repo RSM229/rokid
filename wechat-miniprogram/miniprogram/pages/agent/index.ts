@@ -233,6 +233,8 @@ interface Message {
   commands?: { field: string; label: string; options: string[] }[]
   /** 智能体回执卡（由 /agent/chat 返回，点击可跳详情） */
   cards?: AgentCard[]
+  /** 多条回执卡默认收起，用户点开才展开（2026-11-12） */
+  cardsExpanded?: boolean
   /** 追问的快速候选值（点击即作为回答发送，如 巡视/旁站/验收/见证） */
   chips?: string[]
   agentForm?: AgentForm
@@ -782,6 +784,15 @@ Page(themed({
     const messages = [...this.data.messages]
     if (!messages[index]?.reviewPlan) return
     messages[index] = { ...messages[index], reviewDetailsExpanded: !messages[index].reviewDetailsExpanded }
+    this.setData({ messages })
+  },
+
+  /** 分组建单一次回多张记录卡：默认收起，避免刷屏；点开才展示，单条仍直接显示 */
+  toggleAgentCards(event: WechatMiniprogram.TouchEvent) {
+    const index = Number(event.currentTarget.dataset.index)
+    const messages = [...this.data.messages]
+    if (!messages[index]?.cards?.length) return
+    messages[index] = { ...messages[index], cardsExpanded: !messages[index].cardsExpanded }
     this.setData({ messages })
   },
 
