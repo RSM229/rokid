@@ -31,14 +31,15 @@ const ext = externalConfig()
 const currentEnv = envVersion()
 // 必须是已备案的 HTTPS 域名。微信服务器域名**允许带端口**（官方文档：
 // 「对于 https 域名，可以配置端口，如 https://myserver.com:8080，但配置后只能向
-// https://myserver.com:8080 发起请求，向 myserver.com 或 :9091 请求会失败」），
-// 因此服务器只开放 4432 时，后台必须按「带端口」原样配置，不能只填不带端口的域名。
+// https://myserver.com:8080 发起请求，向 myserver.com 或 :9091 请求会失败」）。
+// 2026-11-12 起线上入口统一走标准 443（外网 :4432 端口映射已不可达），
+// 因此后台「服务器域名」需配成不带端口的 https://www.baize.gdces.cn。
 // 对应关系（三者须逐一在「小程序后台 - 开发管理 - 开发设置 - 服务器域名」配置）：
-//   request / uploadFile / downloadFile 合法域名 -> https://www.baize.gdces.cn:4432
-//   socket 合法域名（wss）-> wss://www.baize.gdces.cn  （wss 域名免配端口，默认放行该域名下所有端口）
-// 注意：一旦后台配了带端口域名，代码里的 apiBaseUrl 就必须带完全相同的端口，两者不一致会被拦截。
+//   request / uploadFile / downloadFile 合法域名 -> https://www.baize.gdces.cn
+//   socket 合法域名（wss）-> wss://www.baize.gdces.cn
+// 注意：后台域名与代码里的 apiBaseUrl 必须完全一致，否则请求会被微信拦截。
 const productionApiBaseUrl = trimTrailingSlash(
-  ext.apiBaseUrl || 'https://www.baize.gdces.cn:4432/api',
+  ext.apiBaseUrl || 'https://www.baize.gdces.cn/api',
 )
 // 联调总开关：true=连本机后端（SQLite 隔离库，tmp/dev_local.py serve --port 8001），
 // false=直连生产后端（生产 MySQL，真实账号与微信绑定关系）。

@@ -67,6 +67,16 @@
       </view>
       <text class="cell-arrow">›</text>
     </view>
+    <view class="cell entry-item entry-tint" bindtap="scanWebLogin">
+      <view class="entry-main">
+        <view class="entry-icon ic-qr"></view>
+        <view class="entry-text">
+          <text class="entry-title">扫码登录网页端</text>
+          <text class="entry-desc">扫描电脑端登录二维码，快速进入 Web 管理后台</text>
+        </view>
+      </view>
+      <text class="cell-arrow">›</text>
+    </view>
     <view class="cell entry-item entry-tint" bindtap="openAccountSecurity">
       <view class="entry-main">
         <view class="entry-icon ic-shield"></view>

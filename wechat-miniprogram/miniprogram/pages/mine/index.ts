@@ -108,11 +108,70 @@ Page(themed({
     wx.navigateTo({ url: '/pages/settings/index' })
   },
 
+  /**
+   * 扫一扫登录网页端：扫 web 登录二维码 → 核对校验码 → 确认绑定。
+   * 超管在小程序登录阶段已被拦截，所以这里天然只服务项目级/管理员账号。
+   */
+  async scanWebLogin() {
+    let scanned: { result?: string }
+    try {
+      scanned = await new Promise<{ result?: string }>((resolve, reject) => {
+        wx.scanCode({
+          scanType: ['qrCode'],
+          success: (res) => resolve(res as { result?: string }),
+          fail: reject,
+        })
+      })
+    } catch (error: any) {
+      if (String(error?.errMsg || '').includes('cancel')) return
+      wx.showToast({ title: '无法打开扫一扫', icon: 'none' })
+      return
+    }
+
+    const raw = String(scanned.result || '').trim()
+    const matched = /^GDJL-WEB-LOGIN:([A-Za-z0-9_-]{16,128}):([A-Z0-9]{4})$/.exec(raw)
+    if (!matched) {
+      wx.showToast({ title: '请扫描网页端登录二维码', icon: 'none' })
+      return
+    }
+    const ticket = matched[1]
+    const code = matched[2]
+
+    try {
+      const info = await request<{
+        code: string
+        client_label?: string
+        ip_masked?: string
+      }>('/auth/scan-login/lookup', { method: 'POST', data: { ticket } })
+
+      const confirmed = await new Promise<boolean>((resolve) => {
+        wx.showModal({
+          title: '登录网页端',
+          content: `校验码：${info.code}\n浏览器：${info.client_label || '未知'}${
+            info.ip_masked ? `\n来自：${info.ip_masked}` : ''
+          }\n\n确认是你本人在登录网页端吗？不是你本人请取消。`,
+          confirmText: '确认登录',
+          cancelText: '取消',
+          success: (res) => resolve(Boolean(res.confirm)),
+          fail: () => resolve(false),
+        })
+      })
+      if (!confirmed) return
+
+      await request<{ ok: boolean }>('/auth/scan-login/confirm', {
+        method: 'POST',
+        data: { ticket, code },
+      })
+      wx.showToast({ title: '网页端已登录', icon: 'success' })
+    } catch (error: any) {
+      wx.showToast({ title: error?.message || '扫码登录失败', icon: 'none' })
+    }
+  },
+
   /** AI 记忆：管理跨会话生效的用户工作规则 */
   openPreferences() {
     wx.navigateTo({ url: '/pages/preferences/index' })
   },
-
   /** 项目记忆：本项目总监维护、全项目共享的统一口径 */
   openProjectMemory() {
     wx.navigateTo({ url: '/pages/project-memory/index' })
