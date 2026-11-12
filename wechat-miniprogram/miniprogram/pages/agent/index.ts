@@ -521,6 +521,8 @@ Page(themed({
 
   data: {
     messages: [] as Message[],
+    // 空态问候语：按时间段 + 待办/草稿动态生成，比固定文案「活」
+    heroGreeting: '您好！今天有什么工作需要我帮您处理?',
     // ima 风格空状态：竖排建议按钮（icon + 文案），点击走 handleActionTap
     // 🔴 needProject：该动作会产生项目级业务数据（现场记录/隐患/监理日志），
     //    无项目用户点了只会被拦，不如一开始就不展示 —— 换成 visibleHeroActions
@@ -581,7 +583,7 @@ Page(themed({
 
     // 回答模型（2026-10-09 改版：输入区左侧「模型」下拉，可切换多个文本大模型；华工走独立供应商）
     models: CHAT_MODELS,
-    currentModel: 'qwen3.8-flash',
+    currentModel: 'qwen3.7-plus',
     modelName: '通义千问 3.8 Flash',
     modelShortName: 'Qwen3.8 Flash',
     showModelMenu: false,
@@ -661,7 +663,7 @@ Page(themed({
     })
 
     const user = session.getUser()
-    const savedModel = String(wx.getStorageSync(`gdjl_${config.storageScope}_agent_model`) || 'qwen3.8-flash')
+    const savedModel = String(wx.getStorageSync(`gdjl_${config.storageScope}_agent_model`) || 'qwen3.7-plus')
     const saved = this.data.models.find(m => m.id === savedModel) || this.data.models[0]
     this.setData({
       currentModel: saved.id,
@@ -718,6 +720,24 @@ Page(themed({
     this.loadPendingDrafts()
     void this.loadTodoPendingCount()
     void this.resumeAgentProgress()
+    this.refreshHeroGreeting()
+  },
+
+  /** 空态问候语按时间与待办动态生成（纯文案，不引入任何选择器/候选，守 11-06 铁律） */
+  refreshHeroGreeting() {
+    const h = new Date().getHours()
+    const part = h < 6 ? '凌晨好' : h < 9 ? '早上好' : h < 12 ? '上午好' : h < 14 ? '中午好' : h < 18 ? '下午好' : '晚上好'
+    let greeting = `${part}！`
+    const todo = this.data.todoPendingCount || 0
+    const drafts = this.data.pendingDrafts || []
+    if (todo > 0) {
+      greeting += `你有 ${todo} 项待办没处理，查一下？`
+    } else if (drafts.length > 0) {
+      greeting += `还有一笔「${drafts[0].label}」没记完，要接着写吗？`
+    } else {
+      greeting += '今天有什么工作需要我帮您处理?'
+    }
+    this.setData({ heroGreeting: greeting })
   },
 
   onHide() {
