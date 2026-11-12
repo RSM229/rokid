@@ -48,7 +48,8 @@ _NOT_IN_PROGRESS = ("已完成", "未施工", "仅堆放", "成品", "未开始"
 _NEG_PREFIX = ("未", "无", "没", "不", "没有", "未见", "未举", "未持", "未封")
 
 _CONTENT_KW = re.compile(r"(?:内容|工序|对象|施工内容|检验批|隐蔽)[:：]\s*([^\n；;，,]{2,40})")
-_SECTION_KW = re.compile(r"(?:部位|桩号|施工部位)[:：]\s*([^\n；;，,]{1,40})")
+_SECTION_KW = re.compile(r"(?:单位工程|施工区域|部位|桩号|施工部位)[:：]\s*([^\n；;，,]{1,40})")
+_TAKEN_AT_KW = re.compile(r"(?:拍摄时间|拍照时间|记录时间|时间|日期)[:：]\s*([^\n；;，,]{1,30})")
 
 
 def _block_parts(block: str) -> tuple[str, str, str]:
@@ -77,6 +78,12 @@ def _extract_content(block: str, raw_text: str) -> str:
 
 def _extract_section(wm_text: str) -> str:
     m = _SECTION_KW.search(wm_text)
+    return m.group(1).strip() if m else ""
+
+
+def _extract_taken_at(wm_text: str) -> str:
+    """从水印文本抽拍摄时间（分组记录据此回填业务日期，避免默认成建单当天）。"""
+    m = _TAKEN_AT_KW.search(wm_text)
     return m.group(1).strip() if m else ""
 
 
@@ -157,7 +164,8 @@ def parse_material_signals(material: str, n_images: int) -> list[dict]:
         combined = f"{wm_text} {raw_text} {obs_text}"
         content = _extract_content(block, raw_text)
         section = _extract_section(wm_text)
-        sig = ImageSignal(content=content, section=section)
+        taken_at = _extract_taken_at(wm_text)
+        sig = ImageSignal(content=content, section=section, taken_at=taken_at)
         for key, val in _behavior_signals(combined).items():
             setattr(sig, key, val)
         d = {k: getattr(sig, k) for k in ImageSignal.__dataclass_fields__

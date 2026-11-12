@@ -14,7 +14,7 @@
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from app.services.image_classification import (
@@ -109,6 +109,9 @@ class ImageGroup:
     images: list[str]
     # 逐图内容提示（来自信号 content / 水印），建记录时拼成 content 草稿
     hints: list[str]
+    # 逐图水印元数据（部位 / 拍摄时间 / 项目 / 天气），建记录时回填到记录字段。
+    # 与 images 等长对齐；分组确认可能跨轮，故需随分组方案序列化。
+    wm: list = field(default_factory=list)
 
 
 def group_images(images: list[str], signals: list[dict]) -> list[ImageGroup]:
@@ -132,11 +135,21 @@ def group_images(images: list[str], signals: list[dict]) -> list[ImageGroup]:
             hint = str((_safe_content(raw) or "")).strip()
         grp = buckets.get(rtype)
         if grp is None:
-            grp = ImageGroup(record_type=rtype, images=[], hints=[])
+            grp = ImageGroup(record_type=rtype, images=[], hints=[], wm=[])
             buckets[rtype] = grp
         grp.images.append(u)
         if hint:
             grp.hints.append(hint)
+        # 携带该图的水印元数据（部位 / 拍摄时间），供建单时回填，避免部位空、日期错成当天
+        if raw:
+            grp.wm.append({
+                "section": str(raw.get("section") or "").strip(),
+                "taken_at": str(raw.get("taken_at") or "").strip(),
+                "project_name": str(raw.get("project_name") or "").strip(),
+                "weather": str(raw.get("weather") or "").strip(),
+            })
+        else:
+            grp.wm.append({})
 
     groups: list[ImageGroup] = []
     for rt in _RECORD_ORDER:

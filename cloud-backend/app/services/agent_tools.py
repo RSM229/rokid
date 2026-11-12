@@ -1217,7 +1217,7 @@ async def _maybe_handle_multi_image_split(ctx: "ToolContext", args: dict, orig_a
         # vision 只分出单组（含全部待定）→ 退化为模型按水印分组（Path 1）
 
     # 无视觉信号 / vision 未分出多组：接受模型按水印文字分组（Path 1）。
-    model_groups = _parse_model_image_groups(args.get("image_groups"), images)
+    model_groups = _parse_model_image_groups(args.get("image_groups"), images, signals)
     if model_groups:
         if len(model_groups) <= 1:
             return None  # 单一类型 → 普通单记录流程
@@ -1249,7 +1249,7 @@ def _norm_split_record_type(value) -> str | None:
     return "待定"
 
 
-def _parse_model_image_groups(raw, images: list) -> list | None:
+def _parse_model_image_groups(raw, images: list, signals: list | None = None) -> list | None:
     """模型按水印文字分组：image_groups=[{record_type, image_indices|images}] → ImageGroup 列表。
 
     image_indices 为 1-based（对应消息里的「【图片 N】」），映射到 ctx.images 的 URL；
@@ -1284,12 +1284,27 @@ def _parse_model_image_groups(raw, images: list) -> list | None:
             continue
         grp = buckets.get(rtype)
         if grp is None:
-            grp = multi_image_split.ImageGroup(record_type=rtype, images=[], hints=[])
+            grp = multi_image_split.ImageGroup(record_type=rtype, images=[], hints=[], wm=[])
             buckets[rtype] = grp
             order.append(rtype)
         for u in urls:
             if u not in grp.images:
                 grp.images.append(u)
+                wm = {}
+                # 尽量按图片序号对齐视觉信号，带出部位 / 拍摄时间
+                try:
+                    i = images.index(u)
+                    sig = (signals or [])[i] if i < len(signals or []) else None
+                    if isinstance(sig, dict):
+                        wm = {
+                            "section": str(sig.get("section") or "").strip(),
+                            "taken_at": str(sig.get("taken_at") or "").strip(),
+                            "project_name": str(sig.get("project_name") or "").strip(),
+                            "weather": str(sig.get("weather") or "").strip(),
+                        }
+                except (ValueError, IndexError):
+                    pass
+                grp.wm.append(wm)
     if not buckets:
         return None
     result = [buckets[r] for r in order if r != "待定"]
@@ -1299,7 +1314,12 @@ def _parse_model_image_groups(raw, images: list) -> list | None:
 
 
 def _group_to_dict(g: "multi_image_split.ImageGroup") -> dict:
-    return {"record_type": g.record_type, "images": list(g.images), "hints": list(g.hints)}
+    return {
+        "record_type": g.record_type,
+        "images": list(g.images),
+        "hints": list(g.hints),
+        "wm": [dict(x) for x in (g.wm or [])],
+    }
 
 
 def _group_from_dict(d: dict) -> "multi_image_split.ImageGroup":
@@ -1307,6 +1327,7 @@ def _group_from_dict(d: dict) -> "multi_image_split.ImageGroup":
         record_type=str(d.get("record_type") or ""),
         images=[str(x) for x in (d.get("images") or [])],
         hints=[str(x) for x in (d.get("hints") or [])],
+        wm=[dict(x) for x in (d.get("wm") or [])],
     )
 
 
@@ -1340,6 +1361,38 @@ def _split_need_more(groups, material: str | None = None, n_images: int = 0) -> 
     }
 
 
+def _split_watermark_fields(wms: list) -> tuple:
+    """从分组逐图水印聚合「施工部位 / 业务日期 / 天气」，供分组建单回填。
+
+    - 部位：合并组内各图非空的 单位工程/施工区域/部位，去重（同组多图可能分属不同单位工程）。
+    - 日期：取各图拍摄时间中最早的一个；无拍摄时间则回退今天（与单图无信号时一致）。
+    - 天气：取首个非空值。
+    """
+    _DATE_PREFIX = re.compile(r"(\d{4})[.\-/年](\d{1,2})[.\-/月](\d{1,2})")
+    sections: list[str] = []
+    dates: list = []
+    weather = ""
+    for w in wms or []:
+        if not isinstance(w, dict):
+            continue
+        s = str(w.get("section") or "").strip()
+        if s and s not in sections:
+            sections.append(s)
+        t = str(w.get("taken_at") or "").strip()
+        if t:
+            # 拍摄时间常带「 09:32」等时刻后缀，先抽出日期部分再解析
+            dm = _DATE_PREFIX.search(t)
+            p = _parse_date(dm.group(0) if dm else t)
+            if p and p not in dates:
+                dates.append(p)
+        wt = str(w.get("weather") or "").strip()
+        if wt and not weather:
+            weather = wt
+    section = " / ".join(sections) if sections else None
+    rec_date = min(dates) if dates else datetime.now().date()
+    return section, rec_date, (weather or None)
+
+
 async def _create_split_records(ctx: "ToolContext", groups: list) -> dict:
     """确认后循环建多条记录：每组一条，同类多图挂该条照片列表；待定组建极简草稿。
 
@@ -1354,12 +1407,18 @@ async def _create_split_records(ctx: "ToolContext", groups: list) -> dict:
             continue
         is_witness = (rtype == "见证")
         content = _split_content(g, rtype)
+        # 按组回填水印字段：拍摄时间→业务日期，单位工程/施工区域→施工部位。
+        # 分组确认可能跨轮，wm 随分组方案持久化，故不依赖 ctx 的临时 image_signals。
+        wms = list(getattr(g, "wm", None) or [])
+        split_section, split_date, split_weather = _split_watermark_fields(wms)
         rec = WorkRecord(
             record_type=rtype,
             status=WorkRecordStatus.DRAFT.value,
             creator_id=ctx.user.id,
             project_id=ctx.project_id,
-            record_date=datetime.now().date(),
+            record_date=split_date,
+            section=(split_section[:128] if split_section else None),
+            weather=(split_weather[:16] if split_weather else None),
             inspection_photos=(None if is_witness else photos),
             witness_photos=(photos if is_witness else None),
             work_content=(content[:2000] if content else None),
@@ -1392,7 +1451,7 @@ async def _create_split_records(ctx: "ToolContext", groups: list) -> dict:
     lines = ["已按分组创建以下记录："]
     for rtype, rec, photos in created:
         lines.append(f"· {rtype}记录 #{rec.id}（{len(photos)}张照片）")
-    lines.append("可在「工作记录」页查看，并补全相关字段。")
+    lines.append("施工部位、业务日期已按各张照片水印自动填入；具体位置等可继续在「工作记录」页补充。")
     return _ok(
         "\n".join(lines),
         cards=cards,
