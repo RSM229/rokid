@@ -637,12 +637,17 @@ def resolve_via_production(parsed: dict | None, message: str,
     # 🔴 与生产 agent.py:1477-1506 同步：多动作且无澄清（plan_only）时，
     # 生产路由取「第一个可执行动作」接管执行，其余动作待续办。评测若不同步，
     # 模型输出多动作会被误判成「工具错」（2026-11-12 多步编排升级）。
+    # 🔴 过滤规则与生产一致：navigate/undo/chat 不进编排（导航/撤销/闲聊不是
+    # 待办业务动作），否则「打开工作台再记一条巡视」会被评测成先执行 navigate。
+    _ORCH_SKIP = {"navigate", "undo", "chat"}
     if not tool and plan.get("execution_mode") == "plan_only":
         if not plan.get("clarifications"):
             for _item in (plan.get("actions") or []):
                 if not isinstance(_item, dict):
                     continue
                 _aid = str(_item.get("id") or "").strip()
+                if _aid in _ORCH_SKIP:
+                    continue
                 _spec = _plan.ACTIONS.get(_aid)
                 _mtool = str((_spec or {}).get("tool") or "").strip() if _spec else ""
                 if _mtool and _mtool in _tools_mod.TOOL_BY_NAME:

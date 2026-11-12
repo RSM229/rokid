@@ -742,10 +742,16 @@ def _plain_messages(message: str, history: list[dict], mode: str | None,
 
 
 async def _generate_plain(messages: list[dict], provider: str | None, model: str | None) -> str:
+    """回答路径统一出口：开深度思考（thinking=True），让回答更聪明。
+
+    🔴 只影响「回答模型」：路由模型（JSON 规划）在 _agent_chat_impl 里显式
+    thinking=False 保持快速，不泄漏思考过程；这里只负责给用户的正文回答。
+    """
     if _streaming_enabled():
         parts: list[str] = []
         async for event in model_gateway.stream_chat_completion(
-            messages, temperature=0.7, provider=provider, model=model
+            messages, temperature=0.7, provider=provider, model=model,
+            thinking=True,
         ):
             if event["type"] == "reasoning":
                 await _emit_stream({"type": "reasoning", "text": event["text"]})
@@ -754,7 +760,8 @@ async def _generate_plain(messages: list[dict], provider: str | None, model: str
                 await _emit_stream({"type": "answer", "text": event["text"]})
         return strip_markdown("".join(parts))
     answer, _cfg = await model_gateway.chat_completion(
-        messages, temperature=0.7, provider=provider, model=model
+        messages, temperature=0.7, provider=provider, model=model,
+        thinking=True,
     )
     return strip_markdown(answer or "")
 
@@ -1474,11 +1481,17 @@ async def _agent_chat_impl(
             if isinstance(item, dict)
         ]
         if not _plan_clarifications:
+            # 🔴 只收「真业务动作」进多步编排：navigate（打开页面）是导航不是干活，
+            # undo（撤销）不该被编排进后续步骤，chat 是问答不是动作。
+            # 否则「打开工作台再记一条巡视」会先跳页、把建档丢给续办，顺序完全颠倒。
+            _ORCHESTRATION_SKIP = {"navigate", "undo", "chat"}
             _executables: list[tuple[str, str]] = []
             for _item in (incoming_plan.get("actions") or []):
                 if not isinstance(_item, dict):
                     continue
                 _action_id = str(_item.get("id") or "").strip()
+                if _action_id in _ORCHESTRATION_SKIP:
+                    continue
                 _spec = agent_request_plan.ACTIONS.get(_action_id)
                 _map_tool = str((_spec or {}).get("tool") or "").strip() if _spec else ""
                 if _map_tool and _map_tool in agent_tools.TOOL_BY_NAME:
@@ -1918,8 +1931,18 @@ async def _agent_chat_impl(
         except model_gateway.ModelGatewayError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
     else:
-        # 非流式复用路由模型的 answer 时，只补一份高相关引用列表（正文没有编号标记）
-        citations, _block = _retrieve_citations(message, project_id, min_score=0.6)
+        # 非流式：先复用路由模型的 answer（快）。若检索到高相关材料，则带材料
+        # 用深度思考回答模型重生成——让回答真正基于资料（检索增强问答质量）。
+        # 只保留模型真正用到的材料作为引用；无高相关材料时就维持路由 answer。
+        citations, block = _retrieve_citations(message, project_id, min_score=0.6)
+        if citations:
+            try:
+                answer, citations = await _plain_answer_cited(
+                    message, req.history, req.provider, req.model, req.mode, project_id,
+                )
+            except model_gateway.ModelGatewayError as exc:
+                # 重生成失败不阻断：保留路由模型的 answer 和引用列表
+                logger.warning("检索增强回答失败，复用路由 answer: %s", type(exc).__name__)
     return {"kind": "chat", "tool": None, "reply": strip_markdown(answer), "card": None,
             "cards": [], "actions": [], "need_more": [], "undo": None,
             "form": None, "model": model_id, "request_plan": incoming_plan,

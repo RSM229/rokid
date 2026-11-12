@@ -190,6 +190,7 @@ async def chat_completion(
     client: httpx.AsyncClient | None = None,
     provider: str | None = None,
     model: str | None = None,
+    thinking: bool | None = None,
 ) -> tuple[str, ModelConfig]:
     config = await get_runtime_model_config("llm")
     override = _provider_override(provider)
@@ -209,6 +210,9 @@ async def chat_completion(
     }
     if response_format:
         payload["response_format"] = response_format
+    if thinking is not None:
+        # DashScope/百炼：true=开启深度思考（回答类任务更聪明），false=关闭
+        payload["enable_thinking"] = bool(thinking)
     owns_client = client is None
     http_client = client or httpx.AsyncClient(timeout=httpx.Timeout(120.0))
     try:
