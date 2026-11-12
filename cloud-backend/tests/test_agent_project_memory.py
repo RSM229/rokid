@@ -1,7 +1,7 @@
-"""项目记忆 + 个人记忆作用域的服务层测试。
+"""项目规约 + 个人记忆作用域的服务层测试。
 
 覆盖 2026-11-09 的分层设计：
-- 项目记忆按 project_id 隔离，跨项目不可见；
+- 项目规约按 project_id 隔离，跨项目不可见；
 - 总监/总监代表可维护，普通成员只能提交 pending 建议；
 - 审批通过后全员可读，驳回后不再注入；
 - 个人记忆支持「全局」与「仅当前项目」两种绑定，跨项目不串。
@@ -135,7 +135,7 @@ class ProjectMemoryServiceTests(unittest.IsolatedAsyncioTestCase):
             await db.commit()
             rows = await agent_project_memories.list_active_memories(db, 1)
             block = agent_project_memories.render_project_memories_block(rows)
-            self.assertIn("本项目记忆", block)
+            self.assertIn("本项目规约", block)
             self.assertIn("整改回复必须附前后对比照片", block)
             self.assertIn("以本条为准", block)
             self.assertEqual(agent_project_memories.render_project_memories_block([]), "")

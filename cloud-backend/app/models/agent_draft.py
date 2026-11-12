@@ -179,7 +179,7 @@ class AgentUserPreference(Base):
     """用户级长期记忆（个人记忆）—— 跨会话生效。
 
     与 ``AgentConversationMemory``（会话级原话）和 ``AgentProjectMemory``
-    （项目级共享记忆）不同，本表存的是**用户自己的、希望以后一直遵守**
+    （项目级共享规则）不同，本表存的是**用户自己的、希望以后一直遵守**
     的做事规则。来源两类：
     - ``user_declared``：用户在管理页/聊天中主动声明（如「整改回复必须附前后对比照片」）；
     - ``assistant_suggested``：助手发现用户重复表达同一习惯后建议沉淀（可被用户关闭）。
@@ -221,12 +221,12 @@ class AgentProjectMemory(Base):
       旧总监的个人记忆不会因此共享给项目。
     - **写权限**：当前项目的 ``chief_supervisor`` / ``deputy_chief``（读
       ``project_members`` 真源，不看全局 ``users.role``），``super_admin`` 兜底。
-    - **读权限**：本项目有效成员；公司管理员排障可读。个人记忆与项目记忆
+    - **读权限**：本项目有效成员；公司管理员排障可读。个人记忆与项目规约
       物理分表，互不影响。
     - **来源分层**：``chief_declared`` / ``deputy_declared`` / ``member_suggested``
       / ``system``。成员只能“建议”，``status='pending'`` 等总监审批后才生效。
 
-    与 ``AgentUserPreference``（个人记忆）的注入优先级：项目记忆 > 个人记忆；
+    与 ``AgentUserPreference``（个人记忆）的注入优先级：项目规约 > 个人记忆；
     用户本轮的明确指令仍优先于两者（由 prompt 注入块里的说明约束模型）。
     """
     __tablename__ = "agent_project_memories"
@@ -270,7 +270,7 @@ class AgentProjectMemory(Base):
 
 
 class AgentProjectMemoryAudit(Base):
-    """项目记忆变更/使用审计流水。
+    """项目规约变更/使用审计流水。
 
     - 变更类：create/suggest/update/enable/disable/delete/approve/reject/publish；
     - 使用类：use（每轮注入一条，detail 里带 memory_ids 与 conversation_id）。

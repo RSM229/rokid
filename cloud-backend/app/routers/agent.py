@@ -1224,7 +1224,7 @@ async def _agent_chat_impl(
         db, user.id, conversation_id=conversation_id, project_id=project_id,
     )
     draft_for_context = pend_for_context[1] if pend_for_context else {}
-    # 项目记忆（总监维护、全项目共享）+ 个人记忆（仅本人），各自独立 system message。
+    # 项目规约（总监维护、全项目共享）+ 个人记忆（仅本人），各自独立 system message。
     project_memories = (
         await agent_project_memories.list_active_memories(db, project_id)
         if project_id else []
@@ -1238,7 +1238,7 @@ async def _agent_chat_impl(
     personal_memory_block = agent_preferences.render_preferences_block(
         personal_memories,
     )
-    # 使用统计：本轮实际注入的项目记忆记一次引用（失败不影响聊天）。
+    # 使用统计：本轮实际注入的项目规约记一次引用（失败不影响聊天）。
     if project_memories:
         try:
             await agent_project_memories.record_usage(
@@ -1250,7 +1250,7 @@ async def _agent_chat_impl(
             await db.commit()
         except Exception:  # noqa: BLE001
             await db.rollback()
-            logger.warning("项目记忆使用统计写入失败，本轮继续", exc_info=True)
+            logger.warning("项目规约使用统计写入失败，本轮继续", exc_info=True)
     await report_progress(
         "load_context", "completed", "已了解项目背景和刚才的对话上下文",
         {
@@ -1269,7 +1269,7 @@ async def _agent_chat_impl(
         record_types=json.dumps(agent_request_plan.RECORD_TYPES, ensure_ascii=False),
     )
     messages: list[dict] = [{"role": "system", "content": system}]
-    # 🔴 项目记忆在前、个人记忆在后：项目统一口径优先于个人习惯；两块都独立成
+    # 🔴 项目规约在前、个人记忆在后：项目统一口径优先于个人习惯；两块都独立成
     # system message，不合并进 _AGENT_SYSTEM 模板体（模板保持字节稳定供跑分基线）。
     # 具体落库前服务端仍做参数/权限/审计，记忆只是非破坏性基线，不能越权。
     if project_memory_block:
@@ -2829,7 +2829,7 @@ def _preference_payload(row: Any) -> dict[str, Any]:
 
 
 async def _project_memory_payloads(db: AsyncSession, rows: list[Any]) -> list[dict[str, Any]]:
-    """项目记忆 payload；批量补 author_name，避免 N+1 查询。"""
+    """项目规约 payload；批量补 author_name，避免 N+1 查询。"""
     author_ids = {
         int(row.author_id) for row in rows
         if getattr(row, "author_id", None) is not None
@@ -2865,7 +2865,7 @@ async def _project_memory_payloads(db: AsyncSession, rows: list[Any]) -> list[di
 
 
 async def _project_memory_scope(db: AsyncSession, user: User):
-    """项目记忆接口的统一作用域：必须有当前项目且是成员/管理员。"""
+    """项目规约接口的统一作用域：必须有当前项目且是成员/管理员。"""
     try:
         return await agent_scope.resolve_project_memory_scope(db, user)
     except agent_scope.ProjectContextError as exc:
@@ -3020,7 +3020,7 @@ async def toggle_preference(
 
 
 # ---------------------------------------------------------------------------
-# 项目记忆（项目级共享记忆）—— 总监/总监代表维护，全项目成员读取
+# 项目规约（项目级共享规则）—— 总监/总监代表维护，全项目成员读取
 # ---------------------------------------------------------------------------
 
 
@@ -3090,7 +3090,7 @@ async def create_project_memory(
         "message": (
             "已提交给项目总监确认"
             if row.status == agent_project_memories.STATUS_PENDING
-            else "已加入项目记忆，全项目下一轮对话生效"
+            else "已加入项目规约，全项目下一轮对话生效"
         ),
         "memory": await _project_memory_payload_one(db, row),
     }
@@ -3108,7 +3108,7 @@ async def update_project_memory(
     """Edit / enable / disable / pin one project memory (manager only)."""
     scope = await _project_memory_scope(db, user)
     if not scope.can_manage_project_memory:
-        raise HTTPException(status_code=403, detail="只有项目总监/总监代表可以维护项目记忆")
+        raise HTTPException(status_code=403, detail="只有项目总监/总监代表可以维护项目规约")
     try:
         row = await agent_project_memories.update_memory(
             db, scope.project_id, memory_id,
@@ -3116,7 +3116,7 @@ async def update_project_memory(
             pinned=req.pinned, actor_id=user.id,
         )
         if row is None:
-            raise HTTPException(status_code=404, detail="项目记忆不存在")
+            raise HTTPException(status_code=404, detail="项目规约不存在")
         if req.active is not None:
             row = await agent_project_memories.set_memory_active(
                 db, scope.project_id, memory_id, req.active, actor_id=user.id,
@@ -3136,12 +3136,12 @@ async def delete_project_memory(
 ):
     scope = await _project_memory_scope(db, user)
     if not scope.can_manage_project_memory:
-        raise HTTPException(status_code=403, detail="只有项目总监/总监代表可以维护项目记忆")
+        raise HTTPException(status_code=403, detail="只有项目总监/总监代表可以维护项目规约")
     deleted = await agent_project_memories.delete_memory(
         db, scope.project_id, memory_id, actor_id=user.id,
     )
     if not deleted:
-        raise HTTPException(status_code=404, detail="项目记忆不存在")
+        raise HTTPException(status_code=404, detail="项目规约不存在")
     await db.commit()
     return {"ok": True, "id": memory_id}
 
@@ -3156,14 +3156,14 @@ async def approve_project_memory(
     """Approve/reject a member's pending project-memory suggestion."""
     scope = await _project_memory_scope(db, user)
     if not scope.can_manage_project_memory:
-        raise HTTPException(status_code=403, detail="只有项目总监/总监代表可以审批项目记忆")
+        raise HTTPException(status_code=403, detail="只有项目总监/总监代表可以审批项目规约")
     try:
         row = await agent_project_memories.approve_memory(
             db, scope.project_id, memory_id,
             approve=req.approve, approver_id=user.id,
         )
         if row is None:
-            raise HTTPException(status_code=404, detail="项目记忆不存在")
+            raise HTTPException(status_code=404, detail="项目规约不存在")
         await db.commit()
     except ValueError as exc:
         await db.rollback()
@@ -3177,10 +3177,10 @@ async def publish_preference_to_project(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """总监把自己的个人记忆发布为项目记忆（复制，保留来源 id）。"""
+    """总监把自己的个人记忆发布为项目规约（复制，保留来源 id）。"""
     scope = await _project_memory_scope(db, user)
     if not scope.can_manage_project_memory:
-        raise HTTPException(status_code=403, detail="只有项目总监/总监代表可以发布项目记忆")
+        raise HTTPException(status_code=403, detail="只有项目总监/总监代表可以发布项目规约")
     preference = await agent_preferences.get_preference(db, user.id, preference_id)
     if preference is None:
         raise HTTPException(status_code=404, detail="个人记忆不存在或不属于当前账号")

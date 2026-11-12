@@ -111,7 +111,7 @@
       <view class="entry-main">
         <view class="entry-icon ic-board"></view>
         <view class="entry-text">
-          <text class="entry-title">项目记忆</text>
+          <text class="entry-title">项目规约</text>
           <text class="entry-desc">本项目总监设定、全项目共享的统一口径</text>
         </view>
       </view>

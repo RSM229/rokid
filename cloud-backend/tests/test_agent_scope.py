@@ -3,7 +3,7 @@
 2026-11-09 起项目/用户隔离的一切读写都先经过 ``agent_scope``；这里锁住：
 - project_id 只从登录态推导，且校验 project_members 有效成员；
 - 会话不能跨项目续聊；
-- 项目记忆写权限认 project_members 岗位（总监/总监代表），不看 users.role。
+- 项目规约写权限认 project_members 岗位（总监/总监代表），不看 users.role。
 """
 import unittest
 
@@ -83,7 +83,7 @@ class AgentScopeTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(memory_scope.project_id, 1)
 
     async def test_non_member_degrades_to_no_project_context(self):
-        """离场脏数据不应阻断聊天，但项目记忆/项目会话全部不参与。"""
+        """离场脏数据不应阻断聊天，但项目规约/项目会话全部不参与。"""
         async with self.session_factory() as db:
             scope = await agent_scope.resolve_agent_scope(
                 db, fake_user(user_id=8, project_id=1),

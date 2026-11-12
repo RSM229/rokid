@@ -1,8 +1,8 @@
 <!--
-  项目记忆（项目级共享记忆）· 2026-11-09 新建
+  项目规约（项目级共享规则）· 2026-11-09 新建
 
   与「我的 - AI 记忆」（个人记忆）的分工：
-    · 项目记忆：本项目总监设定、全项目共享的统一口径，注入每个成员的 AI 上下文；
+    · 项目规约：本项目总监设定、全项目共享的统一口径，注入每个成员的 AI 上下文；
     · 个人记忆：只属于当前用户，跨会话跟随本人。
 
   写权限由后端判定（project_members 中总监/总监代表；super_admin 兜底）：
@@ -10,7 +10,7 @@
     · 普通成员：只能提交 pending 建议，等总监审批后生效。
 -->
 <view class="page" style="{{themeStyle}}">
-  <glass-nav-bar title="项目记忆" left="back" />
+  <glass-nav-bar title="项目规约" left="back" />
 
   <view class="memory-note">
     这里是本项目总监设定的统一口径，全项目成员共享；你自己的习惯请到「AI 记忆」。
@@ -41,7 +41,7 @@
           loading="{{adding}}"
           disabled="{{adding || !inputValue}}"
           bindtap="submitMemory"
-        >{{canManage ? '加入项目记忆' : '提交建议'}}</button>
+        >{{canManage ? '加入项目规约' : '提交建议'}}</button>
       </view>
       <view class="add-hint" wx:if="{{!canManage}}">只有项目总监/总监代表可以直接生效，你的建议会先进入待审批。</view>
     </view>
@@ -68,7 +68,7 @@
   </block>
 
   <!-- ③ 已生效 / 已停用 -->
-  <view class="group-title">项目记忆（{{memories.length}}）</view>
+  <view class="group-title">项目规约（{{memories.length}}）</view>
   <view class="section" wx:if="{{memories.length}}">
     <view class="cell pref-item" wx:for="{{memories}}" wx:key="id">
       <view class="pref-main">
@@ -93,7 +93,7 @@
     </view>
   </view>
   <view class="empty" wx:elif="{{!loading}}">
-    <text>{{canManage ? '还没有项目记忆。新增后，所有项目成员的 AI 都会遵守。' : '还没有项目记忆。'}}</text>
+    <text>{{canManage ? '还没有项目规约。新增后，所有项目成员的 AI 都会遵守。' : '还没有项目规约。'}}</text>
   </view>
   <view class="empty" wx:if="{{loading}}">
     <text>加载中…</text>

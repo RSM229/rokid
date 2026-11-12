@@ -172,7 +172,7 @@ Page(themed({
   openPreferences() {
     wx.navigateTo({ url: '/pages/preferences/index' })
   },
-  /** 项目记忆：本项目总监维护、全项目共享的统一口径 */
+  /** 项目规约：本项目总监维护、全项目共享的统一口径 */
   openProjectMemory() {
     wx.navigateTo({ url: '/pages/project-memory/index' })
   },

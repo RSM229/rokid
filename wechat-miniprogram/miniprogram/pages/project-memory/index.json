@@ -1,5 +1,5 @@
 {
-  "navigationBarTitleText": "项目记忆",
+  "navigationBarTitleText": "项目规约",
   "navigationStyle": "custom",
   "usingComponents": {
     "glass-nav-bar": "/components/glass-nav-bar/index"

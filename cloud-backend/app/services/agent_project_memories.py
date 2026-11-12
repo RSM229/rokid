@@ -6,7 +6,7 @@
 - 维护岗位：当前项目 ``chief_supervisor`` 为主，``deputy_chief`` 可代管，
   ``super_admin`` 兜底；普通成员只能提交 ``pending`` 建议，经总监审批后生效；
 - 读取：本项目有效成员；公司管理员排障可读；
-- 注入优先级：项目记忆 > 个人记忆；用户本轮明确指令仍优先于两者。
+- 注入优先级：项目规约 > 个人记忆；用户本轮明确指令仍优先于两者。
 
 与 ``agent_preferences``（个人记忆）物理分表，互不影响；发布个人记忆到项目
 是**复制**并保留 ``origin_preference_id``，不是引用。
@@ -68,7 +68,7 @@ def _audit(
     actor_id: int | None,
     detail: dict[str, Any] | None = None,
 ) -> None:
-    """写一条项目记忆审计流水；由调用方事务提交。"""
+    """写一条项目规约审计流水；由调用方事务提交。"""
     db.add(AgentProjectMemoryAudit(
         project_id=int(project_id),
         memory_id=int(memory_id) if memory_id is not None else None,
@@ -84,7 +84,7 @@ async def list_active_memories(
     *,
     limit: int = MAX_ACTIVE_PROJECT_MEMORIES,
 ) -> list[AgentProjectMemory]:
-    """注入用：只取 active 且 status=active 的项目记忆。"""
+    """注入用：只取 active 且 status=active 的项目规约。"""
     if not project_id:
         return []
     rows = (
@@ -217,7 +217,7 @@ async def create_memory(
     source: str | None = None,
     audit_action: str | None = None,
 ) -> AgentProjectMemory:
-    """创建或复用一条项目记忆（按内容去重，不堆近似重复行）。
+    """创建或复用一条项目规约（按内容去重，不堆近似重复行）。
 
     - 维护岗创建 → 直接 active；
     - 普通成员创建 → ``pending``，等总监审批；
@@ -225,7 +225,7 @@ async def create_memory(
     """
     text = _text(content)[:500]
     if not text:
-        raise ValueError("项目记忆内容不能为空")
+        raise ValueError("项目规约内容不能为空")
     if category not in CATEGORIES:
         category = "general"
     if kind not in KINDS:
@@ -244,7 +244,7 @@ async def create_memory(
         if not existing.active:
             if await _active_count(db, project_id) >= MAX_ACTIVE_PROJECT_MEMORIES:
                 raise ValueError(
-                    f"本项目项目记忆已达 {MAX_ACTIVE_PROJECT_MEMORIES} 条，请先停用旧条目"
+                    f"本项目项目规约已达 {MAX_ACTIVE_PROJECT_MEMORIES} 条，请先停用旧条目"
                 )
             existing.active = True
             existing.status = STATUS_ACTIVE
@@ -258,7 +258,7 @@ async def create_memory(
         return existing
 
     if status == STATUS_ACTIVE and await _active_count(db, project_id) >= MAX_ACTIVE_PROJECT_MEMORIES:
-        raise ValueError(f"本项目项目记忆已达 {MAX_ACTIVE_PROJECT_MEMORIES} 条，请先停用旧条目")
+        raise ValueError(f"本项目项目规约已达 {MAX_ACTIVE_PROJECT_MEMORIES} 条，请先停用旧条目")
     if status == STATUS_PENDING and await _pending_count(db, project_id) >= MAX_PENDING_PROJECT_MEMORIES:
         raise ValueError("待总监确认的建议已达上限，请稍后再试")
 
@@ -302,10 +302,10 @@ async def update_memory(
     if content is not None:
         text = _text(content)[:500]
         if not text:
-            raise ValueError("项目记忆内容不能为空")
+            raise ValueError("项目规约内容不能为空")
         duplicate = await _find_same_content(db, project_id, text)
         if duplicate is not None and duplicate.id != row.id:
-            raise ValueError("已经有一条相同的项目记忆")
+            raise ValueError("已经有一条相同的项目规约")
         row.content = text
         changed.append("content")
     if category is not None:
@@ -342,7 +342,7 @@ async def set_memory_active(
     if active and not row.active:
         if await _active_count(db, project_id) >= MAX_ACTIVE_PROJECT_MEMORIES:
             raise ValueError(
-                f"本项目项目记忆已达 {MAX_ACTIVE_PROJECT_MEMORIES} 条，请先停用旧条目"
+                f"本项目项目规约已达 {MAX_ACTIVE_PROJECT_MEMORIES} 条，请先停用旧条目"
             )
     row.active = bool(active)
     row.status = STATUS_ACTIVE if active else STATUS_DISABLED
@@ -391,7 +391,7 @@ async def approve_memory(
     if approve:
         if await _active_count(db, project_id) >= MAX_ACTIVE_PROJECT_MEMORIES:
             raise ValueError(
-                f"本项目项目记忆已达 {MAX_ACTIVE_PROJECT_MEMORIES} 条，请先停用旧条目"
+                f"本项目项目规约已达 {MAX_ACTIVE_PROJECT_MEMORIES} 条，请先停用旧条目"
             )
         row.status = STATUS_ACTIVE
         row.active = True
@@ -417,7 +417,7 @@ async def publish_preference(
     actor_id: int | None,
     actor_roles: Sequence[str] | None = None,
 ) -> AgentProjectMemory:
-    """把个人记忆复制为项目记忆（总监/代管操作，保留来源 id）。"""
+    """把个人记忆复制为项目规约（总监/代管操作，保留来源 id）。"""
     row = await create_memory(
         db,
         project_id,
@@ -443,7 +443,7 @@ async def record_usage(
     actor_id: int | None = None,
     conversation_id: str | None = None,
 ) -> int:
-    """记一轮项目记忆注入：批量 +1 use_count / last_used_at，并写一条 use 审计。
+    """记一轮项目规约注入：批量 +1 use_count / last_used_at，并写一条 use 审计。
 
     由聊天主链路在组装 prompt 前调用；调用方负责 commit。返回本次计数条数。
     """
@@ -476,7 +476,7 @@ async def list_audit(
     *,
     limit: int = 50,
 ) -> list[dict[str, Any]]:
-    """最近的项目记忆变更/使用流水（带操作人姓名），供管理页审计展示。"""
+    """最近的项目规约变更/使用流水（带操作人姓名），供管理页审计展示。"""
     if not project_id:
         return []
     capped = max(1, min(int(limit or 50), 200))
@@ -499,7 +499,7 @@ async def list_audit(
             ).scalars().all()
             names = {int(user.id): (user.real_name or user.username or "") for user in users}
         except Exception:  # noqa: BLE001 - 审计只是展示层，用户表异常不能拖垮管理页
-            logger.warning("项目记忆审计补操作人姓名失败", exc_info=True)
+            logger.warning("项目规约审计补操作人姓名失败", exc_info=True)
     out: list[dict[str, Any]] = []
     for row in rows:
         try:
@@ -526,7 +526,7 @@ async def usage_summary(
     *,
     limit: int = 20,
 ) -> list[dict[str, Any]]:
-    """按使用次数排序的项目记忆（管理页「使用统计」）。"""
+    """按使用次数排序的项目规约（管理页「使用统计」）。"""
     if not project_id:
         return []
     rows = (
@@ -558,7 +558,7 @@ async def project_maintainers(
     db: AsyncSession,
     project_id: int,
 ) -> list[dict[str, Any]]:
-    """项目记忆的维护人（总监/总监代表），供管理页展示。"""
+    """项目规约的维护人（总监/总监代表），供管理页展示。"""
     if not project_id:
         return []
     rows = (
@@ -589,7 +589,7 @@ async def project_maintainers(
 def render_project_memories_block(
     memories: Iterable[AgentProjectMemory] | None,
 ) -> str:
-    """把 active 项目记忆渲染成独立的 system prompt 块。"""
+    """把 active 项目规约渲染成独立的 system prompt 块。"""
     rows = [
         row for row in (memories or [])
         if row is not None and row.active and _text(getattr(row, "content", ""))
@@ -597,7 +597,7 @@ def render_project_memories_block(
     if not rows:
         return ""
     lines = [
-        "本项目记忆（由项目总监维护，全项目统一遵守；与「我的记忆」冲突时以本条为准；"
+        "本项目规约（由项目总监维护，全项目统一遵守；与「我的记忆」冲突时以本条为准；"
         "与用户本轮明确指令冲突时，先提示用户并由总监确认，不要静默覆盖）："
     ]
     for row in rows[:MAX_ACTIVE_PROJECT_MEMORIES]:

@@ -15,12 +15,12 @@
 
   <view class="memory-note">会话记录用于回看对话；这里的记忆会跨会话影响 AI。仅保存你确认的工作规则。</view>
 
-  <!-- 项目记忆入口：总监维护、全项目共享的统一口径 -->
+  <!-- 项目规约入口：总监维护、全项目共享的统一口径 -->
   <view class="section project-link">
     <view class="cell entry-item" bindtap="openProjectMemory">
       <view class="entry-main">
         <view class="entry-text">
-          <text class="entry-title">项目记忆{{projectName ? '（' + projectName + '）' : ''}}</text>
+          <text class="entry-title">项目规约{{projectName ? '（' + projectName + '）' : ''}}</text>
           <text class="entry-desc">{{canManageProjectMemory ? '你是总监/总监代表，可维护全项目共享口径' : '查看本项目总监设定的统一口径'}}</text>
         </view>
       </view>
