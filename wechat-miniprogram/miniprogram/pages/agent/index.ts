@@ -319,6 +319,8 @@ interface AgentChatResponse {
   recommendations?: Array<{ field: string; value: string; reason?: string }>
   form?: AgentForm | null
   undo?: { entity: string; id: number } | null
+  /** 工具回执业务数据；多图分组建单时带 split=true，表示后端已按组分配好照片 */
+  data?: { split?: boolean; record_ids?: number[] }
   model?: string
   degraded?: boolean
   request_plan?: AgentRequestPlan
@@ -3694,6 +3696,19 @@ Page(themed({
   async attachPendingPhotosFromReply(result: AgentChatResponse) {
     const pending = this.data.pendingRecordPhotos
     if (!pending.length) return
+    // 多图分组建单：后端 _create_split_records 已按组把照片分别写进每条记录的
+    // inspection_photos / witness_photos。这里不能再把本会话攒下的全部照片补挂到
+    // 第一张记录卡，否则别组照片会串进第一条记录（现场实测：巡视应 1 张 → 详情 8 张）。
+    const workCards = (result.cards || []).filter(c => c.kind === 'work_record' && c.id)
+    if (result.data?.split === true) {
+      // 这批照片已由后端分完，清空待挂队列，避免污染后续会话或单条建单
+      this.setData({ pendingRecordPhotos: [], pendingRecordPhotosSession: 0 })
+      return
+    }
+    if (workCards.length > 1) {
+      // 兜底：后端未下发 split 标志但一次回了多条记录卡，宁可不补挂也不挂错
+      return
+    }
     const session = this.data.pendingRecordPhotosSession
     const current = this.currentSessionId || 0
     if (session && current && session !== current) {
