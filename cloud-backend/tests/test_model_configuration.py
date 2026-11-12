@@ -133,16 +133,29 @@ class ModelConfigurationSecurityTests(unittest.TestCase):
         self.assertEqual(valid.options, {"temperature": 0.7, "safe": "value"})
 
     def test_model_config_loads_settings_defaults(self) -> None:
-        for model_type, expected in {
-            "llm": ("天翼云", "Qwen3.5-35B-A3B"),
-            "tts": ("阿里云", "qwen-audio-3.0-tts-plus"),
-            "stt": ("阿里云", "qwen-audio-3.0-asr-flash"),
-            "vlm": ("华工", "hazard_vlm_detection"),
-        }.items():
+        """锁的是「ModelConfig 逐项镜像 settings」这个契约，不是具体厂商名。
+
+        厂商 / 模型 ID 由部署环境 .env 决定（llm 就从天翼云切到了阿里云，
+        model_id 也随之变化）。写死厂商名会让这条测试变成环境配置的镜子，
+        配置一改就假红，反而掩盖真正的加载逻辑回归。
+        """
+        from app.config import settings
+
+        expected = {
+            "llm": (settings.default_llm_provider, settings.default_llm_model_id),
+            "tts": (settings.default_tts_provider, settings.default_tts_model_id),
+            "stt": (settings.default_stt_provider, settings.default_stt_model_id),
+            "vlm": (settings.default_vlm_provider, settings.default_vlm_model_id),
+        }
+        self.assertTrue(
+            any(provider for provider, _ in expected.values()),
+            "环境里四类默认 provider 全为空，这条契约测试会退化成空对空",
+        )
+        for model_type, (provider, model_id) in expected.items():
             with self.subTest(model_type=model_type):
                 config = ModelConfig(model_type)
-                self.assertEqual(config.provider, expected[0])
-                self.assertEqual(config.model_id, expected[1])
+                self.assertEqual(config.provider, provider)
+                self.assertEqual(config.model_id, model_id)
 
 
 class ModelGatewayContractTests(unittest.IsolatedAsyncioTestCase):

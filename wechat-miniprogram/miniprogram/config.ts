@@ -32,12 +32,12 @@ const currentEnv = envVersion()
 // 必须是已备案的 HTTPS 域名。微信服务器域名**允许带端口**（官方文档：
 // 「对于 https 域名，可以配置端口，如 https://myserver.com:8080，但配置后只能向
 // https://myserver.com:8080 发起请求，向 myserver.com 或 :9091 请求会失败」）。
-// 2026-11-12 起线上入口统一走标准 443（外网 :4432 端口映射已不可达），
-// 因此后台「服务器域名」需配成不带端口的 https://www.baize.gdces.cn。
-// 对应关系（三者须逐一在「小程序后台 - 开发管理 - 开发设置 - 服务器域名」配置）：
+// 现网已开通标准 443（路由器 NAT：公网443 → 192.168.67.195:443），故后台按「不带端口」配置，
+// 走默认 443，无需在域名白名单里写端口。旧的 4432 入口（rokid 规则 4432→10002）已删除。
+// 对应关系（二者须在「小程序后台 - 开发管理 - 开发设置 - 服务器域名」配置）：
 //   request / uploadFile / downloadFile 合法域名 -> https://www.baize.gdces.cn
-//   socket 合法域名（wss）-> wss://www.baize.gdces.cn
-// 注意：后台域名与代码里的 apiBaseUrl 必须完全一致，否则请求会被微信拦截。
+//   socket 合法域名（wss）-> wss://www.baize.gdces.cn  （wss 域名免配端口，默认放行该域名下所有端口）
+// 注意：后台配的域名（带/不带端口）必须与代码 apiBaseUrl 完全一致，否则请求被微信拦截。
 const productionApiBaseUrl = trimTrailingSlash(
   ext.apiBaseUrl || 'https://www.baize.gdces.cn/api',
 )

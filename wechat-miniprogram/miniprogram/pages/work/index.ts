@@ -223,6 +223,7 @@ const TYPE_TABS = [
   { label: '旁站', key: 'station' },
   { label: '见证', key: 'witness' },
   { label: '隐患', key: 'hazard' },
+  { label: '待定', key: 'pending' },
 ]
 
 const TIME_RANGES = [
@@ -281,6 +282,8 @@ Page(themed({
     detailForms: [] as RecordFormOption[],
     selectedFormCode: '',
     loadingForms: false,
+    /** 按需生成表单区块默认收起，点标题才展开（2026-11-12） */
+    formChoiceExpanded: false,
 
     // 记录菜单
     showRecordMenu: false,
@@ -933,6 +936,7 @@ Page(themed({
         this.setData({
           showDetail: true,
           detailType: 'record',
+          formChoiceExpanded: false,
           detail: {
             ...result,
             inspection_time_text: inspectionTimeText,
@@ -952,12 +956,17 @@ Page(themed({
   },
 
   closeDetail() {
-    this.setData({ showDetail: false, detail: {}, detailPhotos: [], detailMediaEvidence: [], detailForms: [], selectedFormCode: '' })
+    this.setData({ showDetail: false, detail: {}, detailPhotos: [], detailMediaEvidence: [], detailForms: [], selectedFormCode: '', formChoiceExpanded: false })
   },
 
   openCollaboration() {
     if (this.data.detailType !== 'record' || !this.data.detail.id) return
     wx.navigateTo({ url: `/pages/todo/compose?type=work_record&id=${this.data.detail.id}` })
+  },
+
+  /** 按需生成表单：默认收起，点标题才展开表单列表 */
+  toggleFormChoice() {
+    this.setData({ formChoiceExpanded: !this.data.formChoiceExpanded })
   },
 
   selectRecordForm(event: WechatMiniprogram.TouchEvent) {

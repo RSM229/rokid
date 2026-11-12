@@ -5,7 +5,9 @@
 2. 文种为「监理日记」（DocType.SUPERVISION_DIARY）、form_code=jianli_riji；
 3. 落款回到作者本人；
 4. 当天发出的通知单类文书进「重要发文」栏；
-5. 归档文件夹映射到「监理日记」。
+5. 归档文件夹映射到「监理日记」；
+6. 真渲染 docx：日记抬头为「监理日记」+ 内部编号 + 记录人签名，日志保持省统表原样；
+7. export-pdf 按 form_code 重渲染时 jianli_riji 有专用填充器，栏目不丢。
 
 运行：cd cloud-backend && .venv/Scripts/python -m unittest tests.test_diary_generate
 """
@@ -164,6 +166,11 @@ class DiaryGenerateTest(unittest.TestCase):
         self.assertEqual(doc.form_code, "jianli_riji")
         # 落款 = 作者本人
         self.assertEqual(content["supervisor"], "日记本人")
+        # 编号带作者：同一天多人各写各的日记，不能重号
+        self.assertTrue(content["doc_number"].startswith("GD-JL-RJ-"))
+        self.assertTrue(content["doc_number"].endswith(f"-{self.ids['me']}"))
+        # 记录人姓名进渲染数据（日记正文可辨识）
+        self.assertEqual(content["recorder_name"], "日记本人")
         # 施工进展栏：只有我的记录，不含同事的「2#楼砌体」
         self.assertIn("1#楼三层梁板模板支撑", content["construction_progress"])
         self.assertNotIn("2#楼砌体", content["construction_progress"])
@@ -209,6 +216,10 @@ class DiaryGenerateTest(unittest.TestCase):
         doc, content = asyncio.run(check())
         self.assertEqual(doc.doc_type, DocType.SUPERVISION_LOG.value)
         self.assertEqual(doc.form_code, "gd_b_220_rizhi")
+        # 项目日志不带个人标识、不改成日记编号
+        self.assertNotIn("recorder_name", content)
+        self.assertTrue(content["doc_number"].startswith("GD-JL-"))
+        self.assertNotIn("GD-JL-RJ", content["doc_number"])
         self.assertIn("1#楼三层梁板模板支撑", content["construction_progress"])
         self.assertIn("2#楼砌体", content["construction_progress"])
 
@@ -216,6 +227,62 @@ class DiaryGenerateTest(unittest.TestCase):
         """归档映射：form_code 与 doc_type 都指向「监理日记」目录。"""
         self.assertEqual(FOLDER_BY_FORM_CODE.get("jianli_riji"), "监理日记")
         self.assertEqual(FOLDER_BY_DOC_TYPE.get("监理日记"), "监理日记")
+
+    def test_05_diary_render_has_own_header(self):
+        """真渲染 docx：日记抬头/编号/记录人与日志不同，且栏目不丢。"""
+        from docx import Document as DocxDocument
+        from app.services.form_registry import get_form
+        from app.services.form_renderer import FILLERS, render_form
+
+        # export-pdf 按 form_code 重渲染，未注册填充器会掉进 fill_generic 丢栏目
+        self.assertIs(FILLERS.get("jianli_riji"), FILLERS.get("gd_b_220_rizhi"))
+        self.assertEqual(get_form("jianli_riji").template, "21监理日志-房建新.docx")
+
+        data = {
+            "project_name": "监理日记测试工程",
+            "doc_number": "GD-JL-RJ-1-20261021-1",
+            "date": "2026-10-21",
+            "weekday": "星期三",
+            "temperature_high": "30",
+            "temperature_low": "20",
+            "weather_morning": "晴",
+            "construction_progress": "1#楼三层梁板模板支撑。",
+            "problems_section": "外架连墙件缺失。",
+            "recorder_name": "日记本人",
+        }
+        diary_docx = render_form("jianli_riji", dict(data), output_dir=Path(_WORKDIR))
+        d = DocxDocument(str(diary_docx))
+        heads = [p.text for p in d.paragraphs]
+        self.assertIn("监理日记", heads)
+        self.assertFalse(any("GD-B-220" in t for t in heads))
+        cells = "\n".join(c.text for r in d.tables[0].rows for c in r.cells)
+        self.assertIn("记录人（签名）：日记本人", cells)
+        self.assertIn("1#楼三层梁板模板支撑", cells)
+        self.assertIn("外架连墙件缺失", cells)
+
+        log_data = {k: v for k, v in data.items() if k != "recorder_name"}
+        log_data["doc_number"] = "GD-JL-1-20261021"
+        log_docx = render_form("gd_b_220_rizhi", log_data, output_dir=Path(_WORKDIR))
+        ld = DocxDocument(str(log_docx))
+        log_heads = [p.text for p in ld.paragraphs]
+        self.assertIn("监理日志", log_heads)
+        self.assertTrue(any("GD-B-220" in t for t in log_heads))
+        self.assertNotIn(
+            "记录人（签名）：日记本人",
+            "\n".join(c.text for r in ld.tables[0].rows for c in r.cells),
+        )
+
+    def test_06_fallback_pdf_title(self):
+        """省统表转换失败走自绘 PDF 时，日记抬头仍是「监理日记」。"""
+        from app.services.doc_generator import _log_title_for
+
+        class _FakeDoc:
+            def __init__(self, doc_type, form_code):
+                self.doc_type = doc_type
+                self.form_code = form_code
+
+        self.assertEqual(_log_title_for(_FakeDoc("监理日记", "jianli_riji")), "监理日记")
+        self.assertEqual(_log_title_for(_FakeDoc("监理日志", "gd_b_220_rizhi")), "监理日志")
 
 
 if __name__ == "__main__":

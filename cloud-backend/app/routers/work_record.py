@@ -102,11 +102,12 @@ async def auto_create_record_document(
         content = {"section": record.section or "", "location": record.location or ""}
     from app.services.record_fields import project_fields
     from app.services.form_registry import FORM_BY_CODE
-    from app.routers.form_doc import RECORD_TYPE_TO_FORM
+    from app.services.form_routing import effective_record_form_code
+    code = effective_record_form_code(None, str(record.record_type or ""), project=project, record=record)
+    spec = FORM_BY_CODE.get(code) if code else None
     for key, value in project_fields(project).items():
         if not str(content.get(key) or "").strip():
             content[key] = value
-    spec = FORM_BY_CODE.get(RECORD_TYPE_TO_FORM.get(record.record_type))
     content["doc_number"] = f"{spec.form_number if spec else 'JL'}-{record.id:05d}"
     content.setdefault("date", datetime.now().strftime("%Y-%m-%d"))
     content.setdefault("supervisor", user.real_name)

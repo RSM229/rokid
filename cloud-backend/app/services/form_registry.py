@@ -90,6 +90,18 @@ FORMS: list[FormSpec] = [
     _spec("gdaq_30308_yinhuan", "安全隐患整改通知（监理对施工单位项目部）", "安全隐患整改通知.docx", "safety", "GDAQ30308", "通知类", "record", (), "安全隐患整改通知"),
     _spec("gdaq_30309_huifu", "安全隐患整改通知回复（施工单位项目部报监理）", None, "none", "GDAQ30309", "通知类", "manual"),
     _spec("gdaq_30305_qizhong", "建筑施工起重机械安装拆卸监理检查记录表", "建筑施工起重机械安装拆卸监理检查记录表.docx", "safety", "GDAQ30305", "现场记录", "record", ("crane_safety",), "起重机械安拆监理检查记录", "起重机械安拆检查"),
+    # ---- 市政工程统表（道路/桥梁等，广东省市政监 / AQSZ 系列，官方版式）----
+    _spec("shijian_24_rizhi", "市政监-24 监理日志", "市政监-24监理日志.docx", "municipal", "市政监-24", "日志报告", "aggregate", (), "监理日志_{date}"),
+    _spec("shijian_9_pangzhan", "市政监-9 旁站监理记录表", "市政监-9旁站监理记录表.docx", "municipal", "市政监-9", "现场记录", "record", ("station",), "旁站监理记录", "旁站"),
+    _spec("shijian_11_xunshi", "市政监-11 巡视记录", "市政监-11巡视记录.docx", "municipal", "市政监-11", "现场记录", "record", ("inspection",), "巡视记录", "巡视"),
+    _spec("aqsz_2_2_anquan_rizhi", "安全监理日志（AQSZ-J-2.2）", "AQSZ-J-2.2安全监理日志.docx", "municipal", "AQSZ-J-2.2", "日志报告", "aggregate", (), "安全监理日志_{date}"),
+    _spec("aqsz_2_5_1_weida", "危大工程监理巡视检查记录表（通用/AQSZ-J-2.5-1）", "AQSZ-J-2.5-1危大巡视表.docx", "municipal", "AQSZ-J-2.5-1", "现场记录", "record", ("inspection",), "危大巡视记录", "巡视"),
+    _spec("aqsz_2_5_2_weida", "危大工程监理巡视检查记录表（基坑/AQSZ-J-2.5-2）", "AQSZ-J-2.5-2危大巡视表.docx", "municipal", "AQSZ-J-2.5-2", "现场记录", "record", ("inspection",), "危大巡视记录", "巡视"),
+    _spec("aqsz_2_5_3_weida", "危大工程监理巡视检查记录表（模板/AQSZ-J-2.5-3）", "AQSZ-J-2.5-3危大巡视表.docx", "municipal", "AQSZ-J-2.5-3", "现场记录", "record", ("inspection",), "危大巡视记录", "巡视"),
+    _spec("aqsz_2_5_4_weida", "危大工程监理巡视检查记录表（脚手架/AQSZ-J-2.5-4）", "AQSZ-J-2.5-4危大巡视表.docx", "municipal", "AQSZ-J-2.5-4", "现场记录", "record", ("inspection",), "危大巡视记录", "巡视"),
+    _spec("aqsz_2_5_5_weida", "危大工程监理巡视检查记录表（起重/AQSZ-J-2.5-5）", "AQSZ-J-2.5-5危大巡视表.docx", "municipal", "AQSZ-J-2.5-5", "现场记录", "record", ("inspection",), "危大巡视记录", "巡视"),
+    _spec("aqsz_2_5_6_weida", "危大工程监理巡视检查记录表（暗挖/AQSZ-J-2.5-6）", "AQSZ-J-2.5-6危大巡视表.docx", "municipal", "AQSZ-J-2.5-6", "现场记录", "record", ("inspection",), "危大巡视记录", "巡视"),
+    _spec("aqsz_2_5_7_weida", "危大工程监理巡视检查记录表（有限空间/AQSZ-J-2.5-7）", "AQSZ-J-2.5-7危大巡视表.docx", "municipal", "AQSZ-J-2.5-7", "现场记录", "record", ("inspection",), "危大巡视记录", "巡视"),
 ]
 
 FORM_BY_CODE: dict[str, FormSpec] = {f.form_code: f for f in FORMS}

@@ -43,6 +43,7 @@ from app.services import (
     agent_scope,
     agent_tools,
     model_gateway,
+    multi_image_split,
 )
 from app.services.record_fields import project_context
 from app.services.agent_context import (
@@ -187,6 +188,10 @@ class AgentChatRequest(BaseModel):
     material: Optional[str] = None
     # 随消息上传图片的服务端媒体地址（仅用于展示历史回看；模型上下文不收）
     images: list[str] = Field(default_factory=list)
+    # 逐图结构化视觉信号（与 images 等长）：是否举牌/封样/危大/施工中…等，
+    # 字段同 image_classification.ImageSignal。由前端在「先把图交给视觉模型」后
+    # 一并带出；旧前端不传则退化为单记录流程（不影响现有行为）。
+    image_signals: list[dict] = Field(default_factory=list)
     # 素材里已确定的结构化字段（如照片水印的拍摄时间/地点/天气），建记录时直接并入 args
     prefill: dict = Field(default_factory=dict)
     # 聊天内表单一次提交：字段名 → 值。有它就不再让模型抽参，直接按字段表回填。
@@ -314,10 +319,11 @@ def _agent_form(
     纯文字一问一答，不再下发下拉框、候选或待填字段卡。
     2026-11-09 用户「我不要核对和填写表格，只要纯文本对话」：建记录前的
     「最终核对」表单卡也去掉，改为纯文字确认（回复「确认生成」即可建档），
-    安全网从「表单按钮」改为「文字确认」。这里只保留
-    - 记录已建后的补充照片框，并附文书/记录的文字链接。
+    安全网从「表单按钮」改为「文字确认」。
+    2026-11-12 移除残留的「先选记录类型」卡（含重复的照片上传框）：
+    多图分组已按记录类型拆单并各自挂图，选类型一律走纯文字追问。
+    这里只保留 - 记录已建后的补充照片框，并附文书/记录的文字链接。
     """
-    options = result.get("options") or {}
     form_code = _record_form_code(tool, args, message)
 
     # 2026-11-06 用户「我不要这些选择，我要完全交互」：缺项 / 选记录类型一律
@@ -327,24 +333,10 @@ def _agent_form(
     if result.get("need_more"):
         return None
 
-    if tool == "create_work_record" and not form_code:
-        opts = [str(x) for x in (options.get("记录类型")
-                                or agent_tools.record_field_spec.RECORD_TYPE_TO_FORM)]
-        return {
-            "id": "record_type", "kind": "record_type",
-            "schema_version": 1, "field_schema": "record_field_spec.v1", "form_code": "",
-            "title": "先选记录类型",
-            "hint": "选好类型后按对应表格补齐；如还没发照片，也可随下一条消息一起上传。",
-            "fields": [{
-                "name": "record_type", "label": "记录类型", "control": "select",
-                "key": "record_type", "canonical": "record_type", "definition_source": "agent_action",
-                "required": True, "value": "", "options": opts,
-                "placeholder": "", "hint": "", "section": "",
-            }],
-            "attachments": _attachment_block("现场照片", "可多选；选好类型后一起建档"),
-            "submit_label": "继续", "skippable": False, "actions": [],
-        }
-
+    # 2026-11-12 移除「先选记录类型」表单卡：多图分组已能一次把照片按
+    # 巡视/旁站/验收拆成多条记录并各自挂图，再要求「先选一个类型 + 重新上传
+    # 照片 + 点继续」既重复又与分组冲突；选类型由 _missing_record_type_reply
+    # 纯文字一问一答覆盖。这里只保留「记录已建后的补充照片框」。
     if tool == "create_work_record" and result.get("ok"):
         record_id = ((result.get("data") or {}).get("record_id")
                      or (result.get("card") or {}).get("id"))
@@ -484,7 +476,8 @@ _AGENT_SYSTEM = """你是「广东建设智慧监理」工程监理智能助手�
 facts 只记录用户原话明确提供的信息；图片、水印和视觉观察由服务端作为独立证据合并。
 args 可以放你已确认的工具参数，但服务端仍会重新抽取、校验和合并。水印/EXIF 中成功识别的
 日期、项目、地点、部位和天气优先于用户转述；冲突时用户值仍保留用于提示。图片缺失不能
-反向覆盖用户事实。可以返回多个动作；存在多个动作时服务端不会自动执行。
+反向覆盖用户事实。可以返回多个动作；存在多个动作时服务端将自动执行第一个可执行动作，
+并在办完后把剩余动作作为「一键续办」选项提示用户继续（无需你追问）。
 
 🔴 最高优先级：办事必须输出受控动作，缺字段交给服务端追问
 ----------------------------------------------------
@@ -509,6 +502,8 @@ station_start_time=9:00、station_end_time=12:00、worker_count=10，结论留�
 
 判断口诀：**能确定是哪一类记录 → 返回 record_work；连类型都定不了 → record_work + 只问类型。**
 
+- 🔴 **多张照片跨多种类型时，用 image_groups 分建多条**：record_work 的 args 可带 image_groups，它是一个分组列表，每项含 record_type（这组图归哪类记录，只能取 巡视/旁站/验收/见证/平行检验/待定，巡查归巡视、材料/取样归见证）和 image_indices（这些图在消息里的 1-based 序号，对应「【图片 N】」，越界或不可达的图忽略；也接受直接给图片 URL）。系统会回执「分了 巡视X / 旁站Y / 待定Z，确认后建」并等你确认后**分别建多条记录**（确认前不建）。仅当照片确实跨多种类型才用；单一类型多图不要传 image_groups（直接建一条、多图挂同一条即可）。用户说「确认建 / 建吧」时再次返回 record_work 即可（不必重复传 image_groups，系统已记住分组）。
+
 其他硬约束
 ----------
 - args 只能包含该工具声明的参数；拿不准的参数不要编造，省略即可（服务端会追问缺失项）。
@@ -532,7 +527,7 @@ station_start_time=9:00、station_end_time=12:00、worker_count=10，结论留�
 🔴 图片与素材（最容易编造的地方）
 --------------------------------
 - 你**看不到图片/照片本身**。只有消息里出现「【图片 N】」素材段（系统已把图交给视觉模型）时，才能引用其中的识别结果。
-- 🔴 素材里一旦出现「【水印】」段：**必须先把水印内容逐项复述给用户**（拍摄时间、地点、天气…），再说明哪些信息已作为证据保存。若业务类型仍不明确，可以在复述后只问一个决定性问题，不能把水印识别失败说成用户没有提供信息。
+- 🔴 素材里一旦出现「【水印】」段：**必须先把水印内容逐项复述给用户**（拍摄时间、地点、天气…），再说明哪些信息已作为证据保存。**多张照片时，每张照片的复述单独写成一行、用换行符分隔，不要只用分号或逗号串成一大段**。若业务类型仍不明确，可以在复述后只问一个决定性问题，不能把水印识别失败说成用户没有提供信息。🔴 用户让你「看 / 识别 / 读」照片（没说要建记录）：先逐项复述水印（多张每行一张）。**若这批照片明显跨多种记录类型**（如同时有验收、旁站、巡视、材料单据等不同场景），应返回 record_work 并带上 image_groups，让系统回执「分了 巡视X / 旁站Y / 待定Z，确认后建」、经你确认后**分别建多条记录**——不要逼用户选「单一类别」去建一条。若只是单一类型或用户只想看不想建档，复述完即可、返回 chat。识别≠强制建档，但也不排斥顺带建档。
 - **严禁凭空说「经图片识别」「看图发现」「照片显示」**，也不要在没有素材时描述现场状况——那是编造，监理会据此签字。
 - 素材里没有识别到隐患，就照实说「素材中未提到隐患」，不要补一句「现场安全状况良好」。
 - 用户说「识别水印 / 先识别水印 / 看下水印」：
@@ -540,13 +535,13 @@ station_start_time=9:00、station_end_time=12:00、worker_count=10，结论留�
   · 本轮**带了素材但没读到【水印】** → 说「这张没读到水印，水印文字要清晰、别被裁掉，麻烦重拍一张或从相册选原图」；
   · 本轮**完全没有素材** → 说：「把带水印的照片发给我（点输入框的「+」选相册或拍照），我先读水印里的拍摄时间和地点。你要发的是哪张？」——**不许说「这张没读到水印」**，你根本没看到图；
   · **不要说「我接收不到图片」「无法识别图片」**。
-- 🔴 **用户只发照片、没明确记录类型时**：必须先**分析**——先按上文把水印客观信息（拍摄时间/地点/部位/天气/公示牌文字）逐项复述出来，再据此判断最可能的记录类型并**给一句依据**（如「水印是隐蔽工程验收公示牌，建议整理成验收记录」）——最后**请用户确认类别**（一次只问这一个决定性问题，如「确认按验收记录整理吗？还是旁站/巡视？」）。**严禁**直接列出待填字段清单、开多栏表单或建一堆事项——本轮模型返回 tool=null 即可，把分析和类别建议说清、问清类别，用户确认后再逐栏引导。
+- 🔴 **用户只发照片、没明确记录类型时**：必须先**分析**——先按上文把水印客观信息（拍摄时间/地点/部位/天气/公示牌文字）逐项复述出来（每张照片单独一行，用换行分隔，不要串成一段），再据此判断最可能的记录类型并**给一句依据**（如「水印是隐蔽工程验收公示牌，建议整理成验收记录」）——最后**请用户确认类别**（一次只问这一个决定性问题，如「确认按验收记录整理吗？还是旁站/巡视？」）。**严禁**直接列出待填字段清单、开多栏表单或建一堆事项——本轮模型返回 tool=null 即可，把分析和类别建议说清、问清类别，用户确认后再逐栏引导。🔴 **「识别 / 看 / 读这些照片」「请识别这 N 张图片」通常是「查看类」请求**：先把水印逐张复述给用户（这步不省）。但**若这批照片明显跨多种记录类型**（同时出现验收、旁站、巡视、材料单据等），**不要**逼用户选「单一类别」去建一条——应返回 record_work 并带 image_groups（按你从水印读出的类型把图分组：image_groups 的每项写 record_type 加 image_indices，例如把第 5、8 张归验收、第 1、3 张归巡视，就传两组，验收配序号 5 和 8、巡视配序号 1 和 3），由系统回执分组并等你确认后分别建多条记录（确认前不会私自建）。确实只想看不想建档时，复述完即可、不调 record_work。用户明确说「记一条 / 建记录 / 整理成记录 / 帮我存」同样返回 record_work（可带 image_groups）。
 
 「记录今天工作情况」这类模糊请求
 --------------------------------
 - 「记录今天工作情况 / 今天干了什么 / 记一下今天」= 要留痕。
 - 🔴 **先判文书、再判素材（顺序不能反）**：如果用户这条消息里是一段**完整的监理日报 / 监理日记 / 监理日志叙述正文**（描述当天施工内容与监理工作，且能抽出日期），**无论是否同时附了照片、水印或其它素材**，都按下面「粘贴叙述性监理日报」的规则返回 `generate_document`——照片只作附件保存，**不得因为带了照片就改走 record_work，更不得抽字段让用户逐项确认项目 / 单位 / 人员**。照片与项目资料对不上（水印是别的项目）时，只在回答里提一句「照片水印项目名与当前项目不一致」，不要把它变成待确认项。
-- **图片/水印素材不等于巡视，也不等于任何固定表式**。如果用户只发了照片、没说要建哪类记录，**且素材里也找不到类型词**：先按上文把水印客观信息逐项复述，再据此判断最可能的记录类型并给一句依据，最后在回答里**只问一个决定性问题确认类别**，例如：「从水印看像是隐蔽工程验收，建议整理成验收记录，你确认吗？还是旁站/巡视/见证/平行检验？」——**先给建议再确认，不要直接开字段清单**（本轮模型返回 tool=null 即可，问清类别后下一轮再建草稿）。素材里已有类型词时按上文规则直接定类型，不必再问。
+- **图片/水印素材不等于巡视，也不等于任何固定表式**。如果用户只发了照片、没说要建哪类记录，**且素材里也找不到类型词**：先按上文把水印客观信息逐项复述（每张照片单独一行，用换行分隔，不要串成一段），再据此判断最可能的记录类型并给一句依据，最后在回答里**只问一个决定性问题确认类别**，例如：「从水印看像是隐蔽工程验收，建议整理成验收记录，你确认吗？还是旁站/巡视/见证/平行检验？」——**先给建议再确认，不要直接开字段清单**（本轮模型返回 tool=null 即可，问清类别后下一轮再建草稿）🔴 注意：用户只说「识别 / 看 / 读 / 请识别这些照片」通常是查看类请求，先复述水印；但若照片明显跨多种类型，同样返回 record_work 并带 image_groups 让系统分组建多条（见上文），不要逼用户选一种。素材里已有明确单一类型词时按上文直接定类型、不必再问。
 - 用户明确说了记录类型时才填写 record_type 并进入记录候选。用户已经在前文说过日期、地点、时间、工作内容的，必须沿用，不得因图片没有识别到而说成缺失。
 - 错误示范（严禁）：直接回一段「今日工作情况结论与建议」，甚至还写「经图片识别」。这是答非所问。
 - 用户明确说「生成今天的监理日志 / 月报」时，才返回 generate_document 动作（args.period=day / month）。
@@ -747,10 +742,16 @@ def _plain_messages(message: str, history: list[dict], mode: str | None,
 
 
 async def _generate_plain(messages: list[dict], provider: str | None, model: str | None) -> str:
+    """回答路径统一出口：开深度思考（thinking=True），让回答更聪明。
+
+    🔴 只影响「回答模型」：路由模型（JSON 规划）在 _agent_chat_impl 里显式
+    thinking=False 保持快速，不泄漏思考过程；这里只负责给用户的正文回答。
+    """
     if _streaming_enabled():
         parts: list[str] = []
         async for event in model_gateway.stream_chat_completion(
-            messages, temperature=0.7, provider=provider, model=model
+            messages, temperature=0.7, provider=provider, model=model,
+            thinking=True,
         ):
             if event["type"] == "reasoning":
                 await _emit_stream({"type": "reasoning", "text": event["text"]})
@@ -759,7 +760,8 @@ async def _generate_plain(messages: list[dict], provider: str | None, model: str
                 await _emit_stream({"type": "answer", "text": event["text"]})
         return strip_markdown("".join(parts))
     answer, _cfg = await model_gateway.chat_completion(
-        messages, temperature=0.7, provider=provider, model=model
+        messages, temperature=0.7, provider=provider, model=model,
+        thinking=True,
     )
     return strip_markdown(answer or "")
 
@@ -1466,6 +1468,43 @@ async def _agent_chat_impl(
     tool = str(incoming_plan.get("selected_tool") or "").strip()
     if tool not in agent_tools.TOOL_BY_NAME:
         tool = ""
+
+    # 🔴 多步编排（2026-11-12）：模型给出多个动作（execution_mode="plan_only"）时，
+    # 不再整轮退化纯问答——自动执行第一个可执行动作，剩余动作在办完后以
+    # 「一键续办」chips 呈现（前端 chips 机制已有，点击即以该文本再发一轮）。
+    # 仅当计划无澄清、无需问记录类型时启用，避免与 needs_record_type /
+    # clarifications 的确定性追问打架。
+    multi_action_ids: list[str] = []
+    if not tool and incoming_plan.get("execution_mode") == "plan_only":
+        _plan_clarifications = [
+            item for item in (incoming_plan.get("clarifications") or [])
+            if isinstance(item, dict)
+        ]
+        if not _plan_clarifications:
+            # 🔴 只收「真业务动作」进多步编排：navigate（打开页面）是导航不是干活，
+            # undo（撤销）不该被编排进后续步骤，chat 是问答不是动作。
+            # 否则「打开工作台再记一条巡视」会先跳页、把建档丢给续办，顺序完全颠倒。
+            _ORCHESTRATION_SKIP = {"navigate", "undo", "chat"}
+            _executables: list[tuple[str, str]] = []
+            for _item in (incoming_plan.get("actions") or []):
+                if not isinstance(_item, dict):
+                    continue
+                _action_id = str(_item.get("id") or "").strip()
+                if _action_id in _ORCHESTRATION_SKIP:
+                    continue
+                _spec = agent_request_plan.ACTIONS.get(_action_id)
+                _map_tool = str((_spec or {}).get("tool") or "").strip() if _spec else ""
+                if _map_tool and _map_tool in agent_tools.TOOL_BY_NAME:
+                    _executables.append((_action_id, _map_tool))
+            if _executables:
+                _first_id, _first_tool = _executables[0]
+                tool = _first_tool
+                # 剩余动作 id 留到首个动作执行成功后再下发，避免打断补字段流程
+                multi_action_ids = [aid for aid, _ in _executables[1:]]
+                logger.info(
+                    "多步编排：首个动作 %s 已接管，剩余动作 %s 待续办",
+                    _first_id, multi_action_ids,
+                )
     fact_args = agent_fact_model.facts_to_args(incoming_plan.get("facts"))
     args = {**semantic_args, **fact_args}
     if incoming_plan.get("record_type") and not str(args.get("record_type") or "").strip():
@@ -1581,6 +1620,15 @@ async def _agent_chat_impl(
             args = {**args, "record_type": candidate}
             turn_fact_args = dict(args)
 
+    # 多图分类分流的「确认」轮：上一轮已给出分组回执（草稿含 _agent_pending_split），
+    # 本轮用户只回肯定词（如「确认建」「建吧」）而无新素材，路由不会自动选工具，
+    # 会导致草稿被吞、分组方案永不消费。此处显式复用 create_work_record 草稿，
+    # 由 _create_work_record 顶层分流消费 _agent_pending_split 循环建多条。
+    if not tool and pending_tool == "create_work_record":
+        _pending_args = draft.get("args") or {}
+        if _pending_args.get("_agent_pending_split") and multi_image_split.is_confirm(message):
+            tool = "create_work_record"
+
     # 素材里已确定的结构化字段（照片水印的拍摄时间/地点/天气）并入建记录参数。
     # 日期、地点、部位和天气以水印/EXIF 客观证据为准；用户冲突描述保留在计划中。
     # 带素材不等于明确了记录类型。素材只提供证据；类型不明时保留澄清，
@@ -1601,6 +1649,9 @@ async def _agent_chat_impl(
         draft_args.pop("record_type", None)
         if prefill:
             draft_args["_prefill"] = prefill
+        if multi_action_ids:
+            # 类型不明先问类型：剩余续办动作同样随草稿存下，等类型确认后下发
+            draft_args["_followup_actions"] = list(multi_action_ids)
         await agent_tools.stash_pending(
             db, user.id, "create_work_record", draft_args, ["记录类型"],
             message=message, fact_args=turn_fact_args, conversation_id=conversation_id,
@@ -1665,6 +1716,8 @@ async def _agent_chat_impl(
             )
         # _prefill is durable context only; it is never a business field.
         args.pop("_prefill", None)
+        # _followup_actions（多步编排续办）是路由层内部键，不是工具参数，绝不传给 handler。
+        args.pop("_followup_actions", None)
         # 普通聊天创建记录与整理计划统一采用“字段齐全 → 用户确认 → 正式写入”。
         # 首次执行只做合同校验并保存待确认草稿；用户确认后才放行工具写入。
         if tool == "create_work_record":
@@ -1683,7 +1736,7 @@ async def _agent_chat_impl(
             args["_require_confirmation"] = not confirmed
             if confirmed:
                 args["_execution_confirmed"] = True
-        ctx = agent_tools.ToolContext(db=db, user=user, project_id=project_id, project=project, message=message, material=material, images=req.images)
+        ctx = agent_tools.ToolContext(db=db, user=user, project_id=project_id, project=project, message=message, material=material, images=req.images, image_signals=req.image_signals)
         await report_progress(
             "tool_validation", "running", "确认要执行的动作，并核对字段是否齐全",
             {"tool": tool, "record_type": str(args.get("record_type") or ""), "form": _record_form_code(tool, args, message) or ""},
@@ -1762,10 +1815,16 @@ async def _agent_chat_impl(
                         )
             elif _tool_reply:
                 result["reply"] = _tool_reply
+            # 续办动作随草稿持久化：首动作若是写操作，本轮只进确认流程就 return，
+            # 剩余动作必须跨轮存活，等首动作确认成功后一并下发（2026-11-12）。
+            _stash_args = dict(args)
+            if prefill and tool == "create_work_record":
+                _stash_args["_prefill"] = prefill
+            if multi_action_ids:
+                _stash_args["_followup_actions"] = list(multi_action_ids)
             await agent_tools.stash_pending(
                 db, user.id, tool,
-                {**args, "_prefill": prefill}
-                if prefill and tool == "create_work_record" else args,
+                _stash_args,
                 result.get("need_more"), message=message,
                 fact_args=turn_fact_args, conversation_id=conversation_id,
                 project_id=project_id,
@@ -1783,6 +1842,12 @@ async def _agent_chat_impl(
                 result["input_components"] = _agent_input_components(form)
             result["input_channels"] = ["text", "voice", "image", "file"]
         elif result.get("ok"):
+            # 首动作确认成功：若草稿里留有续办动作（上一轮多步编排存下的
+            # _followup_actions），转交给下发逻辑，再清草稿（2026-11-12）。
+            if not multi_action_ids:
+                _draft_followup = (draft.get("args") or {}).get("_followup_actions")
+                if isinstance(_draft_followup, list):
+                    multi_action_ids = [str(x) for x in _draft_followup if str(x).strip()]
             await agent_tools.clear_pending(
                 db, user.id, tool, conversation_id, project_id=project_id,
             )
@@ -1800,6 +1865,26 @@ async def _agent_chat_impl(
                     rtype = agent_tools._norm_record_type(str(args.get("record_type") or "")) or "巡视"
                     head = f"已按「{rtype}」开始记录，{head}。"
                 result["reply"] = head + "\n" + str(result.get("reply") or "").strip()
+        # 🔴 多步编排续办：首个动作执行成功（无 need_more）后，把剩余动作变成
+        # 「一键续办」chips——前端点击即以该文本再发一轮（无需手打、不改前端）。
+        # 文案指向动作目录里的中文 label，避免暴露动作 id 给用户。
+        if multi_action_ids and not result.get("need_more") and result.get("ok"):
+            _pending_labels: list[str] = []
+            for _aid in multi_action_ids:
+                _spec = agent_request_plan.ACTIONS.get(_aid)
+                _label = str((_spec or {}).get("label") or "").strip() if _spec else ""
+                if _label:
+                    _pending_labels.append(_label)
+            if _pending_labels:
+                _suffix = "\n已记下还要" + "、".join(_pending_labels[:2]) + (
+                    "等" if len(_pending_labels) > 2 else ""
+                ) + "，点下面继续："
+                result["reply"] = str(result.get("reply") or "").strip() + _suffix
+                existing = list(result.get("chips") or [])
+                for _label in _pending_labels:
+                    if _label not in existing:
+                        existing.append(_label)
+                result["chips"] = existing
         return {"kind": "action", "tool": tool, "model": model_id,
                 "request_plan": incoming_plan, **result}
 
@@ -1831,12 +1916,12 @@ async def _agent_chat_impl(
     # 没法逐字推给前端，而且它的思考过程不适合展示。
     answer = str((parsed or {}).get("answer") or "").strip()
     citations: list[dict] = []
+    # 上一轮的结果卡（文书 id/标题/摘要）作为指代上下文，否则「解释一下为什么这样写」会不知道指谁
+    context_hint, query_extra = await _last_result_context(
+        db, user.id, conversation_id, project_id,
+    )
+    require_context = bool(_FOLLOWUP_REFERENCE_RE.search(message)) and not context_hint
     if not answer or _streaming_enabled():
-        # 上一轮的结果卡（文书 id/标题/摘要）作为指代上下文，否则「解释一下为什么这样写」会不知道指谁
-        context_hint, query_extra = await _last_result_context(
-            db, user.id, conversation_id, project_id,
-        )
-        require_context = bool(_FOLLOWUP_REFERENCE_RE.search(message)) and not context_hint
         try:
             answer, citations = await _plain_answer_cited(
                 message, req.history, req.provider, req.model, req.mode, project_id,
@@ -1846,8 +1931,20 @@ async def _agent_chat_impl(
         except model_gateway.ModelGatewayError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
     else:
-        # 非流式复用路由模型的 answer 时，只补一份高相关引用列表（正文没有编号标记）
-        citations, _block = _retrieve_citations(message, project_id, min_score=0.6)
+        # 非流式：先复用路由模型的 answer（快）。若检索到高相关材料，则带材料
+        # 用深度思考回答模型重生成——让回答真正基于资料（检索增强问答质量）。
+        # 只保留模型真正用到的材料作为引用；无高相关材料时就维持路由 answer。
+        citations, block = _retrieve_citations(message, project_id, min_score=0.6)
+        if citations:
+            try:
+                answer, citations = await _plain_answer_cited(
+                    message, req.history, req.provider, req.model, req.mode, project_id,
+                    context_hint=context_hint, query_extra=query_extra,
+                    require_context=require_context,
+                )
+            except model_gateway.ModelGatewayError as exc:
+                # 重生成失败不阻断：保留路由模型的 answer 和引用列表
+                logger.warning("检索增强回答失败，复用路由 answer: %s", type(exc).__name__)
     return {"kind": "chat", "tool": None, "reply": strip_markdown(answer), "card": None,
             "cards": [], "actions": [], "need_more": [], "undo": None,
             "form": None, "model": model_id, "request_plan": incoming_plan,

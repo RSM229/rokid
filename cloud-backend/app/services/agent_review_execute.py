@@ -176,7 +176,9 @@ async def execute_confirmed_plan(
                 f"事项“{event.get('title') or event['id']}”的业务日期无法识别，请确认日期",
             )
         record_date_text = record_date.isoformat() if record_date else ""
-        form_code = form_requirements.get("form_code") or record_field_spec.form_for_record_type(record_type)
+        form_code = form_requirements.get("form_code") or record_field_spec.form_for_record_type(
+            record_type, project=project,
+        )
         if (
             form_requirements.get("missing_fields")
             or form_requirements.get("conflict_labels")

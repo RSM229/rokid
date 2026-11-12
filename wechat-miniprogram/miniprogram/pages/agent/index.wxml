@@ -30,7 +30,7 @@
     <scroll-view class="messages" scroll-y scroll-into-view="bottom" enhanced show-scrollbar="{{false}}">
       <!-- Hero（ima 风格空状态：大问候语 + 竖排建议按钮） -->
       <view wx:if="{{messages.length <= 1 && !loading}}" class="hero">
-        <view class="hero-greeting">您好！今天有什么工作需要我帮您处理?</view>
+        <view class="hero-greeting">{{heroGreeting}}</view>
         <!-- 🔴 无项目时的常驻引导条：说清「现在能用什么」+「下一步去哪」，
              取代原来那个必然 403 的「创建新项目」弹窗（该接口仅超管可调用，
              而超管不允许登录小程序 ⇒ 小程序里任何人都建不了项目）。 -->
@@ -90,17 +90,25 @@
               </view>
             </view>
           </view>
-          <!-- 智能体回执卡：点击进对应列表/详情 -->
-          <view wx:if="{{item.cards && item.cards.length}}" class="agent-cards">
-            <view class="agent-card" wx:for="{{item.cards}}" wx:for-item="cd" wx:for-index="ci" wx:key="ci"
-                  data-kind="{{cd.kind}}" data-id="{{cd.id}}" bindtap="openAgentCard">
-              <view class="agent-card-top">
-                <text class="agent-card-kind">{{cd.kind === 'work_record' ? '工作记录' : (cd.kind === 'parallel_inspection' ? '平行检验记录' : (cd.kind === 'hazard' ? '隐患' : '文书'))}}</text>
-                <text wx:if="{{cd.status}}" class="agent-card-status">{{cd.status}}</text>
+          <!-- 智能体回执卡：多条时默认收起，用户点开才展开（2026-11-12） -->
+          <view wx:if="{{item.cards && item.cards.length}}" class="agent-cards-wrap">
+            <view wx:if="{{item.cards.length > 1}}" class="inline-review-preview agent-cards-toggle"
+                  data-index="{{mi}}" bindtap="toggleAgentCards">
+              <text wx:if="{{item.cardsExpanded}}">收起记录详情</text>
+              <text wx:else>查看 {{item.cards.length}} 条记录详情</text>
+              <text class="inline-review-preview-arrow {{item.cardsExpanded ? 'expanded' : ''}}">›</text>
+            </view>
+            <view wx:if="{{item.cards.length <= 1 || item.cardsExpanded}}" class="agent-cards">
+              <view class="agent-card" wx:for="{{item.cards}}" wx:for-item="cd" wx:for-index="ci" wx:key="ci"
+                    data-kind="{{cd.kind}}" data-id="{{cd.id}}" bindtap="openAgentCard">
+                <view class="agent-card-top">
+                  <text class="agent-card-kind">{{cd.kind === 'work_record' ? '工作记录' : (cd.kind === 'parallel_inspection' ? '平行检验记录' : (cd.kind === 'hazard' ? '隐患' : '文书'))}}</text>
+                  <text wx:if="{{cd.status}}" class="agent-card-status">{{cd.status}}</text>
+                </view>
+                <text class="agent-card-title">{{cd.title}}</text>
+                <text wx:if="{{cd.sub}}" class="agent-card-sub">{{cd.sub}}</text>
+                <text wx:if="{{cd.time}}" class="agent-card-time">{{cd.time}}</text>
               </view>
-              <text class="agent-card-title">{{cd.title}}</text>
-              <text wx:if="{{cd.sub}}" class="agent-card-sub">{{cd.sub}}</text>
-              <text wx:if="{{cd.time}}" class="agent-card-time">{{cd.time}}</text>
             </view>
           </view>
           <!-- 用户要求：去掉填表形式，改纯对话。暂时用 wx:if=false 隐藏草稿卡片（数据逻辑保留，可随时恢复）。 -->

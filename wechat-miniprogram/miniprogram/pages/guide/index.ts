@@ -85,9 +85,6 @@ Page({
     }
     wx.reLaunch({ url: '/pages/agent/index' })
   },
-  goKnowledge() {
-    wx.navigateTo({ url: '/pages/knowledge/index' })
-  },
   goSettings() {
     wx.navigateTo({ url: '/pages/settings/index' })
   },

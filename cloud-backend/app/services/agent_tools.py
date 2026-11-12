@@ -43,6 +43,7 @@ from app.models.security_audit import SecurityAudit
 from app.models.user import Project, User
 from app.models.work_record import WorkRecord, WorkRecordStatus
 from app.services import agent_request_plan, form_contracts, model_gateway, provform_schema, record_field_spec
+from app.services import multi_image_split
 from app.services.agent_context import (
     append_context_message,
     extract_explicit_message_facts,
@@ -132,6 +133,9 @@ class ToolContext:
     # 否则照片必填项永远缺失、验收等记录永远建不出
     # （2026-11-09/11-10 生产实测：用户明明发了图仍卡在缺照片）。
     images: list[str] = field(default_factory=list)
+    # 逐图结构化视觉信号（与 images 等长）：是否举牌/封样/危大/施工中…等，字段同
+    # image_classification.ImageSignal。多图按图自动分类分流时使用；旧入口不传则退化单记录。
+    image_signals: list[dict] = field(default_factory=list)
 
 
 Handler = Callable[[ToolContext, dict], Awaitable[dict]]
@@ -1155,6 +1159,319 @@ def refill_missing_from_message(args: dict, missing_labels: list | None,
 # 写工具
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------- 多图分类分流（B 方案）
+
+def _reconstruct_signals_from_material(material: str, n_images: int) -> list[dict]:
+    """从聊天素材重建逐图 image_signals（前端视觉结果未填 image_signals 时的兜底）。
+
+    见 ``app.services.agent_vision_signals``。返回空列表表示无法重建（material 不含
+    逐图标记），调用方应回退到模型分组或单记录流程。
+    """
+    from app.services.agent_vision_signals import parse_material_signals
+    try:
+        return parse_material_signals(material, n_images)
+    except Exception as exc:  # noqa: BLE001 - 解析异常不应阻断建档，降级为无信号
+        import logging
+        logging.getLogger(__name__).warning("material→signals 重建失败（降级为无信号）: %s", exc)
+        return []
+
+
+async def _maybe_handle_multi_image_split(ctx: "ToolContext", args: dict, orig_args: dict) -> dict | None:
+    """多图 + 逐图视觉信号时，按图分类、分组、先确认后建；无信号则退化为单记录流程（返回 None）。
+
+    短路在单记录逻辑之前：避免「类型只能取一个 / 多图全挂一条」把多类照片误建为一条。
+    """
+    # 先消费已存的分组方案：确认轮用户只回肯定词、不带新图，必须在此短路之前判定，
+    # 否则「if not images: return None」会把确认轮直接吞掉，分组方案永不消费。
+    pending = args.get("_agent_pending_split")
+    if isinstance(pending, dict) and pending.get("groups"):
+        groups = [_group_from_dict(g) for g in pending["groups"]]
+        if multi_image_split.is_confirm(ctx.message):
+            return await _create_split_records(ctx, groups)
+        return _split_need_more(groups)
+
+    images = [str(u).strip() for u in (ctx.images or []) if str(u).strip()]
+    if not images:
+        return None
+    signals = list(getattr(ctx, "image_signals", None) or [])
+
+    # Path 2：前端把视觉结果放进了 material 但没填 image_signals（设计上的信号通道
+    # 一直空着）→ 后端从「水印字段 + 画面观察」重建逐图信号，激活 group_images。
+    # 仅多图时做（单图无需分流），且只在请求未直接给信号时补。
+    if not signals and len(images) >= 2 and getattr(ctx, "material", None):
+        recon = _reconstruct_signals_from_material(ctx.material, len(images))
+        if recon:
+            signals = recon
+            try:
+                ctx.image_signals = signals
+            except Exception:
+                pass
+
+    if signals:
+        groups = multi_image_split.group_images(images, signals)
+        if len(groups) > 1:
+            plan = {"groups": [_group_to_dict(g) for g in groups], "source": "vision"}
+            args["_agent_pending_split"] = plan
+            orig_args["_agent_pending_split"] = plan
+            return _split_need_more(groups, getattr(ctx, "material", None), len(images))
+        # vision 只分出单组（含全部待定）→ 退化为模型按水印分组（Path 1）
+
+    # 无视觉信号 / vision 未分出多组：接受模型按水印文字分组（Path 1）。
+    model_groups = _parse_model_image_groups(args.get("image_groups"), images, signals)
+    if model_groups:
+        if len(model_groups) <= 1:
+            return None  # 单一类型 → 普通单记录流程
+        plan = {"groups": [_group_to_dict(g) for g in model_groups], "source": "model_watermark"}
+        args["_agent_pending_split"] = plan
+        orig_args["_agent_pending_split"] = plan
+        return _split_need_more(model_groups, getattr(ctx, "material", None), len(images))
+
+    return None  # 无逐图信号且未分组 → 普通单记录流程（多图挂同一条）
+
+
+def _norm_split_record_type(value) -> str | None:
+    """把模型给的分组类型归一为合法记录类型；识别不出归「待定」。"""
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    canonical = _norm_record_type(raw)
+    if canonical:
+        return canonical
+    alias = {
+        "巡查": "巡视", "巡视检查": "巡视",
+        "材料": "见证", "材料单据": "见证", "取样": "见证", "送检": "见证",
+        "举牌": "验收", "隐蔽": "验收",
+        "平行": "平行检验",
+    }
+    for k, v in alias.items():
+        if k in raw:
+            return v
+    return "待定"
+
+
+def _parse_model_image_groups(raw, images: list, signals: list | None = None) -> list | None:
+    """模型按水印文字分组：image_groups=[{record_type, image_indices|images}] → ImageGroup 列表。
+
+    image_indices 为 1-based（对应消息里的「【图片 N】」），映射到 ctx.images 的 URL；
+    也接受直接给 URL。仅做结构解析与类型归一，不访问视觉。
+    """
+    if not isinstance(raw, list) or not raw:
+        return None
+    buckets: dict[str, "multi_image_split.ImageGroup"] = {}
+    order: list[str] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        rtype = _norm_split_record_type(item.get("record_type"))
+        if not rtype:
+            continue
+        idxs = item.get("image_indices") or item.get("images") or []
+        urls: list[str] = []
+        for ix in idxs:
+            if isinstance(ix, str) and ix.strip().lower().startswith("http"):
+                u = ix.strip()
+                if u:
+                    urls.append(u)
+                continue
+            try:
+                i = int(ix) - 1
+            except (TypeError, ValueError):
+                continue
+            if 0 <= i < len(images):
+                urls.append(images[i])
+        urls = [u for u in urls if u]
+        if not urls:
+            continue
+        grp = buckets.get(rtype)
+        if grp is None:
+            grp = multi_image_split.ImageGroup(record_type=rtype, images=[], hints=[], wm=[])
+            buckets[rtype] = grp
+            order.append(rtype)
+        for u in urls:
+            if u not in grp.images:
+                grp.images.append(u)
+                wm = {}
+                # 尽量按图片序号对齐视觉信号，带出部位 / 拍摄时间
+                try:
+                    i = images.index(u)
+                    sig = (signals or [])[i] if i < len(signals or []) else None
+                    if isinstance(sig, dict):
+                        wm = {
+                            "section": str(sig.get("section") or "").strip(),
+                            "taken_at": str(sig.get("taken_at") or "").strip(),
+                            "project_name": str(sig.get("project_name") or "").strip(),
+                            "weather": str(sig.get("weather") or "").strip(),
+                        }
+                except (ValueError, IndexError):
+                    pass
+                grp.wm.append(wm)
+    if not buckets:
+        return None
+    result = [buckets[r] for r in order if r != "待定"]
+    if buckets.get("待定"):
+        result.append(buckets["待定"])
+    return result
+
+
+def _group_to_dict(g: "multi_image_split.ImageGroup") -> dict:
+    return {
+        "record_type": g.record_type,
+        "images": list(g.images),
+        "hints": list(g.hints),
+        "wm": [dict(x) for x in (g.wm or [])],
+    }
+
+
+def _group_from_dict(d: dict) -> "multi_image_split.ImageGroup":
+    return multi_image_split.ImageGroup(
+        record_type=str(d.get("record_type") or ""),
+        images=[str(x) for x in (d.get("images") or [])],
+        hints=[str(x) for x in (d.get("hints") or [])],
+        wm=[dict(x) for x in (d.get("wm") or [])],
+    )
+
+
+def _split_need_more(groups, material: str | None = None, n_images: int = 0) -> dict:
+    summary = multi_image_split.summarize(groups)
+    # 逐张水印复述由后端从 material 确定性生成：分组确认分支会用工具回执覆盖
+    # 模型的 answer，模型写的「图片1…图片8」会被整段丢掉（2026-11-12 真机反馈）。
+    # 放在同一个 reply 里，路由层再覆盖也不会丢；每张单独一行，保持换行格式。
+    lines: list[str] = []
+    if material and n_images:
+        try:
+            from app.services.agent_vision_signals import watermark_lines
+            lines = watermark_lines(material, n_images)
+        except Exception:  # noqa: BLE001 - 复述是增强，失败不阻断分组确认
+            lines = []
+    reply = ("\n".join(lines) + "\n\n" if lines else "") + summary
+    return {
+        "ok": False,
+        "reply": reply,
+        "card": None, "cards": [], "actions": [],
+        "need_more": ["分组确认"],
+        # 🎯 与普通记录「最终确认」对齐（2026-11-12）：多图分组确认同样下发「确认生成」
+        # 快捷键，点击即以该词发送（multi_image_split.is_confirm 命中→直接建多条），
+        # 免打字。路由层不会覆盖已有 chips（它只在「最终确认」态才额外注入）。
+        "chips": ["确认生成"],
+        # ask_block 触发路由把完整记录表单置空（否则 need_more 会让 create_work_record
+        # 渲染一整张空表单，与「只回一句分组汇总、等用户确认」的交互冲突）。
+        "ask_block": {"type": "multi_image_split", "summary": summary,
+                      "watermark_lines": lines},
+        "options": {}, "undo": None, "data": {},
+    }
+
+
+def _split_watermark_fields(wms: list) -> tuple:
+    """从分组逐图水印聚合「施工部位 / 业务日期 / 天气」，供分组建单回填。
+
+    - 部位：合并组内各图非空的 单位工程/施工区域/部位，去重（同组多图可能分属不同单位工程）。
+    - 日期：取各图拍摄时间中最早的一个；无拍摄时间则回退今天（与单图无信号时一致）。
+    - 天气：取首个非空值。
+    """
+    _DATE_PREFIX = re.compile(r"(\d{4})[.\-/年](\d{1,2})[.\-/月](\d{1,2})")
+    sections: list[str] = []
+    dates: list = []
+    weather = ""
+    for w in wms or []:
+        if not isinstance(w, dict):
+            continue
+        s = str(w.get("section") or "").strip()
+        if s and s not in sections:
+            sections.append(s)
+        t = str(w.get("taken_at") or "").strip()
+        if t:
+            # 拍摄时间常带「 09:32」等时刻后缀，先抽出日期部分再解析
+            dm = _DATE_PREFIX.search(t)
+            p = _parse_date(dm.group(0) if dm else t)
+            if p and p not in dates:
+                dates.append(p)
+        wt = str(w.get("weather") or "").strip()
+        if wt and not weather:
+            weather = wt
+    section = " / ".join(sections) if sections else None
+    rec_date = min(dates) if dates else datetime.now().date()
+    return section, rec_date, (weather or None)
+
+
+async def _create_split_records(ctx: "ToolContext", groups: list) -> dict:
+    """确认后循环建多条记录：每组一条，同类多图挂该条照片列表；待定组建极简草稿。
+
+    不走完整字段合同（resolve_event_form）：照片是主要产物，类型字段留待用户在
+    工作记录详情页补全。记录均为草稿状态。
+    """
+    created: list[tuple[str, WorkRecord, list[str]]] = []
+    for g in groups:
+        rtype = g.record_type
+        photos = [str(u).strip() for u in g.images if str(u).strip()]
+        if not photos:
+            continue
+        is_witness = (rtype == "见证")
+        content = _split_content(g, rtype)
+        # 按组回填水印字段：拍摄时间→业务日期，单位工程/施工区域→施工部位。
+        # 分组确认可能跨轮，wm 随分组方案持久化，故不依赖 ctx 的临时 image_signals。
+        wms = list(getattr(g, "wm", None) or [])
+        split_section, split_date, split_weather = _split_watermark_fields(wms)
+        rec = WorkRecord(
+            record_type=rtype,
+            status=WorkRecordStatus.DRAFT.value,
+            creator_id=ctx.user.id,
+            project_id=ctx.project_id,
+            record_date=split_date,
+            section=(split_section[:128] if split_section else None),
+            weather=(split_weather[:16] if split_weather else None),
+            inspection_photos=(None if is_witness else photos),
+            witness_photos=(photos if is_witness else None),
+            work_content=(content[:2000] if content else None),
+            content_json={
+                "source": "agent_multi_image_split",
+                "photo_count": len(photos),
+                "auto_classified": True,
+            },
+        )
+        ctx.db.add(rec)
+        created.append((rtype, rec, photos))
+
+    if not created:
+        return _ok("没有可建的记录。")
+
+    await ctx.db.flush()
+    for rtype, rec, photos in created:
+        await _audit(ctx.db, ctx.user, "agent_write", {
+            "tool": "create_work_record", "entity": "work_record", "id": rec.id,
+            "split": True, "record_type": rtype,
+        })
+    await ctx.db.commit()
+
+    cards = [{
+        "kind": "work_record", "id": rec.id, "title": f"{rtype}记录",
+        "sub": f"{len(photos)}张照片", "status": rec.status,
+        "time": str(rec.record_date),
+    } for rtype, rec, photos in created]
+
+    lines = ["已按分组创建以下记录："]
+    for rtype, rec, photos in created:
+        lines.append(f"· {rtype}记录 #{rec.id}（{len(photos)}张照片）")
+    lines.append("施工部位、业务日期已按各张照片水印自动填入；具体位置等可继续在「工作记录」页补充。")
+    return _ok(
+        "\n".join(lines),
+        cards=cards,
+        actions=[],
+        undo=None,
+        data={"record_ids": [rec.id for _, rec, _ in created], "split": True},
+    )
+
+
+def _split_content(g, rtype: str) -> str:
+    """分组记录的 content 草稿：优先用逐图内容提示拼接，否则给类型占位（待用户补全）。"""
+    hints = [str(h).strip() for h in (g.hints or []) if str(h).strip()]
+    if hints:
+        joined = "；".join(dict.fromkeys(hints))  # 去重保序
+        return joined[:2000]
+    if rtype == "待定":
+        return "待确认归类（由现场照片自动分组，待补充类型与内容）"
+    return f"{rtype}（由{len(g.images)}张现场照片自动归类，待补全内容）"
+
+
 async def _create_work_record(ctx: ToolContext, args: dict) -> dict:
     content = str(args.get("work_content") or args.get("content") or args.get("description") or "").strip()
     section = str(args.get("section") or "").strip()
@@ -1163,6 +1480,12 @@ async def _create_work_record(ctx: ToolContext, args: dict) -> dict:
     # 本函数内对 apply_canonical_form_fields 之后的本地副本做的字段写入不会自动回到该对象，
     # 故凡需跨轮保留的状态（验收内容/结论/类型/询问态）都通过 _set_field_persist 显式镜像回 orig_args。
     orig_args = args
+    # 🔀 多图逐张分类分流（B 方案）：本轮多张图且带逐图视觉信号时，先按图分类、同类合并；
+    # 多组或含待定组先回执确认，确认后循环建多条。该分支在单记录逻辑之前短路返回，
+    # 避免「类型只能取一个 / 多图全挂一条」把多类照片误建为一条。
+    _split_result = await _maybe_handle_multi_image_split(ctx, args, orig_args)
+    if _split_result is not None:
+        return _split_result
     # 🔧 槽位键归一：模型可能用表字段 key（10_14）写 extra_fields，服务端读 canonical（pm_onsite）。
     # 不改会误判「仍缺字段」→ 死循环追问（2026-10-16 真机：危大巡视「到岗」反复被问）。
     raw_type = _norm_record_type(str(args.get("record_type") or "")) or ""
@@ -2579,27 +2902,90 @@ async def _query_regulation(ctx: ToolContext, args: dict) -> dict:
     keyword = str(args.get("keyword") or args.get("question") or ctx.message or "").strip()
     if not keyword:
         return _need_more(["检索关键词"], "想查哪条规范？例如「模板支撑验收要求」。")
+
+    # 「XX 规范怎么要求」的权威来源是内置验收指引，不是知识库文件。
+    # 知识库收录的是省统表/安全监理用表/验收记录/填写示例/操作指引等表式资料，
+    # 把它们当「规范依据」必然答非所问（现场实测：问模板支撑验收，回了一堆表式字段）。
+    from app.services import knowledge_service
+    guide = None
     try:
-        from app.services import knowledge_service
+        guide = knowledge_service.get_acceptance_guide(keyword)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("验收指引获取失败: %s", type(exc).__name__)
+
+    FORM_CATEGORIES = {"省统表", "安全监理用表"}
+    # 归到「其他资料」的验收记录/填写示例/操作指引同样是表式文件，按名称+正文特征一并剔除。
+    FORM_LIKE_HINTS = (
+        "验收记录", "检查记录", "旁站记录", "记录表", "表格模板", "表式",
+        "填写示例", "操作指引", "台账", "本表一式", "工程项目名称",
+        "验收部位", "编号：", "填表", "监理通知单", "监理日志", "举牌验收照片",
+    )
+
+    def _is_form_like(hit: dict) -> bool:
+        blob = " ".join(str(hit.get(k) or "") for k in ("name", "filename", "snippet"))
+        return any(hint in blob for hint in FORM_LIKE_HINTS)
+
+    try:
         hits = knowledge_service.search_by_content(keyword) or []
     except Exception as exc:  # noqa: BLE001
         logger.warning("规范检索失败: %s", type(exc).__name__)
         hits = []
-    if not hits:
-        return _ok(f"没有检索到与「{keyword}」相关的规范条目，换个说法或到「资料库」手动检索。")
-    lines = [f"与「{keyword}」相关的规范依据（{len(hits)} 条）："]
+    regulation_hits = [
+        h for h in hits
+        if h.get("category") not in FORM_CATEGORIES and not _is_form_like(h)
+    ]
+    form_hits = [
+        h for h in hits
+        if h.get("category") in FORM_CATEGORIES or _is_form_like(h)
+    ]
+
+    topic_hit = bool(
+        guide
+        and guide.get("regulation_basis")
+        and not str(guide["regulation_basis"][0]).startswith("请查询")
+    )
+    lines: list[str] = []
     citations: list[dict] = []
-    for i, hit in enumerate(hits[:3], 1):
-        name = hit.get("name") or hit.get("filename") or "规范"
-        snippet = (hit.get("snippet") or "").strip().replace("\n", " ")
-        lines.append(f"{i}. {name}：{snippet[:150]} [[{i}]]")
-        citations.append(_cite(
-            i, "regulation", str(name),
-            sub="规范条文", snippet=snippet[:200], target="/knowledge-base",
-            ref_id=hit.get("source_id") or hit.get("filename") or hit.get("name"),
-        ))
+    if topic_hit:
+        lines.append(f"「{keyword}」依据：{'；'.join(guide['regulation_basis'])}")
+        if guide.get("key_points"):
+            lines.append(f"验收要点：{'；'.join(guide['key_points'])}")
+        if guide.get("steps"):
+            lines.append("实施步骤：" + " → ".join(guide["steps"]))
+        if guide.get("common_violations"):
+            lines.append("常见问题：" + "、".join(guide["common_violations"]))
+        for m in guide.get("matched_docs", [])[:3]:
+            citations.append(_cite(
+                len(citations) + 1, "regulation", m,
+                sub="关联表式", target="/knowledge-base",
+            ))
+    # 命中内置指引时不再追加知识库「规范依据」：库内并无真规范条文，
+    # 追加只会把表式字段/示例重新混进答案。
+    if regulation_hits and not topic_hit:
+        lines.append(f"与「{keyword}」相关的规范依据（{len(regulation_hits)} 条）：")
+        for i, hit in enumerate(regulation_hits[:3], 1):
+            name = hit.get("name") or hit.get("filename") or "规范"
+            snippet = (hit.get("snippet") or "").strip().replace("\n", " ")
+            lines.append(f"{i}. {name}：{snippet[:150]} [[{len(citations) + i}]]")
+            citations.append(_cite(
+                len(citations) + i, "regulation", str(name),
+                sub="规范条文", snippet=snippet[:200], target="/knowledge-base",
+                ref_id=hit.get("source_id") or hit.get("filename") or hit.get("name"),
+            ))
+    if not topic_hit and not regulation_hits:
+        if form_hits:
+            return _ok(
+                f"资料库中与「{keyword}」相关的是表式/示例文件（{len(form_hits)} 份），不是规范条文。"
+                "内置规范指引覆盖：模板、混凝土、钢筋、脚手架、深基坑、防水、电气、"
+                "安全帽、临边洞口、临时用电；换个主题词再问，或到「资料库」查看表式。"
+            )
+        return _ok(
+            f"没有检索到与「{keyword}」相关的规范条文。内置规范指引覆盖：模板、混凝土、"
+            "钢筋、脚手架、深基坑、防水、电气、安全帽、临边洞口、临时用电；"
+            "也可到「资料库」手动检索原文。"
+        )
     lines.append("完整条文请到「资料库」检索原文。")
-    return _ok("\n".join(lines), data={"count": len(hits)}, citations=citations)
+    return _ok("\n".join(lines), data={"count": len(regulation_hits)}, citations=citations)
 
 
 async def _review_plan_doc(ctx: ToolContext, args: dict) -> dict:

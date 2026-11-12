@@ -106,19 +106,39 @@ class ResolveProvformFormCodeTests(unittest.TestCase):
             )
             self.assertEqual(m.resolve_provform_form_code(code), code)
 
+    # 不填字段表单、改由 generate_supervision_log 按日聚合个人记录生成的表式。
+    # form_registry 里 source="aggregate"；没有字段级 schema 是设计，不是缺项。
+    AGGREGATE_WITHOUT_SCHEMA = {"jianli_riji"}
+
     def test_all_choices_have_schema(self):
         """desc 承诺可聊天创建的表式，必须真有 schema，否则用户会撞「暂不支持」。"""
         import app.services.agent_tools as m
         from app.services import provform_schema as ps
+        from app.services.form_registry import FORM_BY_CODE
 
-        missing = [c for c, _ in m.PROVFORM_CHOICES if not ps.get_schema(c)]
+        # 豁免必须名副其实：确实是 aggregate 类，且确实还没有 schema。
+        # 防止有人拿这条豁免当万能挡箭牌，或表式改成走表单后仍被跳过。
+        for code in self.AGGREGATE_WITHOUT_SCHEMA:
+            spec = FORM_BY_CODE.get(code)
+            self.assertIsNotNone(spec, f"{code} 不在注册表里，豁免理由不成立")
+            self.assertEqual(spec.source, "aggregate", f"{code} 已不是聚合生成")
+        self.assertEqual(
+            [c for c in self.AGGREGATE_WITHOUT_SCHEMA if ps.get_schema(c)], [],
+            "这些表式已有 schema，不该继续豁免",
+        )
+
+        missing = [
+            c for c, _ in m.PROVFORM_CHOICES
+            if c not in self.AGGREGATE_WITHOUT_SCHEMA and not ps.get_schema(c)
+        ]
         self.assertEqual(missing, [], f"这些表式无 schema，聊天创建会失败：{missing}")
 
     def test_user_visible_count_matches_choices(self):
-        """🔴 用户可见提示里的类数必须与清单一致（原硬编码「11 类」实为 10 类）。
+        """🔴 用户可见提示里的类数必须动态取自清单（原硬编码「11 类」实为 10 类）。
 
         只看**可执行代码**：注释里解释历史成因时提到「等 11 类」是必要文档，
-        不该被这条守门误伤。
+        不该被这条守门误伤。清单现已扩到 11 项，所以「等 11 类」本身没错，
+        错的是任何写死的数字。
         """
         import app.services.agent_tools as m
         from pathlib import Path
@@ -133,8 +153,14 @@ class ResolveProvformFormCodeTests(unittest.TestCase):
         self.assertIn("len(PROVFORM_CHOICES)", src, "提示语应动态取 len(PROVFORM_CHOICES)")
 
     def test_need_more_prompt_shows_real_count(self):
-        """🔴 端到端：不传 form_code 时，追问文案里的类数必须等于清单真实长度。"""
+        """🔴 端到端：不传 form_code 时，追问文案里的类数必须等于清单真实长度。
+
+        旧断言额外 assertNotIn("等 11 类") 是当年「文案写死 11、清单只有 10」
+        的临时守门；清单扩到 11 项后文案正确了，反而把这条测试自己弄红。
+        现在改成提取文案里出现的每一个类数，逐一与清单比对。
+        """
         import asyncio
+        import re
 
         import app.services.agent_tools as m
 
@@ -144,8 +170,12 @@ class ResolveProvformFormCodeTests(unittest.TestCase):
         self.assertTrue(text, f"追问文案为空：{res}")
         self.assertIn("表式", str(res.get("need_more")), "该追问「表式」这一项")
         expect = str(len(m.PROVFORM_CHOICES))
-        self.assertIn(f"等 {expect} 类", text, f"追问文案类数不对：{text[:160]}")
-        self.assertNotIn("等 11 类", text, "仍在给用户报错误的 11 类")
+        counts = re.findall(r"等\s*(\d+)\s*类", text)
+        self.assertTrue(counts, f"追问文案没给出类数：{text[:160]}")
+        self.assertEqual(
+            set(counts), {expect},
+            f"文案类数与清单真实长度 {expect} 不一致：{text[:160]}",
+        )
 
 
 class _NullCtx:

@@ -553,6 +553,8 @@
 .agent-card-title { display: block; margin-top: 8rpx; font-size: 28rpx; font-weight: 500; color: var(--ink, #12253d); line-height: 1.5; }
 .agent-card-sub { display: block; margin-top: 4rpx; font-size: 24rpx; color: var(--ink-3, #6b7c93); }
 .agent-card-time { display: block; margin-top: 4rpx; font-size: 22rpx; color: var(--ink-3, #6b7c93); }
+/* 多卡回执折叠条：复用 inline-review-preview 外观，双类选择器覆盖其默认下边距 */
+.inline-review-preview.agent-cards-toggle { margin: 8rpx 0 0; }
 
 /* ===== 智能体追问快速选项（点选即回答）===== */
 .agent-chips { display: flex; flex-wrap: wrap; gap: 14rpx; margin-top: 12rpx; }

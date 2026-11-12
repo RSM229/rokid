@@ -233,6 +233,8 @@ interface Message {
   commands?: { field: string; label: string; options: string[] }[]
   /** 智能体回执卡（由 /agent/chat 返回，点击可跳详情） */
   cards?: AgentCard[]
+  /** 多条回执卡默认收起，用户点开才展开（2026-11-12） */
+  cardsExpanded?: boolean
   /** 追问的快速候选值（点击即作为回答发送，如 巡视/旁站/验收/见证） */
   chips?: string[]
   agentForm?: AgentForm
@@ -319,6 +321,8 @@ interface AgentChatResponse {
   recommendations?: Array<{ field: string; value: string; reason?: string }>
   form?: AgentForm | null
   undo?: { entity: string; id: number } | null
+  /** 工具回执业务数据；多图分组建单时带 split=true，表示后端已按组分配好照片 */
+  data?: { split?: boolean; record_ids?: number[] }
   model?: string
   degraded?: boolean
   request_plan?: AgentRequestPlan
@@ -521,6 +525,8 @@ Page(themed({
 
   data: {
     messages: [] as Message[],
+    // 空态问候语：按时间段 + 待办/草稿动态生成，比固定文案「活」
+    heroGreeting: '您好！今天有什么工作需要我帮您处理?',
     // ima 风格空状态：竖排建议按钮（icon + 文案），点击走 handleActionTap
     // 🔴 needProject：该动作会产生项目级业务数据（现场记录/隐患/监理日志），
     //    无项目用户点了只会被拦，不如一开始就不展示 —— 换成 visibleHeroActions
@@ -581,9 +587,9 @@ Page(themed({
 
     // 回答模型（2026-10-09 改版：输入区左侧「模型」下拉，可切换多个文本大模型；华工走独立供应商）
     models: CHAT_MODELS,
-    currentModel: 'qwen3.8-flash',
-    modelName: '通义千问 3.8 Flash',
-    modelShortName: 'Qwen3.8 Flash',
+    currentModel: 'deepseek-v4.1-flash-1017',
+    modelName: 'DeepSeek V4.1 Flash',
+    modelShortName: 'DeepSeek V4.1',
     showModelMenu: false,
     showPlusPanel: false,
     /** 待发送附件：图片/文件可多选先挂在这里，补充文字后一次性发送识别 */
@@ -661,7 +667,7 @@ Page(themed({
     })
 
     const user = session.getUser()
-    const savedModel = String(wx.getStorageSync(`gdjl_${config.storageScope}_agent_model`) || 'qwen3.8-flash')
+    const savedModel = String(wx.getStorageSync(`gdjl_${config.storageScope}_agent_model`) || 'deepseek-v4.1-flash-1017')
     const saved = this.data.models.find(m => m.id === savedModel) || this.data.models[0]
     this.setData({
       currentModel: saved.id,
@@ -718,6 +724,24 @@ Page(themed({
     this.loadPendingDrafts()
     void this.loadTodoPendingCount()
     void this.resumeAgentProgress()
+    this.refreshHeroGreeting()
+  },
+
+  /** 空态问候语按时间与待办动态生成（纯文案，不引入任何选择器/候选，守 11-06 铁律） */
+  refreshHeroGreeting() {
+    const h = new Date().getHours()
+    const part = h < 6 ? '凌晨好' : h < 9 ? '早上好' : h < 12 ? '上午好' : h < 14 ? '中午好' : h < 18 ? '下午好' : '晚上好'
+    let greeting = `${part}！`
+    const todo = this.data.todoPendingCount || 0
+    const drafts = this.data.pendingDrafts || []
+    if (todo > 0) {
+      greeting += `你有 ${todo} 项待办没处理，查一下？`
+    } else if (drafts.length > 0) {
+      greeting += `还有一笔「${drafts[0].label}」没记完，要接着写吗？`
+    } else {
+      greeting += '今天有什么工作需要我帮您处理?'
+    }
+    this.setData({ heroGreeting: greeting })
   },
 
   onHide() {
@@ -760,6 +784,15 @@ Page(themed({
     const messages = [...this.data.messages]
     if (!messages[index]?.reviewPlan) return
     messages[index] = { ...messages[index], reviewDetailsExpanded: !messages[index].reviewDetailsExpanded }
+    this.setData({ messages })
+  },
+
+  /** 分组建单一次回多张记录卡：默认收起，避免刷屏；点开才展示，单条仍直接显示 */
+  toggleAgentCards(event: WechatMiniprogram.TouchEvent) {
+    const index = Number(event.currentTarget.dataset.index)
+    const messages = [...this.data.messages]
+    if (!messages[index]?.cards?.length) return
+    messages[index] = { ...messages[index], cardsExpanded: !messages[index].cardsExpanded }
     this.setData({ messages })
   },
 
@@ -3674,6 +3707,19 @@ Page(themed({
   async attachPendingPhotosFromReply(result: AgentChatResponse) {
     const pending = this.data.pendingRecordPhotos
     if (!pending.length) return
+    // 多图分组建单：后端 _create_split_records 已按组把照片分别写进每条记录的
+    // inspection_photos / witness_photos。这里不能再把本会话攒下的全部照片补挂到
+    // 第一张记录卡，否则别组照片会串进第一条记录（现场实测：巡视应 1 张 → 详情 8 张）。
+    const workCards = (result.cards || []).filter(c => c.kind === 'work_record' && c.id)
+    if (result.data?.split === true) {
+      // 这批照片已由后端分完，清空待挂队列，避免污染后续会话或单条建单
+      this.setData({ pendingRecordPhotos: [], pendingRecordPhotosSession: 0 })
+      return
+    }
+    if (workCards.length > 1) {
+      // 兜底：后端未下发 split 标志但一次回了多条记录卡，宁可不补挂也不挂错
+      return
+    }
     const session = this.data.pendingRecordPhotosSession
     const current = this.currentSessionId || 0
     if (session && current && session !== current) {
@@ -4220,11 +4266,21 @@ Page(themed({
     wx.previewImage({ current: item.path, urls })
   },
 
-  /** 聊天记录里的图片点开预览 */
+  /** 聊天记录里的图片点开预览：同一消息的多张图传给 urls，支持左右滑动/上一张下一张 */
   previewImageUrl(event: WechatMiniprogram.TouchEvent) {
     const url = String(event.currentTarget.dataset.url || '')
     if (!url) return
-    wx.previewImage({ current: url, urls: [url] })
+    const mi = Number(event.currentTarget.dataset.mi)
+    const msg = this.data.messages[mi]
+    // 该消息的图片全集：优先多图数组，其次单图
+    const urls = msg && msg.images && msg.images.length
+      ? [...msg.images]
+      : (msg && msg.image ? [msg.image] : [url])
+    if (urls.length > 1) {
+      wx.previewImage({ current: url, urls })
+    } else {
+      wx.previewImage({ current: url, urls: [url] })
+    }
   },
 
   /** 消息内图片加载失败兜底：本地临时路径失效时切换到服务端远程地址（remoteImages）。

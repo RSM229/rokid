@@ -2,7 +2,7 @@
   "extEnable": true,
   "extAppid": "wx8a825eb12de461fb",
   "ext": {
-    "apiBaseUrl": "https://www.baize.gdces.cn:4432/api",
+    "apiBaseUrl": "https://www.baize.gdces.cn/api",
     "localApiBaseUrl": "http://127.0.0.1:8001/api",
     "useLocalBackend": false,
     "mockWechatLogin": false

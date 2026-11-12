@@ -76,8 +76,11 @@ class Settings(BaseSettings):
     )
     # 公开注册只能授予白名单内角色；项目绑定和角色提升由管理员完成。
     # Step 1：角色值已 key 化为英文，默认白名单随之改英文（原值「监理员」）。
+    # 🔴 必须是 UserRole.value（inspector / special_supervisor / ...）；旧默认值
+    # "supervisor" 不是合法 key，会被 get_public_registration_roles() 过滤后
+    # 静默回退成 [inspector]，配置看似生效实则无效。
     public_registration_roles: str = os.getenv(
-        "PUBLIC_REGISTRATION_ROLES", "supervisor"
+        "PUBLIC_REGISTRATION_ROLES", "inspector"
     )
 
     # CORS 白名单：生产环境应配置为具体域名，逗号分隔
