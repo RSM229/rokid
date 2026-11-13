@@ -362,6 +362,29 @@ _NO_ISSUE_HINTS = ("符合要求", "无异常", "没有发现问题", "没有问
                    "一切正常", "无隐患", "正常")
 
 
+def _backfill_no_issue(message: str) -> str:
+    """用户原话命中「无问题」暗示时返回该暗示词，否则返回空串。
+
+    用途：建巡视/旁站记录时，模型常把用户说的「符合要求/无异常」理解成
+    "没有问题"而省略 problems / station_conclusion 参数 → 服务端追问 → 死循环
+    （2026-10-15 真机踩坑）。这里做确定性兜底：原话命中即回填。
+
+    🔴 仅对「用户原话明确说无问题」生效；以下情况一律返回空串、**不兜底**：
+       - 用户没说（静默上传照片 / 纯文字没提问题）；
+       - 带了照片素材但模型没归结出问题。
+    这两种情况交给模型从各张照片的【图片内容观察】去判断并填写 problems；
+    **服务端严禁盲填「符合要求」**，否则会造假的合规记录（多张照片尤其危险——
+    可能其中某张其实有问题只是用户没说）。2026-11-13 多图口径新增此约束。
+    """
+    text = (message or "").strip()
+    if not text:
+        return ""
+    for h in _NO_ISSUE_HINTS:
+        if h in text:
+            return h
+    return ""
+
+
 def _wants_skip(message: str) -> bool:
     text = (message or "").strip()
     return any(h in text for h in _SKIP_HINTS)
@@ -1653,14 +1676,15 @@ async def _create_work_record(ctx: ToolContext, args: dict) -> dict:
     hazard_type = str(args.get("hazard_type") or args.get("hazard_name") or "").strip()
     is_weida = _is_weida(record_type, args, ctx.message)
 
-    # 巡视「问题及处理」：用户原话说「符合要求/无异常」时兜底回填（见 _NO_ISSUE_HINTS 注释）
+    # 巡视「问题及处理」：用户原话说「符合要求/无异常」时兜底回填（见 _backfill_no_issue 注释）。
+    # 🔴 静默/带照片但未说无问题的情况不兜底——交给模型从素材归结，禁止盲填「符合要求」。
     if record_type == "巡视" and not str(args.get("problems") or "").strip():
-        hit = next((h for h in _NO_ISSUE_HINTS if h in (ctx.message or "")), None)
+        hit = _backfill_no_issue(ctx.message)
         if hit:
             args["problems"] = hit
     # 旁站「结论」：同样兜底（GD-B-212「旁站的问题及处理情况」栏）
     if record_type == "旁站" and not str(args.get("station_conclusion") or "").strip():
-        hit = next((h for h in _NO_ISSUE_HINTS if h in (ctx.message or "")), None)
+        hit = _backfill_no_issue(ctx.message)
         if hit:
             args["station_conclusion"] = hit
     # 旁站「施工情况」：LLM 把叙述放进 work_content 时回落复用，保证 GD-B-212 正文栏不空
@@ -3629,7 +3653,7 @@ TOOLS: tuple[ToolSpec, ...] = (
         {"record_type": "记录类型：巡视/旁站/验收/见证/平行检验/起重机械安拆检查（用户未明确时必须先追问，不能因有图片默认巡视）",
          "*work_content": "施工内容或现场情况",
          "section": "施工区域，如 3号楼二层", "location": "具体位置", "weather": "天气",
-         "problems": "巡视发现的问题及处理情况原文；用户说「符合要求/无异常」时也必须原样传入（如 problems=符合要求），不要省略",
+         "problems": "巡视的「问题及处理情况」，**必填、严禁留空**。用户原话说了问题/符合要求就原样传入；用户没说时，必须从各张照片素材的【图片内容观察】里归结：任一张看出问题→按「图N：…问题…，已要求整改」汇总；全部照片都看不出问题→填「经巡视，各部位未发现质量、安全问题（符合要求）」。绝不许因为用户没说就空着，也绝不许没依据硬写「符合要求」。",
          "treatment": "处理意见及措施", "worker_count": "施工人数（整数）",
          "record_date": "业务日期 YYYY-MM-DD（默认今天）",
          "inspection_start_time": "巡视开始时间 HH:MM（巡视记录，如 9:00）",
