@@ -124,6 +124,30 @@ class TestGroupImages(unittest.TestCase):
         groups = multi_image_split.group_images(images, signals)
         self.assertEqual([g.record_type for g in groups], ["巡视", "待定"])
 
+    def test_same_type_different_section_splits(self):
+        """同类型但水印部位不同 → 各成一组（4 条道路不该塞进同一条记录）。"""
+        images = ["a.jpg", "b.jpg", "c.jpg"]
+        signals = [
+            {"content": "场内便道洒水降尘", "in_progress": True, "section": "沙盛四路"},
+            {"content": "场内便道洒水降尘", "in_progress": True, "section": "大兴路"},
+            {"content": "场内便道洒水降尘", "in_progress": True, "section": "沙盛四路 "},
+        ]
+        groups = multi_image_split.group_images(images, signals)
+        self.assertEqual([g.record_type for g in groups], ["巡视", "巡视"])
+        self.assertEqual([len(g.images) for g in groups], [2, 1])
+        # 尾随空白不应拆组：沙盛四路 的两张（a、c）在第一组
+        self.assertEqual(groups[0].images, ["a.jpg", "c.jpg"])
+
+    def test_section_falls_back_to_unit(self):
+        """水印只写了单位工程时，也用单位工程当分组键。"""
+        images = ["a.jpg", "b.jpg"]
+        signals = [
+            {"content": "场内便道洒水降尘", "in_progress": True, "unit": "沙盛四路"},
+            {"content": "场内便道洒水降尘", "in_progress": True, "unit": "大兴路"},
+        ]
+        groups = multi_image_split.group_images(images, signals)
+        self.assertEqual(len(groups), 2)
+
 
 class TestSummarizeAndConfirm(unittest.TestCase):
     def test_summarize_text(self):
@@ -136,6 +160,19 @@ class TestSummarizeAndConfirm(unittest.TestCase):
         self.assertEqual(
             multi_image_split.summarize(groups),
             "这批图我分了 巡视3 / 旁站3 / 待定3，确认后建。")
+
+    def test_summarize_with_section(self):
+        """按部位拆分后，回执要带上部位名，用户才知道为什么变成多条。"""
+        from app.services.multi_image_split import ImageGroup
+        groups = [
+            ImageGroup(record_type="验收", images=["a", "b"],
+                       hints=[], wm=[{"section": "沙盛四路"}, {}]),
+            ImageGroup(record_type="验收", images=["c"],
+                       hints=[], wm=[{"section": "大兴路"}]),
+        ]
+        self.assertEqual(
+            multi_image_split.summarize(groups),
+            "这批图我分了 验收·沙盛四路2 / 验收·大兴路1，确认后建。")
 
     def test_is_confirm(self):
         self.assertTrue(multi_image_split.is_confirm("确认建"))

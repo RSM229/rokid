@@ -14,6 +14,8 @@
 """
 from __future__ import annotations
 
+import re
+
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
@@ -115,13 +117,16 @@ class ImageGroup:
 
 
 def group_images(images: list[str], signals: list[dict]) -> list[ImageGroup]:
-    """逐图分类 → 按记录类型归并（保持 _RECORD_ORDER 次序）。
+    """逐图分类 → 按（记录类型 + 施工部位）归并（类型内保持 _RECORD_ORDER 次序）。
 
     - 有信号 → 按信号分类；
     - 无信号（空 dict / 越界）→ 视为「无法确认」→ 待定；
-    - 同类多图标为同一组，保留出现次序。
+    - 同类型**且同部位**才并成一组；同类型不同部位各成一组
+      （2026-11-13 用户要求：4 条道路的照片不该塞进同一条记录）。
+    - 部位取水印「单位工程 / 施工区域 / 部位 / 桩号」；取不到就按空部位归一组。
     """
-    buckets: dict[str, ImageGroup] = {}
+    buckets: dict[tuple[str, str], ImageGroup] = {}
+    order: list[tuple[str, str]] = []
     for idx, url in enumerate(images):
         u = str(url or "").strip()
         if not u:
@@ -133,10 +138,12 @@ def group_images(images: list[str], signals: list[dict]) -> list[ImageGroup]:
         else:
             rtype, _res = classify_to_record_type(raw)
             hint = str((_safe_content(raw) or "")).strip()
-        grp = buckets.get(rtype)
+        key = (rtype, _section_key(raw))
+        grp = buckets.get(key)
         if grp is None:
             grp = ImageGroup(record_type=rtype, images=[], hints=[], wm=[])
-            buckets[rtype] = grp
+            buckets[key] = grp
+            order.append(key)
         grp.images.append(u)
         if hint:
             grp.hints.append(hint)
@@ -153,12 +160,25 @@ def group_images(images: list[str], signals: list[dict]) -> list[ImageGroup]:
 
     groups: list[ImageGroup] = []
     for rt in _RECORD_ORDER:
-        if buckets.get(rt):
-            groups.append(buckets.pop(rt))
+        for key in order:
+            if key[0] == rt and buckets.get(key):
+                groups.append(buckets.pop(key))
     # 理论不会进这里，但兜底保留未知类型
-    for grp in buckets.values():
-        groups.append(grp)
+    for key in order:
+        if buckets.get(key):
+            groups.append(buckets.pop(key))
     return groups
+
+
+def _section_key(raw: dict | None) -> str:
+    """分组用的部位键：去掉空白与首尾标点，避免「沙盛四路 」与「沙盛四路」被拆成两组。"""
+    if not raw:
+        return ""
+    text = str(raw.get("section") or "").strip()
+    if not text:
+        # 没填部位时退单位工程：水印只写了「单位工程：××路」的照片也应各自成组
+        text = str(raw.get("unit") or "").strip()
+    return re.sub(r"[\s，,、；;]+", "", text)
 
 
 def _safe_content(raw: dict) -> str:
@@ -167,11 +187,32 @@ def _safe_content(raw: dict) -> str:
 
 
 def summarize(groups: list[ImageGroup]) -> str:
-    """确认回执文案：『这批图我分了 巡视3 / 旁站3 / 待定3，确认后建。』"""
-    parts = [f"{g.record_type}{len(g.images)}" for g in groups]
+    """确认回执文案：『这批图我分了 巡视3 / 旁站3 / 待定3，确认后建。』
+
+    同类型不同部位会拆成多组，回执带上部位名，用户才知道为什么变成多条。
+    """
+    parts = []
+    for g in groups:
+        section = _group_section(g)
+        name = f"{g.record_type}·{_short_section(section)}" if section else g.record_type
+        parts.append(f"{name}{len(g.images)}")
     if not parts:
         return "这批图我没分出可归类的记录，请告诉我每张图分别是什么类型。"
     return "这批图我分了 " + " / ".join(parts) + "，确认后建。"
+
+
+def _group_section(group: ImageGroup) -> str:
+    for wm in group.wm or []:
+        if isinstance(wm, dict):
+            section = str(wm.get("section") or "").strip()
+            if section:
+                return section
+    return ""
+
+
+def _short_section(section: str, limit: int = 12) -> str:
+    section = str(section or "").strip()
+    return section if len(section) <= limit else section[:limit] + "…"
 
 
 # 肯定确认词（命中且无否定词即视为同意建记录）

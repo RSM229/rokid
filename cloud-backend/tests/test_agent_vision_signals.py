@@ -92,12 +92,26 @@ def _real_material() -> str:
 class TestRealBatchClassification(unittest.TestCase):
 
     def test_eight_photos_split_correctly(self):
-        """校准后应为 巡视1 / 旁站4 / 验收3，而不是 巡视2 / 旁站5 / 验收1。"""
+        """类型校准（巡视/旁站/验收 口径）不变；但同类型按水印部位进一步拆开。
+
+        2026-11-13 起分组键 =（记录类型 + 施工部位）：8 张照片分布在 4 个部位
+        （K1+315 段 / dxw9-10 / ssy37-38 / K0+500），所以旁站被拆成 4 条、
+        验收拆成 2 条（dxy5-6 段的底板与顶板同部位，仍合并为一条 2 张）。
+        按类型汇总的张数必须与校准口径一致：巡视 1 / 旁站 4 / 验收 3。
+        """
         sigs = parse_material_signals(_real_material(), 8)
         imgs = [f"https://cdn/p{i}.jpg" for i in range(1, 9)]
         groups = ms.group_images(imgs, sigs)
-        self.assertEqual([(g.record_type, len(g.images)) for g in groups],
-                         [("巡视", 1), ("旁站", 4), ("验收", 3)])
+        totals: dict[str, int] = {}
+        for g in groups:
+            totals[g.record_type] = totals.get(g.record_type, 0) + len(g.images)
+        self.assertEqual(totals, {"巡视": 1, "旁站": 4, "验收": 3})
+        # 同部位同类型合并：dxy5-6 段的底板/顶板钢筋模板验收 → 一条 2 张
+        acceptance = [g for g in groups if g.record_type == "验收"]
+        self.assertIn(2, [len(g.images) for g in acceptance])
+        # 记录次序仍按 _RECORD_ORDER（巡视 → 旁站 → 验收）
+        self.assertEqual([g.record_type for g in groups],
+                         ["巡视"] + ["旁站"] * 4 + ["验收"] * 2)
 
 
 class TestWatermarkLines(unittest.TestCase):
