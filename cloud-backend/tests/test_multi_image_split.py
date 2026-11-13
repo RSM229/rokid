@@ -24,6 +24,7 @@ from app.services import multi_image_split
 from app.services.agent_tools import (
     _create_split_records,
     _maybe_handle_multi_image_split,
+    _split_content,
 )
 from app.models.work_record import WorkRecord, WorkRecordStatus
 
@@ -308,6 +309,77 @@ class TestMultiImageSplitFlow(unittest.TestCase):
         result = asyncio.run(_maybe_handle_multi_image_split(ctx, args, args))
         self.assertIsNone(result)
         self.assertEqual(db.added, [])
+
+
+class TestHintCleaning(unittest.TestCase):
+    """水印「内容」尾巴清洗 + 尾巴字段回填（2026-11-13 真机：工作内容被写成
+    『底板钢筋模板验收；顶板钢筋模板验收 摄时间：2026.10.27 15:18 气：多云31°C 监理』）。
+
+    用户明确要求「不要改一样丢一样」：内容干净了，时间/天气/人员/部位必须还在。
+    """
+
+    def test_cut_watermark_tail(self):
+        self.assertEqual(
+            multi_image_split.clean_hint("顶板钢筋模板验收 摄时间：2026.10.27 15:18 气：多云31°C 监理"),
+            "顶板钢筋模板验收")
+        self.assertEqual(
+            multi_image_split.clean_hint("9m钢板桩收方 拍摄时间：2026-10-27 09:30 天气：晴26℃ 人员：监理"),
+            "9m钢板桩收方")
+
+    def test_tail_fields_are_kept(self):
+        """切下来的尾巴要解析成结构化字段，不能扔。"""
+        clean, tail = multi_image_split.split_hint(
+            "顶板钢筋模板验收 摄时间：2026.10.27 15:18 气：多云31°C 监理")
+        self.assertEqual(clean, "顶板钢筋模板验收")
+        self.assertEqual(tail["taken_at"], "2026.10.27 15:18")
+        self.assertEqual(tail["weather"], "多云31°C")
+        self.assertEqual(tail["person"], "监理")
+
+    def test_keep_content_that_mentions_weather_words(self):
+        # 正文里出现「气温」不是水印字段（前面没有分隔符），不能误切
+        self.assertEqual(
+            multi_image_split.clean_hint("混凝土养护气温控制在20℃以内"),
+            "混凝土养护气温控制在20℃以内")
+        self.assertFalse(multi_image_split.looks_like_watermark_tail("混凝土养护气温控制在20℃以内"))
+
+    def test_clean_hints_dedup_and_drop_empty(self):
+        self.assertEqual(
+            multi_image_split.clean_hints(["基坑巡视", "基坑巡视 摄时间：2026-10-27", "拍摄时间：2026-10-27", ""]),
+            ["基坑巡视"])
+
+    def test_group_hints_cleaned_and_wm_filled(self):
+        """分组后：hints 干净，wm 保留时间/天气/人员（共存）。"""
+        images = ["a.jpg", "b.jpg"]
+        signals = [
+            {"content": "底板钢筋模板验收 摄时间：2026.10.27 09:55 气：晴27°C 监理",
+             "section": "dxy5-6段雨水箱涵"},
+            {"content": "顶板钢筋模板验收 摄时间：2026.10.27 15:18 气：多云31°C 监理",
+             "section": "dxy5-6段雨水箱涵"},
+        ]
+        groups = multi_image_split.group_images(images, signals)
+        self.assertEqual(len(groups), 1)
+        self.assertEqual(groups[0].hints, ["底板钢筋模板验收", "顶板钢筋模板验收"])
+        self.assertEqual([w["weather"] for w in groups[0].wm], ["晴27°C", "多云31°C"])
+        self.assertEqual([w["taken_at"] for w in groups[0].wm],
+                         ["2026.10.27 09:55", "2026.10.27 15:18"])
+        self.assertEqual([w["person"] for w in groups[0].wm], ["监理", "监理"])
+
+    def test_model_groups_also_keep_tail_fields(self):
+        """模型自己给 image_groups 时（hints 原本为空），也要补内容 + 保留尾巴字段。"""
+        from app.services.agent_tools import _parse_model_image_groups
+        imgs = ["https://x/1.jpg", "https://x/2.jpg"]
+        signals = [
+            {"content": "底板钢筋模板验收 摄时间：2026.10.27 09:55 气：晴27°C 监理",
+             "section": "dxy5-6段雨水箱涵"},
+            {"content": "顶板钢筋模板验收 摄时间：2026.10.27 15:18 气：多云31°C 监理",
+             "section": "dxy5-6段雨水箱涵"},
+        ]
+        groups = _parse_model_image_groups(
+            [{"record_type": "验收", "image_indices": [1, 2]}], imgs, signals)
+        g = groups[0]
+        self.assertEqual(g.hints, ["底板钢筋模板验收", "顶板钢筋模板验收"])
+        self.assertEqual([w["weather"] for w in g.wm], ["晴27°C", "多云31°C"])
+        self.assertEqual([w["person"] for w in g.wm], ["监理", "监理"])
 
 
 if __name__ == "__main__":

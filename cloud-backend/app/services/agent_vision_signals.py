@@ -20,6 +20,8 @@ from app.services.image_classification import (
     ImageSignal,
     _hazard_hit,
 )
+# 内容清洗与尾巴解析（切掉水印尾巴「摄时间/天气/监理」，同时把尾巴解析成字段回填）
+from app.services.multi_image_split import split_hint
 
 # 逐图块切分：material 形如「【图片 1】\n【水印】…\n【图片内容观察】…\n\n【图片 2】…」
 _IMG_HEADER = re.compile(r"【图片\s*(\d+)\s*】")
@@ -47,7 +49,7 @@ _NOT_IN_PROGRESS = ("已完成", "未施工", "仅堆放", "成品", "未开始"
 # 否定前缀：出现这些词时，紧跟的判据词应视为否定（如「未见举牌」「无封样」「未施工」）。
 _NEG_PREFIX = ("未", "无", "没", "不", "没有", "未见", "未举", "未持", "未封")
 
-_CONTENT_KW = re.compile(r"(?:内容|工序|对象|施工内容|检验批|隐蔽)[:：]\s*([^\n；;，,]{2,40})")
+_CONTENT_KW = re.compile(r"(?:内容|工序|对象|施工内容|检验批|隐蔽)[:：]\s*([^\n；;，,]{2,120})")
 _SECTION_KW = re.compile(r"(?:单位工程|施工区域|部位|桩号|施工部位)[:：]\s*([^\n；;，,]{1,40})")
 _TAKEN_AT_KW = re.compile(r"(?:拍摄时间|拍照时间|记录时间|时间|日期)[:：]\s*([^\n；;，,]{1,30})")
 
@@ -64,12 +66,14 @@ def _block_parts(block: str) -> tuple[str, str, str]:
 
 
 def _extract_content(block: str, raw_text: str) -> str:
-    """从水印原文里抽「内容/工序/对象」作为归类 content 线索。"""
+    """从水印原文里抽「内容/工序/对象」作为归类 content 线索（未清洗，含尾巴）。
+
+    尾巴（拍摄时间/天气/人员）由 ``parse_material_signals`` 用 ``split_hint`` 切出来
+    另存到信号字段 —— 不能在这一步直接丢掉（2026-11-13 用户要求「要共存」）。
+    """
     m = _CONTENT_KW.search(block)
     if m:
-        # 水印原文里「施工内容」后面常紧跟「拍摄时间：…」等字段；截断掉再喂给
-        # 规则引擎，避免把无关字段文字当工序去命中旁站清单。
-        return re.split(r"\s+拍摄时间[:：]", m.group(1).strip(), maxsplit=1)[0].strip()
+        return m.group(1).strip()
     # 退而求其次：用整段水印原文（截断）喂给规则引擎做子串匹配
     if raw_text:
         return raw_text.strip()[:80]
@@ -162,14 +166,23 @@ def parse_material_signals(material: str, n_images: int) -> list[dict]:
             continue
         wm_text, raw_text, obs_text = _block_parts(block)
         combined = f"{wm_text} {raw_text} {obs_text}"
-        content = _extract_content(block, raw_text)
-        section = _extract_section(wm_text)
-        taken_at = _extract_taken_at(wm_text)
-        sig = ImageSignal(content=content, section=section, taken_at=taken_at)
+        # 内容与尾巴拆开：content 进工作内容，尾巴里的时间/天气/人员/部位回填信号
+        content, tail = split_hint(_extract_content(block, raw_text))
+        section = _extract_section(wm_text) or tail.get("section", "")
+        taken_at = _extract_taken_at(wm_text) or tail.get("taken_at", "")
+        sig = ImageSignal(
+            content=content,
+            section=section,
+            taken_at=taken_at,
+            inspector=tail.get("person") or None,
+        )
         for key, val in _behavior_signals(combined).items():
             setattr(sig, key, val)
         d = {k: getattr(sig, k) for k in ImageSignal.__dataclass_fields__
              if getattr(sig, k) is not None}
+        # 天气：ImageSignal 没有该字段，但分组回填 wm 时要消费它，随 dict 带出
+        if tail.get("weather"):
+            d.setdefault("weather", tail["weather"])
         out.append(d)
     return out
 

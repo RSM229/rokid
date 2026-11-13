@@ -135,9 +135,19 @@ def group_images(images: list[str], signals: list[dict]) -> list[ImageGroup]:
         if not raw:
             rtype = "待定"
             hint = ""
+            tail: dict[str, str] = {}
         else:
+            # 内容里的水印尾巴（摄时间/天气/监理）会污染分类判据与工作内容：
+            # 切出来单独留存，干净内容喂分类引擎，尾巴字段回填 wm（共存，不丢信息）。
+            raw = dict(raw)
+            hint, tail = split_hint(_safe_content(raw) or "")
+            raw["content"] = hint
+            # 尾巴里的时间/天气/人员/部位在没有其它来源时补回信号：
+            # 内容干净了，但这些信息必须还在（共存，不丢）
+            for key, value in tail.items():
+                if not str(raw.get(key) or "").strip():
+                    raw[key] = value
             rtype, _res = classify_to_record_type(raw)
-            hint = str((_safe_content(raw) or "")).strip()
         key = (rtype, _section_key(raw))
         grp = buckets.get(key)
         if grp is None:
@@ -154,6 +164,8 @@ def group_images(images: list[str], signals: list[dict]) -> list[ImageGroup]:
                 "taken_at": str(raw.get("taken_at") or "").strip(),
                 "project_name": str(raw.get("project_name") or "").strip(),
                 "weather": str(raw.get("weather") or "").strip(),
+                # 人员（水印「监理」等）：记录表无独立栏，随 content_json 留档，不丢
+                "person": str(raw.get("person") or raw.get("inspector") or "").strip(),
             })
         else:
             grp.wm.append({})
@@ -184,6 +196,123 @@ def _section_key(raw: dict | None) -> str:
 def _safe_content(raw: dict) -> str:
     c = raw.get("content")
     return str(c) if isinstance(c, str) else ""
+
+
+# ---------------------------------------------------------------- 内容字段清洗
+# 水印相机把「施工内容」和拍摄时间/天气/人员排在同一行、只用空格分隔，
+# 而 OCR 原文拿不到换行，于是抽内容时会把后面几栏一起吞进来。真机样子：
+#   『顶板钢筋模板验收 摄时间：2026.10.27 15:18 气：多云31°C 监理』
+# 这串脏文本会被拼进记录的工作内容（2026-11-13 用户截图「这工作内容怎么这样啊」）。
+# 做法：内容遇到「下一个字段名 + 冒号」就截断。
+_HINT_TAIL_LONG = (
+    "拍摄时间", "拍照时间", "记录时间", "摄时间", "拍摄日期", "拍照日期",
+    "记录日期", "施工部位", "施工区域", "单位工程",
+    "工程名称", "项目名称", "监理人员", "拍摄人员", "施工单位", "建设单位",
+    "监理单位", "验收人员", "检查人员", "旁站人员",
+)
+_HINT_TAIL_SHORT = (
+    "时间", "日期", "地点", "位置", "地址", "部位", "桩号", "天气", "气温",
+    "人员", "监理", "项目", "气",
+)
+# 长标签（≥3 字）几乎不会误伤，允许紧贴前文；短标签要求前面有分隔符，
+# 否则「混凝土养护气温控制」这类正文会被从「气」处切断。
+_HINT_CUT_LONG = re.compile(
+    r"(?:%s)\s*[:：]" % "|".join(sorted(_HINT_TAIL_LONG, key=len, reverse=True)))
+_HINT_CUT_SHORT = re.compile(
+    r"(?:^|[\s；;，,、|（(])\s*(?:%s)\s*[:：]"
+    % "|".join(sorted(_HINT_TAIL_SHORT, key=len, reverse=True)))
+_HINT_TRIM = " \t\r\n；;，,、。|:："
+
+# 被切下来的尾巴不能扔：拍摄时间/天气/人员/部位要能落回记录对应字段，
+# 否则「工作内容干净了，日期天气全丢了」——2026-11-13 用户要求「要共存」。
+_TAIL_LABEL_KEY = {
+    "拍摄时间": "taken_at", "拍照时间": "taken_at", "记录时间": "taken_at",
+    "摄时间": "taken_at", "拍摄日期": "taken_at", "拍照日期": "taken_at",
+    "记录日期": "taken_at", "时间": "taken_at", "日期": "taken_at",
+    "天气": "weather", "气温": "weather", "气": "weather",
+    "施工部位": "section", "施工区域": "section", "单位工程": "section",
+    "部位": "section", "桩号": "section",
+    "位置": "location", "地点": "location", "地址": "location",
+    "人员": "person", "监理人员": "person", "拍摄人员": "person",
+    "验收人员": "person", "检查人员": "person", "旁站人员": "person",
+    "监理": "person", "拍摄人": "person",
+    "工程名称": "project_name", "项目名称": "project_name", "项目": "project_name",
+}
+_TAIL_TOKEN = re.compile(
+    r"(?:%s)\s*[:：]" % "|".join(sorted(_TAIL_LABEL_KEY, key=len, reverse=True)))
+# 水印常把人员写成尾巴上的裸词（「… 多云31°C 监理」，不带冒号），
+# 直接剥出来归到 person，别让它挂在天气值后面。
+_PERSON_BARE = ("监理员", "监理工程师", "监理", "施工员", "安全员", "质检员", "项目经理", "甲方", "业主")
+# 确认串里真的是水印尾巴（而不是正文里出现「时间：15:00」）的锚点：
+# 出现「摄时间/拍摄时间/天气/气温」这类水印专有字段才算。
+_TAIL_ANCHOR = re.compile(r"(?:摄时间|拍摄时间|拍照时间|记录时间|天气|气温)\s*[:：]")
+
+
+def _parse_tail_fields(tail: str) -> dict[str, str]:
+    """把尾巴串按「标签：值」拆成结构化字段（取首个非空）。"""
+    out: dict[str, str] = {}
+    hits = list(_TAIL_TOKEN.finditer(tail))
+    for i, m in enumerate(hits):
+        label = re.sub(r"[\s:：]+$", "", m.group(0))
+        key = _TAIL_LABEL_KEY.get(label)
+        if not key:
+            continue
+        end = hits[i + 1].start() if i + 1 < len(hits) else len(tail)
+        value = re.sub(r"\s+", " ", tail[m.end():end]).strip(_HINT_TRIM)
+        # 尾部裸人员词（「… 晴27°C 监理」）：剥出来记人员，别留在天气/时间值里
+        for person in _PERSON_BARE:
+            if value.endswith(person):
+                value = value[: -len(person)].strip(_HINT_TRIM)
+                out.setdefault("person", person)
+                break
+        if value and key not in out:
+            out[key] = value
+    return out
+
+
+def split_hint(text: str) -> tuple[str, dict[str, str]]:
+    """水印「内容」→（干净的施工内容, 尾巴里解析出的结构化字段）。
+
+    例：``顶板钢筋模板验收 摄时间：2026.10.27 15:18 气：多云31°C 监理``
+    → ``("顶板钢筋模板验收", {"taken_at": "2026.10.27 15:18", "weather": "多云31°C", "person": "监理"})``
+    """
+    s = str(text or "").strip()
+    if not s:
+        return "", {}
+    cut = len(s)
+    for pattern in (_HINT_CUT_LONG, _HINT_CUT_SHORT):
+        m = pattern.search(s)
+        if m and m.start() < cut:
+            cut = m.start()
+    if cut == 0:
+        # 整条就是水印字段串（「拍摄时间：2026-10-27」），没有真正的施工内容
+        return "", _parse_tail_fields(s)
+    if cut < len(s):
+        return s[:cut].strip(_HINT_TRIM), _parse_tail_fields(s[cut:])
+    return s.strip(_HINT_TRIM), {}
+
+
+def clean_hint(text: str) -> str:
+    """把水印「内容」尾巴上的字段串切掉，只留真正的施工内容（见 split_hint）。"""
+    return split_hint(text)[0]
+
+
+def looks_like_watermark_tail(text: str) -> bool:
+    """正文里是否真的混进了水印尾巴（用于单图建记录时决定要不要清洗）。"""
+    return bool(_TAIL_ANCHOR.search(str(text or "")))
+
+
+def clean_hints(hints) -> list[str]:
+    """清洗 + 去重保序；清洗后为空的提示直接丢掉（否则「时间：…」会被当成工作内容）。"""
+    out: list[str] = []
+    seen: set[str] = set()
+    for hint in hints or []:
+        cleaned = clean_hint(hint)
+        if not cleaned or cleaned in seen:
+            continue
+        seen.add(cleaned)
+        out.append(cleaned)
+    return out
 
 
 def summarize(groups: list[ImageGroup]) -> str:

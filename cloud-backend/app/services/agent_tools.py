@@ -1318,23 +1318,43 @@ def _parse_model_image_groups(raw, images: list, signals: list | None = None) ->
             buckets[rtype] = grp
             order.append(rtype)
         for u in urls:
-            if u not in grp.images:
-                grp.images.append(u)
-                wm = {}
-                # 尽量按图片序号对齐视觉信号，带出部位 / 拍摄时间
-                try:
-                    i = images.index(u)
-                    sig = (signals or [])[i] if i < len(signals or []) else None
-                    if isinstance(sig, dict):
-                        wm = {
-                            "section": str(sig.get("section") or "").strip(),
-                            "taken_at": str(sig.get("taken_at") or "").strip(),
-                            "project_name": str(sig.get("project_name") or "").strip(),
-                            "weather": str(sig.get("weather") or "").strip(),
-                        }
-                except (ValueError, IndexError):
-                    pass
-                grp.wm.append(wm)
+            if u in grp.images:
+                continue
+            grp.images.append(u)
+            wm = {}
+            sig = None
+            # 尽量按图片序号对齐视觉信号，带出部位 / 拍摄时间 / 天气 / 人员
+            try:
+                i = images.index(u)
+                sig = (signals or [])[i] if i < len(signals or []) else None
+            except (ValueError, IndexError):
+                sig = None
+            if isinstance(sig, dict):
+                sig = dict(sig)
+                # 信号里的内容可能带水印尾巴：切出来补到信号字段（时间/天气/人员），
+                # 工作内容只留干净部分 —— 信息共存，不因清洗而丢
+                tail: dict = {}
+                raw_content = str(sig.get("content") or "")
+                if raw_content and multi_image_split.looks_like_watermark_tail(raw_content):
+                    cleaned, tail = multi_image_split.split_hint(raw_content)
+                    if cleaned:
+                        sig["content"] = cleaned
+                for key, value in tail.items():
+                    if not str(sig.get(key) or "").strip():
+                        sig[key] = value
+                wm = {
+                    "section": str(sig.get("section") or "").strip(),
+                    "taken_at": str(sig.get("taken_at") or "").strip(),
+                    "project_name": str(sig.get("project_name") or "").strip(),
+                    "weather": str(sig.get("weather") or "").strip(),
+                    "person": str(sig.get("person") or sig.get("inspector") or "").strip(),
+                }
+                # 模型给的分组本身不带 content：从信号里补，否则工作内容只剩
+                # 「验收（由N张现场照片自动归类，待补全内容）」这种占位。
+                hint = multi_image_split.clean_hint(str(sig.get("content") or ""))
+                if hint and hint not in grp.hints:
+                    grp.hints.append(hint)
+            grp.wm.append(wm)
     if not buckets:
         return None
     result = [buckets[r] for r in order if r != "待定"]
@@ -1392,16 +1412,18 @@ def _split_need_more(groups, material: str | None = None, n_images: int = 0) -> 
 
 
 def _split_watermark_fields(wms: list) -> tuple:
-    """从分组逐图水印聚合「施工部位 / 业务日期 / 天气」，供分组建单回填。
+    """从分组逐图水印聚合「施工部位 / 业务日期 / 天气 / 人员」，供分组建单回填。
 
     - 部位：合并组内各图非空的 单位工程/施工区域/部位，去重（同组多图可能分属不同单位工程）。
     - 日期：取各图拍摄时间中最早的一个；无拍摄时间则回退今天（与单图无信号时一致）。
     - 天气：取首个非空值。
+    - 人员：去重留档（记录表无独立栏，落 content_json，避免清洗工作内容后被丢掉）。
     """
     _DATE_PREFIX = re.compile(r"(\d{4})[.\-/年](\d{1,2})[.\-/月](\d{1,2})")
     sections: list[str] = []
     dates: list = []
     weather = ""
+    persons: list[str] = []
     for w in wms or []:
         if not isinstance(w, dict):
             continue
@@ -1418,9 +1440,12 @@ def _split_watermark_fields(wms: list) -> tuple:
         wt = str(w.get("weather") or "").strip()
         if wt and not weather:
             weather = wt
+        ps = str(w.get("person") or "").strip()
+        if ps and ps not in persons:
+            persons.append(ps)
     section = " / ".join(sections) if sections else None
     rec_date = min(dates) if dates else datetime.now().date()
-    return section, rec_date, (weather or None)
+    return section, rec_date, (weather or None), persons
 
 
 # 分组建单的回执/卡片标题用省统表正式表名（与 form_registry 一致），
@@ -1455,7 +1480,7 @@ async def _create_split_records(ctx: "ToolContext", groups: list) -> dict:
         # 按组回填水印字段：拍摄时间→业务日期，单位工程/施工区域→施工部位。
         # 分组确认可能跨轮，wm 随分组方案持久化，故不依赖 ctx 的临时 image_signals。
         wms = list(getattr(g, "wm", None) or [])
-        split_section, split_date, split_weather = _split_watermark_fields(wms)
+        split_section, split_date, split_weather, split_persons = _split_watermark_fields(wms)
         rec = WorkRecord(
             record_type=rtype,
             status=WorkRecordStatus.DRAFT.value,
@@ -1471,6 +1496,10 @@ async def _create_split_records(ctx: "ToolContext", groups: list) -> dict:
                 "source": "agent_multi_image_split",
                 "photo_count": len(photos),
                 "auto_classified": True,
+                # 水印里的拍摄时间/天气/人员原样留档：工作内容不再拼接它们，
+                # 但信息必须可追溯（2026-11-13「不能改一样丢一样」）
+                "watermark": [w for w in wms if isinstance(w, dict)],
+                **({"watermark_person": split_persons} if split_persons else {}),
             },
         )
         ctx.db.add(rec)
@@ -1508,9 +1537,12 @@ async def _create_split_records(ctx: "ToolContext", groups: list) -> dict:
 
 def _split_content(g, rtype: str) -> str:
     """分组记录的 content 草稿：优先用逐图内容提示拼接，否则给类型占位（待用户补全）。"""
-    hints = [str(h).strip() for h in (g.hints or []) if str(h).strip()]
+    # clean_hints：切掉水印尾巴（摄时间/天气/监理）并去重保序。
+    # 不清洗会把「…验收 摄时间：2026.10.27 15:18 气：多云31°C 监理」直接写进
+    # 记录的工作内容（2026-11-13 用户截图反馈）。
+    hints = multi_image_split.clean_hints(g.hints)
     if hints:
-        joined = "；".join(dict.fromkeys(hints))  # 去重保序
+        joined = "；".join(hints)
         return joined[:2000]
     if rtype == "待定":
         return "待确认归类（由现场照片自动分组，待补充类型与内容）"
@@ -1519,6 +1551,17 @@ def _split_content(g, rtype: str) -> str:
 
 async def _create_work_record(ctx: ToolContext, args: dict) -> dict:
     content = str(args.get("work_content") or args.get("content") or args.get("description") or "").strip()
+    # 工作内容里若被写进了水印尾巴（「摄时间：… 气：多云31°C 监理」），
+    # 清洗只切「工作内容」，切下来的时间/天气/人员回填到对应字段并存档（不丢信息）。
+    _content_raw = content
+    _wm_tail: dict = {}
+    if content and multi_image_split.looks_like_watermark_tail(content):
+        _cleaned, _wm_tail = multi_image_split.split_hint(content)
+        if _cleaned:
+            content = _cleaned
+        for _k, _v in _wm_tail.items():
+            if not str(args.get(_k) or "").strip():
+                args[_k] = _v
     section = str(args.get("section") or "").strip()
     location = str(args.get("location") or "").strip()
     # 跨轮持久化锚点：路由器最终会暂存它自己持有的 args 对象（即本参数），
@@ -2058,7 +2101,9 @@ async def _create_work_record(ctx: ToolContext, args: dict) -> dict:
         witness_cert_no=str(args.get("witness_cert_no") or "")[:64],
         content_json={
             "source": "agent",
-            "voice_text": content,
+            # 原话保留（含用户自己写的时间等），工作内容用清洗后的版本
+            "voice_text": _content_raw,
+            **({"watermark_tail": _wm_tail} if _wm_tail else {}),
             **contract_snapshot,
             **({"prov_fields": extra_values(args)} if extra_values(args) else {}),
             **({"hazard_type": hazard_type} if (is_weida and hazard_type) else {}),
