@@ -4,7 +4,7 @@ import 'element-plus/dist/index.css'
 import * as ElementPlusIconsVue from '@element-plus/icons-vue'
 import { use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
-import { BarChart as EBarChart, LineChart as ELineChart, PieChart as EPieChart } from 'echarts/charts'
+import { LineChart as ELineChart, PieChart as EPieChart } from 'echarts/charts'
 import {
   GridComponent,
   TooltipComponent,
@@ -24,7 +24,6 @@ import { useAuthStore } from './stores/auth'
 // 按需注册 echarts 组件
 use([
   CanvasRenderer,
-  EBarChart,
   ELineChart,
   EPieChart,
   GridComponent,

@@ -940,7 +940,10 @@ Page(themed({
           detail: {
             ...result,
             inspection_time_text: inspectionTimeText,
-            problem_text: result.problems || result.inspection_remark || result.work_content || '',
+            // 🔴 问题及处理情况只该是 problems（巡视备注可作弱兜底），
+            // 绝不能落 work_content：那是施工内容/照片水印文字，
+            // 拿它顶替会让「问题处理」显示成一段水印（2026-11-13 现场确认）。
+            problem_text: result.problems || result.inspection_remark || '',
             created_at: result.created_at?.replace('T', ' ').slice(0, 16),
           },
           detailPhotos: photos,

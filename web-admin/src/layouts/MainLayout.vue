@@ -128,10 +128,6 @@
          错分到 charts chunk，运行时 TDZ 报错整站白屏（2026-10-20 踩过）。
          挂在这里是路由级懒加载 chunk，不参与入口分包。 -->
     <ProjectPickDialog />
-
-    <!-- 监理小助手：全站悬浮球。挂在布局层，路由切换不卸载会话状态；
-         同样不放进 App.vue，避免入口 chunk 被牵连分包。 -->
-    <AssistantBall />
   </el-container>
 </template>
 
@@ -142,7 +138,6 @@ import { ElMessage } from 'element-plus'
 import { useAuthStore } from '@/stores/auth'
 import { roleLabel } from '@/constants/role'
 import ProjectPickDialog from '@/components/ProjectPickDialog.vue'
-import AssistantBall from '@/components/assistant/AssistantBall.vue'
 import { projectApi } from '@/api'
 import { Fold, Expand, ArrowDown, OfficeBuilding } from '@element-plus/icons-vue'
 

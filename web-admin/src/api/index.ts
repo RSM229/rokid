@@ -158,17 +158,6 @@ export const authApi = {
   // role 可省略：省略时后端按账号真实岗位自动判定
   login: (username: string, password: string, role?: string) =>
     http.post('/auth/login', role ? { username, password, role } : { username, password }),
-  // 扫码登录：web 生成二维码 → 小程序确认 → web 轮询换 token
-  createScanLogin: () =>
-    http.post<{
-      ticket: string
-      secret: string
-      code: string
-      expires_in: number
-      qr_text: string
-    }>('/auth/scan-login/create'),
-  scanLoginStatus: (ticket: string, secret: string) =>
-    http.get<Record<string, any>>('/auth/scan-login/status', { params: { ticket, secret } }),
   // 已登录用户用项目邀请码加入项目（后端 /auth/invite-codes/{code}/join）
   joinProjectByInvite: (code: string) =>
     http.post(`/auth/invite-codes/${encodeURIComponent(code)}/join`),
@@ -275,8 +264,7 @@ export const hazardApi = {
   detect: (file: File) => {
     const form = new FormData()
     form.append('image', file)
-    // VLM 识别实测 15~140s 不等（供应商偶发慢/失败），默认 30s 会直接超时
-    return http.post('/hazard/detect', form, { timeout: 180000 })
+    return http.post('/hazard/detect', form)
   },
   detectAndSave: async (file: File, params?: any) => {
     const form = new FormData()

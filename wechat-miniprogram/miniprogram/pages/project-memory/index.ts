@@ -2,7 +2,7 @@ import { request } from '../../services/request'
 import { themed } from '../../utils/theme'
 
 /**
- * 项目规约（项目级共享规则）· 2026-11-09 新建
+ * 项目记忆（项目级共享记忆）· 2026-11-09 新建
  *
  * 能力：查看/维护「本项目总监设定的统一口径」——全项目成员共享，个人记忆
  * 不在这里（去「我的 - AI 记忆」）。写权限由后端按 project_members 岗位判定：
@@ -201,7 +201,7 @@ Page(themed({
   async submitMemory() {
     const content = this.data.inputValue.trim()
     if (!content) {
-      wx.showToast({ title: '请输入项目规约内容', icon: 'none' })
+      wx.showToast({ title: '请输入项目记忆内容', icon: 'none' })
       return
     }
     this.setData({ adding: true })
@@ -248,7 +248,7 @@ Page(themed({
     )
     if (!item) return
     wx.showModal({
-      title: '删除项目规约',
+      title: '删除项目记忆',
       content: `确定删除「${item.content}」吗？删除后全项目下一轮对话都不再遵守这条口径。`,
       confirmText: '删除',
       confirmColor: '#c0392b',

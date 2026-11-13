@@ -52,17 +52,6 @@
   mask-image: url("data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2024%2024%22%3E%3Cpath%20fill=%22%230f7a55%22%20d=%22M12,1L3,5v6c0,5.55,3.84,10.74,9,12c5.16-1.26,9-6.45,9-12V5l-9-4z%22/%3E%3C/svg%3E");
 }
 
-/* 扫码登录网页端：深青（二维码方块） */
-.entry-icon.ic-qr {
-  background: rgba(15,122,85,0.10);
-  border-color: rgba(15,122,85,0.20);
-}
-.entry-icon.ic-qr::before {
-  background-color: #0f7a55;
-  -webkit-mask-image: url("data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2024%2024%22%3E%3Cpath%20fill=%22%230f7a55%22%20d=%22M3,3h8v8H3zM5,5v4h4V5zM13,3h8v8h-8zM15,5v4h4V5zM3,13h8v8H3zM5,15v4h4v-4zM13,13h3v3h-3zM18,13h3v3h-3zM13,18h3v3h-3zM18,18h3v3h-3z%22/%3E%3C/svg%3E");
-  mask-image: url("data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2024%2024%22%3E%3Cpath%20fill=%22%230f7a55%22%20d=%22M3,3h8v8H3zM5,5v4h4V5zM13,3h8v8h-8zM15,5v4h4V5zM3,13h8v8H3zM5,15v4h4v-4zM13,13h3v3h-3zM18,13h3v3h-3zM13,18h3v3h-3zM18,18h3v3h-3z%22/%3E%3C/svg%3E");
-}
-
 /* 设置：中性灰蓝（齿轮）。刻意不用主题色 —— 它是配置入口，不抢看板的位置 */
 .entry-icon.ic-gear {
   background: rgba(20,40,60,0.07);

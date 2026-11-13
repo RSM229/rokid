@@ -75,13 +75,13 @@ Page(themed({
     }
   },
 
-  /** 项目规约页：查看本项目共享口径；总监/总监代表可在那边直接维护。 */
+  /** 项目记忆页：查看本项目共享口径；总监/总监代表可在那边直接维护。 */
   openProjectMemory() {
     wx.navigateTo({ url: '/pages/project-memory/index' })
   },
 
   /**
-   * 把一条个人记忆发布为项目规约（仅总监/总监代表可用）。
+   * 把一条个人记忆发布为项目记忆（仅总监/总监代表可用）。
    * 复制而不是引用：之后个人记忆停用，不会撤掉项目统一口径。
    */
   publishToProject(event: WechatMiniprogram.TouchEvent) {
@@ -90,7 +90,7 @@ Page(themed({
     )
     if (!item) return
     wx.showModal({
-      title: '发布到项目规约',
+      title: '发布到项目记忆',
       content: `发布后「${item.rule}」将对全项目成员生效。确定发布吗？`,
       confirmText: '发布',
       success: async (res) => {
