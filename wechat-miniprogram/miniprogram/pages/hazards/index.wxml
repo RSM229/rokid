@@ -66,4 +66,8 @@
     </picker>
     <button class="primary" style="margin-top: 26rpx;" loading="{{actionId === rectHazardId}}" disabled="{{actionId === rectHazardId}}" bindtap="confirmRect">生成整改通知单</button>
   </view>
+
+  <!-- 全屏图片预览（带「上一张/下一张」按钮） -->
+  <image-viewer visible="{{imageViewerVisible}}" urls="{{imageViewerUrls}}"
+                current="{{imageViewerCurrent}}" bind:close="onImageViewerClose" />
 </view>

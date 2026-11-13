@@ -1,0 +1,26 @@
+<!-- 全屏图片预览（带「上一张/下一张」按钮与计数）。
+     微信原生 wx.previewImage 没有上一张/下一张按钮、多图只能滑动，
+     且只传单图时根本无法切换——本项目四类图片场景统一用它替代。
+     mask 与 modal 必须平级兄弟；modal 自持 position:fixed 全屏，不嵌 mask。 -->
+<view wx:if="{{open}}" class="iv-mask" catchtap="close"></view>
+<view wx:if="{{open}}" class="iv-modal">
+  <view class="iv-head">
+    <text class="iv-count">{{activeIndex + 1}} / {{urls.length}}</text>
+    <view class="iv-close" catchtap="close">×</view>
+  </view>
+
+  <swiper class="iv-swiper" current="{{activeIndex}}" duration="200"
+          bindchange="onSwiperChange" circular="{{urls.length > 1}}">
+    <swiper-item wx:for="{{urls}}" wx:key="*this" class="iv-slide">
+      <image class="iv-image" src="{{item}}" mode="aspectFit"
+             bindtap="dismissHint" data-url="{{item}}" />
+    </swiper-item>
+  </swiper>
+
+  <!-- 上一张/下一张 按钮：只有多图时显示；点按钮切换 + 同步 swiper -->
+  <view wx:if="{{urls.length > 1}}" class="iv-nav iv-prev" catchtap="prev">‹</view>
+  <view wx:if="{{urls.length > 1}}" class="iv-nav iv-next" catchtap="next">›</view>
+
+  <text wx:if="{{showHint && urls.length > 1}}" class="iv-hint"
+        catchtap="dismissHint">左右滑动或点 ‹ › 切换照片</text>
+</view>

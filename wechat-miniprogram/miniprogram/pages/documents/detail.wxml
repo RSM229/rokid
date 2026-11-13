@@ -46,7 +46,8 @@
 
         <view class="card-title" style="margin-top:20rpx;" wx:if="{{images.length}}">关联影像</view>
         <view class="images" wx:if="{{images.length}}">
-          <image wx:for="{{images}}" wx:key="*this" src="{{item}}" mode="aspectFill" class="thumb" />
+          <image wx:for="{{images}}" wx:key="*this" src="{{item}}" mode="aspectFill" class="thumb"
+                 data-url="{{item}}" bindtap="previewImage" />
         </view>
 
         <view class="card-title" style="margin-top:20rpx;" wx:if="{{doc.status === '草稿' && contentEditor.length}}">补填 / 修订日志</view>
@@ -136,4 +137,8 @@
       </view>
     </view>
   </view>
+
+  <!-- 全屏图片预览（带「上一张/下一张」按钮；关联影像点开即进这里） -->
+  <image-viewer visible="{{imageViewerVisible}}" urls="{{imageViewerUrls}}"
+                current="{{imageViewerCurrent}}" bind:close="onImageViewerClose" />
 </view>

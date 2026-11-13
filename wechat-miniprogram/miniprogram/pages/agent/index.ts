@@ -525,6 +525,10 @@ Page(themed({
 
   data: {
     messages: [] as Message[],
+    // 全屏图片预览（带上一张/下一张按钮；替代 wx.previewImage，见组件注释）
+    imageViewerVisible: false,
+    imageViewerUrls: [] as string[],
+    imageViewerCurrent: 0,
     // 空态问候语：按时间段 + 待办/草稿动态生成，比固定文案「活」
     heroGreeting: '您好！今天有什么工作需要我帮您处理?',
     // ima 风格空状态：竖排建议按钮（icon + 文案），点击走 handleActionTap
@@ -4263,7 +4267,7 @@ Page(themed({
     const item = this.data.attachments[index]
     if (!item || item.kind !== 'image') return
     const urls = this.data.attachments.filter(a => a.kind === 'image').map(a => a.path)
-    wx.previewImage({ current: item.path, urls })
+    this.openImageViewer(urls, item.path)
   },
 
   /** 聊天记录里的图片点开预览：同一消息的多张图传给 urls，支持左右滑动/上一张下一张 */
@@ -4272,15 +4276,59 @@ Page(themed({
     if (!url) return
     const mi = Number(event.currentTarget.dataset.mi)
     const msg = this.data.messages[mi]
-    // 该消息的图片全集：优先多图数组，其次单图
-    const urls = msg && msg.images && msg.images.length
+    // 该消息的图片全集：优先多图数组，其次单图。
+    // 🔴 不用原生 wx.previewImage：它没有「上一张/下一张」按钮、多图只能滑动，
+    // 且只传 1 张时根本切不了（用户反馈「点不了下一张，只能退出」）。统一走
+    // 带按钮的 image-viewer 组件。这里把 本地路径(images/image) 与 服务端兜底
+    // (remoteImages) 做并集去重，避免「本地照片已失效、remoteImages 却没进 urls」
+    // 导致预览里只有一张。
+    const localUrls = msg?.images && msg.images.length
       ? [...msg.images]
-      : (msg && msg.image ? [msg.image] : [url])
-    if (urls.length > 1) {
-      wx.previewImage({ current: url, urls })
-    } else {
-      wx.previewImage({ current: url, urls: [url] })
-    }
+      : (msg?.image ? [msg.image] : [])
+    const remoteUrls = msg?.remoteImages && msg.remoteImages.length
+      ? [...msg.remoteImages]
+      : []
+    const urls = Array.from(new Set([...localUrls, ...remoteUrls, url].filter(Boolean)))
+    this.openImageViewer(urls.length ? urls : [url], url)
+  },
+
+  /** 聊天内其它缩略图（水印照片卡/事件证据/隐患候选）统一预览：组件带上一张/下一张 */
+  previewInlineImages(event: WechatMiniprogram.TouchEvent) {
+    const url = String(event.currentTarget.dataset.url || '')
+    if (!url) return
+    const mi = Number(event.currentTarget.dataset.mi)
+    const msg = this.data.messages[mi]
+    // data-group：该卡片自己的照片数组（水印照片卡/事件证据卡），
+    // 让同一张卡里的多张照片能互相切换，而不是只看到点开的这一张。
+    const group = event.currentTarget.dataset.group as { image?: string }[] | undefined
+    const groupUrls = Array.isArray(group)
+      ? group.map(item => String(item?.image || '')).filter(Boolean)
+      : []
+    // 集合 = 卡片内照片 + 消息本地图 + 服务端兜底图 + 当前点击图（去重）
+    const localUrls = msg?.images && msg.images.length ? [...msg.images] : (msg?.image ? [msg.image] : [])
+    const remoteUrls = msg?.remoteImages && msg.remoteImages.length ? [...msg.remoteImages] : []
+    const urls = Array.from(new Set([...groupUrls, ...localUrls, ...remoteUrls, url].filter(Boolean)))
+    const list = urls.length ? urls : [url]
+    this.setData({
+      imageViewerVisible: true,
+      imageViewerUrls: list,
+      imageViewerCurrent: Math.max(0, list.indexOf(url)),
+    })
+  },
+
+  /** 聊天内图片统一走带「上一张/下一张」的组件（替代无按钮的原生预览） */
+  openImageViewer(urls: string[], currentUrl: string) {
+    const list = Array.from(new Set((urls || []).filter(Boolean)))
+    if (!list.length) return
+    this.setData({
+      imageViewerVisible: true,
+      imageViewerUrls: list,
+      imageViewerCurrent: Math.max(0, list.indexOf(currentUrl)),
+    })
+  },
+
+  onImageViewerClose() {
+    this.setData({ imageViewerVisible: false, imageViewerUrls: [], imageViewerCurrent: 0 })
   },
 
   /** 消息内图片加载失败兜底：本地临时路径失效时切换到服务端远程地址（remoteImages）。

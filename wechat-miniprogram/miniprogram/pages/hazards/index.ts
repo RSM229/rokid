@@ -60,6 +60,10 @@ Page(themed({
     showDeadline: false,
     rectDeadline: '',
     rectHazardId: 0,
+    // 全屏图片预览（带「上一张/下一张」按钮，替代原生 wx.previewImage）
+    imageViewerVisible: false,
+    imageViewerUrls: [] as string[],
+    imageViewerCurrent: 0,
   },
   onLoad(options: Record<string, string>) {
     if (!requireLogin('pages/hazards/index', options)) return
@@ -110,12 +114,22 @@ Page(themed({
     const current = event.currentTarget.dataset.url as string
     const id = Number(event.currentTarget.dataset.id || 0)
     const item = this.data.hazards.find((hazard) => hazard.id === id)
-    const urls = [
+    const rawUrls = [
       item?.image_url,
       item?.rectification_image_url,
       ...(item?.detail?.media || []).map((media) => media.url || ''),
     ].filter((url): url is string => Boolean(url))
-    if (current) wx.previewImage({ current, urls })
+    if (!current) return
+    // 用带「上一张/下一张」按钮的组件替代原生预览（原生多图只能滑动、单图切不了）
+    const urls = Array.from(new Set(rawUrls))
+    this.setData({
+      imageViewerVisible: true,
+      imageViewerUrls: urls,
+      imageViewerCurrent: Math.max(0, urls.indexOf(current)),
+    })
+  },
+  onImageViewerClose() {
+    this.setData({ imageViewerVisible: false, imageViewerUrls: [], imageViewerCurrent: 0 })
   },
   async toggleDetail(event: WechatMiniprogram.TouchEvent) {
     const id = Number(event.currentTarget.dataset.id)

@@ -134,7 +134,7 @@
             <view wx:if="{{item.reviewUnassignedEvidence && item.reviewUnassignedEvidence.length}}" class="inline-review-unassigned">
               <text class="inline-review-label">尚未分配的照片证据</text>
               <view wx:for="{{item.reviewUnassignedEvidence}}" wx:for-item="photo" wx:key="id" class="inline-watermark-photo">
-                <view class="inline-watermark-head"><image src="{{photo.image}}" mode="aspectFill"/><text>图片水印信息</text><text>{{photo.status}}</text></view>
+                <view class="inline-watermark-head"><image src="{{photo.image}}" mode="aspectFill" data-url="{{photo.image}}" data-mi="{{mi}}" bindtap="previewInlineImages" data-group="{{item.reviewUnassignedEvidence}}"/><text>图片水印信息</text><text>{{photo.status}}</text></view>
                 <block wx:if="{{photo.items.length}}">
                   <view wx:for="{{photo.items}}" wx:for-item="field" wx:key="index" class="inline-review-source">{{field.label}}：{{field.value || '未识别/未知'}}</view>
                 </block>
@@ -218,7 +218,7 @@
               <text wx:if="{{event.watermarkSummary}}" class="inline-review-source">水印字段（待核对）：{{event.watermarkSummary}}</text>
               <text wx:if="{{!event.watermarkSummary && event.evidenceCount}}" class="inline-review-source">水印字段未识别到；地点、区域、参建单位及记录表所需信息可在对话中补充。</text>
               <view wx:for="{{event.evidenceFields}}" wx:for-item="photo" wx:key="id" class="inline-watermark-photo">
-                <view class="inline-watermark-head"><image src="{{photo.image}}" mode="aspectFill"/><text>图片水印信息</text><text>{{photo.status}}</text></view>
+                <view class="inline-watermark-head"><image src="{{photo.image}}" mode="aspectFill" data-url="{{photo.image}}" data-mi="{{mi}}" bindtap="previewInlineImages" data-group="{{event.evidenceFields}}"/><text>图片水印信息</text><text>{{photo.status}}</text></view>
                 <view wx:for="{{photo.items}}" wx:for-item="field" wx:key="index" class="inline-watermark-field">
                   <input value="{{field.label}}" placeholder="字段名（如施工区域）" data-index="{{mi}}" data-evidence="{{photo.id}}" data-item="{{field.index}}" data-key="label" bindblur="changeInlineWatermarkField" />
                   <input value="{{field.value}}" placeholder="未识别/未知，可补充" data-index="{{mi}}" data-evidence="{{photo.id}}" data-item="{{field.index}}" data-key="value" bindblur="changeInlineWatermarkField" />
@@ -272,7 +272,7 @@
             <view wx:for="{{item.hazardCandidates}}" wx:for-item="candidate" wx:key="id" class="inline-hazard-item {{candidate.status}}">
               <view class="inline-hazard-row">
                 <view class="inline-hazard-select {{candidate.selected ? 'selected' : ''}}" data-index="{{mi}}" data-id="{{candidate.id}}" bindtap="toggleHazardCandidate">{{candidate.selected ? '✓' : ''}}</view>
-                <image class="inline-hazard-photo" src="{{candidate.image}}" mode="aspectFill" />
+                <image class="inline-hazard-photo" src="{{candidate.image}}" mode="aspectFill" data-url="{{candidate.image}}" data-mi="{{mi}}" bindtap="previewInlineImages" />
                 <view class="inline-hazard-main">
                   <text class="inline-hazard-risk">{{candidate.title}}</text>
                   <text class="inline-hazard-meta">{{candidate.riskCategory}}{{candidate.section ? ' · ' + candidate.section : ''}}{{candidate.location ? ' · ' + candidate.location : ''}}</text>
@@ -767,3 +767,6 @@
     </view>
   </view>
 </view>
+
+<!-- 全屏图片预览（带上一张/下一张）：聊天内所有图片入口共用 -->
+<image-viewer visible="{{imageViewerVisible}}" urls="{{imageViewerUrls}}" current="{{imageViewerCurrent}}" bind:close="onImageViewerClose" />

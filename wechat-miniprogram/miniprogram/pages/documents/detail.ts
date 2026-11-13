@@ -79,6 +79,10 @@ Page(themed({
     doc: null as DocumentDetail | null,
     fields: [] as { key: string; value: string }[],
     images: [] as string[],
+    // 全屏图片预览（带「上一张/下一张」按钮，替代原生 wx.previewImage）
+    imageViewerVisible: false,
+    imageViewerUrls: [] as string[],
+    imageViewerCurrent: 0,
     hasPdf: false,
     submitting: false,
     generatingPdf: false,
@@ -147,6 +151,22 @@ Page(themed({
   onContentInput(event: WechatMiniprogram.Input) {
     const key = String(event.currentTarget.dataset.key)
     this.setData({ contentEditor: this.data.contentEditor.map(f => f.key === key ? { ...f, value: event.detail.value } : f) })
+  },
+
+  /** 关联影像：传全文书影像，支持左右切换（原生 wx.previewImage 无上一张/下一张按钮） */
+  previewImage(event: WechatMiniprogram.TouchEvent) {
+    const url = String(event.currentTarget.dataset.url || '')
+    const list = Array.from(new Set([...(this.data.images || []), url].filter(Boolean)))
+    if (!list.length) return
+    this.setData({
+      imageViewerVisible: true,
+      imageViewerUrls: list,
+      imageViewerCurrent: Math.max(0, list.indexOf(url)),
+    })
+  },
+
+  onImageViewerClose() {
+    this.setData({ imageViewerVisible: false, imageViewerUrls: [], imageViewerCurrent: 0 })
   },
 
   /** 文件导出 PDF 行：有则打开，无则先生成再打开 */
