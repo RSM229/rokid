@@ -178,6 +178,7 @@ async def ensure_agent_history_schema() -> None:
         AgentRequestTrace,
         AgentUserPreference,
     )
+    from app.models.agent_task import AgentAsyncTask
 
     try:
         async with engine.begin() as conn:
@@ -190,6 +191,7 @@ async def ensure_agent_history_schema() -> None:
                     AgentUserPreference.__table__,
                     AgentProjectMemory.__table__,
                     AgentProjectMemoryAudit.__table__,
+                    AgentAsyncTask.__table__,
                 ],
             )
     except SQLAlchemyError:

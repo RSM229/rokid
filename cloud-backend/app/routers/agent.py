@@ -26,7 +26,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.responses import StreamingResponse
 
-from app.db import get_db
+from app.db import get_db, async_session
 from app.models.user import Project, User
 from app.models.work_record import WorkRecord, WorkRecordType, WorkRecordStatus
 from app.models.agent_draft import AgentConversationMessage, AgentFlowInstance, AgentReviewPlan
@@ -53,9 +53,15 @@ from app.services.agent_context import (
     render_conversation_history,
 )
 from app.services import agent_review_plan
+from app.services import doc_quality
+from app.services import agent_task_registry
 from app.services.text_clean import strip_markdown
 
 logger = logging.getLogger(__name__)
+
+# 客户端断开后仍需跑完的 SSE 后台轮次：强引用必须独立于 task_key
+# （任务表未迁移时 task_key 为 None，_LIVE_TASKS 不会登记，Task 可能被 GC）。
+_DETACHED_TASKS: set = set()
 
 # 流式对话（SSE）的发射器：设置后，模型调用点会把 reasoning/content 增量推给端点的队列。
 # 用 ContextVar 而不是层层加参数，避免改动 600 行的 _agent_chat_impl 签名。
@@ -2023,6 +2029,13 @@ async def _agent_chat_impl(
                     if _label not in existing:
                         existing.append(_label)
                 result["chips"] = existing
+        # 2026-11-13：建档成功后统一补「缺项标黄 + 独立复核意见」。
+        # 只加工回执，不改业务写库；复核失败/超时由 doc_quality 内部降级，绝不阻断出稿。
+        if result.get("ok") and str(tool or "") == "create_work_record":
+            try:
+                await doc_quality.enrich_action_result(result, args, message)
+            except Exception:  # noqa: BLE001
+                logger.warning("doc quality enrichment failed", exc_info=True)
         return {"kind": "action", "tool": tool, "model": model_id,
                 "request_plan": incoming_plan, **result}
 
@@ -2277,6 +2290,20 @@ async def agent_chat_stream(
     前端在拿不到 SSE 时应回退到 ``/chat``（本端点不复用其响应，两者可并存）。
     """
     queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+    # 2026-11-13「说一句就走」：把这一轮登记成可查询的后台任务。表未迁移 /
+    # DB 抖动时静默降级成原来的纯内存 SSE，绝不让任务登记影响聊天主流程。
+    user_id = int(user.id)
+    task_key: str | None = None
+    try:
+        task_key = await agent_task_registry.create_task(
+            user_id=user_id,
+            project_id=getattr(user, "project_id", None),
+            conversation_id=(req.conversation_id or "").strip()[:64] or None,
+            kind="agent_chat",
+            request=json.loads(req.model_dump_json()),
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning("agent task registration failed; stream runs without persistence")
 
     async def emitter(event: dict[str, Any]) -> None:
         await queue.put(event)
@@ -2284,15 +2311,31 @@ async def agent_chat_stream(
     async def runner() -> None:
         token = _STREAM_EMITTER.set(emitter)
         meta_token = _STREAM_META.set(_new_stream_meta())
+        # 🔴 客户端断开后 runner 仍要跑完：不能用请求的 db/user（响应结束即失效），
+        # 另开会话并重新加载用户；agent_chat 内部会把回执写进会话历史。
         try:
-            result = await agent_chat(req, user=user, db=db)
+            await agent_task_registry.mark_running(task_key)
+            async with async_session() as run_db:
+                fresh_user = await run_db.get(User, user_id)
+                if fresh_user is None:
+                    raise RuntimeError("用户不存在，后台轮次无法继续")
+                result = await agent_chat(req, user=fresh_user, db=run_db)
+            await agent_task_registry.finish_task(
+                task_key, result if isinstance(result, dict) else {}
+            )
             await queue.put({"type": "done", "result": result})
+        except asyncio.CancelledError:
+            await agent_task_registry.fail_task(task_key, "任务被取消")
+            raise
         except HTTPException as exc:
+            await agent_task_registry.fail_task(task_key, str(exc.detail))
             await queue.put({"type": "error", "message": str(exc.detail)})
         except model_gateway.ModelGatewayError as exc:
+            await agent_task_registry.fail_task(task_key, str(exc))
             await queue.put({"type": "error", "message": str(exc)})
         except Exception:  # noqa: BLE001 —— 错误要变成事件，不能让 SSE 静默断流
             logger.exception("agent stream failed")
+            await agent_task_registry.fail_task(task_key, "服务异常")
             await queue.put({"type": "error", "message": "服务异常，请稍后重试。"})
         finally:
             _STREAM_META.reset(meta_token)
@@ -2300,9 +2343,18 @@ async def agent_chat_stream(
 
     async def event_stream():
         task = asyncio.create_task(runner())
+        _DETACHED_TASKS.add(task)
+        agent_task_registry.register_live(task_key, task)
+
+        def _on_done(finished) -> None:
+            _DETACHED_TASKS.discard(finished)
+            agent_task_registry.drop_live(task_key)
+
+        task.add_done_callback(_on_done)
         yield _sse_pack("meta", {
             "conversation_id": req.conversation_id,
             "request_id": req.request_id,
+            "task_key": task_key,
         })
         try:
             while True:
@@ -2316,10 +2368,10 @@ async def agent_chat_stream(
                     break
                 yield _sse_pack(kind, event)
         finally:
+            # 🔴 不再 cancel：客户端断开也让后台跑完，回执经 agent_chat 落会话历史，
+            # 用户回来刷新即可看到；状态可从 /api/agent/tasks/{task_key} 查。
             if not task.done():
-                task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await task
+                logger.info("agent stream detached; task continues: %s", task_key)
 
     return StreamingResponse(
         event_stream(),

@@ -30,8 +30,10 @@ from app.routers import stats_company
 from app.routers import files
 from app.routers import role_permissions
 from app.routers import agent
+from app.routers import agent_tasks
 from app.routers import image_archive
 from app.services.period_report_service import daily_report_worker
+from app.services.quality_guard import quality_guard_worker
 from app.db import close_db, ensure_agent_history_schema, init_db
 
 # 项目原先没有任何 logging 配置：root logger 无 handler，于是所有 logger.info
@@ -103,6 +105,9 @@ async def lifespan(app: FastAPI):
         if settings.daily_doc_auto
         else None
     )
+    # 质量守护（2026-11-13）：60s 清扫超时后台任务 + 每日待补汇总 + 每周冒烟。
+    # 与周期文书守护同批启动/收尾，不引入额外调度框架。
+    guard = asyncio.create_task(quality_guard_worker())
     try:
         yield
     finally:
@@ -114,6 +119,9 @@ async def lifespan(app: FastAPI):
             daily_docs.cancel()
             with suppress(asyncio.CancelledError):
                 await daily_docs
+        guard.cancel()
+        with suppress(asyncio.CancelledError):
+            await guard
         await close_db()
 
 
@@ -279,6 +287,11 @@ app.include_router(
     agent.router,
     prefix="/api/agent",
     tags=["智能体（聊天即操作）"],
+)
+app.include_router(
+    agent_tasks.router,
+    prefix="/api/agent",
+    tags=["Agent 异步任务与质量守护"],
 )
 
 # 受控文件服务：取代原先无鉴权的 /uploads、/exports StaticFiles 挂载
