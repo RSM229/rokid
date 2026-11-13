@@ -107,7 +107,12 @@ class TestWatermarkLines(unittest.TestCase):
         self.assertEqual(len(lines), 8)
         for i, line in enumerate(lines, 1):
             self.assertTrue(line.startswith(f"图片{i}："))
-            self.assertTrue(line.endswith("。"))
+            # 新格式：每张图多行，字段「名：值」各占一行
+            self.assertIn("：", line)
+        # 逐行带字段名：图片1 至少含 拍摄时间/施工内容/天气 三类标签
+        self.assertIn("拍摄时间：", lines[0])
+        self.assertIn("施工内容：", lines[0])
+        self.assertIn("天气：", lines[0])
         self.assertIn("2026-10-27 16:07", lines[0])
         self.assertIn("水泥搅拌桩施工", lines[0])
         self.assertIn("多云30℃", lines[0])

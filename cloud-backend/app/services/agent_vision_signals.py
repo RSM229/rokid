@@ -217,12 +217,20 @@ def watermark_lines(material: str, n_images: int) -> list[str]:
             lines.append(f"图片{num}：未读到水印。")
             continue
         wm_text, raw_text, _obs = _block_parts(block)
-        kv = {m.group(1): m.group(2).strip() for m in _WM_KV.finditer(wm_text)}
+        kv = {m.group(1).strip(): m.group(2).strip() for m in _WM_KV.finditer(wm_text)}
+        # 施工内容/工序通常不在结构化 KV 里，从识别原文单独补抽
         cm = _RAW_CONTENT.search(raw_text) or _RAW_CONTENT.search(block)
         content = cm.group(1).strip() if cm else ""
         if content:
             content = re.split(r"\s+拍摄时间[:：]", content, maxsplit=1)[0].strip()
-        pieces = [kv.get("拍摄时间"), kv.get("地点"), kv.get("部位"), content, kv.get("天气")]
-        pieces = [p for p in pieces if p]
-        lines.append(f"图片{num}：" + ("，".join(pieces) if pieces else "水印字段未识别") + "。")
+        if content and "施工内容" not in kv and "内容" not in kv:
+            kv["施工内容"] = content
+        if not kv:
+            lines.append(f"图片{num}：水印字段未识别。")
+            continue
+        # 每张图：标题行 + 每个字段「字段名：值」单独成行（带名、易读）
+        recap = [f"图片{num}："]
+        for label, value in kv.items():
+            recap.append(f"  {label}：{value}")
+        lines.append("\n".join(recap))
     return lines
