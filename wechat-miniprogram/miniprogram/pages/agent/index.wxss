@@ -632,3 +632,24 @@
 .pref-suggest-btn.primary { color: var(--on-brand, #fff); background: var(--brand, #0a2e5c); }
 .pref-suggest-btn.disabled { opacity: .55; }
 .pref-suggest-done { margin-top: 12rpx; font-size: 23rpx; color: #0f7a55; }
+
+/* 建档后缺项：只标黄提示，不追问、不拦保存（2026-11-13 B 层） */
+.doc-missing { margin-top: 12rpx; padding: 14rpx 18rpx; border-radius: 14rpx; background: rgba(200,120,51,.08); box-shadow: inset 0 0 0 1rpx rgba(200,120,51,.16); }
+.doc-missing-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12rpx; }
+.doc-missing-title { font-size: 23rpx; font-weight: 600; color: #8b5427; }
+.doc-missing-note { font-size: 20rpx; color: #a5825f; }
+.doc-missing-tags { display: flex; flex-wrap: wrap; gap: 8rpx; margin-top: 10rpx; }
+.doc-missing-tag { padding: 5rpx 12rpx; border-radius: 9rpx; background: rgba(255,255,255,.82); color: #8b5427; font-size: 20rpx; }
+.doc-missing-tag.required { background: rgba(200,120,51,.16); font-weight: 600; }
+/* 独立复核意见：并进同一条回执，默认收起 */
+.doc-review { margin-top: 12rpx; border-radius: 14rpx; background: rgba(19,121,91,.05); box-shadow: inset 0 0 0 1rpx rgba(19,121,91,.14); }
+.doc-review-head { display: flex; align-items: center; justify-content: space-between; padding: 14rpx 18rpx; }
+.doc-review-head:active { opacity: .7; }
+.doc-review-title { font-size: 23rpx; font-weight: 600; color: #13795b; }
+.doc-review-arrow { font-size: 28rpx; color: #13795b; transition: transform .2s ease; }
+.doc-review-arrow.expanded { transform: rotate(90deg); }
+.doc-review-list { padding: 0 18rpx 14rpx; }
+.doc-review-item { display: flex; align-items: flex-start; gap: 10rpx; margin-top: 10rpx; }
+.doc-review-tag { flex: none; padding: 3rpx 10rpx; border-radius: 8rpx; background: rgba(19,121,91,.1); color: #13795b; font-size: 19rpx; }
+.doc-review-tag.must { background: rgba(200,90,51,.12); color: #a44a24; }
+.doc-review-text { flex: 1; font-size: 22rpx; line-height: 1.5; color: var(--ink-2, #2f4157); }

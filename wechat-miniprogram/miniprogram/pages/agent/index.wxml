@@ -46,7 +46,8 @@
         </view>
       </view>
       <block wx:else>
-        <view wx:for="{{messages}}" wx:for-index="mi" wx:key="index" class="message {{item.role}}" id="msg-{{mi}}">
+        <view wx:for="{{messages}}" wx:for-index="mi" wx:key="index" class="message {{item.role}}" id="msg-{{mi}}"
+              data-index="{{mi}}" bindlongpress="onMessageLongPress">
           <view class="message-head">
             <text class="message-role">{{item.role === 'assistant' ? '监理智能体' : '我'}}</text>
           </view>
@@ -108,6 +109,30 @@
                 <text class="agent-card-title">{{cd.title}}</text>
                 <text wx:if="{{cd.sub}}" class="agent-card-sub">{{cd.sub}}</text>
                 <text wx:if="{{cd.time}}" class="agent-card-time">{{cd.time}}</text>
+              </view>
+            </view>
+          </view>
+          <!-- 建档后的缺项提示：只标黄、不追问、不拦保存（2026-11-13 B 层） -->
+          <view wx:if="{{item.docMissing && item.docMissing.length}}" class="doc-missing">
+            <view class="doc-missing-head">
+              <text class="doc-missing-title">还差 {{item.docMissing.length}} 项</text>
+              <text class="doc-missing-note">不影响保存</text>
+            </view>
+            <view class="doc-missing-tags">
+              <text wx:for="{{item.docMissing}}" wx:for-item="mf" wx:key="label"
+                    class="doc-missing-tag {{mf.required ? 'required' : ''}}">{{mf.label}}</text>
+            </view>
+          </view>
+          <!-- 独立复核意见：并进同一条回执、默认收起（jl D20：不多插一个气泡） -->
+          <view wx:if="{{item.docReview && item.docReview.items.length}}" class="doc-review">
+            <view class="doc-review-head" data-index="{{mi}}" bindtap="toggleDocReview">
+              <text class="doc-review-title">复核意见 · {{item.docReview.items.length}} 条</text>
+              <text class="doc-review-arrow {{item.docReviewExpanded ? 'expanded' : ''}}">›</text>
+            </view>
+            <view wx:if="{{item.docReviewExpanded}}" class="doc-review-list">
+              <view wx:for="{{item.docReview.items}}" wx:for-item="rv" wx:key="id" class="doc-review-item">
+                <text class="doc-review-tag {{rv.level === 'must_fix' ? 'must' : ''}}">{{rv.level === 'must_fix' ? '必须改' : '建议改'}}</text>
+                <text class="doc-review-text">{{rv.text}}</text>
               </view>
             </view>
           </view>

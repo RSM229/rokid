@@ -301,6 +301,11 @@ interface Message {
   progressStartedAt?: number
   progressTerminal?: boolean
   reviewProgress?: Array<{ label: string; state: 'done' | 'current' | 'pending' }>
+  /** 建档后服务端算出的缺项（只标黄提示，不拦保存、不追问） */
+  docMissing?: Array<{ label: string; required: boolean }>
+  /** 独立会话的文书复核意见，并进同一条回执、默认收起 */
+  docReview?: { items: Array<{ id: string; level: string; text: string }>; status: string }
+  docReviewExpanded?: boolean
 }
 
 /** /agent/chat 响应：kind=action 表示服务端已执行动作，chat 表示纯问答 */
@@ -332,6 +337,14 @@ interface AgentChatResponse {
     category: string
     reason: 'assistant' | 'repeated'
     evidence?: string
+  }
+  /** 建档后：缺项列表（占位词也算缺，只提示不拦保存） */
+  missing_fields?: Array<{ key: string; label: string; required: boolean; reason: string }>
+  /** 建档后：独立会话复核意见（只提意见不改稿，并进同一条回执） */
+  review?: {
+    items?: Array<{ level: 'must_fix' | 'suggest'; text: string }>
+    status?: string
+    reason?: string
   }
 }
 
@@ -797,6 +810,15 @@ Page(themed({
     const messages = [...this.data.messages]
     if (!messages[index]?.cards?.length) return
     messages[index] = { ...messages[index], cardsExpanded: !messages[index].cardsExpanded }
+    this.setData({ messages })
+  },
+
+  /** 独立复核意见并进同一条回执，默认收起，点开才看（避免多插一个气泡） */
+  toggleDocReview(event: WechatMiniprogram.TouchEvent) {
+    const index = Number(event.currentTarget.dataset.index)
+    const messages = [...this.data.messages]
+    if (!messages[index]?.docReview?.items?.length) return
+    messages[index] = { ...messages[index], docReviewExpanded: !messages[index].docReviewExpanded }
     this.setData({ messages })
   },
 
@@ -3193,6 +3215,18 @@ Page(themed({
       preferenceSuggestion: result.preference_suggestion
         ? { ...result.preference_suggestion }
         : undefined,
+      docMissing: (result.missing_fields || []).length
+        ? (result.missing_fields || []).map(field => ({ label: field.label, required: field.required }))
+        : undefined,
+      docReview: result.review && (result.review.items || []).length
+        ? {
+            items: (result.review.items || []).map((item, index) => ({
+              id: String(index), level: item.level, text: item.text,
+            })),
+            status: result.review.status || 'ok',
+          }
+        : undefined,
+      docReviewExpanded: false,
     }
   },
 
@@ -4356,6 +4390,69 @@ Page(themed({
   },
 
   /** 一键复制某条对话气泡的文字内容到剪贴板 */
+  /** 长按消息气泡：复制 / 一句话改归类 / 补现场照片（搬自 8090 交互原型）。
+   * 「改归类」不直接改后端记录，只拼一句话发进对话，并在本条消息挂一张
+   * 偏好卡——用户点「记住」才会真正落库，守住「偏好绝不自动保存」的约定。 */
+  onMessageLongPress(event: WechatMiniprogram.TouchEvent) {
+    const index = Number(event.currentTarget.dataset.index)
+    const msg = this.data.messages[index]
+    if (!msg) return
+    wx.showActionSheet({
+      itemList: ['复制内容', '改归类 / 纠错', '补现场照片'],
+      success: (res) => {
+        if (res.tapIndex === 0) {
+          const text = (msg.text ? String(msg.text) : '').trim()
+          if (!text) {
+            wx.showToast({ title: '没有可复制的文字', icon: 'none' })
+            return
+          }
+          wx.setClipboardData({ data: text })
+        } else if (res.tapIndex === 1) {
+          this.openQuickCorrection(index)
+        } else if (res.tapIndex === 2) {
+          this.selectImage()
+        }
+      },
+      fail: () => {},
+    })
+  },
+
+  /** 一句话纠错改归类：选目标类型 → 自动发一句话 → 给「以后都按这个」偏好卡 */
+  openQuickCorrection(messageIndex: number) {
+    const types = ['巡视', '旁站', '验收', '见证']
+    wx.showActionSheet({
+      itemList: types.map((t) => `改成 ${t}`),
+      success: (res) => {
+        const target = types[res.tapIndex]
+        if (!target) return
+        if (this.data.loading) {
+          wx.showToast({ title: '上一轮还没结束，稍后再试', icon: 'none' })
+          return
+        }
+        const rule = `以后这类现场记录按「${target}」归类`
+        const messages = [...this.data.messages]
+        const msg = messages[messageIndex]
+        if (msg) {
+          messages[messageIndex] = {
+            ...msg,
+            preferenceSuggestion: {
+              rule,
+              category: 'record_type',
+              reason: 'assistant' as const,
+            },
+          }
+        }
+        const text = `这条记录归类不对，请改成「${target}」。${rule}。`
+        this.setData({
+          messages,
+          input: text,
+          canSend: true,
+        }, () => { void this.send() })
+      },
+      fail: () => {},
+    })
+  },
+
   copyMessage(event: WechatMiniprogram.TouchEvent) {
     const idx = Number(event.currentTarget.dataset.index)
     const msg = this.data.messages[idx]
@@ -5246,7 +5343,10 @@ Page(themed({
         projectSummary: target?.description || this.data.projectSummary,
       })
     } catch (error) {
-      wx.showToast({ title: (error as Error).message, icon: 'none' })
+      // 401：全局 request 已清会话并跳登录页，这里不再弹英文原文
+      if ((error as { statusCode?: number }).statusCode !== 401) {
+        wx.showToast({ title: (error as Error).message, icon: 'none' })
+      }
     }
   },
 
@@ -5292,7 +5392,15 @@ Page(themed({
       void this.loadPendingDrafts()
       void this.loadTodoPendingCount()
     } catch (error) {
-      wx.showModal({ title: '切换失败', content: (error as Error).message, showCancel: false })
+      // 401 = 登录态失效：全局 request 已清会话并跳登录页（含 pendingRoute 回跳），
+      // 这里不重复弹错误原文（否则用户会看到后端英文 `Not authenticated` 盖在页面上）。
+      if ((error as { statusCode?: number }).statusCode !== 401) {
+        wx.showModal({
+          title: '切换失败',
+          content: (error as Error).message || '请稍后重试',
+          showCancel: false,
+        })
+      }
     } finally {
       this.setData({ switchingProject: false })
     }
