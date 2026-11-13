@@ -382,5 +382,63 @@ class TestHintCleaning(unittest.TestCase):
         self.assertEqual([w["person"] for w in g.wm], ["监理", "监理"])
 
 
+# 2026-11-13 真机（旁站记录详情）：「旁站内容」被写成
+# 「基础混凝土浇筑 调度电话：0758-3371922 13822617995短号：78995 燃利：四会市大沙镇
+#  马房工业开发区内公司传真：0758-3371923 时间 间：2026.10.2716:47」
+# 这是水印相机模板自带的企业落款（电话/短号/传真/地址），不是施工内容；
+# 且 OCR 把「时间」重复识别成「时间 间」，旧正则可丁点都切不动。
+_PHONE_WM_RAW = (
+    "基础混凝土浇筑 调度电话：0758-3371922 13822617995短号：78995 "
+    "燃利：四会市大沙镇马房工业开发区内公司传真：0758-3371923 时间 间：2026.10.2716:47"
+)
+
+
+class TestWatermarkTemplateFooter(unittest.TestCase):
+    """水印模板落款（电话/传真/地址）+ OCR 重复字。"""
+
+    def test_content_keeps_only_work(self):
+        self.assertEqual(multi_image_split.clean_hint(_PHONE_WM_RAW), "基础混凝土浇筑")
+
+    def test_footer_is_kept_not_dropped(self):
+        """切下来的电话/地址必须归位留档（共存，不许丢）。"""
+        _clean, tail = multi_image_split.split_hint(_PHONE_WM_RAW)
+        self.assertIn("0758-3371922", tail["contact"])
+        self.assertIn("13822617995", tail["contact"])
+        self.assertIn("四会市大沙镇", tail["location"])
+        # OCR 把「时间」重复成「时间 间」，仍要认出拍摄时间
+        self.assertTrue(tail["taken_at"].startswith("2026.10.27"))
+
+    def test_ocr_repeated_char_label(self):
+        self.assertEqual(
+            multi_image_split.clean_hint("顶板钢筋模板验收 时间 间：2026.10.27 15:18"),
+            "顶板钢筋模板验收")
+
+    def test_anchor_detects_template_footer(self):
+        # 只有摄时间/天气的老锚点会漏判这类水印 → 单图建记录时完全不清洗
+        self.assertTrue(multi_image_split.looks_like_watermark_tail(_PHONE_WM_RAW))
+
+    def test_phone_in_body_still_not_mistaken(self):
+        # 正文里正常提到电话（不带冒号）不能当水印尾巴
+        self.assertFalse(multi_image_split.looks_like_watermark_tail("已电话通知施工单位整改"))
+
+    def test_group_keeps_contact_and_location(self):
+        signals = [{"content": _PHONE_WM_RAW, "section": "直卸"}]
+        groups = multi_image_split.group_images(["a.jpg"], signals)
+        g = groups[0]
+        self.assertEqual(g.hints, ["基础混凝土浇筑"])
+        self.assertIn("0758-3371922", g.wm[0]["contact"])
+        self.assertIn("四会市大沙镇", g.wm[0]["location"])
+
+    def test_record_backfill_uses_photo_date(self):
+        """记录日期取照片拍摄时间（2026-10-27），不是建单当天。"""
+        from app.services.agent_tools import _split_watermark_fields
+        signals = [{"content": _PHONE_WM_RAW, "section": "直卸"}]
+        g = multi_image_split.group_images(["a.jpg"], signals)[0]
+        fields = _split_watermark_fields(g.wm)
+        self.assertEqual(fields["date"].isoformat(), "2026-10-27")
+        self.assertTrue(fields["contacts"])
+        self.assertTrue(fields["locations"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

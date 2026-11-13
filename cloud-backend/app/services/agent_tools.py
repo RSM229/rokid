@@ -1348,6 +1348,10 @@ def _parse_model_image_groups(raw, images: list, signals: list | None = None) ->
                     "project_name": str(sig.get("project_name") or "").strip(),
                     "weather": str(sig.get("weather") or "").strip(),
                     "person": str(sig.get("person") or sig.get("inspector") or "").strip(),
+                    # 水印模板落款：切出工作内容后原样留档
+                    "contact": str(sig.get("contact") or "").strip(),
+                    "location": str(sig.get("location") or "").strip(),
+                    "org": str(sig.get("org") or "").strip(),
                 }
                 # 模型给的分组本身不带 content：从信号里补，否则工作内容只剩
                 # 「验收（由N张现场照片自动归类，待补全内容）」这种占位。
@@ -1424,6 +1428,11 @@ def _split_watermark_fields(wms: list) -> tuple:
     dates: list = []
     weather = ""
     persons: list[str] = []
+    # 水印模板的企业落款（调度电话/公司传真/地址）：从工作内容里切出来后
+    # 不能凭空消失，聚合起来落 content_json（2026-11-13「要共存」）
+    contacts: list[str] = []
+    locations: list[str] = []
+    orgs: list[str] = []
     for w in wms or []:
         if not isinstance(w, dict):
             continue
@@ -1443,9 +1452,21 @@ def _split_watermark_fields(wms: list) -> tuple:
         ps = str(w.get("person") or "").strip()
         if ps and ps not in persons:
             persons.append(ps)
+        for bucket, key in ((contacts, "contact"), (locations, "location"), (orgs, "org")):
+            val = str(w.get(key) or "").strip()
+            if val and val not in bucket:
+                bucket.append(val)
     section = " / ".join(sections) if sections else None
     rec_date = min(dates) if dates else datetime.now().date()
-    return section, rec_date, (weather or None), persons
+    return {
+        "section": section,
+        "date": rec_date,
+        "weather": weather or None,
+        "persons": persons,
+        "contacts": contacts,
+        "locations": locations,
+        "orgs": orgs,
+    }
 
 
 # 分组建单的回执/卡片标题用省统表正式表名（与 form_registry 一致），
@@ -1480,15 +1501,16 @@ async def _create_split_records(ctx: "ToolContext", groups: list) -> dict:
         # 按组回填水印字段：拍摄时间→业务日期，单位工程/施工区域→施工部位。
         # 分组确认可能跨轮，wm 随分组方案持久化，故不依赖 ctx 的临时 image_signals。
         wms = list(getattr(g, "wm", None) or [])
-        split_section, split_date, split_weather, split_persons = _split_watermark_fields(wms)
+        wm_fields = _split_watermark_fields(wms)
+        split_date = wm_fields["date"]
         rec = WorkRecord(
             record_type=rtype,
             status=WorkRecordStatus.DRAFT.value,
             creator_id=ctx.user.id,
             project_id=ctx.project_id,
             record_date=split_date,
-            section=(split_section[:128] if split_section else None),
-            weather=(split_weather[:16] if split_weather else None),
+            section=(wm_fields["section"][:128] if wm_fields["section"] else None),
+            weather=(wm_fields["weather"][:16] if wm_fields["weather"] else None),
             inspection_photos=(None if is_witness else photos),
             witness_photos=(photos if is_witness else None),
             work_content=(content[:2000] if content else None),
@@ -1499,7 +1521,11 @@ async def _create_split_records(ctx: "ToolContext", groups: list) -> dict:
                 # 水印里的拍摄时间/天气/人员原样留档：工作内容不再拼接它们，
                 # 但信息必须可追溯（2026-11-13「不能改一样丢一样」）
                 "watermark": [w for w in wms if isinstance(w, dict)],
-                **({"watermark_person": split_persons} if split_persons else {}),
+                **({"watermark_person": wm_fields["persons"]} if wm_fields["persons"] else {}),
+                # 水印模板的企业落款（调度电话/传真/地址）：同属被切下来的信息
+                **({"watermark_contact": wm_fields["contacts"]} if wm_fields["contacts"] else {}),
+                **({"watermark_location": wm_fields["locations"]} if wm_fields["locations"] else {}),
+                **({"watermark_org": wm_fields["orgs"]} if wm_fields["orgs"] else {}),
             },
         )
         ctx.db.add(rec)

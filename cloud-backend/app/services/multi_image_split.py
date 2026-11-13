@@ -166,6 +166,11 @@ def group_images(images: list[str], signals: list[dict]) -> list[ImageGroup]:
                 "weather": str(raw.get("weather") or "").strip(),
                 # 人员（水印「监理」等）：记录表无独立栏，随 content_json 留档，不丢
                 "person": str(raw.get("person") or raw.get("inspector") or "").strip(),
+                # 水印模板的企业落款（调度电话/公司传真/地址）：从工作内容里切出来了，
+                # 但必须原样带到 content_json，否则就是「改一样丢一样」
+                "contact": str(raw.get("contact") or "").strip(),
+                "location": str(raw.get("location") or "").strip(),
+                "org": str(raw.get("org") or "").strip(),
             })
         else:
             grp.wm.append({})
@@ -209,19 +214,44 @@ _HINT_TAIL_LONG = (
     "记录日期", "施工部位", "施工区域", "单位工程",
     "工程名称", "项目名称", "监理人员", "拍摄人员", "施工单位", "建设单位",
     "监理单位", "验收人员", "检查人员", "旁站人员",
+    # 水印相机模板自带的企业落款（2026-11-13 真机：旁站内容被写成
+    # 「基础混凝土浇筑 调度电话：0758-3371922 … 公司传真：0758-3371923 时间 间：…」）。
+    # 这些不是施工内容，但也不能扔 —— 见 _TAIL_LABEL_KEY 的 contact / location / org。
+    "调度电话", "公司传真", "联系电话", "电话号码", "公司电话", "办公电话",
+    "公司地址", "项目地址", "办公地址", "公司名称", "单位名称",
+    "纳税人识别号", "统一社会信用代码",
 )
 _HINT_TAIL_SHORT = (
     "时间", "日期", "地点", "位置", "地址", "部位", "桩号", "天气", "气温",
     "人员", "监理", "项目", "气",
+    "电话", "手机", "短号", "传真", "邮箱", "网址", "邮编", "公司", "单位", "微信",
 )
+
+
+def _label_pattern(label: str) -> str:
+    """标签 → 容忍 OCR 错位的正则。
+
+    OCR 常把同一个字重复识别（真机：「时间 间：2026.10.2716:47」），也会在字间
+    插空格。允许字间空白、并容忍末字多出现一次，否则整条水印尾巴一个字都切不掉。
+    """
+    chars = list(label)
+    body = r"\s*".join(re.escape(c) for c in chars)
+    if len(chars) > 1:
+        body += r"(?:\s*%s)?" % re.escape(chars[-1])
+    return body
+
+
+def _label_alternation(labels) -> str:
+    """按长度倒序拼 alternation，保证「公司传真」优先于「公司」。"""
+    return "|".join(_label_pattern(w) for w in sorted(labels, key=len, reverse=True))
+
+
 # 长标签（≥3 字）几乎不会误伤，允许紧贴前文；短标签要求前面有分隔符，
 # 否则「混凝土养护气温控制」这类正文会被从「气」处切断。
-_HINT_CUT_LONG = re.compile(
-    r"(?:%s)\s*[:：]" % "|".join(sorted(_HINT_TAIL_LONG, key=len, reverse=True)))
+_HINT_CUT_LONG = re.compile(r"(?:%s)\s*[:：]" % _label_alternation(_HINT_TAIL_LONG))
 _HINT_CUT_SHORT = re.compile(
-    r"(?:^|[\s；;，,、|（(])\s*(?:%s)\s*[:：]"
-    % "|".join(sorted(_HINT_TAIL_SHORT, key=len, reverse=True)))
-_HINT_TRIM = " \t\r\n；;，,、。|:："
+    r"(?:^|[\s；;，,、|（(])\s*(?:%s)\s*[:：]" % _label_alternation(_HINT_TAIL_SHORT))
+_HINT_TRIM = " \t\r\n；;，,、。|:：）)】]」』”"
 
 # 被切下来的尾巴不能扔：拍摄时间/天气/人员/部位要能落回记录对应字段，
 # 否则「工作内容干净了，日期天气全丢了」——2026-11-13 用户要求「要共存」。
@@ -233,19 +263,58 @@ _TAIL_LABEL_KEY = {
     "施工部位": "section", "施工区域": "section", "单位工程": "section",
     "部位": "section", "桩号": "section",
     "位置": "location", "地点": "location", "地址": "location",
+    "公司地址": "location", "项目地址": "location", "办公地址": "location",
     "人员": "person", "监理人员": "person", "拍摄人员": "person",
     "验收人员": "person", "检查人员": "person", "旁站人员": "person",
     "监理": "person", "拍摄人": "person",
     "工程名称": "project_name", "项目名称": "project_name", "项目": "project_name",
+    # 水印模板落款里的联系方式：不进工作内容，但要留档（共存，不丢）
+    "调度电话": "contact", "联系电话": "contact", "电话号码": "contact",
+    "公司电话": "contact", "办公电话": "contact", "电话": "contact",
+    "手机": "contact", "手机号": "contact", "手机号码": "contact",
+    "短号": "contact", "传真": "contact", "公司传真": "contact",
+    "邮箱": "contact", "电子邮箱": "contact", "网址": "contact", "微信": "contact",
+    "邮编": "postcode",
+    "公司名称": "org", "单位名称": "org", "公司": "org", "单位": "org",
+    "纳税人识别号": "org", "统一社会信用代码": "org",
 }
 _TAIL_TOKEN = re.compile(
-    r"(?:%s)\s*[:：]" % "|".join(sorted(_TAIL_LABEL_KEY, key=len, reverse=True)))
+    r"(?:%s)\s*[:：]" % _label_alternation(_TAIL_LABEL_KEY))
+# 水印落款里还常有简称/错字标签（真机「燃利：四会市大沙镇…」其实是「地址：」的
+# OCR 错字）。没收录的「短词+冒号」也当段落边界，避免前一个字段把后一个字段的值吃掉。
+_GENERIC_SEG = re.compile(r"[\u4e00-\u9fa5]{1,8}\s*[:：]")
+# 值里出现这些地名字样，说明它其实是一段地址（归属 location 而不是 contact）
+_ADDR_HINT = re.compile(r"(?:省|市|区|县|镇|乡|村|路|街|巷|工业区|开发区|园区|大厦|广场)")
 # 水印常把人员写成尾巴上的裸词（「… 多云31°C 监理」，不带冒号），
 # 直接剥出来归到 person，别让它挂在天气值后面。
 _PERSON_BARE = ("监理员", "监理工程师", "监理", "施工员", "安全员", "质检员", "项目经理", "甲方", "业主")
 # 确认串里真的是水印尾巴（而不是正文里出现「时间：15:00」）的锚点：
-# 出现「摄时间/拍摄时间/天气/气温」这类水印专有字段才算。
-_TAIL_ANCHOR = re.compile(r"(?:摄时间|拍摄时间|拍照时间|记录时间|天气|气温)\s*[:：]")
+# 出现「摄时间/拍摄时间/天气/气温」这类水印专有字段才算；水印模板的企业落款
+# （调度电话/公司传真/短号）同属水印特征，一并算作锚点。
+_TAIL_ANCHOR = re.compile(
+    r"(?:摄时间|拍摄时间|拍照时间|记录时间|天气|气温|调度电话|公司传真|"
+    r"联系电话|公司地址|传真|短号)\s*[:：]")
+
+
+def _classify_tail_value(key: str, value: str) -> str:
+    """值归位纠偏：联系方式里夹着地址时，别把整段地址当电话留档。"""
+    if key in ("contact", "org", "postcode") and len(value) >= 8 and _ADDR_HINT.search(value):
+        return "location"
+    return key
+
+
+def _normalize_tail_label(label: str) -> str:
+    """把正则命中的标签还原成表里的键（去空白、折叠 OCR 重复末字）。"""
+    s = re.sub(r"\s+", "", label or "")
+    while len(s) > 2 and s[-1] == s[-2]:
+        s = s[:-1]
+    if s in _TAIL_LABEL_KEY:
+        return s
+    # OCR 多认一个字（「时间间」以外的情况）：按最长已知标签做前缀匹配
+    for known in sorted(_TAIL_LABEL_KEY, key=len, reverse=True):
+        if s.startswith(known):
+            return known
+    return ""
 
 
 def _parse_tail_fields(tail: str) -> dict[str, str]:
@@ -253,20 +322,30 @@ def _parse_tail_fields(tail: str) -> dict[str, str]:
     out: dict[str, str] = {}
     hits = list(_TAIL_TOKEN.finditer(tail))
     for i, m in enumerate(hits):
-        label = re.sub(r"[\s:：]+$", "", m.group(0))
-        key = _TAIL_LABEL_KEY.get(label)
+        key = _TAIL_LABEL_KEY.get(_normalize_tail_label(m.group(0)))
         if not key:
             continue
         end = hits[i + 1].start() if i + 1 < len(hits) else len(tail)
-        value = re.sub(r"\s+", " ", tail[m.end():end]).strip(_HINT_TRIM)
+        raw_value = tail[m.end():end]
+        # 值里若还有没收录的「短词：」，在那里断开：前半段是当前字段的值，
+        # 后半段按内容归位（地址 → location，其余人/公司信息 → extra）。
+        seg = _GENERIC_SEG.search(raw_value)
+        if seg:
+            rest = raw_value[seg.end():].strip(_HINT_TRIM)
+            raw_value = raw_value[: seg.start()]
+            unknown_key = _classify_tail_value("contact", rest) if rest else ""
+            if rest and unknown_key and unknown_key not in out:
+                out[unknown_key] = re.sub(r"\s+", " ", rest)
+        value = re.sub(r"\s+", " ", raw_value).strip(_HINT_TRIM)
         # 尾部裸人员词（「… 晴27°C 监理」）：剥出来记人员，别留在天气/时间值里
         for person in _PERSON_BARE:
             if value.endswith(person):
                 value = value[: -len(person)].strip(_HINT_TRIM)
                 out.setdefault("person", person)
                 break
-        if value and key not in out:
-            out[key] = value
+        if value:
+            key = _classify_tail_value(key, value)
+            out.setdefault(key, value)
     return out
 
 

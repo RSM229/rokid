@@ -49,7 +49,7 @@ _NOT_IN_PROGRESS = ("已完成", "未施工", "仅堆放", "成品", "未开始"
 # 否定前缀：出现这些词时，紧跟的判据词应视为否定（如「未见举牌」「无封样」「未施工」）。
 _NEG_PREFIX = ("未", "无", "没", "不", "没有", "未见", "未举", "未持", "未封")
 
-_CONTENT_KW = re.compile(r"(?:内容|工序|对象|施工内容|检验批|隐蔽)[:：]\s*([^\n；;，,]{2,120})")
+_CONTENT_KW = re.compile(r"(?:内容|工序|对象|施工内容|检验批|隐蔽)[:：]\s*([^\n；;，,]{2,240})")
 _SECTION_KW = re.compile(r"(?:单位工程|施工区域|部位|桩号|施工部位)[:：]\s*([^\n；;，,]{1,40})")
 _TAKEN_AT_KW = re.compile(r"(?:拍摄时间|拍照时间|记录时间|时间|日期)[:：]\s*([^\n；;，,]{1,30})")
 
@@ -74,9 +74,12 @@ def _extract_content(block: str, raw_text: str) -> str:
     m = _CONTENT_KW.search(block)
     if m:
         return m.group(1).strip()
-    # 退而求其次：用整段水印原文（截断）喂给规则引擎做子串匹配
+    # 退而求其次：用整段水印原文（截断）喂给规则引擎做子串匹配。
+    # 🔴 上限必须留够一张图的整行水印（真机 2026-11-13：模板落款「调度电话…公司传真…
+    # 时间 间：2026.10.2716:47」有 101 字，原来截到 80 字正好把拍摄时间砍掉，
+    # 记录日期就默认成了建单当天）。
     if raw_text:
-        return raw_text.strip()[:80]
+        return raw_text.strip()[:240]
     return ""
 
 
@@ -180,9 +183,11 @@ def parse_material_signals(material: str, n_images: int) -> list[dict]:
             setattr(sig, key, val)
         d = {k: getattr(sig, k) for k in ImageSignal.__dataclass_fields__
              if getattr(sig, k) is not None}
-        # 天气：ImageSignal 没有该字段，但分组回填 wm 时要消费它，随 dict 带出
-        if tail.get("weather"):
-            d.setdefault("weather", tail["weather"])
+        # 天气 / 联系方式 / 地址：ImageSignal 没有这些字段，但分组回填 wm 时要消费它，
+        # 随 dict 带出（水印模板的企业落款不能因为清洗工作内容就被丢掉）
+        for extra in ("weather", "contact", "location", "org", "postcode"):
+            if tail.get(extra):
+                d.setdefault(extra, tail[extra])
         out.append(d)
     return out
 
