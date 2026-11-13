@@ -258,6 +258,15 @@
         </view>
       </view>
 
+      <!-- 待定记录：先改类型，再按需选表式（2026-11-13 补的入口）。
+           后端 /work-record/{id}/set-type 早已存在，但小程序一直没接，用户按回执
+           提示来「工作记录页」根本改不了类型。「待定」不在 RECORD_DOC_TYPES 里，
+           不改类型时下面的按需生成表单也选不到任何表式。 -->
+      <view wx:if="{{detailType === 'record' && detail.record_type === '待定'}}" class="detail-section type-change-section">
+        <view class="type-change-hint">这条记录的类型还没定。改成具体类型后，就能在下面按需生成对应的表式。</view>
+        <button class="doc-btn" bindtap="openTypeModal">修改记录类型</button>
+      </view>
+
       <!-- 文书操作：默认收起，点开才选表式（2026-11-12）；工作记录本身不会自动生成表单。 -->
       <view wx:if="{{detailType === 'record' && !detail.generated_doc_id}}" class="detail-section form-choice-section">
         <view class="form-choice-toggle" bindtap="toggleFormChoice">
@@ -374,4 +383,29 @@
       <button bindtap="closeEditModal">取消</button>
     </view>
   </view>
+
+  <!-- 改记录类型弹窗（2026-11-13）：mask 与 modal 必须平级兄弟，
+       modal 自行 fixed 居中；嵌套进 mask 会因冒泡导致点选项/按钮直接关闭。 -->
+  <view wx:if="{{showTypeModal}}" class="mask type-mask" bindtap="closeTypeModal"></view>
+  <view wx:if="{{showTypeModal}}" class="type-modal">
+    <view class="type-modal-title">修改记录类型</view>
+    <view class="type-modal-hint">把这条「待定」记录确定为具体类型；照片和已填内容都会保留。</view>
+    <view class="type-option-list">
+      <view wx:for="{{typeOptions}}" wx:key="*this"
+            class="type-option {{item === selectedTypeValue ? 'selected' : ''}}"
+            data-type="{{item}}" bindtap="selectRecordType">
+        <text>{{item}}记录</text>
+        <text wx:if="{{item === selectedTypeValue}}" class="type-option-check">✓</text>
+      </view>
+    </view>
+    <view class="type-modal-actions">
+      <button class="type-modal-cancel" bindtap="closeTypeModal">取消</button>
+      <button class="type-modal-confirm" bindtap="confirmRecordType"
+              loading="{{savingType}}" disabled="{{!selectedTypeValue || savingType}}">确定</button>
+    </view>
+  </view>
+
+  <!-- 全屏图片预览（带「上一张/下一张」按钮；详情照片与列表缩略图共用） -->
+  <image-viewer visible="{{imageViewerVisible}}" urls="{{imageViewerUrls}}"
+                current="{{imageViewerCurrent}}" bind:close="onImageViewerClose" />
 </view>

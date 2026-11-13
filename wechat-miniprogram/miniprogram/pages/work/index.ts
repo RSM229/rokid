@@ -278,6 +278,10 @@ Page(themed({
     detail: {} as DetailItem,
     detailType: 'record' as 'record' | 'hazard',
     detailPhotos: [] as string[],
+    // 全屏图片预览（带「上一张/下一张」按钮，替代原生 wx.previewImage）
+    imageViewerVisible: false,
+    imageViewerUrls: [] as string[],
+    imageViewerCurrent: 0,
     detailMediaEvidence: [] as MediaEvidence[],
     detailForms: [] as RecordFormOption[],
     selectedFormCode: '',
@@ -304,6 +308,12 @@ Page(themed({
     editForm: {} as Record<string, any>,
     acceptanceResults: ['合格', '不合格', '待整改'],
     savingEdit: false,
+
+    // 待定记录改类型（2026-11-13）：后端 /work-record/{id}/set-type 的入口
+    showTypeModal: false,
+    typeOptions: ['巡视', '旁站', '验收', '见证'],
+    selectedTypeValue: '',
+    savingType: false,
   },
 
   onLoad(options: Record<string, string>) {
@@ -962,6 +972,50 @@ Page(themed({
     this.setData({ showDetail: false, detail: {}, detailPhotos: [], detailMediaEvidence: [], detailForms: [], selectedFormCode: '', formChoiceExpanded: false })
   },
 
+  /** 待定记录改类型：后端 set-type 早已存在，这里补上小程序入口（2026-11-13）。
+   *  「待定」不在 RECORD_DOC_TYPES 里，不改类型就选不到任何表式；
+   *  对话侧另有纯后端快捷指令「改成巡视」，现网旧版本也能用。 */
+  openTypeModal() {
+    if (this.data.detailType !== 'record' || this.data.detail.record_type !== '待定') return
+    this.setData({ showTypeModal: true, selectedTypeValue: '', savingType: false })
+  },
+
+  closeTypeModal() {
+    if (this.data.savingType) return
+    this.setData({ showTypeModal: false, selectedTypeValue: '' })
+  },
+
+  selectRecordType(event: WechatMiniprogram.TouchEvent) {
+    const value = String(event.currentTarget.dataset.type || '')
+    if (value) this.setData({ selectedTypeValue: value })
+  },
+
+  async confirmRecordType() {
+    const id = Number(this.data.detail.id || 0)
+    const recordType = this.data.selectedTypeValue
+    if (!id || !recordType || this.data.savingType) return
+    this.setData({ savingType: true })
+    wx.showLoading({ title: '修改类型…', mask: true })
+    try {
+      await request<{ record_type: string }>(`/work-record/${id}/set-type`, {
+        method: 'POST',
+        data: { record_type: recordType },
+      })
+      wx.hideLoading()
+      this.setData({ showTypeModal: false, selectedTypeValue: '', savingType: false })
+      wx.showToast({ title: `已改为${recordType}`, icon: 'success' })
+      // 详情标题/可用表式随类型变化，列表 tab 的归类也会变，两边都刷新
+      await this.load()
+      await this.openDetail({
+        currentTarget: { dataset: { id, type: 'record' } },
+      } as unknown as WechatMiniprogram.TouchEvent)
+    } catch (error) {
+      wx.hideLoading()
+      this.setData({ savingType: false })
+      wx.showToast({ title: (error as Error).message || '修改失败', icon: 'none' })
+    }
+  },
+
   openCollaboration() {
     if (this.data.detailType !== 'record' || !this.data.detail.id) return
     wx.navigateTo({ url: `/pages/todo/compose?type=work_record&id=${this.data.detail.id}` })
@@ -991,14 +1045,34 @@ Page(themed({
     }
   },
 
+  /** 详情弹窗里的现场照片：传详情全量照片，可左右切到上一张/下一张 */
   previewDetailPhoto(event: WechatMiniprogram.TouchEvent) {
-    const url = event.currentTarget.dataset.url
-    wx.previewImage({ urls: this.data.detailPhotos, current: url })
+    const url = String(event.currentTarget.dataset.url || '')
+    this.openImageViewer(this.data.detailPhotos, url)
   },
 
+  /** 列表卡片缩略图：以当前列表的隐患图片为全集，同样支持上一张/下一张 */
   preview(event: WechatMiniprogram.TouchEvent) {
-    const url = event.currentTarget.dataset.url
-    wx.previewImage({ urls: [url], current: url })
+    const url = String(event.currentTarget.dataset.url || '')
+    const listUrls = (this.data.hazards || [])
+      .map((item: HazardItem) => String(item.image_url || ''))
+      .filter(Boolean)
+    this.openImageViewer([...listUrls, url], url)
+  },
+
+  /** 打开带按钮的全屏预览（去重；current 定位到点击的那张） */
+  openImageViewer(urls: string[], currentUrl: string) {
+    const list = Array.from(new Set((urls || []).filter(Boolean)))
+    if (!list.length) return
+    this.setData({
+      imageViewerVisible: true,
+      imageViewerUrls: list,
+      imageViewerCurrent: Math.max(0, list.indexOf(currentUrl)),
+    })
+  },
+
+  onImageViewerClose() {
+    this.setData({ imageViewerVisible: false, imageViewerUrls: [], imageViewerCurrent: 0 })
   },
 
   // ========== 通用 ==========

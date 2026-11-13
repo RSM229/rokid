@@ -153,3 +153,36 @@
    写 height:auto 会塌陷。 */
 .edit-field.textarea { height: 300rpx; min-height: 300rpx; padding: 16rpx 20rpx; line-height: 1.6; }
 .edit-field:focus { border-color: var(--brand, #1677ff); outline: none; }
+
+/* ---- 待定记录改类型（2026-11-13） ----
+   mask 与 modal 平级兄弟；modal 自行 fixed 居中，
+   z-index 必须高于 detail-sheet(10)，否则会被详情弹层盖住。 */
+.type-mask { z-index: 30; }
+.type-modal {
+  position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  z-index: 31; width: 78vw; box-sizing: border-box;
+  padding: 36rpx 32rpx 28rpx; border-radius: 28rpx;
+  background: rgba(255,255,255,0.94);
+  border: 2rpx solid rgba(255,255,255,0.70);
+  box-shadow: 0 12rpx 48rpx rgba(10,46,92,0.18);
+}
+.type-modal-title { font-size: 32rpx; font-weight: 600; color: var(--ink, #12253d); }
+.type-modal-hint { margin-top: 12rpx; font-size: 24rpx; line-height: 1.6; color: #6b7c90; }
+.type-option-list { margin-top: 24rpx; }
+.type-option {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 20rpx 24rpx; margin-bottom: 14rpx; border-radius: 16rpx;
+  font-size: 28rpx; color: var(--ink, #12253d);
+  background: rgba(234,243,255,0.55); border: 2rpx solid transparent;
+}
+.type-option.selected {
+  border-color: var(--brand, #1677ff); color: var(--brand, #1677ff); font-weight: 600;
+}
+.type-option-check { font-size: 30rpx; }
+.type-modal-actions { display: flex; gap: 16rpx; margin-top: 20rpx; }
+.type-modal-actions button { flex: 1; font-size: 28rpx; border-radius: 24rpx; padding: 14rpx 0; }
+.type-modal-actions button::after { border: none; }
+.type-modal-cancel { background: rgba(234,243,255,0.70); color: #4a5d73; }
+.type-modal-confirm { background: linear-gradient(135deg, #3b8cff, #0b5fd0); color: #fff; }
+.type-change-section .doc-btn { width: 100%; margin-top: 16rpx; }
+.type-change-hint { font-size: 25rpx; line-height: 1.6; color: #6b7c90; }
