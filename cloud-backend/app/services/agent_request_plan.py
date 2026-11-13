@@ -172,6 +172,111 @@ def canonical_record_type(value: Any) -> str | None:
     return None
 
 
+# 🔴 A 层零必填（jl 零必填）：带现场照片 + 用户「你先记着」这类暂缓分类的话，
+# 直接落「待定」记录，不再走前端「候选事项 → 待确认草稿 → 追问记录类型」链路。
+# 判定刻意保守，避免误伤正常的多图分组整理/明确类型建单。
+_ZERO_REQUIRED_STASH_RE = re.compile(
+    r"(先记着|先记一下|先记下|先存着|先存一下|先放着|先放这|先留着|先收着|"
+    r"你先记|帮我记着|先记成待定|先按待定|"
+    r"回头再(说|整理|分|定|补|弄)|之后再说|以后再说|"
+    r"不用(管|问|分)|先别(问|分|定)|暂时不(确定|定|分类)|先不(确定|分类))"
+)
+_EXPLICIT_TYPE_HINT_RE = re.compile(
+    r"(巡视|巡检|巡查|旁站|验收|隐蔽|见证|平行检验|平行检查|起重|塔吊|"
+    r"隐患|日志|月报|周报|日报|通知单|省统表|文书|归档|资料库|分组|分类整理)"
+)
+
+
+def wants_zero_required_stash(
+    message: str, has_images: bool, record_type: str | None,
+) -> bool:
+    """是否属于「拍了几张照片，你先记着」这类零必填意图（应直接落待定）。
+
+    保守判定，四条全满足才命中，避免破坏既有整理计划：
+      ① 必须有图片附件；
+      ② 规划器与用户原话都没给出明确记录类型；
+      ③ 原话不含明确业务类型/整理动作词（否则是正常建单或多图整理）；
+      ④ 原话明确命中「先记着/回头再说」等暂缓措辞。
+    ⚠️ 原话为空（只发图不说话）**不**命中：那是既有的多图分组整理场景，
+    必须保留 /agent/review-plans 链路，不能误伤。
+    """
+    if not has_images:
+        return False
+    if canonical_record_type(record_type):
+        return False
+    text = re.sub(r"\s+", "", _text(message))
+    if not text or _EXPLICIT_TYPE_HINT_RE.search(text):
+        return False
+    if canonical_record_type(text):
+        return False
+    return bool(_ZERO_REQUIRED_STASH_RE.search(text))
+
+
+def apply_zero_required_stash(
+    plan: dict[str, Any], message: str, has_images: bool,
+) -> bool:
+    """命中「你先记着」零必填意图时，把 plan 改成「直达 /agent/chat 落待定」形态。
+
+    小程序前端 sendAttachments 的 wantsRecordPlan 判定为
+    `images.length > 0 && (actions 含 record_work/archive_evidence || execution_mode==='clarify')`；
+    命中就走 /agent/review-plans 的「候选事项 → 待确认草稿 → 追问记录类型」，
+    根本不调用 /agent/chat。清空 actions 并把 execution_mode 设为非 clarify，
+    前端才落到 runAgentWithMaterial → /agent/chat；stash_as_pending 标记让 chat
+    无条件落「待定」（不再依赖模型路由）。
+
+    Returns: 是否命中并改写。
+    """
+    if not wants_zero_required_stash(message, has_images, plan.get("record_type")):
+        return False
+    plan["stash_as_pending"] = True
+    plan["actions"] = []
+    plan["clarifications"] = []
+    plan["execution_mode"] = "single_tool"
+    plan["selected_tool"] = "create_work_record"
+    plan["needs_hazard_analysis"] = False
+    plan["intent"] = "create_record"
+    plan["record_type"] = None
+    plan["reason"] = "带现场照片且用户要求先记着：按「待定」直接留痕，不追问记录类型"
+    return True
+
+
+# ---- 待定记录改类型（纯文字快捷指令；确定性解析，不走模型路由） ----
+# ⚠️ 只认 WorkRecordType 枚举的 4 个值：/work-record/{id}/set-type 用该枚举校验，
+# 填「平行检验/起重机械安拆检查」会被 400 拒绝（工具建记录时是宽松 String）。
+_PENDING_TYPE_TARGETS = ("巡视", "旁站", "验收", "见证")
+_PENDING_TYPE_CHANGE_TOKENS = (
+    "改成", "改为", "换成", "换为", "调成", "调为", "标成", "标为",
+    "设为", "设成", "定为", "定成", "归为", "变成", "改回", "算作", "算成",
+    "调整为", "调整成", "改作", "改做",
+)
+_PENDING_TYPE_CHANGE_STOPWORDS = (
+    "别改", "不要改", "不改了", "不是改", "先别改",
+    "新建", "再建", "另建", "记一条", "再来一条", "生成一条",
+    "添加一条", "补一条", "再记一条", "新建一条",
+    "危大",  # 危大巡视要走模型的 hazard_type 分支，别用快捷指令丢掉危大属性
+)
+
+
+def parse_pending_type_change(message: str) -> str | None:
+    """解析「把刚才那条待定改成巡视」这类改类型指令，返回目标类型。
+
+    刻意保守：必须命明确的变更动词 + 恰好一个目标类型词，且不含否定/新建措辞。
+    命中后 /agent/chat 在模型路由之前直接改最近一条待定记录，不依赖模型路由，
+    因此现网所有小程序版本都能用，也无需改提示词或跑分基线。
+    """
+    text = re.sub(r"\s+", "", _text(message))
+    if not text:
+        return None
+    if any(w in text for w in _PENDING_TYPE_CHANGE_STOPWORDS):
+        return None
+    if not any(t in text for t in _PENDING_TYPE_CHANGE_TOKENS):
+        return None
+    hits = [t for t in _PENDING_TYPE_TARGETS if t in text]
+    if len(hits) != 1:
+        return None
+    return hits[0]
+
+
 def record_choices() -> list[dict[str, str]]:
     choices = [{
         "value": f"record_type:{record_type}",

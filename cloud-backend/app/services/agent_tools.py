@@ -1204,6 +1204,13 @@ async def _maybe_handle_multi_image_split(ctx: "ToolContext", args: dict, orig_a
 
     短路在单记录逻辑之前：避免「类型只能取一个 / 多图全挂一条」把多类照片误建为一条。
     """
+    # 🔴 A 层零必填（jl 零必填）：只有「你先记着/先存着」这类用户明确要求先存着的请求
+    # 才跳过分组，所有照片直接挂一条「待定」记录，避免多问一轮「确认分组」。
+    # 普通「有照片但没说类型」的路由也会打 _auto_tbd，那是**不追问记录类型**，
+    # 不等于不分组——否则跨类型的多张现场照片会被硬塞进同一条记录
+    # （2026-11-13 真机反馈「多图分组没了」）。分组与「类型填什么」是两件事。
+    if args.get("_no_multi_split"):
+        return None
     # 先消费已存的分组方案：确认轮用户只回肯定词、不带新图，必须在此短路之前判定，
     # 否则「if not images: return None」会把确认轮直接吞掉，分组方案永不消费。
     pending = args.get("_agent_pending_split")
@@ -1568,15 +1575,24 @@ async def _create_work_record(ctx: ToolContext, args: dict) -> dict:
     # 🔴 验收记录不受此守卫拦截：验收的「内容/部位」由要点询问块（一起询问）
     # 汇总生成，先拦内容会把流程串行成「问类型→问内容→问工序→询问块」
     # 四五轮填表（2026-11-05 15:07 用户实测「怎么还是填表」）。
-    if (not content and not section and not location) and raw_type != "验收":
+    # 待定记录同样放行（A 层·零必填）：类型已明确「待定」时允许空内容落草稿，
+    # 后续在 work 页补内容/贴标签（眼镜端创建待定记录本就不强制字段）。
+    if (not content and not section and not location) and raw_type not in ("验收", "待定"):
         return _need_more(["记录内容或施工区域"], "请说明记录内容与位置，例如「3号楼二层，钢筋绑扎，天气晴」。")
 
-    # 记录类型必须明确：识别不出就追问，不静默建「待定」。
-    # 仅当用户原话里明确说了「待定/不确定」才允许落为待定。
+    # 记录类型识别（A 层·jj 零必填）：识别不出时不再必须追问。
+    # 有内容/照片就落「待定」草稿保留现场信息，后续在 work 页人工贴标签补齐
+    # （work_record.py 已有「待定→改标签」闭环，工作记录 tab 也有「待定」筛选项）。
+    # 确认轮上用户明确说了「待定/不确定」同样落待定。
     raw_type = str(args.get("record_type") or "").strip()
     record_type = _norm_record_type(raw_type)
     if record_type is None:
+        # 照片在确认轮已离开 ctx.images，只看 _pending_images（含草稿持久化的 _agent_images）
+        has_entity = bool(content or section or location or _pending_images)
         if raw_type and ("待定" in raw_type or "不确定" in raw_type):
+            record_type = "待定"
+        elif has_entity:
+            # 🔎 A 层：有现场内容/照片但类型不明 → 落「待定」草稿，不追问类型。
             record_type = "待定"
         else:
             return _need_more(
@@ -1584,12 +1600,6 @@ async def _create_work_record(ctx: ToolContext, args: dict) -> dict:
                 "这条要记成哪一类？点下面选一个，或直接回复记录类型。",
                 options={"记录类型": ["巡视", "旁站", "验收", "见证", "平行检验", "起重机械安拆检查"]},
             )
-    if record_type == "待定":
-        return _need_more(
-            ["记录类型"],
-            "记录类型还不能是“待定”。请确认是巡视、旁站、验收、见证、平行检验还是起重机械安拆检查。",
-            options={"记录类型": ["巡视", "旁站", "验收", "见证", "平行检验", "起重机械安拆检查"]},
-        )
     record_date = _parse_date(args.get("record_date")) or datetime.now().date()
 
     if record_type == "平行检验":
@@ -2075,10 +2085,20 @@ async def _create_work_record(ctx: ToolContext, args: dict) -> dict:
             brief = brief[:40] + "…"
         reply += f"\n内容：{brief}"
     reply += "\n可在「工作记录」页查看，或直接说「生成监理日志」。"
+    if record_type == "待定":
+        # 2026-11-13 修正：旧文案承诺「可在工作记录页改成巡视/旁站/验收/见证」，
+        # 但那个改类型入口在小程序/Web 后台都没接出来（只有裸 API），属误导。
+        # 现用纯后端对话快捷指令「改成巡视」兜底，现网所有版本立刻可用。
+        reply += "\n这条类型还没定，先按「待定」存着；想改成巡视/旁站/验收/见证，直接回一句「改成巡视」就行。"
     if is_weida:
         reply += ("\n这是危大工程巡视：生成文书时选《危险性较大的分部分项工程监理巡视检查记录表》"
                   f"（GDAQ30306），检查项会按「{hazard_type or '危大类型'}」自动带出。")
-    reply += "\n现场照片可以直接在下方表单里添加（可选，自动加水印挂到这条记录）。"
+    # 2026-11-13：本轮消息带的照片已在上面挂到 inspection_photos/witness_photos，
+    # 再引导「在下方表单里添加」会让用户误以为照片没存上、需要重传一次。
+    if _agent_images:
+        reply += f"\n本轮 {len(_agent_images)} 张现场照片已挂到这条记录，无需重复上传。"
+    else:
+        reply += "\n现场照片可以直接在下方表单里添加（可选，自动加水印挂到这条记录）。"
     return _ok(
         reply,
         card={
@@ -2096,7 +2116,8 @@ async def _create_work_record(ctx: ToolContext, args: dict) -> dict:
         }],
         actions=[],
         undo={"tool": "create_work_record", "entity": "work_record", "id": record.id},
-        data={"record_id": record.id},
+        # photo_count 供路由层判断本轮是否已带图（已带图则不再下发「补充现场照片」卡）
+        data={"record_id": record.id, "photo_count": len(_agent_images)},
     )
 
 

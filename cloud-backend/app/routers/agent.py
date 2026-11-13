@@ -28,6 +28,7 @@ from starlette.responses import StreamingResponse
 
 from app.db import get_db
 from app.models.user import Project, User
+from app.models.work_record import WorkRecord, WorkRecordType, WorkRecordStatus
 from app.models.agent_draft import AgentConversationMessage, AgentFlowInstance, AgentReviewPlan
 from app.models.document import Document
 from app.models.miniprogram import MediaRecord, MediaType
@@ -323,6 +324,8 @@ def _agent_form(
     2026-11-12 移除残留的「先选记录类型」卡（含重复的照片上传框）：
     多图分组已按记录类型拆单并各自挂图，选类型一律走纯文字追问。
     这里只保留 - 记录已建后的补充照片框，并附文书/记录的文字链接。
+    2026-11-13 补充：本轮消息已带现场照片时，照片在建记录阶段就已挂到
+    inspection_photos/witness_photos，此时不再下发补充照片框（空表单 + 重复上传）。
     """
     form_code = _record_form_code(tool, args, message)
 
@@ -341,6 +344,12 @@ def _agent_form(
         record_id = ((result.get("data") or {}).get("record_id")
                      or (result.get("card") or {}).get("id"))
         if not record_id:
+            return None
+        # 2026-11-13：本轮已随消息带现场照片时，建记录阶段照片就已经挂到
+        # inspection_photos/witness_photos，再下发「补充现场照片」表单卡是空转：
+        # fields=[]（0 项信息）、picked=[]（0/9）、skippable=True，还会让用户误以为
+        # 照片没保存要重传。仅「纯文字建记录（没带图）」时才保留这个补拍入口。
+        if int((result.get("data") or {}).get("photo_count") or 0) > 0:
             return None
         record_type = agent_tools._norm_record_type(str(args.get("record_type") or "")) or "工作"
         card = result.get("card") or {}
@@ -1108,6 +1117,16 @@ async def request_plan(
         )
         plan["model"] = model_id
         plan["request_id"] = request_id
+        # 🔴 A 层零必填（jl 零必填）：带图 + 「你先记着」+ 类型不明时，前端
+        # sendAttachments 的 wantsRecordPlan 会命中 → 走 /agent/review-plans
+        # 「候选事项/待确认草稿」，一路追问记录类型，永远到不了 /agent/chat。
+        # 这里把 plan 改成「无候选动作 + 非 clarify」，前端自然落到
+        # runAgentWithMaterial → /agent/chat；stash_as_pending 让 chat 无条件落待定。
+        _plan_has_images = attachment_count > 0 or any(
+            str(item.get("kind") or "").strip() == "image" for item in evidence
+        )
+        if agent_request_plan.apply_zero_required_stash(plan, message, _plan_has_images):
+            logger.info("A层零必填：request-plan 改写为直达 chat 落待定")
         planned_facts = [
             {"field": item.get("field"), "value": item.get("value"), "source": item.get("source")}
             for item in plan.get("facts", []) if isinstance(item, dict)
@@ -1182,6 +1201,58 @@ async def recommend_purpose(
     if plan.get("degraded"):
         legacy["degraded"] = True
     return legacy
+
+
+async def _apply_pending_type_change(
+    db: AsyncSession, user: User, project_id: int | None, new_type: str,
+) -> dict | None:
+    """把当前项目里最近一条「待定」记录改成具体类型。
+
+    与 ``POST /api/work-record/{id}/set-type`` 同语义（类型校验、创建者/权限、
+    content_json.type_history 都一致），但不走 HTTP、不自动生成省统表——
+    产品口径是「工作记录与正式表单解耦，表式由用户在详情里按需选择」。
+
+    Returns: 改成功 → 回执 dict；没有可改的待定记录或无权限 → None（交回模型路由）。
+    """
+    if not project_id or new_type not in {t.value for t in WorkRecordType}:
+        return None
+    res = await db.execute(
+        select(WorkRecord)
+        .where(
+            WorkRecord.project_id == project_id,
+            WorkRecord.record_type == "待定",
+            WorkRecord.status != WorkRecordStatus.ARCHIVED.value,
+        )
+        .order_by(WorkRecord.id.desc())
+        .limit(1)
+    )
+    record = res.scalar_one_or_none()
+    if record is None:
+        return None
+    if record.creator_id != user.id and not user.has_permission("task_manage"):
+        return None
+    old_type = record.record_type
+    record.record_type = new_type
+    cj = dict(record.content_json or {})
+    history = list(cj.get("type_history") or [])
+    history.append({
+        "from": old_type, "to": new_type,
+        "by": user.real_name or user.username,
+        "at": datetime.now().isoformat(timespec="seconds"),
+        "source": "agent_chat",
+    })
+    cj["type_history"] = history
+    record.content_json = cj
+    await db.commit()
+    logger.info("待定记录 #%s 类型 %s → %s（对话快捷指令）", record.id, old_type, new_type)
+    return {
+        "ok": True, "record_id": record.id, "record_type": new_type,
+        "reply": (
+            f"已把刚才那条待定记录改成「{new_type}」（记录 #{record.id}）。"
+            "\n类型定了以后，到「工作记录」页点开这条记录，用「按需生成表单」选对应表式即可。"
+            "\n要换别的类型，直接回「改成旁站」这类话就行。"
+        ),
+    }
 
 
 async def _agent_chat_impl(
@@ -1327,6 +1398,31 @@ async def _agent_chat_impl(
     model_id = req.model or ""
     parsed: dict | None = None
     raw = ""
+
+    # 🔴 待定记录改类型：确定性快捷指令，先于模型路由处理（2026-11-13）。
+    # 后端 /api/work-record/{id}/set-type 早已存在，但小程序与 Web 后台都没接入口，
+    # 用户按回执提示去「工作记录页」其实改不了类型。这里是纯后端兜底：
+    # 纯文字说「改成巡视」即改最近一条待定记录，现网所有小程序版本立刻可用，
+    # 不改提示词、不依赖模型路由，也就不用重跑跑分基线。
+    if not structured_submit and not (req.images if isinstance(req.images, list) else None):
+        _change_to = agent_request_plan.parse_pending_type_change(message)
+        if _change_to:
+            _changed = await _apply_pending_type_change(db, user, project_id, _change_to)
+            if _changed:
+                await report_progress(
+                    "tool_validation", "completed", "已把待定记录改成具体类型",
+                    {"tool": "set_work_record_type", "record_id": _changed["record_id"],
+                     "record_type": _change_to},
+                )
+                return {
+                    "kind": "action", "tool": "set_work_record_type",
+                    "model": model_id, "request_plan": incoming_plan,
+                    "reply": _changed["reply"],
+                    "card": None, "cards": [], "actions": [], "need_more": [],
+                    "options": {}, "form": None, "input_components": [],
+                    "recommendations": [], "undo": None,
+                }
+
     if not structured_submit:
         try:
             await report_progress(
@@ -1639,32 +1735,60 @@ async def _agent_chat_impl(
 
     # 素材里已确定的结构化字段（照片水印的拍摄时间/地点/天气）并入建记录参数。
     # 日期、地点、部位和天气以水印/EXIF 客观证据为准；用户冲突描述保留在计划中。
-    # 带素材不等于明确了记录类型。素材只提供证据；类型不明时保留澄清，
-    # 避免用户上传旁站/验收/材料照片却被静默归成巡视。
+    # A 层（jl 零必填）：现场有证据（照片/内容/水印/部位/位置）且类型不明时，
+    # 直接落「待定」记录，不阻塞用户；完全无证据才保留追问（避免空记录被静默建出）。
+    # 覆盖两条路径：① 上一轮遗留「待确认草稿」（pending_tool=create_work_record，
+    # 草稿无 record_type）② 全新请求（无 pending）。不再依赖模型 clarifications 标记。
     auto_filled: list[str] = []
     needs_record_type = any(
         str(item.get("field") or "") == "record_type"
         for item in incoming_plan.get("clarifications", [])
         if isinstance(item, dict)
-    ) and not pending_tool
-    if needs_record_type:
-        # Never accept a model-inferred form for this ambiguous request.
-        tool = ""
-        # Preserve facts stated in this turn even when the only missing
-        # decision is the target record type.  The next reply ("巡视" etc.)
-        # will merge this draft instead of relying on a short chat window.
-        draft_args = dict(args)
-        draft_args.pop("record_type", None)
-        if prefill:
-            draft_args["_prefill"] = prefill
-        if multi_action_ids:
-            # 类型不明先问类型：剩余续办动作同样随草稿存下，等类型确认后下发
-            draft_args["_followup_actions"] = list(multi_action_ids)
-        await agent_tools.stash_pending(
-            db, user.id, "create_work_record", draft_args, ["记录类型"],
-            message=message, fact_args=turn_fact_args, conversation_id=conversation_id,
-            project_id=project_id,
+    )
+    _rt_known = bool(
+        agent_tools._norm_record_type(
+            str((draft.get("args") or {}).get("record_type") or args.get("record_type") or "")
         )
+    )
+    _has_evidence = bool(
+        (req.images if isinstance(req.images, list) else None)
+        or material or prefill
+        or _plan_evidence_count(incoming_plan)
+        or str(args.get("work_content") or "").strip()
+        or str(args.get("section") or "").strip()
+        or str(args.get("location") or "").strip()
+    )
+    # 🔴 真因修复（2026-11-13 第三次复测）：带图发消息时小程序前端
+    # sendAttachments → /agent/request-plan → wantsRecordPlan → /agent/review-plans
+    # 「候选事项/待确认草稿」，在前端直接 return，根本不调用 /agent/chat。
+    # request-plan 对「你先记着」类请求会打 stash_as_pending 标记并清空 actions，
+    # 前端才落到本端点；这里直读原始请求标记（normalize_candidate 会丢自定义字段），
+    # 无条件落「待定」，不再依赖模型路由结果。
+    _stash_pending_plan = bool(
+        isinstance(req.request_plan, dict)
+        and req.request_plan.get("stash_as_pending")
+    )
+    # 🔴 带图/有内容的请求里，request-plan 往往已直接把 selected_tool 选成
+    # create_work_record（而非留空等路由补），导致原来的 `if not tool` 守卫整轮失效、
+    # 永远走「追问类型→落草稿」。守卫放宽到「plan 已选 create_work_record
+    # 但类型仍不明」也命中，强制落「待定」并免确认。
+    if _stash_pending_plan and _has_evidence:
+        args["record_type"] = "待定"
+        args["_auto_tbd"] = True
+        # 🔴 只有「你先记着」这类用户明确要求先存着的请求才跳过逐图分组：
+        # 用户要的是「别问、先存一条」。普通「有照片但没说类型」不能跳过分组，
+        # 否则一批跨类型的现场照片会被硬塞进同一条待定记录（2026-11-13 真机反馈）。
+        args["_no_multi_split"] = True
+        tool = "create_work_record"
+        logger.info("A层零必填：request-plan 标记直达 → 无条件落待定记录（跳过逐图分组）")
+    elif (not tool or tool == "create_work_record") and not _rt_known and _has_evidence:
+        # 不再追问类型：落「待定」记录，用户在「工作记录」页改标签即可。
+        # 但多图仍按逐图信号分组（跨类型时先回执「分了 X/Y」再确认建多条），
+        # 分组是「照片怎么归档」而不是「记录类型填什么」，不属于零必填要跳过的追问。
+        args["record_type"] = "待定"
+        args["_auto_tbd"] = True
+        tool = "create_work_record"
+        logger.info("A层零必填：有证据且类型不明 → 落待定记录（保留多图分组）")
 
     # 🔴 服务端接管：模型在「已带素材证据 + 已识别记录类型或存在字段冲突」时仍返回
     # 纯聊天（典型：只汇报「你描述的信息与图片证据不一致…请核对」），整轮会退化成一堵
@@ -1729,21 +1853,27 @@ async def _agent_chat_impl(
         # 普通聊天创建记录与整理计划统一采用“字段齐全 → 用户确认 → 正式写入”。
         # 首次执行只做合同校验并保存待确认草稿；用户确认后才放行工具写入。
         if tool == "create_work_record":
-            awaiting = bool((draft.get("args") or {}).get("_awaiting_confirmation"))
-            # 草稿已整理好、只差确认时，用户明确说「按草稿生成」「直接生成」
-            # 同样是一次授权；旧白名单只认「确认」字样，「按当前草稿生成」
-            # 会被当成又一轮草稿整理（模型还接话「收到，已生成」，实际没写库）。
-            _confirm_tokens = (
-                "确认生成", "确认保存", "保存并生成", "确认建档",
-                "按当前草稿生成", "按草稿生成", "直接生成", "生成吧",
-            )
-            confirmed = awaiting and (
-                structured_submit
-                or any(token in message for token in _confirm_tokens)
-            )
-            args["_require_confirmation"] = not confirmed
-            if confirmed:
+            if args.get("_auto_tbd"):
+                # A 层零必填：照片/内容自动落待定，免最终确认（待定内容空、风险低，
+                # 用户可在工作记录页改标签或删除）。
+                args["_require_confirmation"] = False
                 args["_execution_confirmed"] = True
+            else:
+                awaiting = bool((draft.get("args") or {}).get("_awaiting_confirmation"))
+                # 草稿已整理好、只差确认时，用户明确说「按草稿生成」「直接生成」
+                # 同样是一次授权；旧白名单只认「确认」字样，「按当前草稿生成」
+                # 会被当成又一轮草稿整理（模型还接话「收到，已生成」，实际没写库）。
+                _confirm_tokens = (
+                    "确认生成", "确认保存", "保存并生成", "确认建档",
+                    "按当前草稿生成", "按草稿生成", "直接生成", "生成吧",
+                )
+                confirmed = awaiting and (
+                    structured_submit
+                    or any(token in message for token in _confirm_tokens)
+                )
+                args["_require_confirmation"] = not confirmed
+                if confirmed:
+                    args["_execution_confirmed"] = True
         ctx = agent_tools.ToolContext(db=db, user=user, project_id=project_id, project=project, message=message, material=material, images=req.images, image_signals=req.image_signals)
         await report_progress(
             "tool_validation", "running", "确认要执行的动作，并核对字段是否齐全",
@@ -1899,7 +2029,7 @@ async def _agent_chat_impl(
     # Keep evidence context while asking the one missing business decision.
     # This is deliberately a draft, not a record: no database side effect is
     # performed until the user chooses a target type and completes the form.
-    if needs_record_type:
+    if needs_record_type and not tool:  # 仅在无证据（未落待定）时才追问类型
         has_evidence = bool(
             material or prefill
             or (incoming_plan.get("evidence") if isinstance(incoming_plan.get("evidence"), list) else None)
