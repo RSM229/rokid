@@ -237,6 +237,50 @@ def pull_points(division: str, keyproc: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# ②-b 按现场识别内容自动带出验收要点（分组建档后的「请确认是否符合」用）
+# ---------------------------------------------------------------------------
+# 施工内容里出现这些词就去找对应的关键工序；只做确定性匹配，不调模型、不臆造要点。
+_POINT_KEYWORDS = (
+    "钢筋", "模板", "混凝土", "浇筑", "防水", "桩", "管道", "回填", "砌体",
+    "脚手架", "基坑", "钢结构", "预应力", "门窗", "幕墙", "电气", "给排水",
+    "沥青", "基层", "压实", "吊装", "支护", "降水", "抹灰", "保温", "试块",
+    "坍落度", "地基", "路基", "路面", "顶管", "沉井", "照明", "沟槽",
+)
+# 同名工序散落在多个分部时，优先主体结构 / 道排这类与现场照片更贴近的分部，
+# 避免「底板钢筋模板验收」被匹配到桩基础的「钢筋笼隐蔽前验收」。
+_POINT_PREFER_DIVISION = ("主体结构", "道路", "给水", "排水", "混凝土")
+
+
+def match_points_by_text(text: str, limit: int = 3) -> tuple[str, list[str]]:
+    """按现场识别内容匹配最相关的关键工序，带出该工序的规范验收要点。
+
+    返回 ``(工序名, 要点列表)``；匹配不到返回 ``("", [])``。
+    底层仍是 acceptance_checklists.ITEMS 单一数据源（经 _INDEX 拆分好要点）。
+    """
+    t = str(text or "")
+    kws = [k for k in _POINT_KEYWORDS if k in t]
+    if not kws:
+        return "", []
+    best: Optional[dict] = None
+    best_score = 0
+    for e in _INDEX:
+        name = e["关键工序_关键部位"]
+        hits = sum(1 for k in kws if k in name)
+        if not hits:
+            continue
+        score = hits * 10 + (3 if any(
+            p in str(e["分部工程"]) for p in _POINT_PREFER_DIVISION) else 0)
+        if score > best_score:
+            best, best_score = e, score
+    if not best:
+        return "", []
+    return (
+        str(best["关键工序_关键部位"]),
+        [str(p) for p in best["验收要点_原文"][:max(1, limit)]],
+    )
+
+
+# ---------------------------------------------------------------------------
 # ③ 一起询问块拼装
 # ---------------------------------------------------------------------------
 def assemble_ask_block(entry: dict) -> str:

@@ -2094,8 +2094,10 @@ async def _agent_chat_impl(
             # 无论接不接话，快捷键都出现。
             if _awaiting_final and not result.get("ask_block"):
                 result["chips"] = ["确认生成"]
-            if result.get("ask_block"):
-                # 「一起询问」：全部验收询问项必须完整呈现，不能被模型自然接话覆盖。
+            _result_data = result.get("data") if isinstance(result.get("data"), dict) else {}
+            if result.get("ask_block") or _result_data.get("split"):
+                # 「一起询问」与「多图分组建档」回执必须完整呈现：逐类待确认内容
+                # 是确定性生成的，不能被模型自然接话盖掉（2026-11-16 真机需求）。
                 result["reply"] = _tool_reply
             elif _model_answer and not _is_mechanical_reply(_model_answer) and not _sounds_like_success(_model_answer):
                 # 模型自然接话常说「收到，已生成」「按已确认信息直接发起这条…创建」，

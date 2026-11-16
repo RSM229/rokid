@@ -43,7 +43,7 @@ from app.models.security_audit import SecurityAudit
 from app.models.user import Project, User
 from app.models.work_record import WorkRecord, WorkRecordStatus
 from app.services import agent_request_plan, form_contracts, model_gateway, provform_schema, record_field_spec
-from app.services import multi_image_split
+from app.services import multi_image_split, split_record_confirm
 from app.services.agent_context import (
     append_context_message,
     extract_explicit_message_facts,
@@ -1434,6 +1434,18 @@ def _split_need_more(groups, material: str | None = None, n_images: int = 0) -> 
         except Exception:  # noqa: BLE001 - 复述是增强，失败不阻断分组确认
             lines = []
     reply = ("\n".join(lines) + "\n\n" if lines else "") + summary
+    # 分类完就按类型带出「这一类要填什么 + 对应内容/要点」，让用户在点
+    # 「确认生成」之前能核对是否符合现场（2026-11-16 真机录屏需求）。
+    # 提示是增强，失败不阻断分组确认；ask_block 使路由层强制用本 reply，
+    # 不会被模型自然接话盖掉。
+    try:
+        _confirm = split_record_confirm.build_type_confirmation(
+            groups, display=_split_record_display_name, stage="plan")
+    except Exception:  # noqa: BLE001 - 展示增强，失败按旧回执走
+        logger.debug("split type confirmation failed", exc_info=True)
+        _confirm = ""
+    if _confirm:
+        reply += "\n\n" + _confirm
     return {
         "ok": False,
         "reply": reply,
@@ -1446,7 +1458,8 @@ def _split_need_more(groups, material: str | None = None, n_images: int = 0) -> 
         # ask_block 触发路由把完整记录表单置空（否则 need_more 会让 create_work_record
         # 渲染一整张空表单，与「只回一句分组汇总、等用户确认」的交互冲突）。
         "ask_block": {"type": "multi_image_split", "summary": summary,
-                      "watermark_lines": lines},
+                      "watermark_lines": lines,
+                      "type_confirmation": _confirm},
         "options": {}, "undo": None, "data": {},
     }
 
@@ -1587,13 +1600,29 @@ async def _create_split_records(ctx: "ToolContext", groups: list) -> dict:
     lines = ["已按分组创建以下记录："]
     for rtype, rec, photos in created:
         lines.append(f"· {_split_record_display_name(rtype)} #{rec.id}（{len(photos)}张照片）")
-    lines.append("施工部位、业务日期已按各张照片水印自动填入；具体位置等可继续在「工作记录」页补充。")
+    lines.append("施工部位、业务日期已按各张照片水印自动填入。")
+    # 逐类提醒「这一类要填什么 + 对应内容/验收要点」，让用户确认是否符合现场；
+    # 取代原来那句笼统的「具体位置等可继续在工作记录页补充」（2026-11-16 真机需求）。
+    ids_by_type: dict[str, list[int]] = {}
+    for rtype, rec, _photos in created:
+        ids_by_type.setdefault(rtype, []).append(int(rec.id))
+    try:
+        type_confirmation = split_record_confirm.build_type_confirmation(
+            groups, display=_split_record_display_name,
+            created_ids=ids_by_type, stage="created")
+    except Exception:  # noqa: BLE001 - 展示增强，失败按旧回执走
+        logger.debug("split type confirmation failed", exc_info=True)
+        type_confirmation = ""
+    if type_confirmation:
+        lines.append("")
+        lines.append(type_confirmation)
     return _ok(
         "\n".join(lines),
         cards=cards,
         actions=[],
         undo=None,
-        data={"record_ids": [rec.id for _, rec, _ in created], "split": True},
+        data={"record_ids": [rec.id for _, rec, _ in created], "split": True,
+              "type_confirmation": type_confirmation},
     )
 
 
