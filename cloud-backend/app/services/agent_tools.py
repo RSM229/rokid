@@ -1547,6 +1547,16 @@ async def _create_split_records(ctx: "ToolContext", groups: list) -> dict:
             continue
         is_witness = (rtype == "见证")
         content = _split_content(g, rtype)
+        # 验收要点必须真的进记录（2026-11-16 用户截图「工作内容填的不是要点吗」）：
+        # work_content 保留水印识别的施工内容（工序名），要点单独落
+        # content_json.acceptance_points 作为待确认草案；用户回「都符合 /
+        # 写入正式记录」后再由路由层转成正式 acceptance_content。两者共存，不丢工序名。
+        acc_points = None
+        if rtype == "验收":
+            try:
+                acc_points = split_record_confirm.acceptance_points_for([g])
+            except Exception:  # noqa: BLE001 - 要点是增强，失败不阻断建档
+                logger.debug("acceptance points for split record failed", exc_info=True)
         # 按组回填水印字段：拍摄时间→业务日期，单位工程/施工区域→施工部位。
         # 分组确认可能跨轮，wm 随分组方案持久化，故不依赖 ctx 的临时 image_signals。
         wms = list(getattr(g, "wm", None) or [])
@@ -1575,6 +1585,8 @@ async def _create_split_records(ctx: "ToolContext", groups: list) -> dict:
                 **({"watermark_contact": wm_fields["contacts"]} if wm_fields["contacts"] else {}),
                 **({"watermark_location": wm_fields["locations"]} if wm_fields["locations"] else {}),
                 **({"watermark_org": wm_fields["orgs"]} if wm_fields["orgs"] else {}),
+                # 验收要点草案（未经确认，不写成正式验收内容；匹配不到就不写）
+                **({"acceptance_points": acc_points} if acc_points else {}),
             },
         )
         ctx.db.add(rec)

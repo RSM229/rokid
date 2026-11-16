@@ -29,6 +29,7 @@ import logging
 import uuid
 from pathlib import Path
 from app.services.record_fields import business_date, now_local, validate_times, validate_record, invalidate_document, ACCEPTANCE_RESULTS
+from app.services import acceptance_ask_together, work_record_field_view
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -1696,6 +1697,29 @@ async def list_guides(
     }
 
 
+def _detail_acceptance_points_text(record: WorkRecord) -> str:
+    """验收要点展示串：正式验收内容优先；否则用建档时落的草案；
+    再否则（本次改动前建的旧记录）按工作内容现场匹配要点兜底展示。
+
+    只做展示、绝不写库，也不把要点冒充成已确认的正式验收内容。
+    2026-11-16 用户截图「工作内容填的不是要点吗」。
+    """
+    cj = record.content_json or {}
+    if str(cj.get("acceptance_content") or "").strip():
+        return ""
+    points = cj.get("acceptance_points")
+    if isinstance(points, dict):
+        return str(points.get("text") or "").strip()
+    if record.record_type != WorkRecordType.ACCEPTANCE.value:
+        return ""
+    proc, items = acceptance_ask_together.match_points_by_text(
+        str(record.work_content or ""))
+    items = [str(p).strip() for p in items if str(p).strip()]
+    if not items:
+        return ""
+    return f"省统表相近工序「{proc}」：" + "；".join(items) + "（按工作内容匹配，待确认）"
+
+
 @router.get("/{record_id}")
 async def get_work_record(
     record_id: int,
@@ -1780,7 +1804,7 @@ async def get_work_record(
     else:
         inspection_photos = list(dict.fromkeys((record.inspection_photos or []) + media_urls))
         witness_photos = record.witness_photos
-    return {
+    detail = {
         "id": record.id,
         "record_type": record.record_type,
         "status": record.status,
@@ -1832,6 +1856,9 @@ async def get_work_record(
         "acceptance_participants": record.acceptance_participants,
         "acceptance_type": (record.content_json or {}).get("acceptance_type", ""),
         "acceptance_content": (record.content_json or {}).get("acceptance_content", ""),
+        # 分组建档时带出的验收要点草案（未确认前也要让用户看得见）；
+        # 正式验收内容已写入时就不重复展示草案。2026-11-16 真机截图反馈。
+        "acceptance_points_text": _detail_acceptance_points_text(record),
         "station_location": record.station_location,
         "station_start_time": record.station_start_time.isoformat() if record.station_start_time else None,
         "station_end_time": record.station_end_time.isoformat() if record.station_end_time else None,
@@ -1846,6 +1873,13 @@ async def get_work_record(
         "approved_at": record.approved_at.isoformat() if record.approved_at else None,
         "created_at": record.created_at.isoformat() if record.created_at else None,
     }
+    # 详情页按「字段清单」xlsx 生成的 FORMS 分组渲染；原有字段全部保留，
+    # 这里只追加一个视图字段，不改任何既有取值。2026-11-16 用户「工作记录
+    # 那里要根据我的字段来的」。
+    detail["field_sections"] = work_record_field_view.build_field_sections(
+        record.record_type, detail, record.content_json or {},
+    )
+    return detail
 
 
 @router.put("/{record_id}")

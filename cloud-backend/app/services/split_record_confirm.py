@@ -198,3 +198,53 @@ def build_type_confirmation(
         lines.append("以上按类型带出，请确认是否符合现场情况；不符合直接说要改哪项，"
                      "要补的栏位一并告诉我。都符合就回「写入正式记录」。")
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# 要点落库：回执里带出的验收要点必须真的进记录，不能只在对话里出现过。
+# 2026-11-16 用户截图「工作内容填的不是要点吗」：验收记录详情只看到
+# 水印识别的工序名，要点既没落库、详情页也没有对应栏目。
+# ---------------------------------------------------------------------------
+
+def acceptance_points_for(groups: list[Any]) -> dict | None:
+    """验收分组 → 结构化要点草案，供建档写入 ``content_json.acceptance_points``。
+
+    与 ``build_type_confirmation`` 的验收分支同源（同一个 ``_identified`` +
+    ``match_points_by_text``），保证「对话里给用户看的」与「落库的」是同一套要点。
+    匹配不到返回 None，不臆造要点。
+    """
+    identified = _identified(groups)
+    proc, points = _aat.match_points_by_text(identified)
+    items = [str(p).strip() for p in points if str(p).strip()]
+    if not items:
+        return None
+    return {
+        "procedure": str(proc or ""),
+        "identified": identified,
+        "points": items,
+        "text": f"省统表相近工序「{_short(proc, 30)}」：" + "；".join(items),
+        "confirmed": False,
+    }
+
+
+def acceptance_points_text(points: Any) -> str:
+    """详情接口用：把要点草案拼成一行可读文本（正式验收内容为空时展示）。"""
+    if isinstance(points, dict):
+        return str(points.get("text") or "").strip()
+    return ""
+
+
+def build_acceptance_content_from_points(points: Any, *, positive: bool = True) -> str:
+    """用户确认后，把要点草案转成正式「验收内容」：要点原文 + 逐条结论。
+
+    正式验收文书必须带结论，不能只放要点清单。带否定词时不生成（不能把
+    「不符合」写成「符合」），草案原样保留，由后续追问补真实结论。
+    """
+    if not isinstance(points, dict) or not positive:
+        return ""
+    items = [str(p).strip() for p in (points.get("points") or []) if str(p).strip()]
+    if not items:
+        return ""
+    proc = _short(points.get("procedure"), 30)
+    return (f"验收内容（按省统表相近工序「{proc}」逐项核对，共 {len(items)} 项）："
+            + "；".join(f"{p} —— 符合" for p in items))

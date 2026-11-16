@@ -247,6 +247,46 @@ class ExistingRecordShortcutTest(unittest.TestCase):
         ))
         self.assertIsNone(result)
 
+    def _record_with_points(self):
+        record = self._record()
+        record.content_json = {
+            "voice_text": "原始水印原话",
+            "acceptance_points": {
+                "procedure": "构造柱、圈梁、过梁的钢筋绑扎、模板安装及混凝土浇筑",
+                "identified": "底板钢筋模板验收",
+                "points": ["① 核查钢筋规格、数量", "② 模板安装牢固", "③ 混凝土强度符合设计"],
+                "text": "省统表相近工序：① ② ③",
+                "confirmed": False,
+            },
+        }
+        return record
+
+    def test_confirmed_write_through_turns_points_into_formal_content(self):
+        """要点草案经用户写入授权后，正式验收内容必须带逐条结论。"""
+        record = self._record_with_points()
+        result = asyncio.run(agent_router._apply_existing_record_write_through(
+            RouterFakeDb(record), self._user(), 7, "conv-1",
+            "写入正式记录 #126", {"record_type": "验收"},
+        ))
+        self.assertTrue(result and result["ok"])
+        text = str(record.content_json.get("acceptance_content") or "")
+        self.assertIn("逐项核对，共 3 项", text)
+        self.assertEqual(3, text.count("—— 符合"))
+        self.assertIn("acceptance_content", result.get("fields") or [])
+        # 草案与工序名都保留（只搬家不丢弃）
+        self.assertTrue(record.content_json.get("acceptance_points"))
+        self.assertIn("顶板钢筋模板验收", str(record.work_content))
+
+    def test_negative_reply_never_writes_points_as_conforming(self):
+        """用户说「不符合」时，绝不能把要点静默写成「符合」。"""
+        record = self._record_with_points()
+        asyncio.run(agent_router._apply_existing_record_write_through(
+            RouterFakeDb(record), self._user(), 7, "conv-1",
+            "第2项不符合，写入正式记录 #126", {"record_type": "验收"},
+        ))
+        self.assertFalse(str(record.content_json.get("acceptance_content") or ""))
+        self.assertTrue(record.content_json.get("acceptance_points"))
+
 
 if __name__ == "__main__":
     unittest.main()

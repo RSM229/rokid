@@ -175,5 +175,84 @@ class SplitReceiptIntegrationTest(unittest.TestCase):
         self.assertIn('_result_data.get("split")', router_src)
 
 
+class AcceptancePointsPersistTest(unittest.TestCase):
+    """2026-11-16 用户截图「工作内容填的不是要点吗」：要点必须真的进记录。"""
+
+    def test_points_draft_is_structured_and_matches_receipt(self):
+        draft = src.acceptance_points_for([_group("验收", ["底板钢筋模板验收"], "大兴路", 3)])
+        self.assertIsInstance(draft, dict)
+        self.assertEqual(3, len(draft["points"]))
+        self.assertIn("钢筋", draft["procedure"])
+        self.assertIn("底板钢筋模板验收", draft["identified"])
+        self.assertFalse(draft["confirmed"])
+        self.assertIn("核查钢筋规格", src.acceptance_points_text(draft))
+        self.assertEqual("", src.acceptance_points_text(None))
+        self.assertEqual("", src.acceptance_points_text("bad"))
+
+    def test_unmatched_procedure_does_not_invent_points(self):
+        self.assertIsNone(src.acceptance_points_for(
+            [_group("验收", ["随便说一句"], "大兴路")]))
+        self.assertEqual("", src.build_acceptance_content_from_points(None))
+
+    def test_confirmed_points_become_formal_content_with_conclusions(self):
+        draft = src.acceptance_points_for([_group("验收", ["底板钢筋模板验收"], "大兴路")])
+        text = src.build_acceptance_content_from_points(draft)
+        self.assertIn("逐项核对，共 3 项", text)
+        self.assertEqual(3, text.count("—— 符合"))
+        self.assertIn("核查钢筋规格", text)
+        # 用户说「不符合」时绝不能把要点写成「符合」
+        self.assertEqual("", src.build_acceptance_content_from_points(
+            draft, positive=False))
+
+    def test_create_split_records_persists_points_and_keeps_work_content(self):
+        ctx = _context()
+        result = asyncio.run(agent_tools._create_split_records(ctx, _video_groups()))
+        self.assertTrue(result.get("ok"), result)
+        rows = [r for r in ctx.db.rows
+                if isinstance(r, WorkRecord) and r.record_type == "验收"]
+        self.assertEqual(1, len(rows))
+        rec = rows[0]
+        # 工序名保留在 work_content（共存，不因要点而丢）
+        self.assertIn("底板钢筋模板验收", str(rec.work_content or ""))
+        cj = rec.content_json or {}
+        self.assertEqual(3, len((cj.get("acceptance_points") or {}).get("points") or []))
+        # 草案不等于正式验收内容，未经用户确认不许静默写进去
+        self.assertFalse(cj.get("acceptance_content"))
+
+    def test_unmatched_group_has_no_points_key(self):
+        ctx = _context()
+        asyncio.run(agent_tools._create_split_records(
+            ctx, [_group("验收", ["随便说一句"], "大兴路", 2)]))
+        rec = next(r for r in ctx.db.rows
+                   if isinstance(r, WorkRecord) and r.record_type == "验收")
+        self.assertNotIn("acceptance_points", rec.content_json or {})
+
+    def test_legacy_record_without_draft_still_shows_points(self):
+        """本次改动前建的旧记录（用户截图那条）也要能看到要点，只展示不写库。"""
+        from app.routers import work_record as wr
+        legacy = WorkRecord(record_type="验收", work_content="底板钢筋模板验收",
+                            content_json={})
+        text = wr._detail_acceptance_points_text(legacy)
+        self.assertIn("核查钢筋规格", text)
+        self.assertIn("待确认", text)
+        self.assertEqual("", wr._detail_acceptance_points_text(WorkRecord(
+            record_type="验收", work_content="底板钢筋模板验收",
+            content_json={"acceptance_content": "已确认内容"})))
+        self.assertEqual("", wr._detail_acceptance_points_text(WorkRecord(
+            record_type="巡视", work_content="水泥搅拌桩施工", content_json={})))
+
+    def test_router_and_detail_and_wxml_wire_points(self):
+        router_src = (ROOT / "app/routers/agent.py").read_text(encoding="utf-8")
+        self.assertIn("build_acceptance_content_from_points", router_src)
+        detail_src = (ROOT / "app/routers/work_record.py").read_text(encoding="utf-8")
+        self.assertIn('"acceptance_points_text"', detail_src)
+        wxml = (ROOT.parent / "wechat-miniprogram/miniprogram/pages/work/index.wxml").read_text(
+            encoding="utf-8")
+        self.assertIn("验收内容（验收要点）", wxml)
+        self.assertIn("detail.acceptance_points_text", wxml)
+        # 「工作内容」仍展示工序名，不能被要点顶替
+        self.assertIn("{{detail.work_content || '-'}}", wxml)
+
+
 if __name__ == "__main__":
     unittest.main()

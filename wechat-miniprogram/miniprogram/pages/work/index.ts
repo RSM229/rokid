@@ -202,6 +202,23 @@ interface DetailItem {
   evidence?: string[]
   content_json?: Record<string, any>
   media_evidence?: MediaEvidence[]
+  /** 后端按用户 xlsx「字段清单」(record_field_spec.FORMS) 生成的分组视图 */
+  field_sections?: FieldSection[]
+}
+
+/** 工作记录详情页「按字段清单」渲染的字段视图（后端 work_record_field_view） */
+interface FieldSection {
+  title: string
+  fields: {
+    label: string
+    value: string
+    note: string
+    required: boolean
+    auto: boolean
+    kind: string
+    missing: boolean
+    display_value: string
+  }[]
 }
 
 interface MenuItem {
@@ -278,6 +295,8 @@ Page(themed({
     detail: {} as DetailItem,
     detailType: 'record' as 'record' | 'hazard',
     detailPhotos: [] as string[],
+    /** 后端返回 field_sections 时按用户字段清单渲染；否则退回旧手写区块 */
+    showFieldSections: false,
     // 全屏图片预览（带「上一张/下一张」按钮，替代原生 wx.previewImage）
     imageViewerVisible: false,
     imageViewerUrls: [] as string[],
@@ -919,6 +938,7 @@ Page(themed({
           this.setData({
             showDetail: true,
             detailType: 'hazard',
+            showFieldSections: false,
             detail: {
               ...hazard,
               created_at: hazard.created_at?.replace('T', ' ').slice(0, 16),
@@ -946,6 +966,7 @@ Page(themed({
         this.setData({
           showDetail: true,
           detailType: 'record',
+          showFieldSections: Array.isArray(result.field_sections) && result.field_sections.length > 0,
           formChoiceExpanded: false,
           detail: {
             ...result,
@@ -969,7 +990,7 @@ Page(themed({
   },
 
   closeDetail() {
-    this.setData({ showDetail: false, detail: {}, detailPhotos: [], detailMediaEvidence: [], detailForms: [], selectedFormCode: '', formChoiceExpanded: false })
+    this.setData({ showDetail: false, detail: {}, detailPhotos: [], detailMediaEvidence: [], detailForms: [], selectedFormCode: '', formChoiceExpanded: false, showFieldSections: false })
   },
 
   /** 待定记录改类型：后端 set-type 早已存在，这里补上小程序入口（2026-11-13）。

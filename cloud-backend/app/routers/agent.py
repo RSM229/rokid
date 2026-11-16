@@ -45,6 +45,7 @@ from app.services import (
     agent_tools,
     model_gateway,
     multi_image_split,
+    split_record_confirm,
 )
 from app.services.record_fields import project_context
 from app.services.agent_context import (
@@ -1350,6 +1351,17 @@ async def _apply_existing_record_write_through(
         if val and val != str(cj.get(key) or "").strip():
             cj[key] = val
             changed.append(key)
+    # 分组建档时验收要点只落成「待确认草案」；用户给出写入授权且没有否定词时，
+    # 才把要点按逐条结论转成正式验收内容（正式文书不能只放要点清单）。
+    # 2026-11-16 用户截图：要点只在对话里出现过，记录里看不到。
+    if record.record_type == "验收" and not str(cj.get("acceptance_content") or "").strip():
+        _negative = any(w in message for w in (
+            "不符合", "不合格", "不通过", "待整改", "需整改", "有问题"))
+        built = split_record_confirm.build_acceptance_content_from_points(
+            cj.get("acceptance_points"), positive=not _negative)
+        if built:
+            cj["acceptance_content"] = built
+            changed.append("acceptance_content")
     # 用户原话留痕（「只搬家不丢弃」）
     if message:
         prev = str(cj.get("voice_text") or "").strip()

@@ -186,3 +186,6 @@
 .type-modal-confirm { background: linear-gradient(135deg, #3b8cff, #0b5fd0); color: #fff; }
 .type-change-section .doc-btn { width: 100%; margin-top: 16rpx; }
 .type-change-hint { font-size: 25rpx; line-height: 1.6; color: #6b7c90; }
+/* 按字段清单渲染：必填星号 + 超长字段名全文（如巡视内容六项） */
+.field-required { color: #e35d4f; font-weight: 600; }
+.field-note { display: block; margin: 0 0 10rpx 160rpx; font-size: 22rpx; line-height: 1.6; color: #8a99ab; white-space: pre-wrap; word-break: break-all; }

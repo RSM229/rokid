@@ -186,8 +186,24 @@
         <view class="detail-row"><text class="detail-label">创建时间</text><text class="detail-value">{{detail.created_at || '-'}}</text></view>
       </view>
 
-      <!-- 巡视信息（栏目对齐房建 GD-B-214「巡视记录」表） -->
-      <view wx:if="{{detail.record_type === '巡视'}}" class="detail-section">
+      <!-- 按字段清单渲染：栏目名/分组/必填全部来自用户 xlsx「字段清单」生成的
+           record_field_spec.FORMS，后端 /work-record/{id} 返回 field_sections。
+           后端未部署时 showFieldSections=false，自动退回下面四个手写区块，不白屏。 -->
+      <block wx:if="{{showFieldSections}}">
+        <view wx:for="{{detail.field_sections}}" wx:for-item="section" wx:key="title" class="detail-section">
+          <view class="detail-title">{{section.title}}</view>
+          <block wx:for="{{section.fields}}" wx:for-item="field" wx:key="label">
+            <view class="detail-row">
+              <text class="detail-label">{{field.label}}<text wx:if="{{field.required}}" class="field-required"> *</text></text>
+              <text class="detail-value {{field.missing ? 'detail-empty' : ''}}">{{field.display_value}}</text>
+            </view>
+            <text wx:if="{{field.note}}" class="field-note">{{field.note}}</text>
+          </block>
+        </view>
+      </block>
+
+      <!-- 巡视信息（后端旧版本兜底；栏目对齐房建 GD-B-214「巡视记录」表） -->
+      <view wx:if="{{detail.record_type === '巡视' && !showFieldSections}}" class="detail-section">
         <view class="detail-title">巡视记录</view>
         <view class="detail-row"><text class="detail-label">工程项目名称</text><text class="detail-value">{{detail.project_name || '-'}}</text></view>
         <view class="detail-row"><text class="detail-label">巡视的工程部位</text><text class="detail-value">{{detail.section || '未填写'}}</text></view>
@@ -197,16 +213,19 @@
         <view class="detail-row"><text class="detail-label">问题及处理情况</text><text class="detail-value">{{detail.problem_text || '-'}}</text></view>
       </view>
 
-      <!-- 验收信息 -->
-      <view wx:if="{{detail.record_type === '验收'}}" class="detail-section">
+      <!-- 验收信息（后端旧版本兜底） -->
+      <view wx:if="{{detail.record_type === '验收' && !showFieldSections}}" class="detail-section">
         <view class="detail-title">验收信息</view>
         <view class="detail-row"><text class="detail-label">验收类型</text><text class="detail-value">{{detail.acceptance_guide_ref || '-'}}</text></view>
         <view class="detail-row"><text class="detail-label">验收结果</text><text class="detail-value">{{detail.acceptance_result || '-'}}</text></view>
+        <view wx:if="{{detail.acceptance_content}}" class="detail-row"><text class="detail-label">验收内容（验收要点）</text><text class="detail-value">{{detail.acceptance_content}}</text></view>
+        <view wx:elif="{{detail.acceptance_points_text}}" class="detail-row"><text class="detail-label">验收内容（要点待确认）</text><text class="detail-value">{{detail.acceptance_points_text}}</text></view>
+        <view wx:else class="detail-row"><text class="detail-label">验收内容（验收要点）</text><text class="detail-value">-</text></view>
         <view class="detail-row"><text class="detail-label">工作内容</text><text class="detail-value">{{detail.work_content || '-'}}</text></view>
       </view>
 
-      <!-- 旁站信息 -->
-      <view wx:if="{{detail.record_type === '旁站'}}" class="detail-section">
+      <!-- 旁站信息（后端旧版本兜底） -->
+      <view wx:if="{{detail.record_type === '旁站' && !showFieldSections}}" class="detail-section">
         <view class="detail-title">旁站信息</view>
         <view class="detail-row"><text class="detail-label">工程名称</text><text class="detail-value">{{detail.station_project_name || '-'}}</text></view>
         <view class="detail-row"><text class="detail-label">施工单位</text><text class="detail-value">{{detail.construction_unit || '-'}}</text></view>
@@ -218,8 +237,8 @@
         <view class="detail-row"><text class="detail-label">结束时间</text><text class="detail-value">{{detail.station_end_time || '-'}}</text></view>
       </view>
 
-      <!-- 见证信息 -->
-      <view wx:if="{{detail.record_type === '见证'}}" class="detail-section">
+      <!-- 见证信息（后端旧版本兜底） -->
+      <view wx:if="{{detail.record_type === '见证' && !showFieldSections}}" class="detail-section">
         <view class="detail-title">见证信息</view>
         <view class="detail-row"><text class="detail-label">工程项目</text><text class="detail-value">{{detail.project_name || '-'}}</text></view>
         <view class="detail-row"><text class="detail-label">施工单位</text><text class="detail-value">{{detail.construction_unit || '-'}}</text></view>
