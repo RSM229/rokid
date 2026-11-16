@@ -390,6 +390,42 @@ def _wants_skip(message: str) -> bool:
     return any(h in text for h in _SKIP_HINTS)
 
 
+# 🔴 显式「写入正式记录」授权（2026-11-16 真机录屏诊断）：
+# 用户连说「写入正式记录」「请写入验收记录」「其余栏位先留空」，服务端却始终
+# 回「还没写入正式记录，还差…」反复追问。原因有三：确认词白名单只认「确认生成」；
+# 草稿仍有必填缺项时 awaiting=False，白名单根本不生效；必填字段合同不接受
+# 「留空」。这里把「明确要求写入 + 允许留空」提升为一次性授权，与
+# _wants_skip（只能跳过可选栏）严格区分：write_through 允许跳过必填栏。
+_WRITE_THROUGH_HINTS = (
+    "写入正式记录", "写入验收记录", "写入工作记录", "请写入", "直接写入",
+    "写入记录", "写进记录", "正式写入", "按现在已确认", "按已确认内容",
+    "其余栏位先留空", "其他栏位留空", "剩下的留空", "不做臆测填写",
+    "直接建档", "直接保存记录", "就按现在提交", "按当前内容提交",
+    # 「把验收要点补充到我前面创建的验收记录里」也是一条明确写入指令
+    "补充到", "写进", "加进", "填进", "补进",
+)
+_SHORT_CONCLUSIONS = ("合格", "不合格", "待整改")
+
+
+def wants_write_through(message: str) -> bool:
+    """用户明确要求「按已确认内容写入正式记录（缺的先留空）」→ True。
+
+    只认指令性措辞，不认疑问句/字段值，避免把「验收要点呢」「合格」误判成
+    写入授权。命中后由路由层注入 ``_write_through``，工具层据此放行必填缺项
+    与「一起询问」拦截，真正落库（而不是又开一份待确认草稿）。
+    """
+    text = (message or "").strip()
+    if not text or any(q in text for q in ("？", "?", "吗", "呢")):
+        return False
+    return any(h in text for h in _WRITE_THROUGH_HINTS)
+
+
+def short_conclusion(message: str) -> str:
+    """用户只回「合格 / 不合格 / 待整改」→ 返回该结论词，供验收结论栏吸收。"""
+    text = (message or "").strip()
+    return text if text in _SHORT_CONCLUSIONS else ""
+
+
 # ---------------------------------------------------------------------------
 # 追问口径：唯一数据源 = ``record_field_spec``（由「字段表」生成，勿在此硬编码）
 #
@@ -1594,6 +1630,10 @@ async def _create_work_record(ctx: ToolContext, args: dict) -> dict:
     # 本函数内对 apply_canonical_form_fields 之后的本地副本做的字段写入不会自动回到该对象，
     # 故凡需跨轮保留的状态（验收内容/结论/类型/询问态）都通过 _set_field_persist 显式镜像回 orig_args。
     orig_args = args
+    # 🔴 显式写入授权（2026-11-16 真机录屏）：用户已明确「按已确认内容写入正式
+    # 记录、其余栏位留空」时，必填缺项不再追问，缺的栏位留空（不臆测填写），
+    # 直接落库；否则「写入正式记录」会被当成又一轮草稿整理，无限循环。
+    write_through = bool(args.get("_write_through")) or wants_write_through(ctx.message or "")
     # 🔀 多图逐张分类分流（B 方案）：本轮多张图且带逐图视觉信号时，先按图分类、同类合并；
     # 多组或含待定组先回执确认，确认后循环建多条。该分支在单记录逻辑之前短路返回，
     # 避免「类型只能取一个 / 多图全挂一条」把多类照片误建为一条。
@@ -1910,7 +1950,8 @@ async def _create_work_record(ctx: ToolContext, args: dict) -> dict:
                 else _field_value(args, f))
     ]
     required_missing = [f for f in missing if bool(f.get("required"))]
-    if missing and (required_missing or not _wants_skip(ctx.message)):
+    # 显式写入授权：必填缺项也放行（留空、不臆测填写），不再反复追问。
+    if missing and not write_through and (required_missing or not _wants_skip(ctx.message)):
         labels = [str(f.get("label") or f.get("canonical") or "") for f in missing]
         current = labels[0] if labels else "信息"
         if record_type == "验收" and not matched_entry:
@@ -1936,7 +1977,7 @@ async def _create_work_record(ctx: ToolContext, args: dict) -> dict:
     # 验收记录也必须先让用户对全部要点一并确认、归集生成验收内容与结论，
     # 不能拿模型预填的验收内容静默创建（2026-11-05 用户实测反馈）。
     # 用户明确「跳过，直接创建」时消费询问态、沿用已有值放行。
-    if record_type == "验收" and matched_entry:
+    if record_type == "验收" and matched_entry and not write_through:
         if _wants_skip(ctx.message):
             orig_args.pop("_acceptance_ask_state", None)
             args.pop("_acceptance_ask_state", None)
@@ -1972,6 +2013,9 @@ async def _create_work_record(ctx: ToolContext, args: dict) -> dict:
                 if concl_field:
                     args = _set_field_persist(
                         orig_args, args, concl_field, _aat_generate_conclusion(aggregated))
+            elif write_through:
+                # 授权留空：问卷式内容绝不能写进正式记录，清空该栏后按已确认内容放行。
+                args = _set_field_persist(orig_args, args, _acc_check, "")
             else:
                 return _need_more(
                     ["验收内容（验收要点）"],
@@ -1996,8 +2040,10 @@ async def _create_work_record(ctx: ToolContext, args: dict) -> dict:
     }) if _form else None
     contract_snapshot: dict[str, Any] = {}
     if resolved_form:
+        # 显式写入授权只放行「缺项」（留空），冲突/格式错误仍必须拦，
+        # 否则会把互相矛盾或非法的值写进正式记录。
         blocked = (
-            resolved_form.get("missing_fields")
+            (not write_through and bool(resolved_form.get("missing_fields")))
             or resolved_form.get("conflicts")
             or resolved_form.get("invalid_fields")
             or resolved_form.get("materialization_error")
@@ -2040,7 +2086,8 @@ async def _create_work_record(ctx: ToolContext, args: dict) -> dict:
 
     # 普通聊天入口也必须先停在“待最终确认”状态；路由层会在首次尝试时注入
     # _require_confirmation。直接调用工具的旧接口/测试不带该标记，保持兼容。
-    if args.get("_require_confirmation") and not args.get("_execution_confirmed"):
+    if (args.get("_require_confirmation") and not args.get("_execution_confirmed")
+            and not write_through):
         return _need_more(
             ["最终确认"],
             "字段已按当前表式合同补齐。请核对下面内容后回复“确认生成”，或继续修改任意字段；现在尚未写入正式工作记录。",
@@ -2080,6 +2127,8 @@ async def _create_work_record(ctx: ToolContext, args: dict) -> dict:
     args.pop(_ACCEPT_CANDS_KEY, None)
     args.pop(_ACCEPT_CANDS_ORDER, None)
     args.pop("_acceptance_ask_state", None)
+    # 路由层内部标记，绝不落库、不进 content_json
+    args.pop("_write_through", None)
     _agent_images = [str(u).strip() for u in (args.pop("_agent_images", None) or []) if str(u).strip()]
     inspection_photos = None
     witness_photos = None

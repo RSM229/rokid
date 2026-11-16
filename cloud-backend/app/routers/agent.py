@@ -171,6 +171,9 @@ _FAKE_SUCCESS_MARKERS = (
     "已创建", "已生成", "创建成功", "生成成功", "已提交生成", "服务端会据此创建",
     "已写入正式记录", "已建档", "保存成功", "已保存记录", "记录已生成",
     "已发起这条", "已直接发起", "直接发起这条", "发起创建", "正在创建这条",
+    # 2026-11-16 真机录屏：模型说「好，就按现在已确认的内容提交…其余栏位先留空」，
+    # 系统兜底又追加「还没写入正式记录，还差…」→ 同一气泡自相矛盾。
+    "按现在已确认的内容提交", "按已确认内容提交", "就按现在已确认",
 )
 
 
@@ -1261,6 +1264,118 @@ async def _apply_pending_type_change(
     }
 
 
+# 「前面创建的 / 刚建的 / 这条记录」等明确指向已建记录的说法
+_EXISTING_RECORD_HINTS = (
+    "前面创建", "刚创建", "刚才创建", "刚建", "已创建", "已建", "这条记录",
+    "该记录", "上面那条", "前面那条", "上一条记录", "前面建的",
+)
+
+
+def _record_id_from_text(*parts: Any) -> int | None:
+    """从本轮消息/历史里取最近一次出现的「#126」式记录编号。"""
+    found: list[int] = []
+    for part in parts:
+        for m in re.finditer(r"#\s*(\d{1,9})", str(part or "")):
+            found.append(int(m.group(1)))
+    return found[-1] if found else None
+
+
+def _refers_to_existing_record(message: str, *contexts: Any) -> bool:
+    text = str(message or "")
+    if any(h in text for h in _EXISTING_RECORD_HINTS) or _record_id_from_text(text):
+        return True
+    # 「写入正式记录 / 请写入验收记录」本身不带指代，但同一会话（历史原话或
+    # 前端 history）里出现过 #126 → 视为延续同一条记录，避免再新建一条重复的。
+    return _record_id_from_text(*contexts) is not None
+
+
+async def _apply_existing_record_write_through(
+    db: AsyncSession, user: User, project_id: int | None,
+    conversation_id: str | None, message: str,
+    draft_args: dict | None, *contexts: Any,
+) -> dict | None:
+    """「把验收要点补充到前面创建的验收记录里 / 写入正式记录 #126」→ 更新已建记录。
+
+    2026-11-16 真机录屏：6 条记录（含验收 #126）已由带图链路建好，用户随后
+    要求补要点并连说「写入正式记录」，但 Agent 工具表只有 create_work_record，
+    每次都被路由成一份**新的**待确认草稿，必填缺项又拦住确认 → 无限追问。
+    这里做确定性短路：定位到已建记录，把草稿里已确认的字段合并进去并清草稿。
+    找得到才处理；找不到返回 None，交回原流程（不阻断其它场景）。
+    """
+    if not project_id:
+        return None
+    record_id = _record_id_from_text(message, *contexts)
+    if record_id:
+        record = await db.get(WorkRecord, record_id)
+        if record is None or record.project_id != project_id:
+            return None
+    else:
+        args = draft_args if isinstance(draft_args, dict) else {}
+        rtype = agent_tools._norm_record_type(str(args.get("record_type") or "")) or ""
+        # 没有编号且草稿类型不明时不猜目标，交回原流程（避免误改无关记录）。
+        if not rtype or rtype == "待定":
+            return None
+        stmt = select(WorkRecord).where(
+            WorkRecord.project_id == project_id,
+            WorkRecord.creator_id == user.id,
+            WorkRecord.record_type == rtype,
+            WorkRecord.status != WorkRecordStatus.ARCHIVED.value,
+        ).order_by(WorkRecord.id.desc()).limit(1)
+        record = (await db.execute(stmt)).scalar_one_or_none()
+    if record is None:
+        return None
+    if record.creator_id != user.id and not user.has_permission("task_manage"):
+        return None
+
+    args = draft_args if isinstance(draft_args, dict) else {}
+    extra = args.get("extra_fields") if isinstance(args.get("extra_fields"), dict) else {}
+    changed: list[str] = []
+    # 只写「草稿里确实已确认」的值，不臆测、不用空值覆盖已有内容。
+    direct = {
+        "acceptance_result": "acceptance_result", "work_content": "work_content",
+        "problems": "problems", "treatment": "treatment",
+        "station_conclusion": "station_conclusion", "section": "section",
+        "location": "location",
+    }
+    for key, col in direct.items():
+        val = str(args.get(key) or "").strip()
+        if val and val != str(getattr(record, col, "") or "").strip():
+            limit = 2000 if col in ("work_content", "problems", "treatment") else 256
+            setattr(record, col, val[:limit])
+            changed.append(col)
+    cj = dict(record.content_json or {})
+    for key in ("acceptance_type", "acceptance_content", "supervision_conclusion",
+                "self_check_conclusion"):
+        val = str(extra.get(key) or args.get(key) or "").strip()
+        if val and val != str(cj.get(key) or "").strip():
+            cj[key] = val
+            changed.append(key)
+    # 用户原话留痕（「只搬家不丢弃」）
+    if message:
+        prev = str(cj.get("voice_text") or "").strip()
+        cj["voice_text"] = (prev + "\n" + message).strip()[:4000]
+    cj["agent_write_through"] = {
+        "at": datetime.now().isoformat(timespec="seconds"),
+        "by": user.real_name or user.username,
+        "fields": changed,
+        "source": "agent_chat",
+    }
+    record.content_json = cj
+    await db.commit()
+    await agent_tools.clear_pending(
+        db, user.id, "create_work_record", conversation_id, project_id=project_id,
+    )
+    logger.info("对话写入授权：已更新记录 #%s，字段=%s", record.id, changed)
+    return {
+        "ok": True, "record_id": record.id, "fields": changed,
+        "reply": (
+            f"已写入正式记录 #{record.id}（{record.record_type}）。"
+            + (f"\n本次补充：{'、'.join(changed)}。" if changed else "")
+            + "\n没提供的栏位按你的授权留空，不做臆测填写；到「工作记录」页可以继续补。"
+        ),
+    }
+
+
 async def _agent_chat_impl(
     req: AgentChatRequest,
     user: User = Depends(get_current_user),
@@ -1428,6 +1543,35 @@ async def _agent_chat_impl(
                     "options": {}, "form": None, "input_components": [],
                     "recommendations": [], "undo": None,
                 }
+
+    # 🔴 显式写入已建记录（2026-11-16 真机录屏）：先于模型路由确定性处理，
+    # 避免「写入正式记录 / 请写入验收记录」又被路由成一份新的待确认草稿。
+    if (
+        not structured_submit
+        and agent_tools.wants_write_through(message)
+        and (
+            _refers_to_existing_record(message, earlier_messages, req.history)
+            or bool(pend_for_context)   # 有待确认草稿 = 延续同一件事
+        )
+    ):
+        _wt = await _apply_existing_record_write_through(
+            db, user, project_id, conversation_id, message,
+            draft_for_context.get("args") or {}, earlier_messages, req.history,
+        )
+        if _wt:
+            await report_progress(
+                "tool_validation", "completed", "已按写入授权更新正式记录",
+                {"tool": "update_work_record", "record_id": _wt["record_id"],
+                 "fields": _wt["fields"]},
+            )
+            return {
+                "kind": "action", "tool": "update_work_record",
+                "model": model_id, "request_plan": incoming_plan,
+                "reply": _wt["reply"],
+                "card": None, "cards": [], "actions": [], "need_more": [],
+                "options": {}, "form": None, "input_components": [],
+                "recommendations": [], "undo": None,
+            }
 
     if not structured_submit:
         try:
@@ -1808,6 +1952,12 @@ async def _agent_chat_impl(
         tool = "create_work_record"
 
     if tool == "create_work_record":
+        # 🔴 短结论吸收（2026-11-16 真机录屏）：用户只回「合格」，模型接住了
+        # 却没落进 acceptance_result → 下一轮又追问验收结论。确定性兜底。
+        if not str(args.get("acceptance_result") or "").strip():
+            _short = agent_tools.short_conclusion(message)
+            if _short:
+                args["acceptance_result"] = _short
         if prefill:
             rtype = agent_tools._norm_record_type(str(args.get("record_type") or "")) or ""
             if not rtype:
@@ -1869,14 +2019,23 @@ async def _agent_chat_impl(
                 # 草稿已整理好、只差确认时，用户明确说「按草稿生成」「直接生成」
                 # 同样是一次授权；旧白名单只认「确认」字样，「按当前草稿生成」
                 # 会被当成又一轮草稿整理（模型还接话「收到，已生成」，实际没写库）。
+                # 🔴 2026-11-16 真机录屏：用户连说「写入正式记录 / 请写入验收记录」
+                # 不在白名单；且草稿仍有必填缺项时 awaiting=False，白名单根本不生效
+                # → 无限追问。显式写入授权必须独立于 awaiting 生效。
+                write_through = agent_tools.wants_write_through(message)
                 _confirm_tokens = (
                     "确认生成", "确认保存", "保存并生成", "确认建档",
                     "按当前草稿生成", "按草稿生成", "直接生成", "生成吧",
+                    "写入正式记录", "写入验收记录", "写入工作记录",
+                    "请写入", "直接写入", "正式写入", "直接建档",
                 )
-                confirmed = awaiting and (
+                confirmed = (awaiting or write_through) and (
                     structured_submit
                     or any(token in message for token in _confirm_tokens)
+                    or write_through
                 )
+                # 工具层据此放行必填缺项（留空、不臆测）与「一起询问」拦截
+                args["_write_through"] = bool(write_through)
                 args["_require_confirmation"] = not confirmed
                 if confirmed:
                     args["_execution_confirmed"] = True
