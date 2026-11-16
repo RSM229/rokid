@@ -89,6 +89,42 @@ class FieldViewValueTest(unittest.TestCase):
             f["label"] for s in sections for f in s["fields"]
         ])
 
+    def test_auto_grouping_draft_is_not_written_into_part_field(self):
+        """2026-11-16 截图：系统自动归类占位草稿不该写进正式字段值。"""
+        sections = _sections({
+            "id": 131, "record_type": "验收",
+            "section": "ssy37-38雨水管道",
+            "work_content": "验收（由1张现场照片自动归类，待补全内容）",
+        })
+        part = _field(sections, "验收部位、工序、材料、设备进场")
+        self.assertIsNotNone(part)
+        # 水印回填的真实部位保留，占位草稿不展示（用户说「保留其他」）
+        self.assertEqual("ssy37-38雨水管道", part["value"])
+        self.assertNotIn("自动归类", part["value"])
+        self.assertNotIn("施工内容（水印识别）", [
+            f["label"] for s in sections for f in s["fields"]
+        ])
+        # 正式记录里任何字段都不得出现系统占位措辞
+        for s in sections:
+            for f in s["fields"]:
+                self.assertNotIn("自动归类", f["value"])
+
+    def test_real_process_name_is_still_kept(self):
+        sections = _sections({
+            "id": 131, "record_type": "验收", "section": "大兴路",
+            "work_content": "底板钢筋模板验收",
+        })
+        part = _field(sections, "验收部位、工序、材料、设备进场")
+        self.assertIn("底板钢筋模板验收", part["value"])
+
+    def test_strip_auto_draft_handles_both_placeholders(self):
+        self.assertEqual("", view._strip_auto_draft(
+            "验收（由1张现场照片自动归类，待补全内容）"))
+        self.assertEqual("", view._strip_auto_draft(
+            "待确认归类（由现场照片自动分组，待补充类型与内容）"))
+        self.assertEqual("底板钢筋模板验收", view._strip_auto_draft("底板钢筋模板验收"))
+        self.assertEqual("", view._strip_auto_draft(""))
+
     def test_acceptance_points_draft_is_visible_and_marked_pending(self):
         sections = _sections({
             "id": 126, "record_type": "验收",

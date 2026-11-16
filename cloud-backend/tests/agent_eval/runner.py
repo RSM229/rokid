@@ -448,10 +448,9 @@ def judge(case: dict, parsed: dict | None, err: str | None) -> tuple[bool, list[
             fails.append(f"answer 出现禁用措辞「{bad}」")
 
     # --- answer_required：回答里必须出现的措辞（每项给候选，命中任一即可）---
-    # 用途：测「行为正确但工具为空」的场景。例如带水印素材时按当前设计
-    # （agent.py:985-986、prompt:405）不直接建单而是澄清类型，但澄清前
-    # **必须逐项复述水印**（prompt:393）—— 否则用户会以为系统没看图，
-    # 这正是 2026-10-19 真机反馈的抱怨点。
+    # 用途：测「行为正确但工具为空」的场景里必须带上的措辞。
+    # 🔴 2026-11-16 起水印识别内容按用户要求只留在内部思考、不再复述，
+    # 原「必须写出水印具体值」的期望已改为 answer_forbidden（见 K05）。
     for item in exp.get("answer_required") or []:
         cands = item if isinstance(item, (list, tuple, set)) else [item]
         cands = [str(c) for c in cands if str(c).strip()]

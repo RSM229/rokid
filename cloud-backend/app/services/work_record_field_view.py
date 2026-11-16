@@ -17,6 +17,7 @@
 """
 from __future__ import annotations
 
+import re
 from typing import Any, Mapping
 
 from app.services import record_field_spec
@@ -162,6 +163,31 @@ def _is_placeholder(text: str) -> bool:
     return not low or low in _PLACEHOLDERS or low in {"未填写", "未填写（可在编辑记录中补充）"}
 
 
+# 2026-11-16 用户口径「识别的内容只保留到思考里，不需要写出来」：
+# 分组建档在没有识别提示时，_split_content() 会把这类系统占位草稿写进
+# work_content（如「验收（由1张现场照片自动归类，待补全内容）」）。它不是
+# 用户口述/水印读出的工序名，不该出现在正式记录的字段值里。
+_AUTO_DRAFT_MARKERS = ("自动归类", "自动分组", "待补全内容", "待确认归类")
+_AUTO_DRAFT_PAREN = re.compile(
+    r"[（(]?由\s*\d*\s*张?现场照片自动(?:归类|分组)[^）)]*[）)]?"
+    r"|[（(]?待(?:补全内容|确认归类|补充类型与内容)[^）)]*[）)]?"
+)
+_TYPE_WORDS = frozenset({"巡视", "旁站", "验收", "见证", "平行检验", "待定", "巡查"})
+
+
+def _strip_auto_draft(text: Any) -> str:
+    """去掉系统自动归类占位草稿；真实工序名/部位原样保留，只剩类型词则当空。
+
+    展示层过滤，不改库：旧记录里已写入的占位文本保留在数据中，只是不展示，
+    符合「只搬家不丢弃」；新记录后续补全真实工序名时也不受影响。
+    """
+    s = str(text or "").strip()
+    if not any(marker in s for marker in _AUTO_DRAFT_MARKERS):
+        return s
+    s = _AUTO_DRAFT_PAREN.sub("", s).strip(" ·、，,;；（）()")
+    return "" if not s or s in _TYPE_WORDS else s
+
+
 def _lookup(
     keys: tuple[str, ...],
     detail: Mapping[str, Any],
@@ -172,8 +198,9 @@ def _lookup(
         for source in (detail, cj, prov):
             if not isinstance(source, Mapping) or key not in source:
                 continue
-            text = _text(source[key])
-            if not _is_placeholder(text):
+            # 自动归类占位草稿不算有效值，继续找下一个候选键/数据源
+            text = _strip_auto_draft(_text(source[key]))
+            if text and not _is_placeholder(text):
                 return text
     return ""
 
