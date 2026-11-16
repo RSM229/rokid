@@ -1672,7 +1672,13 @@ Page(themed({
         const uploaded = alreadyUploaded
           ? { id: image.mediaId, url: image.remoteUrl || '', watermark: image.serverWatermark, capture_time: image.captureTime, capture_time_source: image.captureTimeSource } as UploadedImageResult
           : await this.uploadEvidence(image, 'agent_review_plan')
-        if (!uploaded) throw new Error('图片证据上传失败，请重试')
+        if (!uploaded) {
+          // 带上客户端真实 errMsg。真机 wx.uploadFile 的失败（域名未配 uploadFile 合法域名、
+          // 临时文件已被清理、弱网超时）都发生在请求出网之前，服务端零日志无从定位，
+          // 只有把 errMsg 透出来才能区分「域名问题」还是「本地文件失效」。
+          const reason = String((this as any).lastUploadErrorMsg || '').trim()
+          throw new Error(`图片证据上传失败${reason ? `（${reason}）` : ''}，请重试`)
+        }
         void this.reportAgentProgress(requestId, 'evidence_upload', 'completed',
           alreadyUploaded
             ? `图片 ${index + 1}/${images.length}：已复用本次计划证据`

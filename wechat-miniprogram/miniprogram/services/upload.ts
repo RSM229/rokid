@@ -78,6 +78,12 @@ function upload<T>(
       },
       fail(error) {
         const message = error.errMsg || '上传失败'
+        // 真机特有：域名没进「uploadFile 合法域名」时请求根本不出网，服务端零日志。
+        // 开发者工具勾了「不校验合法域名」不会复现，因此单独映射成可读提示。
+        if (/not in domain list|invalid domain|domain list/i.test(message)) {
+          reject(new UploadError('当前域名未加入小程序 uploadFile 合法域名', false))
+          return
+        }
         const missingLocalFile = /no such file|not found|does not exist/i.test(message)
         reject(new UploadError(message, !missingLocalFile))
       },
