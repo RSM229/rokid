@@ -1423,17 +1423,18 @@ def _group_from_dict(d: dict) -> "multi_image_split.ImageGroup":
 
 def _split_need_more(groups, material: str | None = None, n_images: int = 0) -> dict:
     summary = multi_image_split.summarize(groups)
-    # 逐张水印复述由后端从 material 确定性生成：分组确认分支会用工具回执覆盖
-    # 模型的 answer，模型写的「图片1…图片8」会被整段丢掉（2026-11-12 真机反馈）。
-    # 放在同一个 reply 里，路由层再覆盖也不会丢；每张单独一行，保持换行格式。
+    # 🔴 2026-11-16 用户口径「识别的内容只保留到思考里，不需要写出来，保留其他就行」：
+    # 这里曾把 watermark_lines() 生成的「图片1：拍摄时间…／地点…／施工内容…」逐张
+    # 拼进 reply（服务端硬编码回执，改 _AGENT_SYSTEM 完全管不到，真机截图仍在念水印）。
+    # 识别值只用于分组、字段回填、验收要点匹配，不再写进任何对话回执。
+    # material / n_images 参数保留以兼容调用方；ask_block 的 watermark_lines
+    # 也置空，避免前端将来把它渲染出来。分组汇总、逐类待填/要点确认全部照旧。
     lines: list[str] = []
-    if material and n_images:
-        try:
-            from app.services.agent_vision_signals import watermark_lines
-            lines = watermark_lines(material, n_images)
-        except Exception:  # noqa: BLE001 - 复述是增强，失败不阻断分组确认
-            lines = []
-    reply = ("\n".join(lines) + "\n\n" if lines else "") + summary
+    # 兼容未发版的旧小程序：客户端靠 reply 里的「自动填入」判断服务端已回执过，
+    # 否则会把本地 formatWatermark() 再拼一遍（又是一行水印具体值）。这句只说
+    # 栏目名，不含任何识别值；新版客户端认「已读到」也会跳过。
+    reply = ("已读到照片水印，日期、地点、部位等已自动填入记录栏位"
+             "（具体值可在草稿中核对）。\n" + summary)
     # 分类完就按类型带出「这一类要填什么 + 对应内容/要点」，让用户在点
     # 「确认生成」之前能核对是否符合现场（2026-11-16 真机录屏需求）。
     # 提示是增强，失败不阻断分组确认；ask_block 使路由层强制用本 reply，

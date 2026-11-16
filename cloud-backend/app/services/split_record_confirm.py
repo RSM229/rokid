@@ -8,7 +8,8 @@
 - 栏目 / 待填字段 → app.services.record_field_spec.FORMS（生成物，勿手改）
 - 验收要点 → acceptance_ask_together.match_points_by_text
   （底层 acceptance_checklists.ITEMS，房建 181 / 市政 139 条规范要点）
-- 现场识别内容 → ImageGroup.hints（multi_image_split 已切掉水印尾巴）
+- 识别内容（仅内部）→ ImageGroup.hints（multi_image_split 已切掉水印尾巴）：
+  用来匹配验收要点、落 content_json，**不写进任何对话回执**（2026-11-16 用户口径）
 - 旁站三段栏目 → FORMS 的 field.section，与《监理旁站记录范本大全》
   「施工情况 / 监理情况 / 发现问题及处理意见」一致
 """
@@ -133,10 +134,12 @@ def build_type_confirmation(
     created_ids: dict[str, list[int]] | None = None,
     stage: str = "created",
 ) -> str:
-    """按记录类型聚合，生成「现场识别 + 该类内容/要点 + 待填栏目 + 请确认」。
+    """按记录类型聚合，生成「该类内容/要点 + 待填栏目 + 请确认」。
 
     display 由调用方传入（复用 agent_tools._split_record_display_name），
     避免本模块再复制一份正式表名。stage=plan 时结尾引导点「确认生成」。
+    🔴 识别出的施工内容（identified）只作内部依据：用于匹配验收要点、
+    落 content_json，不写进标题或正文（2026-11-16 用户「都要」）。
     """
     buckets: dict[str, list[Any]] = {}
     for g in groups or []:
@@ -155,9 +158,9 @@ def build_type_confirmation(
         ids = [int(i) for i in (ids_by_type.get(rtype) or []) if str(i).isdigit()]
         tag = " ".join(f"#{i}" for i in ids[:4])
         head = f"【{name_of(rtype)}{(' ' + tag) if tag else ''}】"
+        # 识别内容只留内部：曾在这里拼「 现场识别：水泥搅拌桩施工」，
+        # 2026-11-16 用户要求一律不写出来；identified 仍用于下方要点匹配。
         identified = _identified(gs)
-        if identified:
-            head += f" 现场识别：{identified}"
         lines.append(head)
 
         has_points = False
@@ -178,9 +181,9 @@ def build_type_confirmation(
             body = ("旁站内容（GD-B-212／范本）：" + " / ".join(secs) + " 三段"
                     if secs else "旁站内容：施工情况 / 监理情况 / 问题与处理")
         elif rtype == "见证":
-            body = "见证内容：" + (identified or "按现场照片整理") + "（材料与取样信息待补）"
+            body = "见证内容：按现场照片整理（材料与取样信息待补）"
         else:
-            body = "内容：" + (identified or "待确认归类后补全")
+            body = "内容：待确认归类后补全"
 
         pending = _pending_labels(
             rtype,

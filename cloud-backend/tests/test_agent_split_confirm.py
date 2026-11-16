@@ -79,7 +79,11 @@ class TypeConfirmationTextTest(unittest.TestCase):
                          "验收": [131], "见证": [132]},
             stage="created",
         )
-        self.assertIn("【巡视检查记录 #127】 现场识别：水泥搅拌桩施工", text)
+        self.assertIn("【巡视检查记录 #127】", text)
+        # 2026-11-16 用户「都要」：识别内容一律不写进回执，只留内部匹配要点
+        self.assertNotIn("现场识别", text)
+        self.assertNotIn("水泥搅拌桩施工", text)
+        self.assertNotIn("钢筋原材取样", text)
         self.assertIn("巡视内容（GD-B-214）", text)
         self.assertIn("特种作业人员是否持证上岗", text)
         self.assertIn("【旁站监理记录 #128 #129 #130】", text)
@@ -173,6 +177,41 @@ class SplitReceiptIntegrationTest(unittest.TestCase):
     def test_router_never_overwrites_split_receipt_with_model_answer(self):
         router_src = (ROOT / "app/routers/agent.py").read_text(encoding="utf-8")
         self.assertIn('_result_data.get("split")', router_src)
+
+
+class NoWatermarkValuesInSplitReplyTest(unittest.TestCase):
+    """2026-11-16 15:14 真机截图：分组确认回执里仍逐张念「图片1：拍摄时间…」。"""
+
+    MATERIAL = (
+        "【图片 1】\n"
+        "【水印】拍摄时间：2026-10-27 16:07:00\n地点：沙盛四路等4条道路工\n"
+        "部位：建材纵一路\n天气：多云30℃\n施工内容：水泥搅拌桩施工\n"
+        "【图片内容观察】水泥搅拌桩施工\n\n"
+        "【图片 2】\n"
+        "【水印】拍摄时间：2026-10-27 15:59:00\n地点：沙盛四路等4条道路工\n"
+        "部位：大兴路\n天气：多云30℃\n施工内容：钢板桩支护安装\n"
+        "【图片内容观察】钢板桩支护安装\n"
+    )
+
+    def test_split_need_more_does_not_print_watermark_fields(self):
+        from app.services.agent_vision_signals import watermark_lines
+        # 先证明素材确实能解析出逐张水印，避免「本来就没生成」造成假通过
+        parsed = watermark_lines(self.MATERIAL, 2)
+        self.assertTrue(any("拍摄时间：" in line for line in parsed))
+
+        result = agent_tools._split_need_more(
+            _video_groups(), material=self.MATERIAL, n_images=2)
+        reply = str(result.get("reply") or "")
+        for leaked in ("图片1：", "图片2：", "拍摄时间：", "地点：", "天气：",
+                       "2026-10-27", "多云30℃", "沙盛四路等4条道路工",
+                       "现场识别", "建材纵一路", "水泥搅拌桩施工"):
+            self.assertNotIn(leaked, reply, "水印识别值仍被写出：" + leaked)
+        # 「保留其他」：分组汇总、逐类待填内容/要点、确认引导一个都不能少
+        self.assertIn("自动填入记录栏位", reply)  # 兼容旧版客户端的概括句
+        self.assertIn("这批图我分了", reply)
+        self.assertIn("巡视内容（GD-B-214）", reply)
+        self.assertIn("点「确认生成」", reply)
+        self.assertEqual([], result.get("ask_block", {}).get("watermark_lines"))
 
 
 class AcceptancePointsPersistTest(unittest.TestCase):

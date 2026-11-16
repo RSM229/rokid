@@ -397,15 +397,17 @@ def clean_hints(hints) -> list[str]:
 def summarize(groups: list[ImageGroup]) -> str:
     """确认回执文案：『这批图我分了 巡视3 / 旁站3 / 待定3，确认后建。』
 
-    同类型不同部位会拆成多组，回执带上部位名，用户才知道为什么变成多条。
+    🔴 2026-11-16 用户口径「识别的内容只保留到思考里，不需要写出来」：
+    水印部位等识别值只用于分组（同类型不同部位仍会拆成多组），不写进回执；
+    这里按类型合并计数，用户看到的是分类结果与张数。
     """
-    parts = []
-    for g in groups:
-        section = _group_section(g)
-        name = f"{g.record_type}·{_short_section(section)}" if section else g.record_type
-        parts.append(f"{name}{len(g.images)}")
-    if not parts:
+    counts: dict[str, int] = {}
+    for g in groups or []:
+        rtype = str(getattr(g, "record_type", "") or "待定").strip() or "待定"
+        counts[rtype] = counts.get(rtype, 0) + len(getattr(g, "images", None) or [])
+    if not counts:
         return "这批图我没分出可归类的记录，请告诉我每张图分别是什么类型。"
+    parts = [f"{rtype}{n}" for rtype, n in counts.items()]
     return "这批图我分了 " + " / ".join(parts) + "，确认后建。"
 
 

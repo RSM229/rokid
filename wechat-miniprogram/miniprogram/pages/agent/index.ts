@@ -3071,13 +3071,19 @@ Page(themed({
         },
         timeout: 120000,
       })
-      // 让用户看得见「水印确实读了」，否则会怀疑系统没看图
+      // 🔴 2026-11-16 用户口径「识别的内容只保留到思考里，不需要写出来」：
+      // 不再把 formatWatermark(wmFields) 逐项拼进对话。水印值仍由 wmFields /
+      // prefill 用于回填与分类，这里只用 wmText 判断是否「读到了水印」。
       const wmText = this.formatWatermark(wmFields)
       const reply = String(result.reply || '')
       if (wmText) {
-        // 服务端已回执「已从照片水印自动填入…」时不重复列一遍
-        if (!reply.includes('自动填入')) {
-          result.reply = [wmText, reply].filter(Boolean).join('\n')
+        // 服务端没给自动填入回执时补一句概括（只说栏目名，不写具体值），
+        // 避免用户以为系统没看图；已有「自动填入/已读到」就不重复。
+        if (!reply.includes('自动填入') && !reply.includes('已读到')) {
+          result.reply = [
+            '已读到这批照片的水印信息，拍摄时间、地点、部位等已自动带入记录栏位。',
+            reply,
+          ].filter(Boolean).join('\n')
         }
       } else if (hasImage) {
         // 普通记录场景只做水印读取；没有水印不等于用户没有提供事实，

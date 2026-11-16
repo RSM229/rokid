@@ -689,6 +689,29 @@ def apply_prefill(
     return out, filled
 
 
+def _auto_filled_summary(filled: list[str]) -> str:
+    """自动填入回执只列栏目名，不写水印识别到的具体值（2026-11-16 用户口径）。
+
+    ``apply_prefill`` 返回的说明形如
+    ``["日期（改用照片水印）：2026-10-27", "地点：沙盛四路等4条道路工"]``，
+    过去整串拼进 reply 会把日期/地点/天气等识别值全念一遍。识别值仍留在
+    ``args`` 里用于落库和证据，只是不再出现在对话文本中。
+
+    🔴 必须保留「自动填入」四个字：小程序 ``index.ts`` 靠它判断服务端已经
+    回执过、不再把本地水印清单拼一遍（旧版客户端兼容）。
+    """
+    labels: list[str] = []
+    for item in filled or []:
+        label = str(item).split("：", 1)[0].split(":", 1)[0].strip()
+        label = label.replace("（改用照片水印）", "").strip()
+        if label and label not in labels:
+            labels.append(label)
+    if not labels:
+        return "已从照片水印自动填入部分栏位"
+    return ("已从照片水印自动填入：" + "、".join(labels)
+            + "（具体值已带入记录栏位，可在草稿中核对）")
+
+
 def _history_messages(history: list[dict], limit: int = 6) -> list[dict]:
     """把前端历史压成模型消息（只保留最近 limit 轮，忽略卡片等非文本内容）。"""
     out: list[dict] = []
@@ -2179,7 +2202,7 @@ async def _agent_chat_impl(
             if result.get("field_conflicts"):
                 pass  # 冲突 brief 已覆盖「按水印填入」这层信息，正文交给模型接话
             else:
-                head = "已从照片水印自动填入：" + "、".join(auto_filled)
+                head = _auto_filled_summary(auto_filled)
                 if result.get("need_more"):
                     rtype = agent_tools._norm_record_type(str(args.get("record_type") or "")) or "巡视"
                     head = f"已按「{rtype}」开始记录，{head}。"
