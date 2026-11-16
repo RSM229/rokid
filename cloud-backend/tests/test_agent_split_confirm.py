@@ -89,7 +89,8 @@ class TypeConfirmationTextTest(unittest.TestCase):
         self.assertIn("【旁站监理记录 #128 #129 #130】", text)
         self.assertIn("旁站内容（GD-B-212／范本）", text)
         self.assertIn("【验收记录 #131】", text)
-        self.assertIn("验收要点（省统表", text)
+        self.assertIn("验收要点：", text)
+        self.assertNotIn("省统表相近工序", text)  # 15:37 截图：括号里的工序名要去掉
         self.assertIn("① 核查", text)
         self.assertNotIn("① ①", text)  # 要点原文自带序号，不能套两层
         self.assertIn("待填：验收类型", text)
@@ -160,7 +161,8 @@ class SplitReceiptIntegrationTest(unittest.TestCase):
         reply = str(result.get("reply") or "")
         self.assertIn("已按分组创建以下记录", reply)
         self.assertIn("巡视内容（GD-B-214）", reply)
-        self.assertIn("验收要点（省统表", reply)
+        self.assertIn("验收要点：", reply)
+        self.assertNotIn("省统表相近工序", reply)
         self.assertIn("请确认是否符合现场情况", reply)
         self.assertNotIn("具体位置等可继续", reply)
         self.assertTrue(result.get("data", {}).get("type_confirmation"))
@@ -212,6 +214,59 @@ class NoWatermarkValuesInSplitReplyTest(unittest.TestCase):
         self.assertIn("巡视内容（GD-B-214）", reply)
         self.assertIn("点「确认生成」", reply)
         self.assertEqual([], result.get("ask_block", {}).get("watermark_lines"))
+
+
+class NoProcedureLabelInAcceptanceTextTest(unittest.TestCase):
+    """2026-11-16 15:37 截图「验收要点，括号里的要去掉吧」。
+
+    匹配到的规范工序名（识别/匹配结果）不写进任何用户可见文本，
+    但 content_json.acceptance_points.procedure 仍保留供内部追溯。
+    """
+
+    @staticmethod
+    def _draft():
+        return src.acceptance_points_for(
+            [_group("验收", ["底板钢筋模板验收"], "大兴路")])
+
+    def test_receipt_shows_points_without_procedure_bracket(self):
+        text = src.build_type_confirmation(
+            _video_groups(), display=agent_tools._split_record_display_name)
+        draft = self._draft()
+        self.assertIn("验收要点：①", text)
+        self.assertNotIn("省统表相近工序", text)
+        self.assertNotIn(draft["procedure"], text)
+        self.assertIn("待填：", text)  # 其他内容照旧保留
+
+    def test_draft_and_formal_text_hide_procedure_but_keep_it_internally(self):
+        draft = self._draft()
+        self.assertIn("procedure", draft)  # 内部字段仍在，不丢数据
+        self.assertTrue(draft["procedure"])
+        shown = src.acceptance_points_text(draft)
+        self.assertIn("核查钢筋规格", shown)
+        self.assertNotIn(draft["procedure"], shown)
+        formal = src.build_acceptance_content_from_points(draft)
+        self.assertNotIn(draft["procedure"], formal)
+        self.assertIn("—— 符合", formal)
+        self.assertIn("逐项核对，共 3 项", formal)
+
+    def test_legacy_draft_with_procedure_prefix_is_stripped_on_display(self):
+        draft = self._draft()
+        legacy = dict(draft)
+        legacy["text"] = f"省统表相近工序「{draft['procedure']}」：" + draft["text"]
+        shown = src.acceptance_points_text(legacy)
+        self.assertNotIn(draft["procedure"], shown)
+        self.assertIn("核查钢筋规格", shown)
+
+    def test_legacy_record_detail_hides_procedure(self):
+        from app.routers import work_record as wr
+        legacy = WorkRecord(record_type="验收", work_content="底板钢筋模板验收",
+                            content_json={})
+        text = wr._detail_acceptance_points_text(legacy)
+        proc, _items = aat.match_points_by_text("底板钢筋模板验收")
+        self.assertNotIn(proc, text)
+        self.assertNotIn("省统表相近工序", text)
+        self.assertIn("核查钢筋规格", text)
+        self.assertIn("待确认", text)
 
 
 class AcceptancePointsPersistTest(unittest.TestCase):

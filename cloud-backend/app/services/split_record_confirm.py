@@ -168,12 +168,13 @@ def build_type_confirmation(
             items = _xunshi_items()
             body = f"巡视内容（GD-B-214）：{_circled(items)}" if items else "巡视内容：待补"
         elif rtype == "验收":
-            proc, points = _aat.match_points_by_text(identified)
+            _proc, points = _aat.match_points_by_text(identified)
             if points:
                 has_points = True
                 # 要点原文自带 ① ② ③，别再套一层序号。
-                body = (f"验收要点（省统表相近工序「{_short(proc, 30)}」）："
-                        + "；".join(_short(p, 52) for p in points))
+                # 2026-11-16 用户截图「验收要点，括号里的要去掉吧」：匹配到的
+                # 规范工序名不再写出来，只留要点正文；proc 仍用于内部追溯。
+                body = "验收要点：" + "；".join(_short(p, 52) for p in points)
             else:
                 body = "验收要点：暂未匹配到这道工序的规范要点，说下验收的是哪道工序我再带出"
         elif rtype == "旁站":
@@ -222,18 +223,32 @@ def acceptance_points_for(groups: list[Any]) -> dict | None:
     if not items:
         return None
     return {
+        # 工序名只留在内部：用于追溯匹配来源，不写进任何回执/记录展示文本
         "procedure": str(proc or ""),
         "identified": identified,
         "points": items,
-        "text": f"省统表相近工序「{_short(proc, 30)}」：" + "；".join(items),
+        "text": "；".join(items),
         "confirmed": False,
     }
 
 
+# 历史草案曾把匹配到的规范工序名写在要点前（「工序名：① …」）。
+# 2026-11-16 用户「验收要点，括号里的要去掉吧」：展示层统一剥掉，
+# content_json.acceptance_points.procedure 仍保留，不丢数据。
+_LEGACY_PROC_PREFIX = re.compile(r"^省统表相近工序「[^」]*」\s*[:：]\s*")
+
+
+def _strip_procedure_prefix(text: Any) -> str:
+    return _LEGACY_PROC_PREFIX.sub("", str(text or "").strip())
+
+
 def acceptance_points_text(points: Any) -> str:
-    """详情接口用：把要点草案拼成一行可读文本（正式验收内容为空时展示）。"""
+    """详情接口用：把要点草案拼成一行可读文本（正式验收内容为空时展示）。
+
+    历史草案里带工序名前缀的也在这里剥掉，旧记录同样不再显示。
+    """
     if isinstance(points, dict):
-        return str(points.get("text") or "").strip()
+        return _strip_procedure_prefix(points.get("text"))
     return ""
 
 
@@ -248,6 +263,5 @@ def build_acceptance_content_from_points(points: Any, *, positive: bool = True) 
     items = [str(p).strip() for p in (points.get("points") or []) if str(p).strip()]
     if not items:
         return ""
-    proc = _short(points.get("procedure"), 30)
-    return (f"验收内容（按省统表相近工序「{proc}」逐项核对，共 {len(items)} 项）："
+    return (f"验收内容（逐项核对，共 {len(items)} 项）："
             + "；".join(f"{p} —— 符合" for p in items))

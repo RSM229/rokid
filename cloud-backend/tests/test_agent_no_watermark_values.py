@@ -81,6 +81,21 @@ class HardCodedReceiptTest(unittest.TestCase):
         body = splitter[start:splitter.index("def _group_section(", start)]
         self.assertNotIn("_short_section(section)", body)
 
+    def test_acceptance_points_hide_matched_procedure(self):
+        """15:37 截图：验收要点后面括号里的规范工序名也是识别/匹配结果，不写出来。"""
+        from app.services import multi_image_split as mis
+        from app.services import split_record_confirm as src
+        group = mis.ImageGroup(record_type="验收", images=["a"],
+                               hints=["底板钢筋模板验收"], wm=[])
+        draft = src.acceptance_points_for([group])
+        self.assertTrue(draft and draft["procedure"])  # 内部仍保留
+        for text in (src.build_type_confirmation([group]),
+                     src.acceptance_points_text(draft),
+                     src.build_acceptance_content_from_points(draft)):
+            self.assertNotIn(draft["procedure"], text)
+            self.assertNotIn("省统表相近工序", text)
+        self.assertIn("核查钢筋规格", src.acceptance_points_text(draft))
+
 
 class GroupSummaryAndConfirmationTest(unittest.TestCase):
     """2026-11-16 用户「都要」：分组汇总与分类回执也不写识别值。"""

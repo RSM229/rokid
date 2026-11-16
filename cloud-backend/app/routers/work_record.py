@@ -29,7 +29,7 @@ import logging
 import uuid
 from pathlib import Path
 from app.services.record_fields import business_date, now_local, validate_times, validate_record, invalidate_document, ACCEPTANCE_RESULTS
-from app.services import acceptance_ask_together, work_record_field_view
+from app.services import acceptance_ask_together, work_record_field_view, split_record_confirm
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -1709,15 +1709,16 @@ def _detail_acceptance_points_text(record: WorkRecord) -> str:
         return ""
     points = cj.get("acceptance_points")
     if isinstance(points, dict):
-        return str(points.get("text") or "").strip()
+        # 复用展示层：历史草案的工序名前缀在这里一并剥掉（procedure 仍留在库里）
+        return split_record_confirm.acceptance_points_text(points)
     if record.record_type != WorkRecordType.ACCEPTANCE.value:
         return ""
-    proc, items = acceptance_ask_together.match_points_by_text(
+    _proc, items = acceptance_ask_together.match_points_by_text(
         str(record.work_content or ""))
     items = [str(p).strip() for p in items if str(p).strip()]
     if not items:
         return ""
-    return f"省统表相近工序「{proc}」：" + "；".join(items) + "（按工作内容匹配，待确认）"
+    return "；".join(items) + "（按工作内容匹配，待确认）"
 
 
 @router.get("/{record_id}")
