@@ -41,16 +41,16 @@ cd ..
 2. `miniprogram/config.ts` 在 `develop` 开发版默认连接本机 `127.0.0.1:8000`，只在开发者工具本地设置里勾选「不校验合法域名」即可；体验版/正式版不受影响，仍从 `ext.apiBaseUrl` 读取线上服务器地址。真机不能使用电脑的 `127.0.0.1`。
 3. 后端本地配置 `WECHAT_APP_ID`、`WECHAT_APP_SECRET`；本地服务与体验/正式服务都使用真实微信登录，保持 `WECHAT_MOCK_LOGIN_ENABLED=false` 和 `mockWechatLogin=false`。
 4. 在微信公众平台配置 request、uploadFile、downloadFile、socket 合法域名、业务类目和隐私保护指引（`app.json` 已开启 `__usePrivacyCheck__`）。
-   **服务器只开放 4432 时无需改端口**——微信 https 合法域名允许带端口，但不能混用。按当前默认地址 `https://www.baize.gdces.cn:4432/api` 需配置为：
+   **线上统一走标准 443，域名不带端口**。按当前默认地址 `https://www.baize.gdces.cn/api` 需配置为：
 
    | 类型 | 后台填写值 |
    | --- | --- |
-   | request 合法域名 | `https://www.baize.gdces.cn:4432` |
-   | uploadFile 合法域名 | `https://www.baize.gdces.cn:4432` |
-   | downloadFile 合法域名 | `https://www.baize.gdces.cn:4432` |
+   | request 合法域名 | `https://www.baize.gdces.cn` |
+   | uploadFile 合法域名 | `https://www.baize.gdces.cn` |
+   | downloadFile 合法域名 | `https://www.baize.gdces.cn` |
    | socket 合法域名 | `wss://www.baize.gdces.cn`（wss 域名免配端口，默认放行该域名下所有端口；当前版本未使用） |
 
-   要点：带端口域名配置后，**代码里的地址必须带完全相同的端口**，写不带端口或写 `:443` 都会被拦截；反过来后台若不配端口，请求 URL 里也不能带端口（连 `:443` 都失败）。域名必须已完成 ICP 备案，且证书域名匹配、TLS ≥ 1.2。
+   要点：后台配的域名带不带端口，必须与代码 `apiBaseUrl` 完全一致——后台不配端口，请求 URL 里也不能带端口（写 `:443` 同样会被拦截）。域名必须已完成 ICP 备案，且证书域名匹配、TLS ≥ 1.2。
 5. 使用真机验证相机、录音、位置、前后台切换、弱网重试。
 
 弱网上传队列会在小程序回到前台或网络恢复后自动补传，也可在“采集”页手动重试。不同发布环境的地址通过 `ext` 配置隔离，微信 AppSecret 和 AI Token 始终只保存在服务端。

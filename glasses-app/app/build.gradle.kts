@@ -15,7 +15,7 @@ android {
         versionCode = 1
         versionName = "0.1.0"
 
-        buildConfigField("String", "API_BASE_URL", "\"https://www.baize.gdces.cn:4432/api\"")
+        buildConfigField("String", "API_BASE_URL", "\"https://www.baize.gdces.cn/api\"")
 
         javaCompileOptions {
             annotationProcessorOptions {

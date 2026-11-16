@@ -32,13 +32,13 @@ test('PREFER_LOCAL_BACKEND=false disables local backend; production URL always u
         mockWechatLogin: true,
         useLocalBackend: true,
         localApiBaseUrl: 'http://127.0.0.1:8000/api/',
-        apiBaseUrl: 'https://test.example:4432/api/',
+        apiBaseUrl: 'https://test.example/api/',
       }),
       getAccountInfoSync: () => ({ miniProgram: { envVersion } }),
     } })
     // 铁律：联调直连生产后端，本地后端开关恒为 false（不受 ext.useLocalBackend 覆盖）
     assert.equal(config.useLocalBackend, false)
-    assert.equal(config.apiBaseUrl, 'https://test.example:4432/api')
+    assert.equal(config.apiBaseUrl, 'https://test.example/api')
     // 🔴 2026-10-29 决策已定：mockWechatLogin 跟随「mock 仅限本地」铁律 ——
     // 只在 useLocalBackend=true 且 develop 且 ext.mockWechatLogin=true 时开启。
     // PREFER_LOCAL_BACKEND=false 时 useLocalBackend 恒 false，故任何环境/ext 下
@@ -54,7 +54,7 @@ test('production backend is always used when no local preference is set', () => 
       getAccountInfoSync: () => ({ miniProgram: { envVersion } }),
     } })
     assert.equal(config.useLocalBackend, false)
-    assert.equal(config.apiBaseUrl, 'https://www.baize.gdces.cn:4432/api')
+    assert.equal(config.apiBaseUrl, 'https://www.baize.gdces.cn/api')
   }
 })
 

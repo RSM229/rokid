@@ -128,9 +128,9 @@ blockquote.q-tip{border-left-color:var(--accent); background:#f0f7ff}
 <h2 id="1-3-访问方式">1.3 访问方式</h2>
 <ul>
 <li><strong>微信小程序</strong>：微信内搜索小程序名，或扫描项目组提供的二维码</li>
-<li><strong>Web 管理后台</strong>：浏览器打开 <code>https://www.baize.gdces.cn:4432/admin/</code></li>
+<li><strong>Web 管理后台</strong>：浏览器打开 <code>https://www.baize.gdces.cn/admin/</code></li>
 </ul>
-<blockquote class="quote q-danger"><p>🔴 <strong>注意地址带端口 <code>:4432</code></strong>，且必须带 <code>/admin/</code> 前缀。建议第一次打开后加入浏览器收藏夹。</p><p>🔴 登录后请勿在浏览器直接按 <code>F5</code> 刷新子页面（历史遗留问题，已在修复中）；如遇白屏或 404，回到上述完整地址重新进入即可。</p></blockquote>
+<blockquote class="quote q-danger"><p>🔴 <strong>地址不带端口</strong>（标准 443），且必须带 <code>/admin/</code> 前缀。建议第一次打开后加入浏览器收藏夹。</p><p>🔴 登录后请勿在浏览器直接按 <code>F5</code> 刷新子页面（历史遗留问题，已在修复中）；如遇白屏或 404，回到上述完整地址重新进入即可。</p></blockquote>
 <h2 id="1-4-三端功能对照">1.4 三端功能对照</h2>
 <table><thead><tr><th>业务能力</th><th>小程序</th><th>Web 后台</th><th>眼镜端</th></tr></thead><tbody><tr><td>工作台（AI 对话）</td><td>✅</td><td>✅</td><td>语音</td></tr><tr><td>隐患识别（拍照 + AI）</td><td>✅</td><td>✅</td><td>✅（第一视角）</td></tr><tr><td>巡视 / 旁站 / 验收 / 见证</td><td>✅</td><td>✅</td><td>语音记录</td></tr><tr><td>监理文书生成与审批</td><td>✅（生成/查看）</td><td>✅（审批/导出）</td><td>—</td></tr><tr><td>台账归集与导出 Excel/PDF</td><td>✅（查看/导出）</td><td>✅（归档/批量导出）</td><td>—</td></tr><tr><td>派单与接单</td><td>✅（接单）</td><td>✅（派单）</td><td>—</td></tr><tr><td>项目看板 / 公司看板</td><td>✅</td><td>✅</td><td>—</td></tr><tr><td>立项 / 建号 / 权限配置</td><td>❌</td><td>✅</td><td>—</td></tr><tr><td>音视频通话 / 通讯录</td><td>✅</td><td>❌</td><td>—</td></tr></tbody></table>
 <h2 id="1-5-术语表">1.5 术语表</h2>
@@ -203,7 +203,7 @@ blockquote.q-tip{border-left-color:var(--accent); background:#f0f7ff}
 <blockquote class="quote q-tip"><p>💡 微信登录与密码登录是<strong>同一个账号</strong>，只是身份验证方式不同。绑定后手机端免密，电脑端仍用账号密码。</p></blockquote>
 <h2 id="2-8-首次登录-web-后台">2.8 首次登录 · Web 后台</h2>
 <ol>
-<li>打开 <code>https://www.baize.gdces.cn:4432/admin/</code></li>
+<li>打开 <code>https://www.baize.gdces.cn/admin/</code></li>
 <li>输入 <strong>用户名 + 密码</strong></li>
 <li>🔴 <strong>「选择角色」保持空（自动识别，推荐）</strong> ——系统会根据你的账号岗位自动加载对应权限</li>
 </ol>
@@ -600,7 +600,7 @@ blockquote.q-tip{border-left-color:var(--accent); background:#f0f7ff}
 <p><strong>Q12　「资料库」和「规范资料库」是一回事吗？</strong>不是。「规范资料库」是规范法规检索；「资料库」是你的个人/共享资料库（可建库、可凭邀请码加入）。</p>
 <p><strong>Q13　通知收不到？</strong>在「我」→ <strong>服务通知订阅</strong>，订阅「审批通知」「派单与隐患通知」。</p>
 <h2 id="web-后台">Web 后台</h2>
-<p><strong>Q14　网页刷新后 404 / 白屏？</strong>历史遗留问题（在子页面按 F5 会 404）。回到 <code>https://www.baize.gdces.cn:4432/admin/</code> 重新进入即可。</p>
+<p><strong>Q14　网页刷新后 404 / 白屏？</strong>历史遗留问题（在子页面按 F5 会 404）。回到 <code>https://www.baize.gdces.cn/admin/</code> 重新进入即可。</p>
 <p><strong>Q15　左侧菜单和说明书里写的不一样？</strong>菜单<strong>随权限自动增减</strong>。没有权限的项不显示，这是正常的。</p>
 <p><strong>Q16　台账 / 文书审批 / 派单在哪里？</strong>不在左侧菜单，<strong>从「工作台」输入指令进入</strong>（如输入"台账""文书审批"）。</p>
 <p><strong>Q17　为什么系统提示我"不能审批自己"？</strong>人员审批有互斥约束：管理员不能批自己的申请，且只能批本组织的人。请让其他管理员处理。</p>

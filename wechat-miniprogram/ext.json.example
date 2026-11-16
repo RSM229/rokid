@@ -2,7 +2,7 @@
   "extEnable": true,
   "extAppid": "请替换为真实微信小程序AppID",
   "ext": {
-    "apiBaseUrl": "https://www.baize.gdces.cn:4432/api",
+    "apiBaseUrl": "https://www.baize.gdces.cn/api",
     "localApiBaseUrl": "http://127.0.0.1:8000/api",
     "useLocalBackend": false,
     "mockWechatLogin": false
