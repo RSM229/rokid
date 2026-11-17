@@ -120,6 +120,14 @@ class TypeConfirmationTextTest(unittest.TestCase):
         self.assertTrue(lines[acceptance + 3].startswith("③ 混凝土强度等级"))
         self.assertTrue(any(line.startswith("待填：") for line in lines))
 
+    def test_pending_asks_problems_even_optional(self):
+        """2026-11-17 用户「这个要跟用户交互的」：巡视问题及处理虽是非必填栏，
+        确认回执的「待填」也要带出，不能静默留空。"""
+        text = src.build_type_confirmation(
+            [_group("巡视", ["水泥搅拌桩施工"], section="大兴路")],
+            display=lambda rt: f"{rt}记录", stage="created")
+        self.assertIn("待填：巡视开始时间、巡视的问题及处理情况", text)
+
     def test_plan_stage_asks_to_confirm_classification(self):
         text = src.build_type_confirmation(
             _video_groups(), display=agent_tools._split_record_display_name,
@@ -146,7 +154,9 @@ class TypeConfirmationTextTest(unittest.TestCase):
         self.assertIn("施工单位是否按工程设计文件", items[0])
         secs = src._pangzhan_sections()
         self.assertEqual(["施工情况", "监理情况", "问题与处理"], secs)
-        self.assertEqual(["巡视开始时间"], src._pending_labels(
+        # 2026-11-17 用户「这个要跟用户交互的」：巡视问题及处理虽是非必填栏，
+        # 也要在确认回执里带出问用户，不能静默留空。
+        self.assertEqual(["巡视开始时间", "巡视的问题及处理情况"], src._pending_labels(
             "巡视", has_section=True, has_photo=True, has_points=False))
 
     def test_unknown_type_and_empty_groups_are_safe(self):

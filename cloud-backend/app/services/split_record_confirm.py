@@ -28,6 +28,13 @@ _SECTION_FROM_WATERMARK = "section"
 _PHOTO_ALREADY_ATTACHED = "photo"
 _POINTS_ALREADY_SHOWN = "acceptance_content"
 
+# 2026-11-17 用户截图「这个要跟用户交互的」：巡视/旁站/危大巡视的
+# 「问题及处理情况」虽是 xlsx 非必填栏（required=False），却是正式文书的
+# 实栏（GD-B-214/212 的问题与处理），建单时不能静默留空。这些 canonical
+# 的栏即使 non-required 也列进「待填」，由确认回执带出问用户（无问题可回
+# 「无异常」，_backfill_no_issue 会落 problems）。
+_MUST_ASK_OPTIONAL: set[str] = {"problems"}
+
 
 def _short(text: Any, limit: int) -> str:
     s = str(text or "").strip()
@@ -54,7 +61,11 @@ def _pending_labels(rtype: str, *, has_section: bool, has_photo: bool,
         skip.add(_POINTS_ALREADY_SHOWN)
     out: list[str] = []
     for field in form.get("fields", []):
-        if field.get("kind") != "ask" or not field.get("required"):
+        if field.get("kind") != "ask":
+            continue
+        # 必填栏 + 用户交互专用可选栏（_MUST_ASK_OPTIONAL）一起进「待填」；
+        # 其余可选栏（施工作业人数等）仍不强求，不打扰用户。
+        if not field.get("required") and str(field.get("canonical") or "") not in _MUST_ASK_OPTIONAL:
             continue
         if field.get("canonical") in skip:
             continue
