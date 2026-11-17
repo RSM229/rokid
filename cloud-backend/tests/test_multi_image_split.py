@@ -439,6 +439,48 @@ class TestWatermarkTemplateFooter(unittest.TestCase):
         self.assertTrue(fields["contacts"])
         self.assertTrue(fields["locations"])
 
+    def test_no_clock_in_watermark_does_not_invent_start_time(self):
+        """水印只有日期没时分 → start_dt=None，绝不臆造开始时刻。"""
+        from app.services.agent_tools import _split_watermark_fields
+        fields = _split_watermark_fields([
+            {"section": "大兴路", "taken_at": "2026-10-27"},
+        ])
+        self.assertIsNone(fields["start_dt"])
+
+
+class TestSplitRecordStartTimeBackfill(unittest.TestCase):
+    """2026-11-17 用户截图「日期和位置呢」：分组建单此前只写记录日期，
+    详情里「巡视开始时间（年月日 时）」读 inspection_start_time 一直空着。
+    水印有拍摄时刻就必须回填到开始时间栏（旁站→station_start_time）。"""
+
+    def _build(self, record_type: str):
+        from app.services.multi_image_split import ImageGroup
+        db = FakeSession()
+        ctx = FakeCtx(db=db)
+        wm = [{"section": "直卸", "taken_at": "2026.10.27 16:47",
+               "weather": "晴26℃"}]
+        group = ImageGroup(record_type=record_type, images=["a.jpg"],
+                           hints=[_PHONE_WM_RAW], wm=wm)
+        result = asyncio.run(_create_split_records(ctx, [group]))
+        self.assertTrue(result.get("ok"))
+        records = [o for o in db.added if isinstance(o, WorkRecord)]
+        self.assertEqual(len(records), 1)
+        return records[0]
+
+    def test_patrol_start_time_from_watermark_clock(self):
+        rec = self._build("巡视")
+        self.assertIsNotNone(rec.inspection_start_time)
+        self.assertEqual(rec.inspection_start_time.strftime("%Y-%m-%d %H:%M"),
+                         "2026-10-27 16:47")
+        self.assertEqual(rec.record_date.isoformat(), "2026-10-27")
+        self.assertIsNone(rec.inspection_end_time)  # 不臆造结束时间
+
+    def test_station_start_time_from_watermark_clock(self):
+        rec = self._build("旁站")
+        self.assertIsNotNone(rec.station_start_time)
+        self.assertEqual(rec.station_start_time.strftime("%Y-%m-%d %H:%M"),
+                         "2026-10-27 16:47")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

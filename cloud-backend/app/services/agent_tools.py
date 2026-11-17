@@ -1474,8 +1474,13 @@ def _split_watermark_fields(wms: list) -> tuple:
     - 人员：去重留档（记录表无独立栏，落 content_json，避免清洗工作内容后被丢掉）。
     """
     _DATE_PREFIX = re.compile(r"(\d{4})[.\-/年](\d{1,2})[.\-/月](\d{1,2})")
+    # 2026-11-17 用户截图「日期和位置呢」：分组建单此前只把水印抽成日期写
+    # record_date，详情里「巡视开始时间（年月日 时）」读的是 inspection_start_time
+    # 一直空着。这里把组内最早拍摄**时刻**（含时分）一并按日期取出来回填。
+    _TIME_SUFFIX = re.compile(r"(\d{1,2})\s*[:：时]\s*(\d{2})")
     sections: list[str] = []
     dates: list = []
+    start_dts: list[datetime] = []
     weather = ""
     persons: list[str] = []
     # 水印模板的企业落款（调度电话/公司传真/地址）：从工作内容里切出来后
@@ -1496,6 +1501,15 @@ def _split_watermark_fields(wms: list) -> tuple:
             p = _parse_date(dm.group(0) if dm else t)
             if p and p not in dates:
                 dates.append(p)
+            # 同一张水印取日期+时分组成完整时刻（最早一张），供开始时间栏回填。
+            tm = _TIME_SUFFIX.search(t)
+            if p and tm:
+                hour, minute = int(tm.group(1)), int(tm.group(2))
+                if hour <= 23 and minute <= 59:
+                    try:
+                        start_dts.append(datetime(p.year, p.month, p.day, hour, minute))
+                    except ValueError:
+                        pass
         wt = str(w.get("weather") or "").strip()
         if wt and not weather:
             weather = wt
@@ -1511,6 +1525,8 @@ def _split_watermark_fields(wms: list) -> tuple:
     return {
         "section": section,
         "date": rec_date,
+        # 最早拍摄时刻（含时分）；无时刻水印则为 None，绝不臆造开始时间。
+        "start_dt": min(start_dts) if start_dts else None,
         "weather": weather or None,
         "persons": persons,
         "contacts": contacts,
@@ -1590,6 +1606,15 @@ async def _create_split_records(ctx: "ToolContext", groups: list) -> dict:
                 **({"acceptance_points": acc_points} if acc_points else {}),
             },
         )
+        # 水印拍摄时刻 → 开始时间栏（与单图 apply_prefill 同规则：巡视落
+        # inspection_start_time，旁站落 station_start_time）。只填开始、不臆造
+        # 结束时间；没有带时分的水印就保持 None，交给用户补。
+        start_dt = wm_fields.get("start_dt")
+        if isinstance(start_dt, datetime):
+            if rtype == "旁站":
+                rec.station_start_time = start_dt
+            else:
+                rec.inspection_start_time = start_dt
         ctx.db.add(rec)
         created.append((rtype, rec, photos))
 
