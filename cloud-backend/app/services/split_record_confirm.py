@@ -127,7 +127,7 @@ def _circled(items: list[str]) -> str:
     """分点逐行排列（2026-11-17 用户截图「每一个分点都换行」）。
 
     序号仍只在这里加一次；换行后小程序气泡 white-space:pre-wrap 直接生效，
-    不再用「；」把 ①②③ 串成一整段。第一项跟在栏目标题后，其余另起一行。
+    不再用「；」把 ①②③ 串成一整段。栏目标题由调用方单独成行，每项自己一行。
     """
     return "\n".join(f"{chr(0x2460 + i)} {it}" for i, it in enumerate(items))
 
@@ -171,7 +171,8 @@ def build_type_confirmation(
         has_points = False
         if rtype == "巡视":
             items = _xunshi_items()
-            body = f"巡视内容（GD-B-214）：{_circled(items)}" if items else "巡视内容：待补"
+            # 2026-11-17 用户给的样例：标题单独一行，①②③ 再逐行列出
+            body = f"巡视内容（GD-B-214）：\n{_circled(items)}" if items else "巡视内容：待补"
         elif rtype == "验收":
             _proc, points = _aat.match_points_by_text(identified)
             if points:
@@ -179,7 +180,8 @@ def build_type_confirmation(
                 # 要点原文自带 ① ② ③，逐条换行、别再套一层序号。
                 # 2026-11-16 用户截图「验收要点，括号里的要去掉吧」：匹配到的
                 # 规范工序名不再写出来，只留要点正文；proc 仍用于内部追溯。
-                body = "验收要点：" + "\n".join(_short(p, 52) for p in points)
+                # 2026-11-17 用户样例：标题与分点分开两行，同巡视排版一致。
+                body = "验收要点：\n" + "\n".join(_short(p, 52) for p in points)
             else:
                 body = "验收要点：暂未匹配到这道工序的规范要点，说下验收的是哪道工序我再带出"
         elif rtype == "旁站":

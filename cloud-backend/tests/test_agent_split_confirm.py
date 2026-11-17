@@ -99,7 +99,7 @@ class TypeConfirmationTextTest(unittest.TestCase):
         self.assertIn("写入正式记录", text)
 
     def test_each_point_gets_its_own_line(self):
-        """2026-11-17 用户截图「每一个分点都换行」：① ② ③ 不再挤成一段。"""
+        """2026-11-17 用户样例：标题独占一行，①②③ 逐行，待填另起一行。"""
         text = src.build_type_confirmation(
             _video_groups(), display=agent_tools._split_record_display_name)
         lines = [line.strip() for line in text.splitlines()]
@@ -107,10 +107,17 @@ class TypeConfirmationTextTest(unittest.TestCase):
             self.assertLessEqual(
                 sum(line.count(marker) for marker in "①②③④⑤⑥⑦⑧⑨⑩"), 1,
                 "同一行出现多个分点：" + line)
-        self.assertTrue(any(line.startswith("② 使用的工程材料") for line in lines))
-        self.assertTrue(any(line.startswith("⑤ 安全文明施工情况") for line in lines))
-        self.assertTrue(any(line.startswith("② 模板安装牢固") for line in lines))
-        self.assertTrue(any(line.startswith("③ 混凝土强度等级") for line in lines))
+
+        xunshi = lines.index("巡视内容（GD-B-214）：")
+        self.assertTrue(lines[xunshi + 1].startswith("① 施工单位是否按工程设计文件"))
+        self.assertTrue(lines[xunshi + 2].startswith("② 使用的工程材料"))
+        self.assertTrue(lines[xunshi + 3].startswith("③ 施工现场管理人员"))
+        self.assertTrue(lines[xunshi + 6].startswith("待填：巡视开始时间"))
+
+        acceptance = lines.index("验收要点：")
+        self.assertTrue(lines[acceptance + 1].startswith("① 核查"))
+        self.assertTrue(lines[acceptance + 2].startswith("② 模板安装牢固"))
+        self.assertTrue(lines[acceptance + 3].startswith("③ 混凝土强度等级"))
         self.assertTrue(any(line.startswith("待填：") for line in lines))
 
     def test_plan_stage_asks_to_confirm_classification(self):
@@ -247,7 +254,7 @@ class NoProcedureLabelInAcceptanceTextTest(unittest.TestCase):
         text = src.build_type_confirmation(
             _video_groups(), display=agent_tools._split_record_display_name)
         draft = self._draft()
-        self.assertIn("验收要点：①", text)
+        self.assertIn("验收要点：\n  ①", text)
         self.assertNotIn("省统表相近工序", text)
         self.assertNotIn(draft["procedure"], text)
         self.assertIn("待填：", text)  # 其他内容照旧保留
