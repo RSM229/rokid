@@ -235,6 +235,29 @@ def _shorten_label(label: str) -> tuple[str, str]:
     return clean[:34] + "…", clean
 
 
+def _format_inspection_items(value: Any) -> Any:
+    """把字段清单里「（1.… 2.…）」的整段检查项拆成逐行 ① ② ③。
+
+    2026-11-17 用户截图：详情页巡视内容仍是一整段「1. 2. 3. 4. 5. 6.其他」。
+    只改展示形态、不改字段真源，六个条目一个不少（含「其他」），也不截断。
+    只认「括号包起来 + 从 1 连续编号」的整段清单，用户自己填的内容原样保留。
+    """
+    s = str(value or "").strip()
+    if len(s) < 4 or s[0] not in "（(" or s[-1] not in "）)":
+        return value
+    core = s[1:-1].strip()
+    nums = [int(n) for n in re.findall(r"(?:^|\s)(\d+)\.\s*", core)]
+    if len(nums) < 2 or nums != list(range(1, len(nums) + 1)):
+        return value
+    items = [part.strip() for part in re.split(r"(?:^|\s)\d+\.\s*", core) if part.strip()]
+    if len(items) != len(nums):
+        return value
+    return "\n".join(
+        f"{chr(0x2460 + i)} {item}" if i < 20 else f"({i + 1}) {item}"
+        for i, item in enumerate(items)
+    )
+
+
 def build_field_sections(
     record_type: str,
     detail: Mapping[str, Any] | None = None,
@@ -292,6 +315,7 @@ def build_field_sections(
                     # 字段名本身就是六项全文，把它作为值展示给用户核对，
                     # 别显示成空的「-」，也不冒充成现场填写的内容。
                     value = note.split("：", 1)[-1].strip() if "：" in note else note
+                    value = _format_inspection_items(value)
                     note = ""
                 if canonical == "photo":
                     # 举牌验收照片：列表是图片 URL，展示张数即可，缩略图在

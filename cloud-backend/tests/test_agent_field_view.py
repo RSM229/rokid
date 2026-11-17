@@ -175,11 +175,26 @@ class FieldViewValueTest(unittest.TestCase):
         self.assertEqual(content["value"], "混凝土浇筑全过程旁站")
 
     def test_patrol_content_shows_six_items_from_xlsx(self):
+        """2026-11-17 用户截图：详情里的六项也要逐行，不能挤成一段。"""
         sections = _sections({"id": 127, "record_type": "巡视"})
         content = _field(sections, "巡视内容")
-        self.assertIn("施工单位是否按工程设计文件", content["value"])
-        self.assertIn("特种作业人员是否持证上岗", content["value"])
+        value = content["value"]
+        lines = value.splitlines()
+        self.assertEqual(6, len(lines))
+        self.assertTrue(lines[0].startswith("① 施工单位是否按工程设计文件"))
+        self.assertTrue(lines[1].startswith("② 使用的工程材料"))
+        self.assertTrue(lines[2].startswith("③ 施工现场管理人员"))
+        self.assertTrue(lines[3].startswith("④ 特种作业人员"))
+        self.assertTrue(lines[4].startswith("⑤ 安全文明施工情况"))
+        self.assertEqual("⑥ 其他", lines[5])
+        self.assertNotIn("1.施工单位", value)
+        self.assertIn("（专项）施工方案施工", value)  # 原文一个字不丢
         self.assertEqual(content["note"], "")
+        self.assertEqual(content["display_value"], value)
+
+    def test_user_written_numbered_text_is_not_reformatted(self):
+        self.assertEqual("1.现场已处理", view._format_inspection_items("1.现场已处理"))
+        self.assertEqual("（甲 乙）", view._format_inspection_items("（甲 乙）"))
 
     def test_photo_field_shows_count_not_url_list(self):
         sections = _sections({
@@ -238,6 +253,13 @@ class FieldViewWiringTest(unittest.TestCase):
             self.assertIn(
                 f"detail.record_type === '{rtype}' && !showFieldSections", text,
             )
+
+    def test_detail_value_css_keeps_newlines(self):
+        wxss = (Path(__file__).resolve().parents[1]
+                / "../wechat-miniprogram/miniprogram/pages/work/index.wxss").resolve()
+        line = next(l for l in wxss.read_text(encoding="utf-8").splitlines()
+                    if l.startswith(".detail-value"))
+        self.assertIn("white-space: pre-wrap", line)
 
 
 if __name__ == "__main__":
