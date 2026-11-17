@@ -181,7 +181,10 @@
         <view class="detail-row"><text class="detail-label">业务项目</text><text class="detail-value">{{detail.project_name || detail.station_project_name || '未填写'}}</text></view>
         <view wx:if="{{detail.project_mismatch}}" class="detail-row"><text class="detail-label">水印项目</text><text class="detail-value">{{detail.watermark_project_name || '-'}}</text></view>
         <view wx:if="{{detail.project_mismatch}}" class="form-choice-hint">记录归属当前选择的项目；水印项目仅作为证据保留。新建记录时需先在 Agent 内确认采用哪一组项目信息。</view>
-        <view class="detail-row"><text class="detail-label">区域</text><text class="detail-value">{{detail.section || '未填写'}}</text></view>
+        <!-- 2026-11-17 用户「楼栋/楼层/区域都归属于工程部位」：新版字段区已展示
+             「巡视的工程部位」等正式字段（同一 section 值），顶部不再单列「区域」，
+              避免同一个值重复显示两遍。隐患详情/旧版兜底仍保留该行，不丢信息。 -->
+        <view wx:if="{{!(detailType === 'record' && showFieldSections)}}" class="detail-row"><text class="detail-label">区域</text><text class="detail-value">{{detail.section || '未填写'}}</text></view>
         <view class="detail-row"><text class="detail-label">位置</text><text class="detail-value {{detail.location ? '' : 'detail-empty'}}">{{detail.location || '未填写（可在编辑记录中补充）'}}</text></view>
         <view class="detail-row"><text class="detail-label">创建时间</text><text class="detail-value">{{detail.created_at || '-'}}</text></view>
       </view>
