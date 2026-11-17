@@ -231,9 +231,27 @@ class FieldViewValueTest(unittest.TestCase):
             "section": "3号楼", "construction_unit": "某某建设",
         })
         labels = [f["label"] for s in sections for f in s["fields"]]
+        # 无表式兜底分组仍保留「施工内容（水印识别）」（与有表式的「其他记录信息」不同）
         self.assertIn("施工内容（水印识别）", labels)
         self.assertNotIn("记录类型", labels)
         self.assertTrue(all(not f["missing"] for s in sections for f in s["fields"]))
+
+    def test_watermark_work_content_not_shown_in_extra_section(self):
+        """2026-11-17 用户截图：巡视详情「其他记录信息」里冒出
+        「施工内容（水 沙盛四路等4条道路工 广东建设监理 印识别）」——
+        这是水印 OCR 值（混进项目名/单位名），不是用户字段清单要的栏目，
+        有表式记录的「其他记录信息」不应再展示它；数据仍留在库里。"""
+        sections = _sections({
+            "id": 164, "record_type": "巡视",
+            "work_content": "水 沙盛四路等4条道路工 广东建设监理 印识别",
+        })
+        labels = [f["label"] for s in sections for f in s["fields"]]
+        self.assertNotIn("施工内容（水印识别）", labels)
+        extra = next((s for s in sections if s["title"] == "其他记录信息"), None)
+        if extra:
+            self.assertNotIn("施工内容（水印识别）", [f["label"] for f in extra["fields"]])
+            for field in extra["fields"]:
+                self.assertNotIn("沙盛四路等4条道路工", str(field["value"]))
 
 
 class FieldViewWiringTest(unittest.TestCase):

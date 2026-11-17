@@ -126,9 +126,12 @@ _FALLBACK_FIELDS: tuple[tuple[str, tuple[str, ...]], ...] = (
 
 # 「其他记录信息」分组：详情里有值但不在此类型字段清单里的遗留字段。
 # 只在字段清单渲染启用时追加，保证换渲染方式不丢数据。
+# 2026-11-17 用户「这个不是要求的字段吧，怎么会存在」：移除「施工内容（水印识别）」——
+# work_content 是水印 OCR 识别值（常混进项目名/单位名），本就不该写成用户可见字段；
+# 真实施工内容由「验收部位、工序」等清单内栏目吸收（见下方合并逻辑），数据仍留库里。
+# 注意 _FALLBACK_FIELDS 里的同名项保留：那是「待定」等无表式类型的事实兜底。
 _EXTRA_FIELDS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("验收结果", ("acceptance_result",)),
-    ("施工内容（水印识别）", ("work_content",)),
     ("旁站结论", ("station_conclusion",)),
     ("检查备注", ("inspection_remark",)),
     ("备注", ("remark",)),
