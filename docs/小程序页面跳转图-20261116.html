@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>监理通小程序页面跳转图（2026-11-16）</title>
+<style>
+  :root {
+    --ink: #1f2d3d;
+    --muted: #6b7a90;
+    --line: #dbe4ef;
+    --bg: #eef2f7;
+    --card: #ffffff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "Microsoft YaHei", "PingFang SC", "Noto Sans SC", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    line-height: 1.6;
+  }
+  .wrap { max-width: 1680px; margin: 0 auto; padding: 28px 24px 48px; }
+  h1 { margin: 0 0 6px; font-size: 24px; letter-spacing: .5px; }
+  .meta { margin: 0; color: var(--muted); font-size: 13px; }
+  .meta code { background: #e4ebf4; padding: 1px 6px; border-radius: 5px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 10px 20px; margin: 18px 0 14px; font-size: 13px; color: #46556a; }
+  .legend span { display: inline-flex; align-items: center; gap: 7px; }
+  .swatch { width: 14px; height: 14px; border-radius: 4px; border: 1.5px solid transparent; display: inline-block; }
+  .swatch.auth { background: #f0f9f2; border-color: #7fb894; }
+  .swatch.tab { background: #e8f1ff; border-color: #5b8fd6; }
+  .swatch.agent { background: #0a2e5c; border-color: #0a2e5c; }
+  .swatch.business { background: #fff7e8; border-color: #d09a3a; }
+  .swatch.kb { background: #f2eeff; border-color: #7a64cf; }
+  .swatch.personal { background: #fff0f4; border-color: #cc5c7d; }
+  .swatch.dash { background: transparent; border: 0; border-top: 2px dashed #9aa7b8; height: 0; width: 18px; border-radius: 0; }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 14px;
+    box-shadow: 0 8px 28px rgba(28, 49, 80, .08);
+    overflow: auto;
+  }
+  .card svg { width: 100%; height: auto; display: block; min-width: 1100px; }
+  .note { margin: 14px 2px 0; color: var(--muted); font-size: 13px; }
+  @media print {
+    body { background: #fff; }
+    .wrap { padding: 0; }
+    .card { border: 0; box-shadow: none; padding: 0; }
+    .card svg { min-width: 0; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>监理通小程序页面跳转图</h1>
+  <p class="meta">代码基线：<code>D:\rokid\rokid\wechat-miniprogram</code> · 生成日期：2026-11-16 · 共 29 页</p>
+
+  <div class="legend">
+    <span><i class="swatch auth"></i>认证与引导</span>
+    <span><i class="swatch tab"></i>主 Tab</span>
+    <span><i class="swatch agent"></i>智能体工作台</span>
+    <span><i class="swatch business"></i>业务页面</span>
+    <span><i class="swatch kb"></i>资料库</span>
+    <span><i class="swatch personal"></i>个人 / 账号</span>
+    <span><i class="swatch dash"></i>次要 / 快捷路径</span>
+  </div>
+
+  <div class="card">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1140" width="1600" height="1140" role="img" aria-labelledby="diagramTitle diagramDesc">
+      <title id="diagramTitle">监理通小程序页面跳转图</title>
+      <desc id="diagramDesc">29 个页面的主要跳转关系，横向一排为 5 个自定义 Tab，实线为主要路径，虚线为次要或快捷入口。</desc>
+    
+      <defs>
+        <linearGradient id="agentGrad" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stop-color="#0a2e5c"/>
+          <stop offset="1" stop-color="#1e5a9e"/>
+        </linearGradient>
+        <filter id="shadow" x="-12%" y="-12%" width="132%" height="145%">
+          <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#1f2d3d" flood-opacity="0.10"/>
+        </filter>
+        <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#2f6fd0"/>
+        </marker>
+        <marker id="arrow2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#9aa7b8"/>
+        </marker>
+      </defs>
+    
+      <style>
+        .node rect { fill:#ffffff; stroke:#c9d6e8; stroke-width:1.5; filter:url(#shadow); }
+        .node .t { font:600 14px "Microsoft YaHei","PingFang SC","Noto Sans SC",sans-serif; fill:#1f2d3d; text-anchor:middle; }
+        .node .s { font:10px "Microsoft YaHei","PingFang SC","Noto Sans SC",sans-serif; fill:#6b7a90; text-anchor:middle; }
+    
+        .node.start rect { fill:#0a2e5c; stroke:#0a2e5c; }
+        .node.start .t, .node.start .s { fill:#ffffff; }
+    
+        .node.auth rect { fill:#f0f9f2; stroke:#7fb894; }
+        .node.tab rect { fill:#e8f1ff; stroke:#5b8fd6; }
+        .node.agent rect { fill:url(#agentGrad); stroke:#0a2e5c; }
+        .node.agent .t, .node.agent .s { fill:#ffffff; }
+        .node.business rect { fill:#fff7e8; stroke:#d09a3a; }
+        .node.kb rect { fill:#f2eeff; stroke:#7a64cf; }
+        .node.personal rect { fill:#fff0f4; stroke:#cc5c7d; }
+    
+        .edge { fill:none; stroke:#2f6fd0; stroke-width:1.8; opacity:.92; }
+        .edge.secondary { stroke:#9aa7b8; stroke-width:1.4; stroke-dasharray:7 5; }
+        .edge-label { font:11px "Microsoft YaHei","PingFang SC","Noto Sans SC",sans-serif; fill:#3b4a5f; paint-order:stroke; stroke:#f6f8fb; stroke-width:3px; }
+    
+        .auth-box { fill:#f4fbf6; stroke:#9cc7ac; stroke-width:1.3; stroke-dasharray:8 6; }
+        .bracket path { fill:none; stroke:#8aa0b8; stroke-width:1.1; stroke-dasharray:5 5; }
+        .group-label { font:600 15px "Microsoft YaHei","PingFang SC","Noto Sans SC",sans-serif; fill:#5a6b80; letter-spacing:1px; text-anchor:middle; }
+        .footer { font:11px "Microsoft YaHei","PingFang SC","Noto Sans SC",sans-serif; fill:#8b98a8; text-anchor:middle; }
+      </style>
+    
+      <rect x="0" y="0" width="1600" height="1140" fill="#f6f8fb"/>
+    
+      <rect class="auth-box" x="360" y="10" width="1000" height="270" rx="18"/>
+      <text class="group-label" x="390" y="38" text-anchor="start">启动 · 认证与引导</text>
+    
+      <g class="bracket">
+        <path d="M40,362 H1340"/>
+        <path d="M115,362 V380"/>
+        <path d="M285,362 V380"/>
+        <path d="M560,362 V380"/>
+        <path d="M880,362 V380"/>
+        <path d="M1260,362 V380"/>
+      </g>
+    
+      <g class="edges">
+        <path class="edge primary" d="M800,74 V88 H615 V100" marker-end="url(#arrow)"/>
+        <path class="edge primary" d="M860,74 V88 H955 V100" marker-end="url(#arrow)"/>
+        <path class="edge primary" d="M955,150 V175 H975 V200" marker-end="url(#arrow)"/>
+        <path class="edge primary" d="M1050,225 H1120" marker-end="url(#arrow)"/>
+        <path class="edge primary" d="M880,150 V175 H735 V200" marker-end="url(#arrow)"/>
+        <path class="edge primary" d="M900,150 V170 H465 V200" marker-end="url(#arrow)"/>
+        <path class="edge primary" d="M615,150 V330 H480 V380" marker-end="url(#arrow)"/>
+        <path class="edge primary" d="M1150,250 V300 H540 V380" marker-end="url(#arrow)"/>
+        <path class="edge primary" d="M1030,125 H1070 V340 H640 V380" marker-end="url(#arrow)"/>
+        <path class="edge primary" d="M440,400 H360" marker-end="url(#arrow)"/>
+        <path class="edge primary" d="M680,415 H800" marker-end="url(#arrow)"/>
+        <path class="edge primary" d="M680,452 V470 H1260 V436" marker-end="url(#arrow)"/>
+        <path class="edge primary" d="M470,456 V540" marker-end="url(#arrow)"/>
+        <path class="edge primary" d="M650,456 V500 H665 V540" marker-end="url(#arrow)"/>
+        <path class="edge primary" d="M440,420 H400 V677 H420" marker-end="url(#arrow)"/>
+        <path class="edge primary" d="M680,430 H780 V567 H800" marker-end="url(#arrow)"/>
+        <path class="edge primary" d="M90,436 V540" marker-end="url(#arrow)"/>
+        <path class="edge primary" d="M285,436 V540" marker-end="url(#arrow)"/>
+        <path class="edge primary" d="M250,436 V500 H150 V540" marker-end="url(#arrow)"/>
+        <path class="edge primary" d="M115,436 V512 H495 V540" marker-end="url(#arrow)"/>
+        <path class="edge primary" d="M290,594 V650" marker-end="url(#arrow)"/>
+        <path class="edge primary" d="M590,677 H580 V787 H570" marker-end="url(#arrow)"/>
+        <path class="edge primary" d="M880,436 V540" marker-end="url(#arrow)"/>
+        <path class="edge secondary" d="M880,594 V620 H290 V594" marker-end="url(#arrow2)"/>
+        <path class="edge primary" d="M1255,436 V540" marker-end="url(#arrow)"/>
+        <path class="edge primary" d="M1310,436 V500 H1425 V540" marker-end="url(#arrow)"/>
+        <path class="edge primary" d="M1180,420 H1160 V677 H1180" marker-end="url(#arrow)"/>
+        <path class="edge primary" d="M1180,430 H1140 V787 H1180" marker-end="url(#arrow)"/>
+        <path class="edge secondary" d="M1340,400 H1560 V295 H1210 V250" marker-end="url(#arrow2)"/>
+        <path class="edge primary" d="M1220,436 V480 H1090 V690 H740" marker-end="url(#arrow)"/>
+        <path class="edge primary" d="M1255,704 V722 H1425 V704" marker-end="url(#arrow)"/>
+        <path class="edge primary" d="M1510,580 H1550 V787 H1490" marker-end="url(#arrow)"/>
+        <path class="edge primary" d="M1360,594 V610 H1120 V897 H1180" marker-end="url(#arrow)"/>
+        <path class="edge primary" d="M1510,567 H1530 V897 H1490" marker-end="url(#arrow)"/>
+        <path class="edge primary" d="M1415,924 V980" marker-end="url(#arrow)"/>
+        <path class="edge secondary" d="M1180,787 H1100 V190 H630 V150" marker-end="url(#arrow2)"/>
+      </g>
+    
+      <g class="edge-labels">
+        <text class="edge-label" x="706" y="82" text-anchor="middle">首次 / 未看过引导</text>
+        <text class="edge-label" x="585" y="614" text-anchor="middle">归档文书</text>
+        <text class="edge-label" x="1465" y="288" text-anchor="middle">快捷入口</text>
+        <text class="edge-label" x="1150" y="184" text-anchor="middle">帮助</text>
+      </g>
+    
+      <g class="nodes">
+        <g class="node start" transform="translate(760,30)">
+      <title>启动 · App.onLaunch</title>
+      <rect width="140" height="44" rx="10"/>
+      <text class="t" x="70" y="24">启动</text>
+      <text class="s" x="70" y="41">App.onLaunch</text>
+    </g>
+        <g class="node auth" transform="translate(540,100)">
+      <title>新手指引 · pages/guide</title>
+      <rect width="150" height="50" rx="10"/>
+      <text class="t" x="75" y="24">新手指引</text>
+      <text class="s" x="75" y="41">pages/guide</text>
+    </g>
+        <g class="node auth" transform="translate(880,100)">
+      <title>登录 · pages/login</title>
+      <rect width="150" height="50" rx="10"/>
+      <text class="t" x="75" y="24">登录</text>
+      <text class="s" x="75" y="41">pages/login</text>
+    </g>
+        <g class="node auth" transform="translate(380,200)">
+      <title>强制改密 · force-password</title>
+      <rect width="170" height="50" rx="10"/>
+      <text class="t" x="85" y="24">强制改密</text>
+      <text class="s" x="85" y="41">force-password</text>
+    </g>
+        <g class="node auth" transform="translate(660,200)">
+      <title>找回密码 · pages/forgot</title>
+      <rect width="150" height="50" rx="10"/>
+      <text class="t" x="75" y="24">找回密码</text>
+      <text class="s" x="75" y="41">pages/forgot</text>
+    </g>
+        <g class="node auth" transform="translate(900,200)">
+      <title>注册 · pages/register</title>
+      <rect width="150" height="50" rx="10"/>
+      <text class="t" x="75" y="24">注册</text>
+      <text class="s" x="75" y="41">pages/register</text>
+    </g>
+        <g class="node auth" transform="translate(1120,200)">
+      <title>加入项目 · join-project</title>
+      <rect width="180" height="50" rx="10"/>
+      <text class="t" x="90" y="24">加入项目</text>
+      <text class="s" x="90" y="41">join-project</text>
+    </g>
+        <g class="node tab" transform="translate(40,380)">
+      <title>待办事项 · tab 1</title>
+      <rect width="150" height="56" rx="10"/>
+      <text class="t" x="75" y="24">待办事项</text>
+      <text class="s" x="75" y="41">tab 1</text>
+    </g>
+        <g class="node tab" transform="translate(210,380)">
+      <title>工作记录 · tab 2</title>
+      <rect width="150" height="56" rx="10"/>
+      <text class="t" x="75" y="24">工作记录</text>
+      <text class="s" x="75" y="41">tab 2</text>
+    </g>
+        <g class="node agent" transform="translate(440,380)">
+      <title>工作台 · pages/agent</title>
+      <rect width="240" height="76" rx="10"/>
+      <text class="t" x="120" y="29">工作台</text>
+      <text class="s" x="120" y="48">pages/agent</text>
+      <text class="s" x="120" y="64">对话式智能体 · 5598 行</text>
+    </g>
+        <g class="node tab" transform="translate(800,380)">
+      <title>资料库 · tab 4</title>
+      <rect width="160" height="56" rx="10"/>
+      <text class="t" x="80" y="24">资料库</text>
+      <text class="s" x="80" y="41">tab 4</text>
+    </g>
+        <g class="node tab" transform="translate(1180,380)">
+      <title>我 · tab 5</title>
+      <rect width="160" height="56" rx="10"/>
+      <text class="t" x="80" y="24">我</text>
+      <text class="s" x="80" y="41">tab 5</text>
+    </g>
+        <g class="node business" transform="translate(40,540)">
+      <title>发起协作 · todo/compose</title>
+      <rect width="160" height="54" rx="10"/>
+      <text class="t" x="80" y="24">发起协作</text>
+      <text class="s" x="80" y="41">todo/compose</text>
+    </g>
+        <g class="node business" transform="translate(210,540)">
+      <title>文书详情 · documents/detail</title>
+      <rect width="160" height="54" rx="10"/>
+      <text class="t" x="80" y="24">文书详情</text>
+      <text class="s" x="80" y="41">documents/detail</text>
+    </g>
+        <g class="node business" transform="translate(210,650)">
+      <title>手写签名 · documents/signature</title>
+      <rect width="160" height="54" rx="10"/>
+      <text class="t" x="80" y="24">手写签名</text>
+      <text class="s" x="80" y="41">documents/signature</text>
+    </g>
+        <g class="node business" transform="translate(420,540)">
+      <title>拍照 / 录像 · pages/capture</title>
+      <rect width="150" height="54" rx="10"/>
+      <text class="t" x="75" y="24">拍照 / 录像</text>
+      <text class="s" x="75" y="41">pages/capture</text>
+    </g>
+        <g class="node business" transform="translate(590,540)">
+      <title>隐患列表 · pages/hazards</title>
+      <rect width="150" height="54" rx="10"/>
+      <text class="t" x="75" y="24">隐患列表</text>
+      <text class="s" x="75" y="41">pages/hazards</text>
+    </g>
+        <g class="node business" transform="translate(420,650)">
+      <title>平行检验 · pages/parallel</title>
+      <rect width="150" height="54" rx="10"/>
+      <text class="t" x="75" y="24">平行检验</text>
+      <text class="s" x="75" y="41">pages/parallel</text>
+    </g>
+        <g class="node business" transform="translate(590,650)">
+      <title>待补草稿 · pages/drafts</title>
+      <rect width="150" height="54" rx="10"/>
+      <text class="t" x="75" y="24">待补草稿</text>
+      <text class="s" x="75" y="41">pages/drafts</text>
+    </g>
+        <g class="node business" transform="translate(420,760)">
+      <title>省统表表单 · record-form</title>
+      <rect width="150" height="54" rx="10"/>
+      <text class="t" x="75" y="24">省统表表单</text>
+      <text class="s" x="75" y="41">record-form</text>
+    </g>
+        <g class="node kb" transform="translate(800,540)">
+      <title>资料详情 · kb/detail</title>
+      <rect width="160" height="54" rx="10"/>
+      <text class="t" x="80" y="24">资料详情</text>
+      <text class="s" x="80" y="41">kb/detail</text>
+    </g>
+        <g class="node personal" transform="translate(1180,540)">
+      <title>数据看板 · pages/dashboard</title>
+      <rect width="150" height="54" rx="10"/>
+      <text class="t" x="75" y="24">数据看板</text>
+      <text class="s" x="75" y="41">pages/dashboard</text>
+    </g>
+        <g class="node personal" transform="translate(1340,540)">
+      <title>账号安全 · account-security</title>
+      <rect width="170" height="54" rx="10"/>
+      <text class="t" x="85" y="24">账号安全</text>
+      <text class="s" x="85" y="41">account-security</text>
+    </g>
+        <g class="node personal" transform="translate(1180,650)">
+      <title>长期偏好 · pages/preferences</title>
+      <rect width="150" height="54" rx="10"/>
+      <text class="t" x="75" y="24">长期偏好</text>
+      <text class="s" x="75" y="41">pages/preferences</text>
+    </g>
+        <g class="node personal" transform="translate(1340,650)">
+      <title>项目记忆 · project-memory</title>
+      <rect width="170" height="54" rx="10"/>
+      <text class="t" x="85" y="24">项目记忆</text>
+      <text class="s" x="85" y="41">project-memory</text>
+    </g>
+        <g class="node personal" transform="translate(1180,760)">
+      <title>设置 · pages/settings</title>
+      <rect width="150" height="54" rx="10"/>
+      <text class="t" x="75" y="24">设置</text>
+      <text class="s" x="75" y="41">pages/settings</text>
+    </g>
+        <g class="node personal" transform="translate(1340,760)">
+      <title>身份信息 · security/identity</title>
+      <rect width="150" height="54" rx="10"/>
+      <text class="t" x="75" y="24">身份信息</text>
+      <text class="s" x="75" y="41">security/identity</text>
+    </g>
+        <g class="node personal" transform="translate(1180,870)">
+      <title>微信绑定 · security/binding</title>
+      <rect width="150" height="54" rx="10"/>
+      <text class="t" x="75" y="24">微信绑定</text>
+      <text class="s" x="75" y="41">security/binding</text>
+    </g>
+        <g class="node personal" transform="translate(1340,870)">
+      <title>密码管理 · security/credentials</title>
+      <rect width="150" height="54" rx="10"/>
+      <text class="t" x="75" y="24">密码管理</text>
+      <text class="s" x="75" y="41">security/credentials</text>
+    </g>
+        <g class="node personal" transform="translate(1340,980)">
+      <title>密保问题 · pages/security</title>
+      <rect width="150" height="54" rx="10"/>
+      <text class="t" x="75" y="24">密保问题</text>
+      <text class="s" x="75" y="41">pages/security</text>
+    </g>
+      </g>
+    
+      <text class="footer" x="800" y="1072">5 个自定义 Tab：待办事项 / 工作记录 / 工作台 / 资料库 / 我（wx.redirectTo 切换，非原生 tabBar）</text>
+      <text class="footer" x="800" y="1096">代码基线：D:\rokid\rokid\wechat-miniprogram · 2026-11-16 · 实线为主要路径，虚线为次要 / 快捷入口</text>
+    </svg>
+  </div>
+
+  <p class="note">说明：横向一排为 5 个自定义 Tab（工作台居中）；实线表示主要跳转，虚线表示次要 / 快捷入口；页内 Overlay（项目概况、模型选择、+ 面板、日报、语音会话、任务派发、文书表单、历史抽屉、图片预览）未展开。</p>
+</div>
+</body>
+</html>
