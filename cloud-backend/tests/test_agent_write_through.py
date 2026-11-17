@@ -353,16 +353,72 @@ class WriteThroughMissingFieldsInteractionTest(unittest.TestCase):
         self.assertEqual(["施工单位自检结论", "监理验收结论"],
                          list(result.get("pending_labels") or []))
 
-    def test_unrelated_message_keeps_asking_same_field(self):
+    def test_field_question_gets_hint_and_is_never_written(self):
+        """用户问「这栏怎么填」→ 给通用口径，问句绝不能被当成栏位值写库。"""
         record = self._record()
         state = {"record_id": 155, "labels": ["验收类型"]}
         args = {"record_type": "验收", "_write_through_fields": state}
         result = asyncio.run(agent_router._continue_existing_record_write_through(
+            RouterFakeDb(record), self._user(), 7, "conv-1", "验收类型怎么填？", args,
+        ))
+        self.assertEqual(["验收类型"], list(result.get("need_more") or []))
+        self.assertIn("类型名称", str(result.get("reply") or ""))
+        self.assertFalse(record.content_json.get("acceptance_type"))
+        self.assertNotIn("怎么填", str(record.content_json))
+        self.assertEqual(1, result["_write_through_state"]["attempts"]["验收类型"])
+
+    def test_second_miss_auto_skips_and_never_loops(self):
+        """同一栏第 2 次没对上 → 自动跳过，状态单调推进，不再问这一栏。"""
+        record = self._record()
+        state = {"record_id": 155,
+                 "labels": ["验收类型", "施工单位自检结论"],
+                 "attempts": {"验收类型": 1}}
+        args = {"record_type": "验收", "_write_through_fields": state}
+        result = asyncio.run(agent_router._continue_existing_record_write_through(
             RouterFakeDb(record), self._user(), 7, "conv-1", "今天天气不错", args,
         ))
-        self.assertTrue(result)
-        self.assertEqual(["验收类型"], list(result.get("need_more") or []))
-        self.assertFalse(record.content_json.get("acceptance_type"))
+        st = result["_write_through_state"]
+        self.assertIn("验收类型", st["skipped"])
+        self.assertNotIn("验收类型", st["labels"])
+        self.assertNotIn("验收类型", list(result.get("need_more") or []))
+        self.assertIn("先按留空处理", str(result.get("reply") or ""))
+
+    def test_skipped_field_never_comes_back(self):
+        """写入后重新算缺栏时必须排除已跳过的栏，否则跳过又回来＝死循环。"""
+        record = self._record()
+        args = {"record_type": "验收",
+                "_write_through_fields": {"record_id": 155, "labels": [],
+                                          "attempts": {}, "skipped": ["验收类型"]}}
+        result = asyncio.run(agent_router._apply_existing_record_write_through(
+            RouterFakeDb(record), self._user(), 7, "conv-1",
+            "写入正式记录 #155", args,
+        ))
+        self.assertNotIn("验收类型", list(result.get("need_more") or []))
+        self.assertNotIn("验收类型", list(result.get("pending_labels") or []))
+
+    def test_repeated_misses_never_loop_on_one_field(self):
+        """连着多轮答非所问：任何栏最多被问 2 次，且跳过的栏只增不减。"""
+        record = self._record()
+        state = {"record_id": 155,
+                 "labels": ["验收类型", "施工单位自检结论", "监理验收结论"],
+                 "attempts": {}, "skipped": []}
+        asked: list[str] = []
+        for _ in range(8):
+            args = {"record_type": "验收", "_write_through_fields": state}
+            result = asyncio.run(agent_router._continue_existing_record_write_through(
+                RouterFakeDb(record), self._user(), 7, "conv-1", "今天天气不错", args,
+            ))
+            if result is None:
+                break
+            need = list(result.get("need_more") or [])
+            if need:
+                asked.append(str(need[0]))
+            state = result["_write_through_state"]
+            if not need:
+                break
+        self.assertTrue(asked)
+        self.assertTrue(all(asked.count(x) <= 2 for x in set(asked)), asked)
+        self.assertGreaterEqual(len(state["skipped"]), 1)
 
 
 if __name__ == "__main__":

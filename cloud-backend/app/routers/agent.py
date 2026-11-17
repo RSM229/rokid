@@ -1325,6 +1325,88 @@ _LEAVE_BLANK_HINTS = (
     "不用填", "暂不填", "跳过",
 )
 
+# 🔴 2026-11-17：写入后逐栏追问必须「有界 + 单调推进」。
+# 同一栏最多「没对上」2 次，第 2 次自动跳过并记为留空；跳过的栏不再回到追问列表。
+# 任何分支都必须让 labels 变短或 attempts+1，杜绝「同一栏 + 同一句回复」死循环。
+_WRITE_THROUGH_MAX_ATTEMPTS = 2
+
+# 通用填写口径：只给格式与占位示例，绝不带出本轮水印 / OCR / 工序识别值
+# （用户 11-16「AI 对话不复述识别/匹配值」）。也不下发候选卡、表单卡。
+_FIELD_FILL_HINTS: tuple[tuple[str, str], ...] = (
+    ("日期", "按「年-月-日」给日期"),
+    ("时间", "按「年-月-日 时:分」给到时刻，也可以只说上午/下午"),
+    ("天气", "说天气加气温"),
+    ("人数", "直接给数字"),
+    ("部位", "按「楼栋 / 楼层 / 构件」说，如「X#楼 X 层 X 构件」"),
+    ("位置", "按「楼栋 / 楼层 / 构件」或桩号区间说"),
+    ("结论", "直接给一句结论"),
+    ("单位", "给单位全称"),
+    ("类型", "直接说类型名称，一个词就行"),
+    ("内容", "直接说现场情况，不用带栏名"),
+)
+
+_FIELD_QUESTION_HINTS = (
+    "怎么填", "如何填", "填什么", "写什么", "怎么写", "是什么", "什么意思",
+    "啥意思", "举例", "例如", "例子", "哪些", "为什么", "怎么样",
+    "吗？", "吗?", "？", "?",
+)
+
+
+def _is_field_question(message: str) -> bool:
+    """用户在问「这一栏怎么填」而不是在给值；这类句子绝不写进字段。"""
+    text = str(message or "").strip()
+    return bool(text) and any(h in text for h in _FIELD_QUESTION_HINTS)
+
+
+def _field_fill_hint(label: str) -> str:
+    """按栏目给通用填写口径（占位示例，不含本轮任何识别值）。"""
+    for key, hint in _FIELD_FILL_HINTS:
+        if key in str(label or ""):
+            return hint
+    return "直接说这一栏的内容，不用带栏名"
+
+
+def _write_through_state_full(args: dict | None) -> dict:
+    """完整续办状态；兼容旧草稿里只有 {record_id, labels} 的结构。"""
+    raw = (args or {}).get(_WRITE_THROUGH_STATE_KEY)
+    state: dict[str, Any] = {
+        "record_id": None, "labels": [], "attempts": {}, "skipped": [],
+    }
+    if isinstance(raw, dict):
+        try:
+            state["record_id"] = int(raw.get("record_id"))
+        except (TypeError, ValueError):
+            state["record_id"] = None
+        state["labels"] = [str(x) for x in (raw.get("labels") or []) if str(x).strip()]
+        attempts = raw.get("attempts")
+        if isinstance(attempts, dict):
+            state["attempts"] = {
+                str(k): int(v) for k, v in attempts.items()
+                if str(k).strip() and str(v).isdigit()
+            }
+        state["skipped"] = [str(x) for x in (raw.get("skipped") or []) if str(x).strip()]
+    elif isinstance(raw, (list, tuple)):
+        state["labels"] = [str(x) for x in raw if str(x).strip()]
+    return state
+
+
+def _short_label_fields(form_code: str | None) -> dict[str, dict]:
+    """详情页短标签 → 字段表字段。
+
+    详情页展示用 _shorten_label 截短/替换过的短标签，字段表却按原始 label 反查，
+    长栏目必然对不上 → 用户答了也写不进库 → 反复问同一栏。这里建双向名称映射。
+    """
+    out: dict[str, dict] = {}
+    if not form_code:
+        return out
+    for field in agent_tools.record_field_spec.fields_of(form_code):
+        raw = str(field.get("raw_label") or field.get("label") or "").strip()
+        short, _ = work_record_field_view._shorten_label(raw)
+        for name in (short, raw, str(field.get("label") or "").strip()):
+            if name:
+                out.setdefault(name, field)
+    return out
+
 
 def _wants_leave_blank(message: str) -> bool:
     return any(hint in str(message or "") for hint in _LEAVE_BLANK_HINTS)
@@ -1347,18 +1429,8 @@ def _looks_like_field_answer(label: str, message: str) -> bool:
 
 def _write_through_state(args: dict | None) -> tuple[int | None, list[str]]:
     """从草稿里取「正在补哪一栏」的状态，供下一轮续办。"""
-    raw = (args or {}).get(_WRITE_THROUGH_STATE_KEY)
-    record_id: int | None = None
-    labels: list[str] = []
-    if isinstance(raw, dict):
-        try:
-            record_id = int(raw.get("record_id"))
-        except (TypeError, ValueError):
-            record_id = None
-        labels = [str(x) for x in (raw.get("labels") or []) if str(x).strip()]
-    elif isinstance(raw, (list, tuple)):
-        labels = [str(x) for x in raw if str(x).strip()]
-    return record_id, labels
+    state = _write_through_state_full(args)
+    return state["record_id"], state["labels"]
 
 
 def _write_through_missing_labels(record: WorkRecord, cj: dict) -> list[str]:
@@ -1490,7 +1562,11 @@ async def _apply_existing_record_write_through(
         cj["voice_text"] = (prev + "\n" + message).strip()[:4000]
     # 🔴 2026-11-17 用户「还有其他的没填呢，怎么不跟用户交互」：
     # 写入授权只落已确认内容；详情页仍标红的必填栏要逐栏问，不再静默留空。
-    missing_labels = _write_through_missing_labels(record, cj)
+    # 自动跳过过的栏不再回到追问列表（跳过又回来就是死循环）。
+    _state = _write_through_state_full(args)
+    _skipped = set(_state["skipped"])
+    missing_labels = [x for x in _write_through_missing_labels(record, cj)
+                      if x not in _skipped]
     stamp = datetime.now().isoformat(timespec="seconds")
     if missing_labels and not _wants_leave_blank(message):
         cj["agent_write_through"] = {
@@ -1506,10 +1582,14 @@ async def _apply_existing_record_write_through(
             "ok": True, "record_id": record.id, "fields": changed,
             "record_type": str(record.record_type or ""),
             "need_more": [current], "pending_labels": missing_labels,
+            "_write_through_state": {
+                "record_id": record.id, "labels": missing_labels,
+                "attempts": _state["attempts"], "skipped": _state["skipped"],
+            },
             "reply": (
                 f"已写入正式记录 #{record.id}（{record.record_type}）。"
                 + (f"\n本次补充：{'、'.join(changed)}。" if changed else "")
-                + f"\n还差「{current}」，你说一下我就补进去。"
+                + f"\n还差「{current}」，{_field_fill_hint(current)}；你说一下我就补进去。"
                 + (f"后面还要补：{'、'.join(missing_labels[1:])}。" if len(missing_labels) > 1 else "")
                 + "\n这些栏位都不补就说「先留空」。"
             ),
@@ -1539,27 +1619,38 @@ async def _continue_existing_record_write_through(
     db: AsyncSession, user: User, project_id: int | None,
     conversation_id: str | None, message: str, draft_args: dict | None,
 ) -> dict | None:
-    """写入后逐栏追问的续办：用户这句回答「还差」的那一栏，再写回同一条记录。"""
-    record_id, labels = _write_through_state(draft_args)
+    """写入后逐栏追问的续办。
+
+    🔴 2026-11-17 防死循环：每一轮状态都必须朝终止推进——
+    答上 → labels 去掉本栏；没答上 → attempts+1，达到上限自动跳过本栏；
+    「在问这一栏怎么填」只回通用口径，不写值，但同样计入次数。
+    """
+    state = _write_through_state_full(draft_args)
+    record_id, labels = state["record_id"], state["labels"]
     if record_id is None or not labels:
         return None
     args = dict(draft_args or {})
     current = labels[0]
+    attempts = dict(state["attempts"])
+    skipped = list(dict.fromkeys(state["skipped"]))
+    rest = list(labels[1:])
+    ask_again = False
+    auto_skipped = ""
+
     if _wants_leave_blank(message):
-        rest: list[str] = []          # 整批留空，交给写入函数一次性收口
-    elif not _looks_like_field_answer(current, message):
-        return {
-            "ok": False, "need_more": [current], "pending_labels": labels,
-            "reply": (f"「{current}」这句我没对上，直接说这一栏就行；"
-                      "都不补就说「先留空」。"),
-        }
+        # 整批留空：一次性收口，不留下任何待问栏。
+        skipped = list(dict.fromkeys(skipped + labels))
+        rest = []
+        attempts = {}
+    elif _is_field_question(message) or not _looks_like_field_answer(current, message):
+        ask_again = True
     else:
         refilled = agent_tools.refill_missing_from_message(args, [current], message)
         if refilled is None:
-            # 时间类字段被通用回填故意跳过（不能吃整句），这里按表式字段再试一次
+            # 短标签 → 表式字段精确映射：长栏目被 _shorten_label 截短时也能命中。
             form = agent_tools.record_field_spec.form_for_record_type(
                 str(args.get("record_type") or ""), False)
-            field = next(
+            field = _short_label_fields(form).get(current) or next(
                 (f for f in agent_tools.record_field_spec.fields_of(form)
                  if current in str(f.get("label") or "")
                  or current in str(f.get("raw_label") or "")),
@@ -1569,20 +1660,59 @@ async def _continue_existing_record_write_through(
                 args = agent_tools._set_field_value(args, field, message[:120])
                 refilled = args
         if refilled is None:
-            return {
-                "ok": False, "need_more": [current], "pending_labels": labels,
-                "reply": (f"「{current}」这句我没对上，直接说这一栏就行；"
-                          "都不补就说「先留空」。"),
-            }
-        args = refilled
-        rest = labels[1:]
-    args[_WRITE_THROUGH_STATE_KEY] = {"record_id": record_id, "labels": rest}
+            ask_again = True
+        else:
+            args = refilled
+            attempts.pop(current, None)   # 本栏已答上，计数清零
+
+    if ask_again:
+        used = int(attempts.get(current, 0)) + 1
+        if used >= _WRITE_THROUGH_MAX_ATTEMPTS:
+            # 第 2 次仍没对上 → 自动跳过，labels 单调变短，不再重复问这一栏。
+            skipped = list(dict.fromkeys(skipped + [current]))
+            attempts.pop(current, None)
+            auto_skipped = current
+        else:
+            attempts[current] = used
+            rest = list(labels)          # 保留本栏，但只再问一次且回复不同
+
+    full_state = {
+        "record_id": record_id, "labels": rest,
+        "attempts": attempts, "skipped": skipped,
+    }
+    args[_WRITE_THROUGH_STATE_KEY] = dict(full_state)
+
+    if ask_again and not auto_skipped:
+        # 用户在问「怎么填」：给通用口径，不写库、不重复那句「我没对上」。
+        return {
+            "ok": False, "record_id": record_id,
+            "need_more": [current], "pending_labels": rest,
+            "_write_through_state": full_state,
+            "reply": (
+                f"「{current}」：{_field_fill_hint(current)}。"
+                "\n你说一下我就补进去；不想补就说「先留空」。"
+            ),
+        }
+
     result = await _apply_existing_record_write_through(
         db, user, project_id, conversation_id, message, args,
         record_id_hint=record_id,
     )
     if result is not None:
-        result["pending_labels"] = result.get("pending_labels") or rest
+        # 以写入后重新算出的缺栏为准（已填/已跳过的栏都会被过滤掉），
+        # 避免 state 里只留 rest 而把详情页其它缺栏丢掉。
+        final_labels = [str(x) for x in (result.get("pending_labels") or rest)]
+        full_state = {
+            "record_id": record_id, "labels": final_labels,
+            "attempts": attempts, "skipped": skipped,
+        }
+        result["pending_labels"] = final_labels
+        result["_write_through_state"] = full_state
+        if auto_skipped:
+            result["reply"] = (
+                str(result.get("reply") or "").rstrip()
+                + f"\n「{auto_skipped}」先按留空处理，到「工作记录」页还能补。"
+            )
     return result
 
 
@@ -1597,10 +1727,14 @@ async def _persist_write_through_state(
         state_args = dict(draft_args or {})
         if not str(state_args.get("record_type") or "").strip():
             state_args["record_type"] = str(result.get("record_type") or "")
-        state_args[_WRITE_THROUGH_STATE_KEY] = {
-            "record_id": result.get("record_id"),
-            "labels": [str(x) for x in (result.get("pending_labels") or need)],
-        }
+        full_state = result.get("_write_through_state")
+        state_args[_WRITE_THROUGH_STATE_KEY] = (
+            dict(full_state) if isinstance(full_state, dict) else {
+                "record_id": result.get("record_id"),
+                "labels": [str(x) for x in (result.get("pending_labels") or need)],
+                "attempts": {}, "skipped": [],
+            }
+        )
         await agent_tools.stash_pending(
             db, user.id, "create_work_record", state_args, need,
             message=message, conversation_id=conversation_id, project_id=project_id,
