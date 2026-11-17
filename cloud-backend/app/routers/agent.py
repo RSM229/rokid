@@ -46,6 +46,7 @@ from app.services import (
     model_gateway,
     multi_image_split,
     split_record_confirm,
+    work_record_field_view,
 )
 from app.services.record_fields import project_context
 from app.services.agent_context import (
@@ -1315,10 +1316,82 @@ def _refers_to_existing_record(message: str, *contexts: Any) -> bool:
     return _record_id_from_text(*contexts) is not None
 
 
+# 2026-11-17 用户截图「还有其他的没填呢，怎么不跟用户交互」：
+# 「写入正式记录」只授权把已确认内容落库，不再等于「其余必填栏一律留空」。
+# 需要用户口述的栏目仍要一问一答；只有明确说留空/跳过才真的留空。
+_WRITE_THROUGH_STATE_KEY = "_write_through_fields"
+_LEAVE_BLANK_HINTS = (
+    "先留空", "都留空", "其余留空", "栏位留空", "先不填", "都不填",
+    "不用填", "暂不填", "跳过",
+)
+
+
+def _wants_leave_blank(message: str) -> bool:
+    return any(hint in str(message or "") for hint in _LEAVE_BLANK_HINTS)
+
+
+def _looks_like_field_answer(label: str, message: str) -> bool:
+    """续办轮别把闲聊当栏位值（「今天天气不错」不能塞进验收类型）。"""
+    text = str(message or "").strip()
+    if not text or len(text) > 120:
+        return False
+    if any(h in text for h in ("天气", "你好", "谢谢", "几点", "为什么", "是什么", "怎么样")):
+        return False
+    if "验收类型" in str(label or ""):
+        return any(k in text for k in (
+            "隐蔽", "检验批", "进场", "分项", "分部", "单位工程",
+            "竣工", "预验收", "验收",
+        ))
+    return True
+
+
+def _write_through_state(args: dict | None) -> tuple[int | None, list[str]]:
+    """从草稿里取「正在补哪一栏」的状态，供下一轮续办。"""
+    raw = (args or {}).get(_WRITE_THROUGH_STATE_KEY)
+    record_id: int | None = None
+    labels: list[str] = []
+    if isinstance(raw, dict):
+        try:
+            record_id = int(raw.get("record_id"))
+        except (TypeError, ValueError):
+            record_id = None
+        labels = [str(x) for x in (raw.get("labels") or []) if str(x).strip()]
+    elif isinstance(raw, (list, tuple)):
+        labels = [str(x) for x in raw if str(x).strip()]
+    return record_id, labels
+
+
+def _write_through_missing_labels(record: WorkRecord, cj: dict) -> list[str]:
+    """详情页判定为「未填写」的必填栏，排除照片/签章这类聊天填不了的栏。
+
+    与小程序详情页共用 work_record_field_view.build_field_sections，
+    避免对话里问的栏和详情页标红的栏对不上。
+    """
+    detail = {k: v for k, v in (getattr(record, "__dict__", {}) or {}).items()
+              if not str(k).startswith("_")}
+    detail["content_json"] = cj
+    detail["acceptance_points_text"] = split_record_confirm.acceptance_points_text(
+        cj.get("acceptance_points"))
+    sections = work_record_field_view.build_field_sections(
+        str(record.record_type or ""), detail, cj)
+    out: list[str] = []
+    for section in sections:
+        for field in section.get("fields") or []:
+            if not field.get("missing"):
+                continue
+            label = str(field.get("label") or "").strip()
+            if not label or any(k in label for k in ("照片", "签章", "签字")):
+                continue
+            if label not in out:
+                out.append(label)
+    return out
+
+
 async def _apply_existing_record_write_through(
     db: AsyncSession, user: User, project_id: int | None,
     conversation_id: str | None, message: str,
     draft_args: dict | None, *contexts: Any,
+    record_id_hint: int | None = None,
 ) -> dict | None:
     """「把验收要点补充到前面创建的验收记录里 / 写入正式记录 #126」→ 更新已建记录。
 
@@ -1330,7 +1403,8 @@ async def _apply_existing_record_write_through(
     """
     if not project_id:
         return None
-    record_id = _record_id_from_text(message, *contexts)
+    # 续办轮用户只回「隐蔽工程」，消息里没有 #编号 → 用草稿里的写入态定位
+    record_id = record_id_hint or _record_id_from_text(message, *contexts)
     if record_id:
         record = await db.get(WorkRecord, record_id)
         if record is None or record.project_id != project_id:
@@ -1370,12 +1444,35 @@ async def _apply_existing_record_write_through(
             setattr(record, col, val[:limit])
             changed.append(col)
     cj = dict(record.content_json or {})
+    # extra_fields 一律按 canonical 搬进 content_json（「只搬家不丢弃」）：
+    # 后续逐栏追问补的字段不只验收四栏，巡视时间等也会从这里被详情页读到。
+    _internal_keys = {"voice_text", "acceptance_points", "agent_write_through",
+                      "prov_fields", "acceptance_points_text"}
+    for key, value in extra.items():
+        slot = str(key or "").strip()
+        if not slot or slot in _internal_keys or slot.startswith("_"):
+            continue
+        val = value if isinstance(value, (list, dict)) else str(value or "").strip()
+        if val in (None, "", [], {}):
+            continue
+        if val != cj.get(slot):
+            cj[slot] = val
+            changed.append(slot)
     for key in ("acceptance_type", "acceptance_content", "supervision_conclusion",
                 "self_check_conclusion"):
-        val = str(extra.get(key) or args.get(key) or "").strip()
+        if key in extra:
+            continue
+        val = str(args.get(key) or "").strip()
         if val and val != str(cj.get(key) or "").strip():
             cj[key] = val
             changed.append(key)
+    # 时间类字段在表式里是独立参数，续办轮只按文本收，别塞进 DateTime 列
+    for arg_key, cj_key in (("inspection_start_time", "start_time"),
+                            ("inspection_end_time", "end_time")):
+        val = str(args.get(arg_key) or "").strip()
+        if val and val != str(cj.get(cj_key) or "").strip():
+            cj[cj_key] = val
+            changed.append(cj_key)
     # 分组建档时验收要点只落成「待确认草案」；用户给出写入授权且没有否定词时，
     # 才把要点按逐条结论转成正式验收内容（正式文书不能只放要点清单）。
     # 2026-11-16 用户截图：要点只在对话里出现过，记录里看不到。
@@ -1391,26 +1488,128 @@ async def _apply_existing_record_write_through(
     if message:
         prev = str(cj.get("voice_text") or "").strip()
         cj["voice_text"] = (prev + "\n" + message).strip()[:4000]
+    # 🔴 2026-11-17 用户「还有其他的没填呢，怎么不跟用户交互」：
+    # 写入授权只落已确认内容；详情页仍标红的必填栏要逐栏问，不再静默留空。
+    missing_labels = _write_through_missing_labels(record, cj)
+    stamp = datetime.now().isoformat(timespec="seconds")
+    if missing_labels and not _wants_leave_blank(message):
+        cj["agent_write_through"] = {
+            "at": stamp, "by": user.real_name or user.username,
+            "fields": changed, "source": "agent_chat",
+            "status": "awaiting_fields",
+        }
+        record.content_json = cj
+        await db.commit()
+        current = missing_labels[0]
+        logger.info("对话写入授权：记录 #%s 已落已确认内容，仍待补 %s", record.id, missing_labels)
+        return {
+            "ok": True, "record_id": record.id, "fields": changed,
+            "record_type": str(record.record_type or ""),
+            "need_more": [current], "pending_labels": missing_labels,
+            "reply": (
+                f"已写入正式记录 #{record.id}（{record.record_type}）。"
+                + (f"\n本次补充：{'、'.join(changed)}。" if changed else "")
+                + f"\n还差「{current}」，你说一下我就补进去。"
+                + (f"后面还要补：{'、'.join(missing_labels[1:])}。" if len(missing_labels) > 1 else "")
+                + "\n这些栏位都不补就说「先留空」。"
+            ),
+        }
     cj["agent_write_through"] = {
-        "at": datetime.now().isoformat(timespec="seconds"),
-        "by": user.real_name or user.username,
-        "fields": changed,
-        "source": "agent_chat",
+        "at": stamp, "by": user.real_name or user.username,
+        "fields": changed, "source": "agent_chat",
+        "status": "completed" if not missing_labels else "left_blank",
     }
     record.content_json = cj
     await db.commit()
-    await agent_tools.clear_pending(
-        db, user.id, "create_work_record", conversation_id, project_id=project_id,
-    )
+    # 草稿清理由调用方统一做：还需补栏时要把待补状态留在草稿里跨轮续办。
     logger.info("对话写入授权：已更新记录 #%s，字段=%s", record.id, changed)
     return {
         "ok": True, "record_id": record.id, "fields": changed,
+        "record_type": str(record.record_type or ""),
         "reply": (
             f"已写入正式记录 #{record.id}（{record.record_type}）。"
             + (f"\n本次补充：{'、'.join(changed)}。" if changed else "")
-            + "\n没提供的栏位按你的授权留空，不做臆测填写；到「工作记录」页可以继续补。"
+            + ("\n没提供的栏位按你的授权留空，不做臆测填写；到「工作记录」页可以继续补。"
+               if missing_labels else "\n字段已齐。")
         ),
     }
+
+
+async def _continue_existing_record_write_through(
+    db: AsyncSession, user: User, project_id: int | None,
+    conversation_id: str | None, message: str, draft_args: dict | None,
+) -> dict | None:
+    """写入后逐栏追问的续办：用户这句回答「还差」的那一栏，再写回同一条记录。"""
+    record_id, labels = _write_through_state(draft_args)
+    if record_id is None or not labels:
+        return None
+    args = dict(draft_args or {})
+    current = labels[0]
+    if _wants_leave_blank(message):
+        rest: list[str] = []          # 整批留空，交给写入函数一次性收口
+    elif not _looks_like_field_answer(current, message):
+        return {
+            "ok": False, "need_more": [current], "pending_labels": labels,
+            "reply": (f"「{current}」这句我没对上，直接说这一栏就行；"
+                      "都不补就说「先留空」。"),
+        }
+    else:
+        refilled = agent_tools.refill_missing_from_message(args, [current], message)
+        if refilled is None:
+            # 时间类字段被通用回填故意跳过（不能吃整句），这里按表式字段再试一次
+            form = agent_tools.record_field_spec.form_for_record_type(
+                str(args.get("record_type") or ""), False)
+            field = next(
+                (f for f in agent_tools.record_field_spec.fields_of(form)
+                 if current in str(f.get("label") or "")
+                 or current in str(f.get("raw_label") or "")),
+                None,
+            )
+            if field is not None:
+                args = agent_tools._set_field_value(args, field, message[:120])
+                refilled = args
+        if refilled is None:
+            return {
+                "ok": False, "need_more": [current], "pending_labels": labels,
+                "reply": (f"「{current}」这句我没对上，直接说这一栏就行；"
+                          "都不补就说「先留空」。"),
+            }
+        args = refilled
+        rest = labels[1:]
+    args[_WRITE_THROUGH_STATE_KEY] = {"record_id": record_id, "labels": rest}
+    result = await _apply_existing_record_write_through(
+        db, user, project_id, conversation_id, message, args,
+        record_id_hint=record_id,
+    )
+    if result is not None:
+        result["pending_labels"] = result.get("pending_labels") or rest
+    return result
+
+
+async def _persist_write_through_state(
+    db: AsyncSession, user: User, project_id: int | None,
+    conversation_id: str | None, message: str,
+    result: dict, draft_args: dict | None,
+) -> None:
+    """还有栏要问 → 留在草稿跨轮续办；全部落定 → 清草稿。"""
+    need = [str(x) for x in (result.get("need_more") or []) if str(x).strip()]
+    if need:
+        state_args = dict(draft_args or {})
+        if not str(state_args.get("record_type") or "").strip():
+            state_args["record_type"] = str(result.get("record_type") or "")
+        state_args[_WRITE_THROUGH_STATE_KEY] = {
+            "record_id": result.get("record_id"),
+            "labels": [str(x) for x in (result.get("pending_labels") or need)],
+        }
+        await agent_tools.stash_pending(
+            db, user.id, "create_work_record", state_args, need,
+            message=message, conversation_id=conversation_id, project_id=project_id,
+        )
+    else:
+        await agent_tools.clear_pending(
+            db, user.id, "create_work_record", conversation_id,
+            project_id=project_id,
+        )
 
 
 async def _agent_chat_impl(
@@ -1581,6 +1780,36 @@ async def _agent_chat_impl(
                     "recommendations": [], "undo": None,
                 }
 
+    # 🔴 写入后仍有必填栏待补：用户这句就是对该栏的回答，先续办同一条记录。
+    # 必须在模型路由前短路，否则「隐蔽工程」会被当成新建记录的字段，重复建档。
+    _wt_args = draft_for_context.get("args") or {}
+    if (
+        not structured_submit
+        and _write_through_state(_wt_args)[0] is not None
+        and not agent_tools.wants_write_through(message)
+    ):
+        _wt = await _continue_existing_record_write_through(
+            db, user, project_id, conversation_id, message, _wt_args,
+        )
+        if _wt is not None:
+            await _persist_write_through_state(
+                db, user, project_id, conversation_id, message, _wt, _wt_args,
+            )
+            await report_progress(
+                "tool_validation", "completed", "已按用户补充更新正式记录",
+                {"tool": "update_work_record", "record_id": _wt.get("record_id"),
+                 "fields": _wt.get("fields") or []},
+            )
+            return {
+                "kind": "action", "tool": "update_work_record",
+                "model": model_id, "request_plan": incoming_plan,
+                "reply": _wt["reply"],
+                "card": None, "cards": [], "actions": [],
+                "need_more": [str(x) for x in (_wt.get("need_more") or [])],
+                "options": {}, "form": None, "input_components": [],
+                "recommendations": [], "undo": None,
+            }
+
     # 🔴 显式写入已建记录（2026-11-16 真机录屏）：先于模型路由确定性处理，
     # 避免「写入正式记录 / 请写入验收记录」又被路由成一份新的待确认草稿。
     if (
@@ -1593,9 +1822,12 @@ async def _agent_chat_impl(
     ):
         _wt = await _apply_existing_record_write_through(
             db, user, project_id, conversation_id, message,
-            draft_for_context.get("args") or {}, earlier_messages, req.history,
+            _wt_args, earlier_messages, req.history,
         )
         if _wt:
+            await _persist_write_through_state(
+                db, user, project_id, conversation_id, message, _wt, _wt_args,
+            )
             await report_progress(
                 "tool_validation", "completed", "已按写入授权更新正式记录",
                 {"tool": "update_work_record", "record_id": _wt["record_id"],
@@ -1605,7 +1837,8 @@ async def _agent_chat_impl(
                 "kind": "action", "tool": "update_work_record",
                 "model": model_id, "request_plan": incoming_plan,
                 "reply": _wt["reply"],
-                "card": None, "cards": [], "actions": [], "need_more": [],
+                "card": None, "cards": [], "actions": [],
+                "need_more": [str(x) for x in (_wt.get("need_more") or [])],
                 "options": {}, "form": None, "input_components": [],
                 "recommendations": [], "undo": None,
             }

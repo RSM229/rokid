@@ -288,5 +288,82 @@ class ExistingRecordShortcutTest(unittest.TestCase):
         self.assertTrue(record.content_json.get("acceptance_points"))
 
 
+class WriteThroughMissingFieldsInteractionTest(unittest.TestCase):
+    """2026-11-17 截图「还有其他的没填呢，怎么不跟用户交互」。
+
+    「写入正式记录」只授权把已确认内容落库；详情页仍标红的必填栏要逐栏问，
+    只有用户明确说留空/跳过才真的留空。
+    """
+
+    def _user(self):
+        return SimpleNamespace(id=4, real_name="监理员", username="jl",
+                               has_permission=lambda _p: True)
+
+    def _record(self):
+        return WorkRecord(
+            id=155, project_id=7, creator_id=4, record_type="验收",
+            status="draft", content_json={
+                "voice_text": "原始水印原话",
+                "acceptance_points": {
+                    "points": ["① 核查钢筋规格", "② 模板安装牢固", "③ 混凝土强度符合设计"],
+                    "text": "① 核查钢筋规格；② 模板安装牢固；③ 混凝土强度符合设计",
+                    "confirmed": False,
+                },
+            },
+            work_content="底板钢筋模板验收",
+        )
+
+    def test_write_through_asks_for_missing_required_fields(self):
+        record = self._record()
+        result = asyncio.run(agent_router._apply_existing_record_write_through(
+            RouterFakeDb(record), self._user(), 7, "conv-1",
+            "写入正式记录 #155", {"record_type": "验收"},
+        ))
+        self.assertTrue(result and result["ok"])
+        self.assertEqual(["验收类型"], list(result.get("need_more") or []))
+        self.assertIn("施工单位自检结论", result.get("pending_labels") or [])
+        self.assertIn("监理验收结论", result.get("pending_labels") or [])
+        self.assertEqual("awaiting_fields",
+                         record.content_json["agent_write_through"]["status"])
+        # 已确认的要点仍要真正落库，不能因为追问而整批不写
+        self.assertIn("逐项核对，共 3 项", str(record.content_json.get("acceptance_content") or ""))
+
+    def test_explicit_leave_blank_still_finishes_write(self):
+        record = self._record()
+        result = asyncio.run(agent_router._apply_existing_record_write_through(
+            RouterFakeDb(record), self._user(), 7, "conv-1",
+            "其余栏位先留空，写入正式记录 #155", {"record_type": "验收"},
+        ))
+        self.assertTrue(result and result["ok"])
+        self.assertFalse(result.get("need_more"))
+        self.assertEqual("left_blank",
+                         record.content_json["agent_write_through"]["status"])
+
+    def test_user_answer_fills_field_and_asks_next(self):
+        record = self._record()
+        state = {"record_id": 155,
+                 "labels": ["验收类型", "施工单位自检结论", "监理验收结论"]}
+        args = {"record_type": "验收", "_write_through_fields": state}
+        result = asyncio.run(agent_router._continue_existing_record_write_through(
+            RouterFakeDb(record), self._user(), 7, "conv-1", "隐蔽工程", args,
+        ))
+        self.assertTrue(result and result["ok"])
+        self.assertEqual("隐蔽工程", record.content_json.get("acceptance_type"))
+        self.assertEqual(["施工单位自检结论"], list(result.get("need_more") or []))
+        self.assertEqual(["施工单位自检结论", "监理验收结论"],
+                         list(result.get("pending_labels") or []))
+
+    def test_unrelated_message_keeps_asking_same_field(self):
+        record = self._record()
+        state = {"record_id": 155, "labels": ["验收类型"]}
+        args = {"record_type": "验收", "_write_through_fields": state}
+        result = asyncio.run(agent_router._continue_existing_record_write_through(
+            RouterFakeDb(record), self._user(), 7, "conv-1", "今天天气不错", args,
+        ))
+        self.assertTrue(result)
+        self.assertEqual(["验收类型"], list(result.get("need_more") or []))
+        self.assertFalse(record.content_json.get("acceptance_type"))
+
+
 if __name__ == "__main__":
     unittest.main()
