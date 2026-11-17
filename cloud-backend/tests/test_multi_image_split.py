@@ -279,6 +279,26 @@ class TestMultiImageSplitFlow(unittest.TestCase):
         self.assertEqual(db.commit_calls, 1)
         self.assertIn("record_ids", result.get("data", {}))
 
+    def test_confirm_turn_with_no_issue_backfills_problems(self):
+        """2026-11-17 用户「这个要跟用户交互的」：确认轮用户说「无异常」，
+        巡视/旁站的问题及处理情况要落 problems 列，不静默留空。"""
+        db = FakeSession()
+        ctx = _nine_ctx(db=db, message="")
+        args = {}
+        asyncio.run(_maybe_handle_multi_image_split(ctx, args, args))
+        plan = args["_agent_pending_split"]
+        ctx2 = FakeCtx(images=[], signals=[], message="确认建，无异常", db=db)
+        args2 = {"_agent_pending_split": plan}
+        result = asyncio.run(_maybe_handle_multi_image_split(ctx2, args2, args2))
+        self.assertTrue(result.get("ok"))
+        records = [o for o in db.added if isinstance(o, WorkRecord)]
+        patrol = [r for r in records if r.record_type == "巡视"][0]
+        station = [r for r in records if r.record_type == "旁站"][0]
+        self.assertIn("无异常", str(patrol.problems or ""))
+        self.assertIn("无异常", str(station.problems or ""))
+        pending = [r for r in records if r.record_type == "待定"][0]
+        self.assertIsNone(pending.problems)  # 待定不套用问题栏
+
     def test_witness_group_uses_witness_photos(self):
         # 含见证组的混合信号：验证见证照写入 witness_photos 而非 inspection_photos
         db = FakeSession()

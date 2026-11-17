@@ -1557,6 +1557,10 @@ async def _create_split_records(ctx: "ToolContext", groups: list) -> dict:
     工作记录详情页补全。记录均为草稿状态。
     """
     created: list[tuple[str, WorkRecord, list[str]]] = []
+    # 确认轮顺带交代的问题（如有）：落到 problems 列为了不丢信息。
+    # 2026-11-17 用户截图「这个要跟用户交互的」：分组建单的确认回执会带出
+    # 「问题及处理情况」待填栏，用户可能在确认时一并说了问题/无异常。
+    _mk = (ctx.message or "").strip()
     for g in groups:
         rtype = g.record_type
         photos = [str(u).strip() for u in g.images if str(u).strip()]
@@ -1615,6 +1619,13 @@ async def _create_split_records(ctx: "ToolContext", groups: list) -> dict:
                 rec.station_start_time = start_dt
             else:
                 rec.inspection_start_time = start_dt
+        # 巡视/旁站的「问题及处理情况」栏：确认轮用户明确说了问题就直接落，
+        # 说「无异常/符合要求」由 _backfill_no_issue 落；什么都没说不臆造。
+        # 2026-11-17 用户截图「这个要跟用户交互的」（分组确认回执已带出待填栏）。
+        if rtype in ("巡视", "旁站"):
+            prob = _backfill_no_issue(_mk)
+            if prob and prob != str(getattr(rec, "problems", "") or "").strip():
+                rec.problems = prob[:2000]
         ctx.db.add(rec)
         created.append((rtype, rec, photos))
 
