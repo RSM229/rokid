@@ -98,6 +98,21 @@ class TypeConfirmationTextTest(unittest.TestCase):
         self.assertIn("请确认是否符合现场情况", text)
         self.assertIn("写入正式记录", text)
 
+    def test_each_point_gets_its_own_line(self):
+        """2026-11-17 用户截图「每一个分点都换行」：① ② ③ 不再挤成一段。"""
+        text = src.build_type_confirmation(
+            _video_groups(), display=agent_tools._split_record_display_name)
+        lines = [line.strip() for line in text.splitlines()]
+        for line in lines:
+            self.assertLessEqual(
+                sum(line.count(marker) for marker in "①②③④⑤⑥⑦⑧⑨⑩"), 1,
+                "同一行出现多个分点：" + line)
+        self.assertTrue(any(line.startswith("② 使用的工程材料") for line in lines))
+        self.assertTrue(any(line.startswith("⑤ 安全文明施工情况") for line in lines))
+        self.assertTrue(any(line.startswith("② 模板安装牢固") for line in lines))
+        self.assertTrue(any(line.startswith("③ 混凝土强度等级") for line in lines))
+        self.assertTrue(any(line.startswith("待填：") for line in lines))
+
     def test_plan_stage_asks_to_confirm_classification(self):
         text = src.build_type_confirmation(
             _video_groups(), display=agent_tools._split_record_display_name,

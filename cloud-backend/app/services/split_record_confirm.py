@@ -124,7 +124,12 @@ def _group_has_photo(groups: list[Any]) -> bool:
 
 
 def _circled(items: list[str]) -> str:
-    return "；".join(f"{chr(0x2460 + i)} {it}" for i, it in enumerate(items))
+    """分点逐行排列（2026-11-17 用户截图「每一个分点都换行」）。
+
+    序号仍只在这里加一次；换行后小程序气泡 white-space:pre-wrap 直接生效，
+    不再用「；」把 ①②③ 串成一整段。第一项跟在栏目标题后，其余另起一行。
+    """
+    return "\n".join(f"{chr(0x2460 + i)} {it}" for i, it in enumerate(items))
 
 
 def build_type_confirmation(
@@ -171,10 +176,10 @@ def build_type_confirmation(
             _proc, points = _aat.match_points_by_text(identified)
             if points:
                 has_points = True
-                # 要点原文自带 ① ② ③，别再套一层序号。
+                # 要点原文自带 ① ② ③，逐条换行、别再套一层序号。
                 # 2026-11-16 用户截图「验收要点，括号里的要去掉吧」：匹配到的
                 # 规范工序名不再写出来，只留要点正文；proc 仍用于内部追溯。
-                body = "验收要点：" + "；".join(_short(p, 52) for p in points)
+                body = "验收要点：" + "\n".join(_short(p, 52) for p in points)
             else:
                 body = "验收要点：暂未匹配到这道工序的规范要点，说下验收的是哪道工序我再带出"
         elif rtype == "旁站":
@@ -193,8 +198,9 @@ def build_type_confirmation(
             has_points=has_points,
         )
         if pending:
-            body += " ｜ 待填：" + "、".join(pending)
-        lines.append("  " + body)
+            # 分点已逐行排列，待填另起一行，避免挂在最后一条要点尾巴上
+            body += "\n待填：" + "、".join(pending)
+        lines.extend("  " + line for line in body.split("\n"))
 
     if stage == "plan":
         lines.append("以上按类型先跟你核对：分类和内容符合就点「确认生成」；要改哪一类直接说。")
