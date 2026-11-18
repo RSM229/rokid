@@ -161,7 +161,7 @@
 import { ref, onMounted, nextTick, markRaw } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { workRecordApi, documentApi, viewFile } from '@/api'
+import { workRecordApi, documentApi, viewFile, agentApi } from '@/api'
 import {
   ChatDotRound, User, View, CircleCheck, Monitor, Camera, Document,
   Warning, ArrowRight, Plus, EditPen, Reading, Document as DocIcon, Notebook,
@@ -179,6 +179,8 @@ const messagesRef = ref<HTMLElement | null>(null)
 const pendingImage = ref<string | null>(null)
 const pendingImageFile = ref<File | null>(null)
 const hazardMode = ref(false)
+// 后端智能体会话 ID（多轮上下文）
+const conversationId = ref<string | null>(null)
 
 // ===== 层级导航 =====
 const currentLevel1 = ref('')
@@ -348,31 +350,40 @@ async function sendMessage() {
 }
 
 async function callLlmChat(userMsg: string) {
+  // 未匹配本地指令，交给后端智能体（多轮 + 工具编排）
   try {
-    const resp = await fetch('/api/knowledge/llm-query', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${localStorage.getItem('token') || ''}`,
-      },
-      body: JSON.stringify({
-        question: userMsg,
-        use_llm: true,
-        knowledge_scope: selectedKB.value,
-      }),
-    })
+    const history = chatMessages.value
+      .filter((m) => typeof m.content === 'string' && m.role !== 'assistant-typing')
+      .slice(-6)
+      .map((m) => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.content }))
 
-    if (resp.ok) {
-      const data = await resp.json()
-      chatMessages.value.push({
-        role: 'assistant',
-        content: data.answer || formatKnowledgeFallback(data.context_results) || '知识库中暂未找到相关内容。',
-      })
+    const resp = await agentApi.chat({
+      message: userMsg,
+      conversation_id: conversationId.value,
+      history,
+    } as any)
+
+    if (resp?.reply) {
+      // 会话上下文延续
+      if (resp.conversation_id) conversationId.value = resp.conversation_id
+
+      // 结构化卡片（评审计划等）暂以文本提示展示，正常文本走 reply
+      let text = String(resp.reply)
+      if (resp.cards?.length) {
+        const cardLines = resp.cards
+          .filter((c: any) => c?.title && c?.content)
+          .map((c: any) => `【${c.title}】\n${String(c.content).slice(0, 200)}`)
+        if (cardLines.length) text = cardLines.join('\n\n') + (text ? '\n\n' + text : '')
+      }
+      chatMessages.value.push({ role: 'assistant', content: text || '已处理。' })
     } else {
-      chatMessages.value.push({ role: 'assistant', content: '服务暂时不可用，请稍后再试。\n您也可以使用快捷指令按钮进行操作。' })
+      chatMessages.value.push({ role: 'assistant', content: '智能体暂无回复，请稍后再试。\n也可以使用快捷指令直接操作。' })
     }
   } catch (e: any) {
-    chatMessages.value.push({ role: 'assistant', content: '网络错误：' + e.message + '\n您也可以使用快捷指令按钮进行操作。' })
+    chatMessages.value.push({
+      role: 'assistant',
+      content: '服务暂时不可用：' + (e?.response?.data?.detail || e?.message || '未知错误') + '\n您也可以使用快捷指令按钮进行操作。',
+    })
   }
 
   await nextTick()
@@ -413,14 +424,6 @@ function clearPendingImage() {
   if (pendingImage.value) URL.revokeObjectURL(pendingImage.value)
   pendingImage.value = null
   pendingImageFile.value = null
-}
-
-function formatKnowledgeFallback(results: any[] | undefined): string {
-  if (!results?.length) return ''
-  return [
-    '从所选知识范围检索到以下相关内容：',
-    ...results.slice(0, 5).map((item) => `• ${item.title || item.name || item.source_file}：${item.snippet || ''}`),
-  ].join('\n')
 }
 
 function previewImage(src: string) {

@@ -305,6 +305,23 @@ export const documentApi = {
   generateDailyLog: (date: string) => http.post('/document/generate-daily-log', null, { params: { date } }),
 }
 
+// 智能体（后端 /api/agent/chat，POST /agent/chat）
+export const agentApi = {
+  chat: (data: {
+    message: string
+    conversation_id?: string | null
+    history?: { role: string; content: string }[]
+    mode?: string | null
+    material?: string | null
+    images?: string[]
+    prefill?: Record<string, any>
+    form_values?: Record<string, any>
+    project_id?: number | null
+  }) => http.post('/agent/chat', data),
+  conversations: (conversationId: string) =>
+    http.get(`/agent/conversations/${conversationId}`),
+}
+
 // 知识库
 export const knowledgeApi = {
   categories: () => http.get('/knowledge/regulations/categories'),

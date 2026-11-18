@@ -559,6 +559,17 @@ def resolve_record_form(
         acceptance_content = content.get("acceptance_content") or getattr(record, "work_content", None)
         direct["content"] = acceptance_content
         direct["acceptance_content"] = acceptance_content
+        # 分组建档把验收结论写在 content_json 顶层（acceptance_type /
+        # self_check_conclusion / supervision_conclusion），与 prov_fields 同义；
+        # 表式校验只读 prov_fields/记录列时会误判缺项——详情页四栏都有值，
+        # 点生成文书仍提示「缺验收类型、自检结论、监理结论」（2026-11-18 真机）。
+        for key in ("acceptance_type", "self_check_conclusion", "supervision_conclusion"):
+            direct[key] = content.get(key)
+        # 「举牌验收照片」canonical=photo，实物落在 inspection_photos 列：
+        # 不映射会把已附照片的验收判成缺照片，生成被永久拦住。
+        photos = getattr(record, "inspection_photos", None) or []
+        if photos:
+            direct["photo"] = f"已附{len(photos)}张"
     for value, attr in (
         ("start_time", "station_start_time"),
         ("end_time", "station_end_time"),

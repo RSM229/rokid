@@ -20,7 +20,7 @@ from app.services.image_classification import (
     ImageSignal,
     _hazard_hit,
 )
-# 内容清洗与尾巴解析（切掉水印尾巴「摄时间/天气/监理」，同时把尾巴解析成字段回填）
+# 尾巴解析：切掉水印尾巴「摄时间/天气/监理」并把它们解析成字段回填（内容侧同时清洗）
 from app.services.multi_image_split import split_hint
 
 # 逐图块切分：material 形如「【图片 1】\n【水印】…\n【图片内容观察】…\n\n【图片 2】…」
@@ -66,10 +66,13 @@ def _block_parts(block: str) -> tuple[str, str, str]:
 
 
 def _extract_content(block: str, raw_text: str) -> str:
-    """从水印原文里抽「内容/工序/对象」作为归类 content 线索（未清洗，含尾巴）。
+    """从水印原文里抽「内容/工序/对象」作为归类 content 线索（含尾巴，未做身份剔除）。
 
     尾巴（拍摄时间/天气/人员）由 ``parse_material_signals`` 用 ``split_hint`` 切出来
     另存到信号字段 —— 不能在这一步直接丢掉（2026-11-13 用户要求「要共存」）。
+    这里**不做任何清洗**：清洗会先删掉天气/拍摄时间/裸人员词，``split_hint``
+    之后就再也切不出来（2026-11-18 真机 #200 天气未落库）。内容侧的清洗由
+    ``split_hint`` 自己完成。
     """
     m = _CONTENT_KW.search(block)
     if m:
@@ -92,6 +95,54 @@ def _extract_taken_at(wm_text: str) -> str:
     """从水印文本抽拍摄时间（分组记录据此回填业务日期，避免默认成建单当天）。"""
     m = _TAKEN_AT_KW.search(wm_text)
     return m.group(1).strip() if m else ""
+
+
+# 天气：水印结构化行「天气：晴 28℃」；也有 OCR 只写「气：晴 28℃」的模板。
+_WEATHER_KW = re.compile(r"(?:天气|气温|气)\s*[:：]\s*([^\n；;，,]{1,20})")
+# 「晴 28℃ / 多云31°C」：天气词+气温整体，不依赖标签也能认出来。
+_WEATHER_TEMP = re.compile(
+    r"(?:晴|多云|阴|阵雨|雷阵雨|小雨|中雨|大雨|暴雨|大暴雨|特大暴雨|冻雨|"
+    r"雨夹雪|小雪|中雪|大雪|雾|霾|沙尘暴|浮尘)"
+    r"\s*[-+]?\d{1,2}\s*[℃°]\s*C?"
+)
+
+
+def _extract_weather(*texts: str) -> str:
+    """从水印结构化行/识别原文抽天气。
+
+    天气必须单独抽一次：``_extract_content`` 命中「施工内容：」时只返回内容值，
+    尾巴里没有天气；走原文兜底时天气又会被 ``scrub_watermark_noise`` 当噪声删掉。
+    两条路径都会让详情页「天气」永远为空（2026-11-18 真机 #200）。
+    """
+    for text in texts:
+        if not text:
+            continue
+        m = _WEATHER_TEMP.search(text)
+        if m:
+            return re.sub(r"\s+", " ", m.group(0)).strip()[:16]
+        m = _WEATHER_KW.search(text)
+        if m:
+            value = m.group(1).strip().split(" ")[0]
+            if value:
+                return value[:16]
+    return ""
+
+
+# 人员：结构化水印行「人员：张三」，不能只从尾巴取 —— 尾巴里的真实姓名
+# 不在裸词表里会被当正文，切尾后要么留在内容里、要么被清洗删掉。
+_PERSON_KW = re.compile(
+    r"(?:^|[；;，,、|\s])\s*"
+    r"(?:旁站人员|验收人员|检查人员|监理人员|拍摄人员|记录人员|拍摄人|记录人|人员|监理)"
+    r"\s*[:：]\s*([^\n；;，,]{1,12})"
+)
+
+
+def _extract_person(wm_text: str) -> str:
+    """从结构化水印行抽人员（姓名或岗位）。"""
+    m = _PERSON_KW.search(str(wm_text or ""))
+    if not m:
+        return ""
+    return re.split(r"\s+", m.group(1).strip())[0][:12]
 
 
 def _negated_before(text: str, pos: int) -> bool:
@@ -169,15 +220,20 @@ def parse_material_signals(material: str, n_images: int) -> list[dict]:
             continue
         wm_text, raw_text, obs_text = _block_parts(block)
         combined = f"{wm_text} {raw_text} {obs_text}"
-        # 内容与尾巴拆开：content 进工作内容，尾巴里的时间/天气/人员/部位回填信号
-        content, tail = split_hint(_extract_content(block, raw_text))
+        # 内容与尾巴拆开：content 进工作内容，尾巴里的时间/天气/人员/部位回填信号。
+        # 尾巴必须从**未经内容抽取裁剪**的原文解析：命中「施工内容：」时
+        # _extract_content 只返回内容值，单位/地址/电话等尾巴字段会全部丢失。
+        content, _ = split_hint(_extract_content(block, raw_text))
+        _, tail = split_hint(raw_text or _extract_content(block, raw_text))
         section = _extract_section(wm_text) or tail.get("section", "")
         taken_at = _extract_taken_at(wm_text) or tail.get("taken_at", "")
+        weather = _extract_weather(wm_text, raw_text) or tail.get("weather", "")
+        person = _extract_person(wm_text) or tail.get("person", "")
         sig = ImageSignal(
             content=content,
             section=section,
             taken_at=taken_at,
-            inspector=tail.get("person") or None,
+            inspector=person or None,
         )
         for key, val in _behavior_signals(combined).items():
             setattr(sig, key, val)
@@ -185,6 +241,8 @@ def parse_material_signals(material: str, n_images: int) -> list[dict]:
              if getattr(sig, k) is not None}
         # 天气 / 联系方式 / 地址：ImageSignal 没有这些字段，但分组回填 wm 时要消费它，
         # 随 dict 带出（水印模板的企业落款不能因为清洗工作内容就被丢掉）
+        if weather:
+            d["weather"] = weather
         for extra in ("weather", "contact", "location", "org", "postcode"):
             if tail.get(extra):
                 d.setdefault(extra, tail[extra])

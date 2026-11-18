@@ -385,6 +385,25 @@ def _backfill_no_issue(message: str) -> str:
     return ""
 
 
+_ACCEPTANCE_OK_RE = re.compile(r"验收[^，。；,;\n]{0,10}(?:符合|合格|通过)")
+_ACCEPTANCE_NEG_RE = re.compile(
+    r"验收[^，。；,;\n]{0,10}(?:不|未|没)[^，。；,;\n]{0,6}(?:符合|合格|通过)")
+
+
+def _acceptance_confirmed(message: str) -> bool:
+    """用户在确认轮明确说「验收符合/合格/通过」时返回 True。
+
+    只认明说：没提验收、或说的是「巡视问题及处理情况符合要求」都不算，
+    避免把巡视的「符合」替监理写进验收结论（2026-11-18 真机：用户回
+    「巡视问题及处理情况符合要求，验收符合」，验收记录结论栏却是空）。
+    「验收不合格/未通过」一律不算。
+    """
+    text = str(message or "")
+    if _ACCEPTANCE_NEG_RE.search(text):
+        return False
+    return bool(_ACCEPTANCE_OK_RE.search(text))
+
+
 def _wants_skip(message: str) -> bool:
     text = (message or "").strip()
     return any(h in text for h in _SKIP_HINTS)
@@ -705,6 +724,23 @@ _ACCEPTANCE_INFER = [
     ("竣工预验收", "预验收"),
     ("预验收", "预验收"),
     ("竣工验收", "竣工验收"),
+    # 2026-11-18 用户「还有这么多空吗」：分组建档时照片水印往往只识别出工序名
+    # （钢筋/模板/防水…），没有「隐蔽工程」这类字样，验收类型就一直空着。
+    # 按施工惯例给草稿默认值（隐蔽工序→隐蔽工程，安装/浇筑类→检验批），
+    # 用户可在详情页改；只影响草稿，不改变正式验收结论。
+    ("钢筋", "隐蔽工程"),
+    ("预埋", "隐蔽工程"),
+    ("防水", "隐蔽工程"),
+    ("回填", "隐蔽工程"),
+    ("垫层", "隐蔽工程"),
+    ("桩基", "隐蔽工程"),
+    ("管道", "隐蔽工程"),
+    ("模板", "检验批"),
+    ("混凝土", "检验批"),
+    ("砌体", "检验批"),
+    ("抹灰", "检验批"),
+    ("路基", "检验批"),
+    ("基层", "检验批"),
 ]
 
 
@@ -757,6 +793,11 @@ async def _aat_aggregate_reply(items, user_reply):
 def _aat_generate_conclusion(aggregated):
     from app.services import acceptance_ask_together as _aat
     return _aat.generate_conclusion(aggregated)
+
+
+def _aat_generate_self_check_conclusion(aggregated):
+    from app.services import acceptance_ask_together as _aat
+    return _aat.generate_self_check_conclusion(aggregated)
 
 
 def _set_field_persist(orig_args: dict, args: dict, field: dict, value: str) -> dict:
@@ -1250,10 +1291,18 @@ async def _maybe_handle_multi_image_split(ctx: "ToolContext", args: dict, orig_a
     # 先消费已存的分组方案：确认轮用户只回肯定词、不带新图，必须在此短路之前判定，
     # 否则「if not images: return None」会把确认轮直接吞掉，分组方案永不消费。
     pending = args.get("_agent_pending_split")
+    logger.info("[多图分组调试] 工具层入口: has_pending_split=%s pending_groups=%d args.record_type=%s images=%d is_confirm=%s",
+                 bool(pending and pending.get("groups")),
+                 len((pending or {}).get("groups") or []),
+                 args.get("record_type"),
+                 len(ctx.images or []),
+                 multi_image_split.is_confirm(ctx.message))
     if isinstance(pending, dict) and pending.get("groups"):
         groups = [_group_from_dict(g) for g in pending["groups"]]
         if multi_image_split.is_confirm(ctx.message):
+            logger.info("[多图分组调试] ✅ 确认轮 → 走 _create_split_records, %d groups", len(groups))
             return await _create_split_records(ctx, groups)
+        logger.info("[多图分组调试] ⏳ 分组方案已带过来但本轮没说确认词(%r), 保持 need_more", ctx.message)
         return _split_need_more(groups)
 
     images = [str(u).strip() for u in (ctx.images or []) if str(u).strip()]
@@ -1279,6 +1328,8 @@ async def _maybe_handle_multi_image_split(ctx: "ToolContext", args: dict, orig_a
             plan = {"groups": [_group_to_dict(g) for g in groups], "source": "vision"}
             args["_agent_pending_split"] = plan
             orig_args["_agent_pending_split"] = plan
+            logger.info("[多图分组调试] vision分组写入 _agent_pending_split: %d groups, args has key=%s",
+                         len(groups), "_agent_pending_split" in args)
             return _split_need_more(groups, getattr(ctx, "material", None), len(images))
         # vision 只分出单组（含全部待定）→ 退化为模型按水印分组（Path 1）
 
@@ -1290,6 +1341,8 @@ async def _maybe_handle_multi_image_split(ctx: "ToolContext", args: dict, orig_a
         plan = {"groups": [_group_to_dict(g) for g in model_groups], "source": "model_watermark"}
         args["_agent_pending_split"] = plan
         orig_args["_agent_pending_split"] = plan
+        logger.info("[多图分组调试] 首次分组写入 _agent_pending_split: %d groups, args has key after write=%s",
+                     len(model_groups), "_agent_pending_split" in args)
         return _split_need_more(model_groups, getattr(ctx, "material", None), len(images))
 
     return None  # 无逐图信号且未分组 → 普通单记录流程（多图挂同一条）
@@ -1550,6 +1603,23 @@ def _split_record_display_name(rtype: str) -> str:
     return _SPLIT_RECORD_DISPLAY.get(rtype) or f"{rtype}记录"
 
 
+# 水印只印岗位不印姓名时（真机：「监理」），不能当成人名填进「巡视人」栏。
+_ROLE_ONLY_NAMES = {
+    "监理", "监理员", "监理工程师", "专业监理工程师", "总监理工程师", "总监",
+    "总监代表", "项目经理", "施工员", "安全员", "质检员", "取样员", "见证员",
+    "甲方", "业主", "建设单位",
+}
+
+
+def _inspector_name(persons, fallback: str) -> str:
+    """巡视人/旁站监理人员：优先水印里的真实姓名，岗位名或空则回落到记录人。"""
+    for person in persons or ():
+        name = str(person or "").strip()
+        if name and name not in _ROLE_ONLY_NAMES and 2 <= len(name) <= 6:
+            return name
+    return str(fallback or "").strip()
+
+
 async def _create_split_records(ctx: "ToolContext", groups: list) -> dict:
     """确认后循环建多条记录：每组一条，同类多图挂该条照片列表；待定组建极简草稿。
 
@@ -1561,27 +1631,56 @@ async def _create_split_records(ctx: "ToolContext", groups: list) -> dict:
     # 2026-11-17 用户截图「这个要跟用户交互的」：分组建单的确认回执会带出
     # 「问题及处理情况」待填栏，用户可能在确认时一并说了问题/无异常。
     _mk = (ctx.message or "").strip()
+    # 水印 OCR 常把项目名/监理单位一起识别进「内容」，用它剔除，避免污染工作内容
+    _project_name = str(getattr(getattr(ctx, "project", None), "name", "") or "").strip()
+    # 记录人（当前登录的监理人员）：水印没印姓名时用作「巡视人」默认值
+    _author_name = str(
+        getattr(ctx.user, "real_name", "") or getattr(ctx.user, "username", "") or ""
+    ).strip()
     for g in groups:
         rtype = g.record_type
         photos = [str(u).strip() for u in g.images if str(u).strip()]
         if not photos:
             continue
         is_witness = (rtype == "见证")
-        content = _split_content(g, rtype)
+        # 按组回填水印字段：拍摄时间→业务日期，单位工程/施工区域→施工部位。
+        # 分组确认可能跨轮，wm 随分组方案持久化，故不依赖 ctx 的临时 image_signals。
+        wms = list(getattr(g, "wm", None) or [])
+        wm_fields = _split_watermark_fields(wms)
+        content = _split_content(
+            g, rtype, project_name=_project_name, orgs=wm_fields["orgs"])
         # 验收要点必须真的进记录（2026-11-16 用户截图「工作内容填的不是要点吗」）：
         # work_content 保留水印识别的施工内容（工序名），要点单独落
         # content_json.acceptance_points 作为待确认草案；用户回「都符合 /
         # 写入正式记录」后再由路由层转成正式 acceptance_content。两者共存，不丢工序名。
         acc_points = None
+        acc_type = ""
         if rtype == "验收":
             try:
                 acc_points = split_record_confirm.acceptance_points_for([g])
             except Exception:  # noqa: BLE001 - 要点是增强，失败不阻断建档
                 logger.debug("acceptance points for split record failed", exc_info=True)
-        # 按组回填水印字段：拍摄时间→业务日期，单位工程/施工区域→施工部位。
-        # 分组确认可能跨轮，wm 随分组方案持久化，故不依赖 ctx 的临时 image_signals。
-        wms = list(getattr(g, "wm", None) or [])
-        wm_fields = _split_watermark_fields(wms)
+            # 2026-11-18 用户「还有这么多空吗」：分组建档时顺手把能判断的验收类型填上，
+            # 别让详情页整栏空着等用户手填。只写草稿默认值，用户可改。
+            acc_src = " ".join(
+                str(x or "") for x in (
+                    (acc_points or {}).get("identified"),
+                    (acc_points or {}).get("procedure"),
+                    content,
+                )
+            )
+            acc_type = _infer_acceptance_type(acc_src)
+        # 用户这轮已明确「验收符合/合格」＝要点确认，直接落正式验收内容；
+        # 否则回完「验收符合」还要再回一次「写入正式记录」，而回执又没说写没写，
+        # 用户不知道到底有没有写入（2026-11-18 真机）。
+        _acc_ok = bool(rtype == "验收" and _acceptance_confirmed(_mk))
+        acc_formal = ""
+        if _acc_ok and acc_points:
+            acc_formal = split_record_confirm.build_acceptance_content_from_points(acc_points)
+            if acc_formal:
+                acc_points["confirmed"] = True
+        # 按组回填水印字段：拍摄时间→业务日期，单位工程/施工区域→施工部位
+        # （wm_fields 已在循环开头算好，工作内容清洗要用到其中的单位落款）。
         split_date = wm_fields["date"]
         rec = WorkRecord(
             record_type=rtype,
@@ -1608,6 +1707,26 @@ async def _create_split_records(ctx: "ToolContext", groups: list) -> dict:
                 **({"watermark_org": wm_fields["orgs"]} if wm_fields["orgs"] else {}),
                 # 验收要点草案（未经确认，不写成正式验收内容；匹配不到就不写）
                 **({"acceptance_points": acc_points} if acc_points else {}),
+                # 本轮用户已确认「验收符合」→ 要点直接转成正式验收内容
+                **({"acceptance_content": acc_formal} if acc_formal else {}),
+                # 验收类型草稿默认（工序可判断时）：减少详情页空栏；用户可改
+                **({"acceptance_type": acc_type} if acc_type else {}),
+                # 施工单位自检结论：施工单位送检前本就自检合格，草稿先给标准说法；
+                # 监理验收结论仍留空，必须依据用户确认结果再落，不能替监理下结论。
+                **({"self_check_conclusion": "施工单位自检合格"} if rtype == "验收" else {}),
+                # 用户确认轮明确说「验收符合/合格」→ 监理验收结论直接落，
+                # 否则（没说、只说巡视符合）保持空，等用户补（2026-11-18 真机）。
+                **({"supervision_conclusion": "验收合格，同意进入下道工序。"}
+                   if _acc_ok else {}),
+                # 巡视人/旁站监理人员：水印通常只印「监理」这种岗位名，没有姓名可用；
+                # 记录由当前登录的监理人员创建，默认落本人姓名，避免文书该栏空白
+                # （2026-11-18 用户截图「巡视人呢」）。
+                **({"inspector": _inspector_name(wm_fields["persons"], _author_name)}
+                   if rtype in ("巡视", "旁站")
+                   and _inspector_name(wm_fields["persons"], _author_name) else {}),
+                # 旁站两个必填枚举（到岗情况/自查自检）：旁站本身即监理在现场核对过，
+                # 草稿先给「是」，详情页不再出现「未填写 / -」（2026-11-18 真机）。
+                **({"qa_onsite": "是", "self_check": "是"} if rtype == "旁站" else {}),
             },
         )
         # 水印拍摄时刻 → 开始时间栏（与单图 apply_prefill 同规则：巡视落
@@ -1650,39 +1769,130 @@ async def _create_split_records(ctx: "ToolContext", groups: list) -> dict:
     for rtype, rec, photos in created:
         lines.append(f"· {_split_record_display_name(rtype)} #{rec.id}（{len(photos)}张照片）")
     lines.append("施工部位、业务日期已按各张照片水印自动填入。")
-    # 逐类提醒「这一类要填什么 + 对应内容/验收要点」，让用户确认是否符合现场；
-    # 取代原来那句笼统的「具体位置等可继续在工作记录页补充」（2026-11-16 真机需求）。
+    # 回执必须说清「写了什么」：用户回完「巡视符合、验收符合」后，如果只列记录
+    # 编号、还把已写入的栏位挂在「待填」里，用户根本不知道到底有没有写进去
+    # （2026-11-18 真机截图）。filled_by_type 同时用于剔除「待填」。
+    filled_by_type: dict[str, set[str]] = {}
+    written_lines: list[str] = []
+    for rtype, rec, _photos in created:
+        cj = rec.content_json or {}
+        filled = filled_by_type.setdefault(rtype, set())
+        if rec.section:
+            filled.add("section")
+        if rec.work_content:
+            filled.update({"content", "work_content"})
+        if rec.problems:
+            filled.add("problems")
+        if rec.treatment:
+            filled.add("treatment")
+        if rec.inspection_start_time or rec.station_start_time:
+            filled.add("start_time")
+        if rec.inspection_end_time or rec.station_end_time:
+            filled.add("end_time")
+        if rec.inspection_photos or rec.witness_photos:
+            filled.add("photo")
+        for key in ("acceptance_type", "acceptance_content",
+                    "self_check_conclusion", "supervision_conclusion"):
+            if str(cj.get(key) or "").strip():
+                filled.add(key)
+
+        parts: list[str] = []
+        if rtype in ("巡视", "旁站") and str(rec.problems or "").strip():
+            parts.append(f"问题及处理情况：{rec.problems}")
+        if rtype == "验收":
+            if str(cj.get("acceptance_type") or "").strip():
+                parts.append(f"验收类型：{cj['acceptance_type']}")
+            if str(cj.get("acceptance_content") or "").strip():
+                parts.append("验收内容：已按要点逐项写入")
+            if str(cj.get("self_check_conclusion") or "").strip():
+                parts.append(f"施工单位自检结论：{cj['self_check_conclusion']}")
+            if str(cj.get("supervision_conclusion") or "").strip():
+                parts.append(f"监理验收结论：{cj['supervision_conclusion']}")
+        if parts:
+            written_lines.append(f"· #{rec.id} " + "；".join(parts))
+    if written_lines:
+        lines.append("已写入：")
+        lines.extend(written_lines)
     ids_by_type: dict[str, list[int]] = {}
     for rtype, rec, _photos in created:
         ids_by_type.setdefault(rtype, []).append(int(rec.id))
+    # 验收要点仍是「待确认草案」时才需要用户再回一句「写入正式记录」；
+    # 本轮已确认并落成正式内容的，结尾不再要求重复确认。
+    _points_pending = any(
+        rtype == "验收"
+        and (rec.content_json or {}).get("acceptance_points")
+        and not str((rec.content_json or {}).get("acceptance_content") or "").strip()
+        for rtype, rec, _ in created
+    )
     try:
         type_confirmation = split_record_confirm.build_type_confirmation(
             groups, display=_split_record_display_name,
-            created_ids=ids_by_type, stage="created")
+            created_ids=ids_by_type, stage="created",
+            filled_by_type=filled_by_type,
+            closing=(
+                "以上按类型带出，请确认是否符合现场情况；不符合直接说要改哪项，"
+                "要补的栏位一并告诉我。都符合就回「写入正式记录」。"
+                if _points_pending
+                else "以上内容已写入记录；要改哪项直接说。"
+            ),
+        )
     except Exception:  # noqa: BLE001 - 展示增强，失败按旧回执走
         logger.debug("split type confirmation failed", exc_info=True)
         type_confirmation = ""
     if type_confirmation:
         lines.append("")
         lines.append(type_confirmation)
+    # 缺项提示必须按「真实写库的记录」算：多图分组的 args 里没有逐组内容，
+    # 直接拿 args 校验会误报「还差 1 项：记录内容」，而三条记录其实都有内容
+    # （2026-11-18 真机截图）。
+    missing_all: list[dict] = []
+    try:
+        from app.services.doc_quality import missing_fields as _missing_fields
+
+        seen_keys: set[str] = set()
+        for rtype, rec, _photos in created:
+            values = {
+                "work_content": rec.work_content,
+                "content": rec.work_content,
+                "section": rec.section,
+                "location": rec.location,
+                "problems": rec.problems,
+                "treatment": rec.treatment,
+                "start_time": rec.inspection_start_time or rec.station_start_time,
+                # 验收「举牌验收照片」：照片落在 inspection_photos，键名与省统表
+                # canonical=photo 不同，不带上就会把已挂照片的验收误报成缺照片
+                "inspection_photos": rec.inspection_photos or [],
+                **(rec.content_json or {}),
+            }
+            for item in _missing_fields(rtype, values):
+                key = str(item.get("key") or item.get("label") or "")
+                if key and key not in seen_keys:
+                    seen_keys.add(key)
+                    missing_all.append(item)
+    except Exception:  # noqa: BLE001 - 提示增强，失败退回原回执
+        logger.debug("split missing fields failed", exc_info=True)
+        missing_all = []
     return _ok(
         "\n".join(lines),
         cards=cards,
         actions=[],
         undo=None,
         data={"record_ids": [rec.id for _, rec, _ in created], "split": True,
-              "type_confirmation": type_confirmation},
+              "type_confirmation": type_confirmation,
+              "missing_fields": missing_all},
     )
 
 
-def _split_content(g, rtype: str) -> str:
+def _split_content(g, rtype: str, project_name: str = "", orgs=()) -> str:
     """分组记录的 content 草稿：优先用逐图内容提示拼接，否则给类型占位（待用户补全）。"""
-    # clean_hints：切掉水印尾巴（摄时间/天气/监理）并去重保序。
-    # 不清洗会把「…验收 摄时间：2026.10.27 15:18 气：多云31°C 监理」直接写进
-    # 记录的工作内容（2026-11-13 用户截图反馈）。
-    hints = multi_image_split.clean_hints(g.hints)
+    # clean_hints：切掉水印尾巴（摄时间/天气/监理/品牌防伪码）并去重保序，
+    # 顺带剔除混进内容的项目名与监理单位落款。
+    # 不清洗会把「…验收 摄时间：2026.10.27 15:18 气：多云31°C 监理」或
+    # 「沙盛四路等4条道路工 广东建设监理；沟槽开挖 日」直接写进记录的工作内容。
+    hints = multi_image_split.clean_hints(g.hints, project_name=project_name, orgs=orgs)
     if hints:
-        joined = "；".join(hints)
+        # 表盘刻度别当参数值：「水泥搅拌桩水灰比 800」（真机 2026-11-18）
+        joined = multi_image_split.scrub_reading_noise("；".join(hints))
         return joined[:2000]
     if rtype == "待定":
         return "待确认归类（由现场照片自动分组，待补充类型与内容）"
@@ -1702,6 +1912,11 @@ async def _create_work_record(ctx: ToolContext, args: dict) -> dict:
         for _k, _v in _wm_tail.items():
             if not str(args.get(_k) or "").strip():
                 args[_k] = _v
+    # 水印相机印刷的 App 品牌/防伪码/拍摄日期/气温不该进工作内容
+    # （真机：「沙盛四路等4条道路工 广东建设监理；沟槽开挖 日」）。
+    if content:
+        content = multi_image_split.scrub_watermark_noise(content)
+        content = multi_image_split.scrub_reading_noise(content)
     section = str(args.get("section") or "").strip()
     location = str(args.get("location") or "").strip()
     # 跨轮持久化锚点：路由器最终会暂存它自己持有的 args 对象（即本参数），
@@ -1929,6 +2144,15 @@ async def _create_work_record(ctx: ToolContext, args: dict) -> dict:
                             args = _set_field_persist(
                                 orig_args, args, concl_field,
                                 _aat_generate_conclusion(aggregated))
+                        # 🔴 2026-11-17 新增：同步生成施工单位自检结论（省统表 YS 栏位⑥-自检）
+                        _ask_fields = record_field_spec.ask_fields("acceptance_record")
+                        sc_field = next(
+                            (f for f in _ask_fields
+                             if f.get("canonical") == "self_check_conclusion"), None)
+                        if sc_field:
+                            args = _set_field_persist(
+                                orig_args, args, sc_field,
+                                _aat_generate_self_check_conclusion(aggregated))
                         orig_args.pop("_acceptance_ask_state", None)
                         args.pop("_acceptance_ask_state", None)
                     else:
@@ -2091,6 +2315,14 @@ async def _create_work_record(ctx: ToolContext, args: dict) -> dict:
                 if concl_field:
                     args = _set_field_persist(
                         orig_args, args, concl_field, _aat_generate_conclusion(aggregated))
+                # 🔴 同步填自检结论（见上一处注释）
+                _af = record_field_spec.ask_fields("acceptance_record")
+                sc_field2 = next(
+                    (f for f in _af if f.get("canonical") == "self_check_conclusion"), None)
+                if sc_field2:
+                    args = _set_field_persist(
+                        orig_args, args, sc_field2,
+                        _aat_generate_self_check_conclusion(aggregated))
             elif write_through:
                 # 授权留空：问卷式内容绝不能写进正式记录，清空该栏后按已确认内容放行。
                 args = _set_field_persist(orig_args, args, _acc_check, "")
@@ -2263,6 +2495,12 @@ async def _create_work_record(ctx: ToolContext, args: dict) -> dict:
             **({"wind": str(args.get("wind"))[:16]} if args.get("wind") else {}),
             **({"subcontract_unit": str(args.get("subcontract_unit"))[:128]}
                if args.get("subcontract_unit") else {}),
+            # 巡视人/旁站监理人员：模型没给姓名就用创建人，避免文书该栏空白
+            **({"inspector": _inspector_name(
+                [_wm_tail.get("person")], str(getattr(ctx.user, "real_name", "") or ""))}
+               if record_type in ("巡视", "旁站") else {}),
+            # 旁站到岗情况/自查自检：草稿先给「是」，避免详情页「未填写 / -」
+            **({"qa_onsite": "是", "self_check": "是"} if record_type == "旁站" else {}),
         },
     )
     ctx.db.add(record)

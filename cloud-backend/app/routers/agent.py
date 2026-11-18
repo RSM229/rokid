@@ -1538,6 +1538,16 @@ async def _apply_existing_record_write_through(
         if val and val != str(cj.get(key) or "").strip():
             cj[key] = val
             changed.append(key)
+        if not val:
+            continue
+        # 2026-11-18 同步镜像到 prov_fields：表式必填校验（resolve_record_form）
+        # 与文书渲染都以 prov_fields 为准，只写顶层会导致「详情有值、生成说没填」。
+        prov = dict(cj.get("prov_fields") or {})
+        if str(prov.get(key) or "").strip() != val:
+            prov[key] = val
+            cj["prov_fields"] = prov
+            if "prov_fields" not in changed:
+                changed.append("prov_fields")
     # 时间类字段在表式里是独立参数，续办轮只按文本收，别塞进 DateTime 列
     for arg_key, cj_key in (("inspection_start_time", "start_time"),
                             ("inspection_end_time", "end_time")):
@@ -1556,6 +1566,15 @@ async def _apply_existing_record_write_through(
         if built:
             cj["acceptance_content"] = built
             changed.append("acceptance_content")
+            # 2026-11-18 用户「还有这么多空吗」：要点确认通过后同步落两条结论，
+            # 详情页不再一直空着。否定答复（不符合/待整改）不代为下结论，留待整改复验。
+            if not _negative:
+                if not str(cj.get("self_check_conclusion") or "").strip():
+                    cj["self_check_conclusion"] = "施工单位自检合格"
+                    changed.append("self_check_conclusion")
+                if not str(cj.get("supervision_conclusion") or "").strip():
+                    cj["supervision_conclusion"] = "验收合格，同意进入下道工序。"
+                    changed.append("supervision_conclusion")
     # 用户原话留痕（「只搬家不丢弃」）
     if message:
         prev = str(cj.get("voice_text") or "").strip()
@@ -2268,24 +2287,43 @@ async def _agent_chat_impl(
                 "extract_supplement", "completed", "本轮内容没有匹配到当前草稿缺项，原草稿保持不变",
                 {"candidate_fields": list(extra.keys())[:24]},
             )
+    # 🔴 多图分类分流的「确认」轮 —— 必须**先于**单类型词提取判断：
+    # 上一轮已给出分组回执（草稿含 _agent_pending_split），本轮用户可能同时确认
+    # 多种记录类型（如「巡视符合要求，验收符合」）。若先跑 canonical_record_type，
+    # 会从这句话里只提取到第一个类型词（如「巡视」），导致 tool 被先设成
+    # create_work_record 且 args 里 record_type="巡视"，下方的多图分组确认检查
+    # 就因为 `if not tool` 守卫被跳过，分组方案永不消费 → 验收记录丢失。
+    # 修复：草稿里有 _agent_pending_split 时，**跳过单类型词提取**（这是分组
+    # 确认轮，不是新的建单请求），并把 _agent_pending_split 从 draft.args 合并
+    # 到 args 里，让工具层 _maybe_handle_multi_image_split 能消费它。
+    if pending_tool == "create_work_record":
+        _draft_args = draft.get("args") or {}
+        _pending_split = _draft_args.get("_agent_pending_split")
+        logger.info("[多图分组调试] message=%r tool=%r pending_tool=%r has_pending_split=%s split_groups=%d is_confirm=%s",
+                     message, tool, pending_tool,
+                     bool(_pending_split and _pending_split.get("groups")),
+                     len((_pending_split or {}).get("groups") or []),
+                     multi_image_split.is_confirm(message))
+        if isinstance(_pending_split, dict) and _pending_split.get("groups"):
+            # 分组方案从草稿带过来 → 合并进本轮 args，工具层需要
+            args["_agent_pending_split"] = _pending_split
+            orig_args_ref = args  # 别丢引用：后续要镜像回
+            if not tool and multi_image_split.is_confirm(message):
+                tool = "create_work_record"
+                # 分组确认轮不要从用户消息里抽 record_type（如"巡视符合，验收符合"
+                # 会只抽到"巡视"）——分组方案里已经有正确的类型分配了
+            # 有分组方案但本轮没说确认词 → 保持 need_more 态，等用户确认
+
     # A type choice is intentionally kept as a deterministic transition for
     # the evidence-only draft.  The generic supplement extractor cannot infer
     # a form before record_type exists.
-    if not tool and pending_tool == "create_work_record":
+    # 🔴 仅在**没有多图分组方案**时才跑（有分组时上面已跳过，避免误匹配单类型）
+    if not tool and pending_tool == "create_work_record" and not args.get("_agent_pending_split"):
         candidate = agent_request_plan.canonical_record_type(message)
         if candidate:
             tool = pending_tool
             args = {**args, "record_type": candidate}
             turn_fact_args = dict(args)
-
-    # 多图分类分流的「确认」轮：上一轮已给出分组回执（草稿含 _agent_pending_split），
-    # 本轮用户只回肯定词（如「确认建」「建吧」）而无新素材，路由不会自动选工具，
-    # 会导致草稿被吞、分组方案永不消费。此处显式复用 create_work_record 草稿，
-    # 由 _create_work_record 顶层分流消费 _agent_pending_split 循环建多条。
-    if not tool and pending_tool == "create_work_record":
-        _pending_args = draft.get("args") or {}
-        if _pending_args.get("_agent_pending_split") and multi_image_split.is_confirm(message):
-            tool = "create_work_record"
 
     # 素材里已确定的结构化字段（照片水印的拍摄时间/地点/天气）并入建记录参数。
     # 日期、地点、部位和天气以水印/EXIF 客观证据为准；用户冲突描述保留在计划中。

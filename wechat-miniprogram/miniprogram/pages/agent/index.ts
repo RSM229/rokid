@@ -488,14 +488,27 @@ function sessionIdFromConversationId(conversationId: string): number {
 // 🔴 2026-10-26（方案①）：原前端关键词指令表 COMMAND_ROUTES / matchCommand / handleCommand 已删除。
 // 自由文本「打开XX页」统一交后端 /agent/chat 的 navigate 工具（页面词典 = agent_tools.py _PAGE_ALIASES），
 // 后端回执 actions[{type:'navigate', url}] → agentReplyToMessage 映射为 navigate: 指令 → 点击即跳。
-// 确定性本地动作（语音记录/拍照识别/查资料/生成日志）仍由空态宫格 heroActions → handleActionTap 直接触发，
-// 零延迟、不经过 LLM。
+// 空态建议卡（语音记录现场工作 / 查规范资料库）由 heroActions → handleActionTap 触发，
+// 但它们不是功能页入口：点开先在本页对话里给引导与可点选项，由智能体带用户一步步走完，
+// 需要确定性动作（录音/选图）时仍走本地链路，知识问答走 /agent/chat。
 
 /** 工作台「模型」下拉可选的大模型清单。
  * 统一从 services/modelCatalog 引入（与"智能助手"页共用同一份目录与选择器组件）：
  *  - provider='' 走默认文本大模型端点（阿里云 token-plan），用 model 字段覆盖具体模型名；
  *  - provider='huagong' 走华南理工独立供应商（未配置则后端自动回退默认模型）。 */
 const CHAT_MODELS = MODEL_CATALOG
+
+/** @ 提及面板：快捷指令项（点选后把提示词填进输入框，用户可继续补充） */
+interface AtQuickItem { key: string; icon: string; label: string; desc: string; prompt: string }
+const AT_QUICK_ITEMS: AtQuickItem[] = [
+  { key: 'write-record', icon: '📝', label: '写工作记录', desc: '口述现场情况，带你逐项补齐', prompt: '帮我写一条工作记录：' },
+  { key: 'hazard', icon: '🔍', label: '隐患识别', desc: '拍照识别现场安全隐患', prompt: '帮我识别这张照片里的安全隐患' },
+  { key: 'query-spec', icon: '📚', label: '查规范', desc: '查规范条文与验收要点', prompt: '帮我查一下这条规范的要求：' },
+  { key: 'daily-log', icon: '📋', label: '生成监理日志', desc: '按当日记录汇总日志', prompt: '帮我生成今天的监理日志' },
+  { key: 'acceptance', icon: '✅', label: '验收要点', desc: '列出某工序必查项', prompt: '帮我列出这个工序的验收必查项：' },
+]
+interface AtMember { id: number; real_name: string }
+interface AtBizItem { key: string; icon: string; label: string; desc: string; ref: string }
 
 /** 工作记录字段候选值：语音里没说清楚的字段，先给常用项让用户点选，不合适再自己填写 */
 const FIELD_SUGGESTIONS: Record<string, string[]> = {
@@ -538,6 +551,9 @@ Page(themed({
 
   data: {
     messages: [] as Message[],
+    // 消息流滚动锚点：新回执追加后跟到底部（固定值只在首次渲染生效，
+    // 长回执会停在开头，用户以为「后面的内容没显示」，2026-11-18 真机）。
+    scrollAnchor: 'bottom',
     // 全屏图片预览（带上一张/下一张按钮；替代 wx.previewImage，见组件注释）
     imageViewerVisible: false,
     imageViewerUrls: [] as string[],
@@ -545,14 +561,15 @@ Page(themed({
     // 空态问候语：按时间段 + 待办/草稿动态生成，比固定文案「活」
     heroGreeting: '您好！今天有什么工作需要我帮您处理?',
     // ima 风格空状态：竖排建议按钮（icon + 文案），点击走 handleActionTap
-    // 🔴 needProject：该动作会产生项目级业务数据（现场记录/隐患/监理日志），
-    //    无项目用户点了只会被拦，不如一开始就不展示 —— 换成 visibleHeroActions
-    //    按有无项目动态过滤，无项目时只留「查规范」这类真能用的入口。
+    // 🔴 2026-11-16 用户口径：只留「开启语音，记录现场工作」「查询规范资料库」两条。
+    //    卡片不是跳转页面的功能入口，也不替用户一键执行 —— 点开后在当前聊天里
+    //    先讲清步骤、给可点选项，由智能体带用户一步步完成（startVoiceWorkFromChat
+    //    / askScopeFromChat）。「拍照识别安全隐患」「生成今日监理日志」已下架。
+    // needProject：会产生项目级业务数据的入口对无项目用户隐藏，改由 refreshHeroActions
+    //    补「加入项目」引导，避免点一个被拦一个。
     heroActions: [
       { icon: 'ic-mic', text: '开启语音，记录现场工作', command: '工作记录', needProject: true },
-      { icon: 'ic-camera', text: '拍照识别安全隐患', command: '拍照', needProject: true },
       { icon: 'ic-book', text: '查询规范资料库', command: '知识库', needProject: false },
-      { icon: 'ic-doc', text: '生成今日监理日志', command: '生成监理日志', needProject: true },
       { icon: 'ic-doc', text: '加入项目（填邀请码）', command: 'join-project', needProject: false, onlyNoProject: true },
     ] as { icon: string; text: string; command: string; needProject: boolean; onlyNoProject?: boolean }[],
     /** 实际渲染的快捷动作：无项目时滤掉写业务的、并补一个「加入项目」入口 */
@@ -609,6 +626,15 @@ Page(themed({
     modelShortName: 'DeepSeek V4.1',
     showModelMenu: false,
     showPlusPanel: false,
+    /** @ 提及面板：输入卡里的统一引用选择器（快捷指令 / 成员 / 业务引用） */
+    showAtPanel: false,
+    atTab: 'quick' as 'quick' | 'member' | 'biz',
+    atQuery: '',
+    atQuickItems: AT_QUICK_ITEMS,
+    atMembers: [] as AtMember[],
+    atBiz: [] as AtBizItem[],
+    atVisibleItems: AT_QUICK_ITEMS as AtQuickItem[] | AtMember[] | AtBizItem[],
+    atLoading: false,
     /** 待发送附件：图片/文件可多选先挂在这里，补充文字后一次性发送识别 */
     attachments: [] as Attachment[],
     /**
@@ -3253,10 +3279,18 @@ Page(themed({
     if (progress?.role === 'assistant' && progress.progressRequestId && !progress.text) {
       const next = [...messages]
       next[progressIndex] = mergeAgentProgress(reply, progress)
-      this.setData({ messages: next })
+      this.setData({ messages: next }, () => this.scrollChatToBottom())
       return
     }
-    this.setData({ messages: [...messages, reply] })
+    this.setData({ messages: [...messages, reply] }, () => this.scrollChatToBottom())
+  },
+
+  /** 新回执追加后跟到底部：scroll-into-view 值不变不会二次触发，
+   *  长回执（分组建档回执常一屏放不下）会停在开头，用户误以为后半段没输出。 */
+  scrollChatToBottom() {
+    this.setData({ scrollAnchor: '' }, () => {
+      this.setData({ scrollAnchor: 'bottom' })
+    })
   },
 
   /** 局部更新某条消息的偏好建议（busy/saved/清除） */
@@ -3985,7 +4019,7 @@ Page(themed({
     }
   },
 
-  /** 空状态四个建议按钮：一律在当前聊天框内完成，不再跳转到其它页面 */
+  /** 空态建议按钮：一律在当前聊天框内引导用户完成，不跳转到其它页面 */
   handleActionTap(event: WechatMiniprogram.TouchEvent) {
     const command = event.currentTarget.dataset.command as string
     if (command === 'show-form') {
@@ -4046,19 +4080,20 @@ Page(themed({
       void this.autoCreateWorkSession()
       return
     }
+    // 空态引导卡的分步选项：继续在本页对话里带用户往下走，不跳页
+    if (command.startsWith('work-guide:')) {
+      this.continueWorkGuide(command.slice('work-guide:'.length))
+      return
+    }
     switch (command) {
       case '工作记录':
         this.startVoiceWorkFromChat()
         return
-      case '拍照':
-        this.captureForRecognize()
-        return
       case '知识库':
         this.askScopeFromChat()
         return
-      case '生成监理日志':
-        void this.generateTodayLogInChat()
-        return
+      // 「拍照识别安全隐患」「生成今日监理日志」两张卡已下架（2026-11-16）；
+      // 对应函数保留给其它入口复用，不再从这里分发。
       default:
         this.setData({ input: command })
         this.send()
@@ -4082,13 +4117,46 @@ Page(themed({
     void this.autoCreateWorkSession()
   },
 
-  /** 空状态① 语音记录现场工作：在当前页进入录音模式，结果直接回到聊天框
-   *  2026-10-09：不再弹「先拍照/先说话」选择，直接进入说话流程（结束后会询问是否补照片） */
+  /** 空状态① 语音记录现场工作：先在当前聊天里给引导和分步选项（不跳页、不直接开录）
+   *  2026-11-16：卡片是「带领用户」的对话入口，不是功能跳转；用户选了「开始说话」
+   *  才进入录音模式，之后的缺项提示、确认归档仍由智能体逐轮带着走。 */
   startVoiceWorkFromChat() {
     if (!this.data.projectCreated) {
       this.guideJoinProject('语音记录会生成现场工作记录')
       return
     }
+    this.addMessage({
+      role: 'assistant',
+      text: '我来带你把今天的现场情况记成一条正式工作记录，跟着三步走：\n① 说一段现场情况，或先发现场照片，我会自动读出时间、天气、部位和验收要点；\n② 缺的内容我一次列给你，点选或补一句就行；\n③ 你说「写入正式记录」，我再归档。\n先从哪一步开始？',
+      actions: [
+        { label: '开始说话', command: 'work-guide:voice' },
+        { label: '先发照片', command: 'work-guide:photo' },
+        { label: '用文字描述', command: 'work-guide:text' },
+      ],
+    })
+  },
+
+  /** 引导卡的下一步：全部留在当前对话里推进，不跳转到任何页面 */
+  continueWorkGuide(step: string) {
+    if (step === 'voice') {
+      this.beginVoiceWorkSession()
+      return
+    }
+    if (step === 'photo') {
+      this.pickImages('album')
+      this.addMessage({ role: 'assistant', text: '选好照片后点下方发送，我会先归类，再逐项带你补齐记录内容。' })
+      return
+    }
+    if (step === 'text') {
+      // 文字描述同样进建档会话（输入框文字会作为字段补充，走 autoCreateWorkSession），
+      // 而不是开一轮普通问答，保证「带领用户」的链路一致。
+      this.beginVoiceWorkSession('直接在下方输入现场情况就行，例如「3号楼二层钢筋绑扎，天气晴，一切正常」，我会接着带你补缺项、确认归档。')
+      return
+    }
+  },
+
+  /** 用户选「开始说话」/「用文字描述」后才真正进入记录会话（原 startVoiceWorkFromChat 的动作） */
+  beginVoiceWorkSession(hint?: string) {
     this.setData({
       voiceWorkMode: true,
       voiceSessionActive: false,
@@ -4099,10 +4167,12 @@ Page(themed({
       workPhotoAsked: false,
       workMissing: [],
       showPlusPanel: false,
+      input: '',
+      canSend: false,
     })
     this.addMessage({
       role: 'assistant',
-      text: '请点击下方麦克风说出工作内容，例如「3号楼二层钢筋绑扎，天气晴，一切正常」。',
+      text: hint || '请点击下方麦克风说出工作内容，例如「3号楼二层钢筋绑扎，天气晴，一切正常」。',
     })
   },
 
@@ -4161,10 +4231,13 @@ Page(themed({
     })
   },
 
-  /** 空状态③ 查资料库：不再弹范围选择，直接提示输入问题（2026-10-09） */
+  /** 空状态③ 查规范资料库：不跳到资料库页面，由智能体在对话里带用户问（2026-11-16）
+   *  chips 点一下即作为用户问题发给 /agent/chat，后续追问、找条款都在同一会话里继续带。 */
   askScopeFromChat() {
-    this.setData({
-      messages: [...this.data.messages, { role: 'assistant', text: '请输入要查询的规范或资料问题，我来为你检索资料库：', timeText: formatMessageTime() }],
+    this.addMessage({
+      role: 'assistant',
+      text: '查规范不用翻页面，我带你问：先选一个方向，或者直接把问题打在下方，我会检索资料库给出条款依据，再按你的追问往下查。',
+      chips: ['旁站记录怎么填', '钢筋隐蔽验收要点', '危大工程专项方案', '安全检查要点'],
     })
   },
 
@@ -4757,11 +4830,11 @@ Page(themed({
     const progress = messages[progressIndex]
     if (msg.role === 'assistant' && progress?.role === 'assistant' && progress.progressRequestId && !progress.text) {
       messages[progressIndex] = mergeAgentProgress(msg, progress)
-      this.setData({ messages })
+      this.setData({ messages }, () => this.scrollChatToBottom())
       return progressIndex
     }
     messages.push(msg)
-    this.setData({ messages })
+    this.setData({ messages }, () => this.scrollChatToBottom())
     return messages.length - 1
   },
 
@@ -5075,8 +5148,8 @@ Page(themed({
   /**
    * 按「有没有项目」重算 Hero 区展示的快捷动作。
    *
-   * 无项目时：滤掉会产生业务数据的（语音记录/拍照识别/生成日志），
-   * 只留「查规范资料库」这类真能用的，并补一个「加入项目」入口 ——
+   * 无项目时：滤掉会产生业务数据的（语音记录），只留「查询规范资料库」
+   * 这类真能用的，并补一个「加入项目」入口 ——
    * 让用户第一眼就知道现在能干什么、下一步该干什么，而不是点一个被拦一个。
    */
   refreshHeroActions() {
@@ -5497,16 +5570,16 @@ Page(themed({
     wx.navigateTo({ url })
   },
 
-  // 输入卡左侧的模型下拉（千问 / 华工）
+  // 输入卡左侧的模型下拉（千问 / 华工）；与 @ 面板互斥
   toggleModelMenu() {
-    this.setData({ showModelMenu: !this.data.showModelMenu })
+    this.setData({ showModelMenu: !this.data.showModelMenu, showAtPanel: false })
   },
 
-  // 页面根 bindtap：点气泡外任意处关闭模型菜单（无条件关闭而非 toggle，
+  // 页面根 bindtap：点气泡外任意处关闭模型菜单 / @ 面板（无条件关闭而非 toggle，
   // 否则冒泡到菜单项/按钮时会把刚关掉的面板又翻转打开；滚动是 touch 事件不受影响）
   onPageTap() {
-    if (this.data.showModelMenu) {
-      this.setData({ showModelMenu: false })
+    if (this.data.showModelMenu || this.data.showAtPanel) {
+      this.setData({ showModelMenu: false, showAtPanel: false })
     }
   },
 
@@ -5518,6 +5591,165 @@ Page(themed({
     wx.setStorageSync(`gdjl_${config.storageScope}_agent_model`, model.id)
     this.setData({ currentModel: model.id, modelName: model.name, modelShortName: model.shortName, showModelMenu: false })
     this.addMessage({ role: 'assistant', text: `已切换为「${model.name}」模型。` })
+  },
+
+  // 模型下拉菜单里的「隐患识别」入口：底部 tab 第 1 格改为待办事项后，这里是隐患识别的固定入口
+  openHazardCapture() {
+    this.setData({ showModelMenu: false })
+    wx.navigateTo({ url: '/pages/capture/index?mode=hazard' })
+  },
+
+  // ============ @ 提及面板 ============
+  // 空操作：@ 面板内部 catchtap 阻断冒泡，避免点面板被 onPageTap 关掉
+  noop() {},
+
+  // 两个气泡互斥：开 @ 面板时关模型菜单，反之亦然
+  toggleAtPanel() {
+    const opening = !this.data.showAtPanel
+    this.setData({ showAtPanel: opening, showModelMenu: false, atQuery: '', atTab: 'quick', atVisibleItems: AT_QUICK_ITEMS })
+    if (opening) void this.loadAtData()
+  },
+
+  switchAtTab(event: WechatMiniprogram.TouchEvent) {
+    const tab = event.currentTarget.dataset.tab as 'quick' | 'member' | 'biz'
+    const items = tab === 'quick' ? this.data.atQuickItems : tab === 'member' ? this.data.atMembers : this.data.atBiz
+    this.setData({ atTab: tab, atQuery: '', atVisibleItems: items })
+    void this.loadAtData()
+  },
+
+  onAtSearch(event: WechatMiniprogram.Input) {
+    const q = event.detail.value.trim().toLowerCase()
+    const source = this.data.atTab === 'quick' ? this.data.atQuickItems
+      : this.data.atTab === 'member' ? this.data.atMembers : this.data.atBiz
+    const match = (s: string) => !q || s.toLowerCase().includes(q)
+    const visible = source.filter((i: AtQuickItem | AtMember | AtBizItem) => {
+      if (this.data.atTab === 'quick') { const x = i as AtQuickItem; return match(x.label) || match(x.desc) }
+      if (this.data.atTab === 'member') { const x = i as AtMember; return match(x.real_name) }
+      const x = i as AtBizItem; return match(x.label) || match(x.desc)
+    })
+    this.setData({ atQuery: event.detail.value, atVisibleItems: visible as AtQuickItem[] | AtMember[] | AtBizItem[] })
+  },
+
+  // 打开面板 / 切到对应 tab 时按需加载；失败静默（面板仍可用快捷指令）
+  async loadAtData() {
+    const tab = this.data.atTab
+    if (tab === 'quick') return
+    if (tab === 'member') {
+      if (this.data.atMembers.length) return
+      this.setData({ atLoading: true })
+      try {
+        const users = await request<AtMember[]>('/task/assignable-users')
+        this.setData({ atMembers: users || [], atVisibleItems: users || [] })
+      } catch { /* ignore */ } finally { this.setData({ atLoading: false }) }
+      return
+    }
+    // biz：一次拉记录 / 隐患 / 规范 / 资料库文件夹，各自失败不影响其它
+    if (this.data.atBiz.length) return
+    this.setData({ atLoading: true })
+    const results = await Promise.allSettled([
+      request<{ records?: Array<Record<string, unknown>> }>('/work-record/list'),
+      request<Array<Record<string, unknown>>>('/hazard/list'),
+      request<{ results?: Array<Record<string, unknown>> }>('/knowledge/regulations/list'),
+      // 资料库文件夹：两步（/kb/mine 拿 kbId → /kb/{id}/folders 拿树），失败降级为空
+      (async () => {
+        const kb = await request<{ id: number }>('/kb/mine')
+        if (!kb || !kb.id) return []
+        return await request<{ items: Array<Record<string, unknown>> }>(`/kb/${kb.id}/folders`)
+      })(),
+    ])
+    const items: AtBizItem[] = []
+    const ok = (i: number) => results[i].status === 'fulfilled'
+      ? (results[i] as PromiseFulfilledResult<unknown>).value : []
+    // 后端返回结构不统一：work-record/list={records:[]}、regulations/list={results:[]}、folders={items:[]}、hazard/list=[]，这里统一摊平成数组
+    const asArray = (v: unknown): Array<Record<string, unknown>> => {
+      if (Array.isArray(v)) return v as Array<Record<string, unknown>>
+      if (v && typeof v === 'object') {
+        const o = v as Record<string, unknown>
+        if (Array.isArray(o.records)) return o.records as Array<Record<string, unknown>>
+        if (Array.isArray(o.results)) return o.results as Array<Record<string, unknown>>
+        if (Array.isArray(o.items)) return o.items as Array<Record<string, unknown>>
+      }
+      return []
+    }
+    const label = (r: Record<string, unknown>, keys: string[]) => {
+      for (const k of keys) if (r[k]) return String(r[k])
+      return ''
+    }
+    // 工作记录
+    for (const r of asArray(ok(0))) {
+      const id = r.id as number | string
+      const title = label(r, ['content', 'title', 'work_content', 'business_content']).slice(0, 24) || '工作记录'
+      items.push({ key: `record-${id}`, icon: '📝', label: label(r, ['record_type_name', 'record_type']) || '工作记录',
+        desc: `${title}${r.project_name ? ' · ' + String(r.project_name) : ''}`, ref: `@[记录#${id} ${title}]` })
+    }
+    // 隐患
+    for (const r of asArray(ok(1))) {
+      const id = r.id as number | string
+      const title = label(r, ['hazard_name', 'risk_category', 'description', 'title']).slice(0, 24) || '隐患'
+      items.push({ key: `hazard-${id}`, icon: '⚠️', label: '隐患', desc: title, ref: `@[隐患#${id} ${title}]` })
+    }
+    // 规范资料
+    for (const r of asArray(ok(2))) {
+      const name = label(r, ['name', 'title', 'filename', 'file_name']).slice(0, 30)
+      if (!name) continue
+      const id = r.id ?? r.filename ?? r.file_name ?? name
+      items.push({ key: `reg-${id}`, icon: '📚', label: '规范', desc: name, ref: `@[规范 ${name}]` })
+    }
+    // 资料库文件夹：树形拍平，带层级路径 + 文档数，插到业务引用最前（用户最常按文件夹找资料）
+    const folderItems: AtBizItem[] = []
+    const flattenFolder = (nodes: Array<Record<string, unknown>>, prefix: string) => {
+      for (const f of nodes) {
+        const name = String(f.name || '').trim()
+        if (!name) continue
+        const path = prefix ? `${prefix}/${name}` : name
+        const count = Number(f.count || 0)
+        folderItems.push({ key: `kb-${f.id}`, icon: '📁', label: path,
+          desc: count ? `${count} 份资料` : '空文件夹', ref: `@[资料库 ${path}]` })
+        const children = Array.isArray(f.children) ? f.children as Array<Record<string, unknown>> : []
+        if (children.length) flattenFolder(children, path)
+      }
+    }
+    flattenFolder(asArray(ok(3)), '')
+    items.unshift(...folderItems)
+    const finalItems = items.slice(0, 60)
+    this.setData({ atBiz: finalItems, atVisibleItems: this.data.atTab === 'biz' ? finalItems : this.data.atVisibleItems, atLoading: false })
+  },
+
+  // 点选：把引用/提示词插进输入框，关闭面板并聚焦
+  pickAtQuick(event: WechatMiniprogram.TouchEvent) {
+    const key = event.currentTarget.dataset.key as string
+    const item = this.data.atQuickItems.find(i => i.key === key)
+    if (!item) return
+    // 隐患识别需要拍照/选图，直接跳采集页，与模型下拉里的同名入口一致
+    if (key === 'hazard') {
+      this.setData({ showAtPanel: false })
+      wx.navigateTo({ url: '/pages/capture/index?mode=hazard' })
+      return
+    }
+    this.insertAtText(item.prompt, false)
+  },
+
+  pickAtMember(event: WechatMiniprogram.TouchEvent) {
+    const id = Number(event.currentTarget.dataset.id)
+    const user = this.data.atMembers.find(m => m.id === id)
+    if (!user) return
+    this.insertAtText(`@${user.real_name} `, false)
+  },
+
+  pickAtBiz(event: WechatMiniprogram.TouchEvent) {
+    const key = event.currentTarget.dataset.key as string
+    const item = this.data.atBiz.find(i => i.key === key)
+    if (!item) return
+    this.insertAtText(`${item.ref} `, false)
+  },
+
+  // 统一插入：追加到现有输入末尾（已有的话留一个空格），重算 canSend
+  insertAtText(text: string, _closePanel: boolean) {
+    const current = this.data.input
+    const next = current ? `${current.replace(/\s+$/, '')} ${text}` : text
+    // focus 先 false 再 true：若本来就是 true，直接 setData true 不会触发 textarea 重新聚焦
+    this.setData({ input: next, canSend: true, showAtPanel: false, draftFocus: false })
+    setTimeout(() => this.setData({ draftFocus: true }), 60)
   },
 
   onInput(event: WechatMiniprogram.Input) {

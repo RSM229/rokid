@@ -5,7 +5,6 @@
     <view class="nav-bar-inner" style="height: {{navBarHeight}}px; top: {{statusBarHeight}}px;">
       <view class="nav-left" bindtap="openHistory">
         <view class="nav-menu-icon"></view>
-        <text wx:if="{{todoPendingCount}}" class="todo-badge">{{todoPendingCount > 99 ? '99+' : todoPendingCount}}</text>
       </view>
       <view class="nav-title-wrap" bindtap="switchProject">
         <text class="nav-title">{{projectName || '监理智能体'}}</text>
@@ -27,7 +26,7 @@
   <!-- Main Chat Area -->
   <view class="main" style="padding-top: {{statusBarHeight + navBarHeight + (breadcrumb.length > 0 ? 70 : 10)}}px;">
     <!-- 待补全草稿提醒卡已按用户要求移除（2026-10-15）：草稿数据仍落库，聊天内追问补全流程不变 -->
-    <scroll-view class="messages" scroll-y scroll-into-view="bottom" enhanced show-scrollbar="{{false}}">
+    <scroll-view class="messages" scroll-y scroll-into-view="{{scrollAnchor}}" enhanced show-scrollbar="{{false}}">
       <!-- Hero（ima 风格空状态：大问候语 + 竖排建议按钮） -->
       <view wx:if="{{messages.length <= 1 && !loading}}" class="hero">
         <view class="hero-greeting">{{heroGreeting}}</view>
@@ -494,10 +493,14 @@
         </view>
       </view>
 
-      <!-- 第二行：左「+」，右「模型▾ / 麦克风 / 发送箭头」（仿 Auto Mode 排版） -->
+      <!-- 第二行：左「+」，右「@ / 模型▾ / 麦克风 / 发送箭头」（仿 Auto Mode 排版） -->
       <view class="input-card-row">
         <view class="round-btn round-btn-lg ic-plus-g" bindtap="togglePlusPanel"></view>
         <view class="flex-spacer"></view>
+        <!-- @ 提及：统一引用选择器（快捷指令 / 成员 / 业务引用） -->
+        <view class="at-anchor">
+          <view class="at-chip {{showAtPanel ? 'active' : ''}}" catchtap="toggleAtPanel">@</view>
+        </view>
         <view class="model-anchor">
           <!-- catchtap：阻断冒泡到页面根，否则打开瞬间被 onPageTap 反向关闭（事件冒泡先于 setData 生效） -->
           <view class="model-chip" catchtap="toggleModelMenu">
@@ -509,6 +512,16 @@
                菜单项 bindtap 直达 selectModel；selectModel 先把 showModelMenu 置 false，
                再冒泡到根 onPageTap 时已是 false，不会二次翻转（setData 异步，读到的仍是新值前的旧值也无害） -->
           <view class="model-menu" wx:if="{{showModelMenu}}">
+            <!-- 隐患识别入口：2026-11-16 底部 tab 第 1 格改为待办事项后，这里成为隐患识别的固定入口。catchtap 阻断冒泡，避免 onPageTap 二次关闭 -->
+            <view class="model-menu-item model-menu-hazard" catchtap="openHazardCapture">
+              <view class="model-menu-row1">
+                <view class="hazard-menu-icon"></view>
+                <text class="model-menu-name">隐患识别</text>
+                <text class="model-menu-arrow">›</text>
+              </view>
+              <text class="model-menu-desc">拍照识别现场安全隐患</text>
+            </view>
+            <view class="model-menu-divider"></view>
             <view class="model-menu-item {{currentModel === item.id ? 'active' : ''}}"
                   wx:for="{{models}}" wx:key="id" data-model="{{item.id}}" bindtap="selectModel">
               <view class="model-menu-row1">
@@ -714,13 +727,8 @@
           </view>
         </view>
 
-        <view class="drawer-group">
-          <view class="drawer-nav todo-drawer-entry" data-url="/pages/todo/index" bindtap="navigateTo">
-            <view class="drawer-nav-icon ic-list"></view>
-            <text class="drawer-nav-text">待办事项</text>
-            <text wx:if="{{todoPendingCount}}" class="todo-drawer-badge">{{todoPendingCount > 99 ? '99+' : todoPendingCount}}</text>
-          </view>
-        </view>
+        <!-- 待办事项入口已于 2026-11-16 挪至底部 tab 第 1 格，侧栏重复入口已删；
+             顶栏待办角标同步移除（底部 tab 本身即入口，无需在菜单按钮上重复提示）。 -->
 
         <!-- 「资料库」整组已撤（2026-10-08）：
              - 「共享资料库」＝底部 tab「资料库」，本页「+」面板亦已有同名入口，无重复必要；
@@ -790,6 +798,45 @@
       </scroll-view>
       <view class="panel-actions"><button bindtap="closeOverlay">取消</button><button loading="{{workFormSubmitting}}" disabled="{{workFormSubmitting}}" bindtap="submitWorkForm">保存并生成记录</button></view>
     </view>
+  </view>
+
+  <!-- @ 提及面板：放页面根层（脱离 input-card 的 backdrop-filter 包含块），fixed 相对视口横向铺满，避免宽面板向左溢出屏幕被裁切 -->
+  <view class="at-panel" wx:if="{{showAtPanel}}" catchtap="noop">
+    <view class="at-panel-head">
+      <text class="at-panel-title">引用或指令</text>
+      <view class="at-panel-close" catchtap="toggleAtPanel">×</view>
+    </view>
+    <input class="at-search" value="{{atQuery}}" placeholder="搜索快捷指令、成员、记录…" placeholder-class="at-search-ph" bindinput="onAtSearch" confirm-type="search" />
+    <view class="at-tabs">
+      <view class="at-tab {{atTab === 'quick' ? 'active' : ''}}" data-tab="quick" catchtap="switchAtTab">快捷指令</view>
+      <view class="at-tab {{atTab === 'member' ? 'active' : ''}}" data-tab="member" catchtap="switchAtTab">成员</view>
+      <view class="at-tab {{atTab === 'biz' ? 'active' : ''}}" data-tab="biz" catchtap="switchAtTab">业务引用</view>
+    </view>
+    <scroll-view class="at-list" scroll-y>
+      <view wx:if="{{atLoading}}" class="at-empty">加载中…</view>
+      <block wx:else>
+        <view wx:if="{{!atVisibleItems.length}}" class="at-empty">没有匹配的内容</view>
+        <!-- 列表项：wx:if/elif/else 用 block 承载且必须紧邻（中间不能插注释）；view 单独 wx:for -->
+        <block wx:if="{{atTab === 'quick'}}">
+          <view class="at-item" wx:for="{{atVisibleItems}}" wx:key="key" data-key="{{item.key}}" catchtap="pickAtQuick">
+            <view class="at-item-icon">{{item.icon}}</view>
+            <view class="at-item-body"><text class="at-item-label">{{item.label}}</text><text class="at-item-desc">{{item.desc}}</text></view>
+          </view>
+        </block>
+        <block wx:elif="{{atTab === 'member'}}">
+          <view class="at-item" wx:for="{{atVisibleItems}}" wx:key="id" data-id="{{item.id}}" catchtap="pickAtMember">
+            <view class="at-avatar">{{item.real_name[0]}}</view>
+            <view class="at-item-body"><text class="at-item-label">{{item.real_name}}</text></view>
+          </view>
+        </block>
+        <block wx:else>
+          <view class="at-item" wx:for="{{atVisibleItems}}" wx:key="key" data-key="{{item.key}}" catchtap="pickAtBiz">
+            <view class="at-item-icon">{{item.icon}}</view>
+            <view class="at-item-body"><text class="at-item-label">{{item.label}}</text><text class="at-item-desc">{{item.desc}}</text></view>
+          </view>
+        </block>
+      </block>
+    </scroll-view>
   </view>
 </view>
 
