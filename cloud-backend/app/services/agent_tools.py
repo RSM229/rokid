@@ -2706,6 +2706,90 @@ async def _recheck_hazard(ctx: ToolContext, args: dict) -> dict:
     )
 
 
+async def _dispatch_task(ctx: ToolContext, args: dict) -> dict:
+    """总监/总代在聊天里对 AI 说「让某某去…」即派单（2026-11-18 方案②）。
+
+    与 task.py create_task 同口径复用（成员表判据 + task_receive 校验 +
+    通知推送），不走 ORM 裸写，保证业务规则不漂移。
+    """
+    title = str(args.get("title") or "").strip()
+    if not title:
+        return _need_more(["任务标题"], "请说一下任务标题，例如「检查 3 号楼二层临边防护」。")
+    # 被指派人：姓名（模糊匹配本项目可派人）或 user_id
+    from app.models.task_assignment import TaskAssignment, TaskCategory, TaskPriority
+    from app.routers.task import CreateTaskRequest
+    assignee_id: int | None = None
+    assignee_name = str(args.get("assignee_name") or args.get("assignee") or "").strip()
+    raw_id = str(args.get("assignee_id") or "").strip()
+    if raw_id.isdigit():
+        assignee_id = int(raw_id)
+    elif assignee_name:
+        from app.services.permissions import project_members_with_permission
+        rows = await project_members_with_permission(ctx.db, ctx.project_id, "task_receive")
+        for member, user_row in rows:
+            names = {user_row.real_name or "", user_row.username or ""}
+            if assignee_name in names or assignee_name in (user_row.real_name or ""):
+                assignee_id = user_row.id
+                break
+        if assignee_id is None:
+            candidates = "、".join(
+                f"{u.real_name}" for _m, u in rows[:8]
+            ) or "（本项目暂无可派人成员）"
+            return _need_more(
+                ["被指派人"],
+                f"我在本项目没找到叫「{assignee_name}」的可派人员。本项目可指派：{candidates}。请确认姓名后再说一次。",
+            )
+    if assignee_id is None:
+        from app.services.permissions import project_members_with_permission
+        rows = await project_members_with_permission(ctx.db, ctx.project_id, "task_receive")
+        candidates = "、".join(f"{u.real_name}" for _m, u in rows[:8]) or "（本项目暂无可派人成员）"
+        return _need_more(
+            ["被指派人"],
+            f"要指派给谁？本项目可指派：{candidates}。请说姓名。",
+        )
+
+    category = str(args.get("category") or "").strip()
+    valid_cats = [c.value for c in TaskCategory]
+    if category not in valid_cats:
+        category = "其他事务" if "其他事务" in valid_cats else valid_cats[0]
+    priority = str(args.get("priority") or "").strip()
+    valid_pris = [p.value for p in TaskPriority]
+    if priority not in valid_pris:
+        priority = "中" if "中" in valid_pris else valid_pris[0]
+
+    req = CreateTaskRequest(
+        title=title[:200],
+        description=str(args.get("description") or "").strip()[:2000] or None,
+        assignee_id=assignee_id,
+        category=category,
+        priority=priority,
+        notify_glasses=True,
+    )
+    from app.routers.task import create_task
+    result = await create_task(req=req, user=ctx.user, db=ctx.db)
+
+    from app.models.user import User as _User
+    assignee = await ctx.db.get(_User, assignee_id)
+    assignee_label = (assignee.real_name if assignee else None) or f"用户#{assignee_id}"
+    await _audit(ctx.db, ctx.user, "agent_write", {
+        "tool": "dispatch_task", "entity": "task_assignment", "id": result.get("task_id"),
+    })
+    await ctx.db.commit()
+
+    task = await ctx.db.get(TaskAssignment, result.get("task_id"))
+    return _ok(
+        f"已派单给 {assignee_label}：{title}（任务 #{result.get('task_id')}，{category}，优先级「{priority}」）。对方会收到眼镜端与微信通知。",
+        card={
+            "kind": "task", "id": result.get("task_id"), "title": title[:60],
+            "sub": f"已派给 {assignee_label}", "status": task.status if task else "待接单",
+            "time": str(datetime.now().date()),
+        },
+        actions=[{"type": "navigate", "label": "查看我的派单", "url": "/pages/todo/index"}],
+        undo=None,
+        data={"task_id": result.get("task_id"), "assignee_id": assignee_id},
+    )
+
+
 def _provform_name_index() -> list[tuple[str, str]]:
     """表式名 → form_code 的候选索引（含 CHOICES 友好名、registry 官方名、表号）。"""
     from app.services.form_registry import FORM_BY_CODE
@@ -4162,6 +4246,22 @@ TOOLS: tuple[ToolSpec, ...] = (
         {"*hazard_id": "当前项目的隐患记录编号", "*passed": "是否合格 true/false", "remark": "复查意见"},
         "hazard_ai", "write", _recheck_hazard,
         ("复查隐患 123，合格",),
+    ),
+    ToolSpec(
+        "dispatch_task",
+        "派单：把一项任务指派给本项目的监理人员（总监/总代口述即可）。"
+        "用户说「让某某去…」「派某某…」「给某某派个单/任务」时用。"
+        "被指派人必须是本项目持 task_receive 岗位的有效成员，说姓名即可（或 user id）。"
+        "类别默认「其他事务」，用户说了类别词（巡视检查/验收管理/见证取样/旁站监督/隐患处理/文书处理/整改跟踪）时映射。"
+        "优先级默认「中」。派单成功会通知对方（眼镜端+微信）。",
+        {"*title": "任务标题（用户口述的任务内容，动词开头，如「检查3号楼二层临边防护」）",
+         "*assignee_name": "被指派人姓名（本项目成员名，用户原话里的名字）",
+         "assignee_id": "被指派人 user id（知道 id 时优先）",
+         "description": "任务描述/要求细节",
+         "category": "类别：巡视检查/验收管理/见证取样/旁站监督/隐患处理/文书处理/整改跟踪/其他事务",
+         "priority": "优先级：低/中/高/紧急"},
+        "task_assign", "write", _dispatch_task,
+        ("让张三去检查3号楼二层的临边防护", "给李四派个单：复查昨天那条隐患的整改情况"),
     ),
     ToolSpec(
         "create_provform_doc",

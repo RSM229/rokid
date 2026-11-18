@@ -531,7 +531,7 @@ _AGENT_SYSTEM = """你是「广东建设智慧监理」工程监理智能助手�
 {catalog}
 
 只输出一个 JSON 对象，不要输出任何其它文字、不要加代码块标记：
-{{"intent": "create_record|archive|analyze_hazard|query|generate_document|navigate|undo|chat|clarify",
+{{"intent": "create_record|archive|analyze_hazard|query|generate_document|navigate|undo|dispatch|chat|clarify",
  "actions": [{{"id": "动作 id", "confidence": 0.0, "reason": "简短依据"}}],
  "record_type": "巡视|旁站|验收|见证|平行检验|null", "record_type_confidence": 0.0,
  "facts": [{{"field": "参数名", "value": "用户明确提供的值", "source_span": "用户原话片段", "confidence": 0.0}}],

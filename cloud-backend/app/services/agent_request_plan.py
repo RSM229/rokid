@@ -79,6 +79,10 @@ ACTIONS: dict[str, dict[str, Any]] = {
         "label": "复查隐患整改", "tool": "recheck_hazard", "kind": "write",
         "requires_confirmation": True, "attachment_purpose": None,
     },
+    "dispatch_task": {
+        "label": "派单给成员", "tool": "dispatch_task", "kind": "write",
+        "requires_confirmation": True, "attachment_purpose": None,
+    },
     "archive_evidence": {
         "label": "仅整理归档资料", "tool": None, "kind": "draft",
         "requires_confirmation": False, "attachment_purpose": "archive",
@@ -139,6 +143,24 @@ INTENT_ACTIONS = {
     "undo": "undo",
     "chat": "chat",
 }
+
+# 🔴 派单意图不受 LLM 概率影响的确定性兜底（2026-11-18 方案②）：
+# 「让/派/通知 某人 去…」「给某人派个单/任务」这类口述在语义模型里可能被归到
+# chat / create_record；这里关键词命中就强制注入 dispatch_task 动作候选，
+# 后续 facts 合并自然把姓名/任务内容带给工具层。只补动作不覆盖模型，安全。
+_DISPATCH_KEYWORDS = ("派单", "派个单", "派个任务", "派他", "派她",
+                      "让.去", "叫他", "让她", "叫他", "让她去", "让他去")
+
+
+def _dispatch_hinted(message: str) -> bool:
+    text = str(message or "").strip()
+    if not text:
+        return False
+    if any(k in text for k in ("派单", "派个单", "派个任务", "派任务")):
+        return True
+    # 「让/叫 + 人名 + 去/去检查…」句式：两个动词之间夹着 2~4 字人名
+    import re as _re
+    return bool(_re.search(r"[让叫]\S{2,4}去", text))
 
 ACTION_BY_TOOL = {
     str(spec["tool"]): action_id
@@ -511,6 +533,15 @@ def normalize_candidate(
             "image_upload",
         ))
 
+    # 🔴 派单确定性兜底：模型没选出 dispatch_task 但口述命中派单句式时注入
+    # （只补不换——模型已明确选了别的写动作时不抢，避免「记录+派单」复合句被抢跑）。
+    if "dispatch_task" not in action_ids and _dispatch_hinted(message):
+        actions.append({
+            "id": "dispatch_task", "confidence": 0.9,
+            "reason": "口述命中派单句式（确定性兜底）",
+        })
+        action_ids.add("dispatch_task")
+
     if not actions:
         if attachment_count or evidence_count:
             clarifications.append(_clarification(
@@ -526,9 +557,12 @@ def normalize_candidate(
         intent = "clarify"
     elif intent not in {
         "create_record", "archive", "analyze_hazard", "query",
-        "generate_document", "navigate", "undo", "chat", "clarify",
+        "generate_document", "navigate", "undo", "chat", "clarify", "dispatch",
     }:
         intent = "clarify"
+    # 派单兜底注入了动作时，intent 同步归位（避免上游被判 clarify 引发重复追问）
+    if "dispatch_task" in action_ids and intent == "clarify":
+        intent = "dispatch"
 
     write_actions = [
         item for item in actions
