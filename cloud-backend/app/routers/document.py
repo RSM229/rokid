@@ -77,6 +77,21 @@ class DailyLogExtras(BaseModel):
 NEED_APPROVAL_TYPES = {DocType.RECTIFICATION.value, DocType.MONTHLY.value, DocType.WEEKLY.value}
 
 
+def _is_diary_doc(doc: Document) -> bool:
+    """监理日记（个人工作记录）：doc_type 或 form_code 任一命中即认定。"""
+    return doc.doc_type == DocType.SUPERVISION_DIARY.value or doc.form_code == "jianli_riji"
+
+
+def _ensure_diary_visible(doc: Document, user: User) -> None:
+    """日记可见性守卫（原型「仅个人可见」）：非本人且无审批权限 → 404。
+
+    统一在 get/markdown/download/export 各读口校验，防止同项目他人日记串显。
+    用 404 而非 403，避免泄露「这个项目里存在谁的日记」。
+    """
+    if _is_diary_doc(doc) and doc.creator_id != user.id and not user.has_permission("document_approve"):
+        raise HTTPException(status_code=404, detail="文书不存在")
+
+
 def _auto_fill_content(doc_type: str, user: User, req: DocCreateRequest) -> dict:
     """根据文书类型自动填充基础字段"""
     now = datetime.now()
@@ -287,6 +302,15 @@ async def list_documents(
     query = query.order_by(Document.created_at.desc())
     result = await db.execute(query)
     docs = result.scalars().all()
+    # 日记「仅个人可见」：列表层直接滤掉他人日记（有审批权限者可看全部）。
+    # 原实现把过滤责任推给前端（只回 creator_id），前端一旦漏滤就跨人串显——
+    # 2026-11-18 收紧为后端强制。
+    docs = [
+        d for d in docs
+        if not _is_diary_doc(d)
+        or d.creator_id == user.id
+        or user.has_permission("document_approve")
+    ]
     creator_ids = {d.creator_id for d in docs if d.creator_id}
     # 日记是按作者查自己的汇总（原型「仅个人可见」）：列表带回 creator_id，
     # 调用方据此过滤，再显示 creator_name，避免前端拿 id 反查。
@@ -340,6 +364,7 @@ async def get_document(
     doc = result.scalar_one_or_none()
     if not doc:
         raise HTTPException(status_code=404, detail="文书不存在")
+    _ensure_diary_visible(doc, user)
     return {
         "content_revision": doc.content_revision,
         "signed_pdf_path": doc.signed_pdf_path,
@@ -684,6 +709,7 @@ async def export_pdf(
     doc = result.scalar_one_or_none()
     if not doc:
         raise HTTPException(status_code=404, detail="文书不存在")
+    _ensure_diary_visible(doc, user)
 
     # 影像兜底：attached_images 为空且 content 带 hazard_id 时，从隐患记录现取（老文书/后补照片场景）
     if not doc.attached_images:
@@ -788,6 +814,7 @@ async def export_docx(
     doc = await db.get(Document, doc_id)
     if not doc or not can_read_project(doc.project_id, user, all_projects):
         raise HTTPException(404, "文书不存在")
+    _ensure_diary_visible(doc, user)
     # 监理日记正式产物是 Markdown，不再提供省统表 Word 导出
     if doc.doc_type == DocType.SUPERVISION_DIARY.value:
         raise HTTPException(400, "监理日记以 Markdown 为正式产物，请使用 PDF 导出")
@@ -870,6 +897,7 @@ async def get_document_markdown(
     doc = (await db.execute(stmt)).scalar_one_or_none()
     if not doc:
         raise HTTPException(status_code=404, detail="文书不存在")
+    _ensure_diary_visible(doc, user)
     if not doc.markdown_path:
         raise HTTPException(status_code=404, detail="该文书没有 Markdown 正文")
     from app.services.signature_service import _resolve_file_path
@@ -899,6 +927,7 @@ async def download_markdown(
     doc = (await db.execute(stmt)).scalar_one_or_none()
     if not doc:
         raise HTTPException(status_code=404, detail="文书不存在")
+    _ensure_diary_visible(doc, user)
     if not doc.markdown_path:
         raise HTTPException(status_code=404, detail="该文书没有 Markdown 正文")
     from app.services.signature_service import _resolve_file_path
@@ -1112,19 +1141,11 @@ async def generate_daily_diary(
         raise HTTPException(status_code=400, detail="日期格式错误，需 YYYY-MM-DD")
 
     project_id = require_project_id(user)
-    # 校验 author_id 属于当前项目成员（防越权读取他人工作记录）
+    # 2026-11-18 收紧：日记是「个人工作记录」，只能给本人生成。
+    # 原先允许给同项目他人代生成——A 可用 B 的名义造日记（creator/落款都是 B）且 B 不知情。
+    # 总监确需查看他人日记走 list（有 document_approve 权限可见）。
     if author_id is not None and author_id != user.id:
-        from app.models.project_member import ProjectMember
-        member = (
-            await db.execute(
-                select(ProjectMember).where(
-                    ProjectMember.project_id == project_id,
-                    ProjectMember.user_id == author_id,
-                )
-            )
-        ).scalar_one_or_none()
-        if member is None:
-            raise HTTPException(status_code=403, detail="不能为该项目外的成员生成日记")
+        raise HTTPException(status_code=404, detail="日记只能为本人生成")
     target_author = author_id if author_id is not None else user.id
     record_ids = None
     ex = DailyLogExtras()

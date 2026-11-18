@@ -842,6 +842,32 @@ async def generate_supervision_log(
     await db.commit()
     await db.refresh(doc)
 
+    # 日记旧件清理（A2，2026-11-18）：同作者同项目同日的旧日记自动覆盖删除，
+    # 不再依赖前端逐个 DELETE（网络抖动会漏删 → 置顶卡堆同名日记）。
+    # 只在手动生成（force=True）时执行；定时任务 force=False 走 _find_existing 跳过。
+    if is_diary and force:
+        stale = (await db.execute(
+            select(Document).where(
+                Document.project_id == project_id,
+                Document.creator_id == signer.id,
+                Document.doc_type == DocType.SUPERVISION_DIARY.value,
+                Document.title == title,
+                Document.id != doc.id,
+            )
+        )).scalars().all()
+        for old in stale:
+            try:
+                if old.markdown_path and old.markdown_path.startswith("/exports/"):
+                    (settings.export_dir / old.markdown_path[len("/exports/"):]).unlink(missing_ok=True)
+                if old.pdf_path and old.pdf_path.startswith("/exports/"):
+                    (settings.export_dir / old.pdf_path[len("/exports/"):]).unlink(missing_ok=True)
+            except OSError:
+                pass
+            await db.delete(old)
+        if stale:
+            await db.commit()
+            logger.info("日记重生成：清理 %s 份同日旧件", len(stale))
+
     # 产物分叉：日记走 Markdown（个人汇总、文本形态）；日志走省统表 docx→PDF
     # （GD-B-220 / 市政监-24 正式版式）。任一步失败不影响主流程（文书均已入库）。
     diary_suffix = "监理日记" if is_diary else "监理日志"
