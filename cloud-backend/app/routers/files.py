@@ -85,12 +85,17 @@ async def serve_upload(
 async def serve_export(
     rest: str,
     user: User = Depends(_user_from_file_request),
+    db: AsyncSession = Depends(get_db),
 ):
     """受控返回导出/归档文件。
 
     - ``archives/{project_id}/...``：路径内编码项目，按归属校验（403 拦截越权）；
     - 平铺导出文件若文件名含 ``_p{project_id}_`` 标记，按标记校验归属；
       含 ``_all_`` 标记为「全部项目」导出，仅公司级账号可下载；
+    - ``doc_{id}_`` 前缀的业务文书（日记/日志/省统表等）按文书归属校验：
+      日记（个人维度）仅本人或 document_approve；其余按项目归属
+      （2026-11-18 补漏：此前平铺日记文件名无项目标记，任何登录用户
+      枚举 doc id 即可直读他人日记全文）；
     - 其余遗留平铺文件：仅要求登录（纵深防御）。
     """
     path = _safe_resolve(settings.export_dir, rest)
@@ -108,8 +113,24 @@ async def serve_export(
             pass
         return FileResponse(path)
 
-    # 平铺导出文件名形如 台账_p12_20261030...xlsx 或 文书_all_20261030...pdf
     leaf = parts[-1]
+    # doc_{id}_… 业务文书：反查库校验归属（日记 404 防探测，其余项目归属）
+    doc_match = re.match(r"^doc_(\d+)_", leaf)
+    if doc_match:
+        from app.models.document import Document
+
+        doc = await db.get(Document, int(doc_match.group(1)))
+        if doc is not None:
+            if doc.doc_type == "监理日记" or doc.form_code == "jianli_riji":
+                # 与 document.py 读口同口径：非本人且无审批权限 → 404
+                if doc.creator_id != user.id and not user.has_permission(
+                    "document_approve"
+                ):
+                    raise HTTPException(status_code=404, detail="文件不存在")
+            else:
+                if not can_read_project(doc.project_id, user):
+                    raise HTTPException(status_code=403, detail="无权访问该项目文件")
+        # doc 不存在（已删）的残留文件：继续走通用标记校验
     if "_all_" in leaf and not user.is_super_admin() and not user.is_org_admin():
         raise HTTPException(status_code=403, detail="全部项目导出仅公司级账号可下载")
     # 取文件名中所有 _p<数字>_ 片段，逐一校验归属
