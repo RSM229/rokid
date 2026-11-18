@@ -153,6 +153,11 @@
    写 height:auto 会塌陷。 */
 .edit-field.textarea { height: 300rpx; min-height: 300rpx; padding: 16rpx 20rpx; line-height: 1.6; }
 .edit-field:focus { border-color: var(--brand, #1677ff); outline: none; }
+/* 具体位置 + 定位按钮同行：输入框吃掉剩余宽度，按钮取可读地址回填 */
+.edit-location-row { display: flex; align-items: center; gap: 12rpx; }
+.edit-location-row .edit-field { flex: 1; width: auto; min-width: 0; margin-bottom: 16rpx; }
+.edit-locate-btn { flex: none; height: 84rpx; min-height: 84rpx; margin-bottom: 16rpx; padding: 0 24rpx; display: flex; align-items: center; justify-content: center; border-radius: 12rpx; background: var(--brand, #1677ff); color: #fff; font-size: 26rpx; }
+.edit-locate-btn:active { opacity: 0.85; }
 
 /* ---- 待定记录改类型（2026-11-13） ----
    mask 与 modal 平级兄弟；modal 自行 fixed 居中，
@@ -189,3 +194,50 @@
 /* 按字段清单渲染：必填星号 + 超长字段名全文（如巡视内容六项） */
 .field-required { color: #e35d4f; font-weight: 600; }
 .field-note { display: block; margin: 0 0 10rpx 160rpx; font-size: 22rpx; line-height: 1.6; color: #8a99ab; white-space: pre-wrap; word-break: break-all; }
+
+/* 个人工作记录（监理日记）置顶卡 */
+.diary-card{margin:16rpx 20rpx;padding:20rpx 24rpx;border-radius:16rpx;background:#f6f8fb;border:1rpx solid #e5e7eb;}
+.diary-card.pinned{background:#eef6ff;border-color:#bcdcff;}
+.diary-card.pending{background:#fff7e6;border-color:#ffe0a3;}
+.diary-card-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:8rpx;}
+.diary-card-title{font-size:30rpx;font-weight:600;color:#1f2937;}
+.diary-card-actions{display:flex;align-items:center;gap:16rpx;font-size:24rpx;color:#6b7280;}
+.diary-badge{color:#1677ff;font-weight:600;}
+.diary-meta{font-size:24rpx;color:#4b5563;margin:8rpx 0 12rpx;line-height:1.5;}
+.diary-doc-row{display:flex;justify-content:space-between;align-items:center;padding:12rpx 0;border-top:1rpx solid rgba(0,0,0,0.06);font-size:26rpx;}
+.diary-doc-title{color:#111827;}
+.diary-doc-open{color:#1677ff;font-size:24rpx;}
+.diary-card-btns{margin-top:12rpx;display:flex;gap:12rpx;}
+.batch-hint{margin-top:8rpx;font-size:22rpx;color:#6b7280;text-align:center;}
+/* diary/doc sheets */
+.diary-sheet-scroll{max-height:60vh;padding:16rpx 24rpx;}
+.diary-sheet-hint{font-size:24rpx;color:#6b7280;margin-bottom:16rpx;line-height:1.5;}
+.diary-pick-row{display:flex;align-items:flex-start;gap:16rpx;padding:16rpx 0;border-bottom:1rpx solid #f0f0f0;}
+.diary-pick-main{flex:1;}
+.diary-pick-title{font-size:28rpx;color:#111827;}
+.diary-pick-meta{font-size:22rpx;color:#6b7280;margin-top:4rpx;}
+.doc-match-row{display:flex;justify-content:space-between;align-items:center;padding:18rpx 0;border-bottom:1rpx solid #f0f0f0;}
+.doc-match-title{font-size:28rpx;color:#111827;}
+.doc-match-form{font-size:24rpx;color:#1677ff;margin-top:4rpx;}
+.doc-match-status{font-size:22rpx;color:#6b7280;}
+
+/* 文书弹层：生成 → 审批 → 归档 三段 */
+.doc-sheet{max-height:86vh;}
+.doc-step-bar{display:flex;align-items:center;padding:8rpx 32rpx 20rpx;}
+.doc-step{display:flex;align-items:center;gap:8rpx;font-size:24rpx;color:#9ca3af;}
+.doc-step-no{width:36rpx;height:36rpx;line-height:36rpx;text-align:center;border-radius:50%;background:#e5e7eb;color:#6b7280;font-size:22rpx;}
+.doc-step.done .doc-step-no{background:#d1e7ff;color:#1677ff;}
+.doc-step.active{color:#1677ff;font-weight:600;}
+.doc-step.active .doc-step-no{background:#1677ff;color:#fff;}
+.doc-step-line{flex:1;height:2rpx;background:#e5e7eb;margin:0 12rpx;}
+.doc-result-row{padding:18rpx 0;border-bottom:1rpx solid #f0f0f0;}
+.doc-result-head{display:flex;align-items:center;justify-content:space-between;gap:12rpx;}
+.doc-result-title{font-size:27rpx;color:#111827;flex:1;}
+.doc-result-chip{font-size:21rpx;padding:2rpx 12rpx;border-radius:20rpx;flex:none;}
+.chip-draft{background:#f3f4f6;color:#6b7280;}
+.chip-pending{background:#fff7e6;color:#d97706;}
+.chip-ok{background:#ecfdf5;color:#059669;}
+.chip-warn{background:#fef2f2;color:#dc2626;}
+.doc-result-meta{font-size:22rpx;color:#6b7280;margin-top:6rpx;}
+.doc-result-btns{display:flex;gap:12rpx;margin-top:12rpx;}
+.doc-sheet-note{margin:0 32rpx 8rpx;padding:14rpx 18rpx;border-radius:12rpx;background:#f6f8fb;font-size:22rpx;color:#4b5563;line-height:1.5;}

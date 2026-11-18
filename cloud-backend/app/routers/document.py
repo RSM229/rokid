@@ -1,6 +1,6 @@
 """监理文书路由 — 8类文书生成/审批/导出，含自动填充、LLM内容生成与PDF导出"""
 from datetime import datetime, date, timedelta
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 
 import asyncio
 from fastapi.responses import FileResponse
@@ -41,6 +41,7 @@ class DocCreateRequest(BaseModel):
     location: Optional[str] = None
     weather: Optional[str] = None
     attached_images: list[str] = []
+    form_code: Optional[str] = None
 
 
 class DocUpdateRequest(BaseModel):
@@ -108,6 +109,7 @@ async def create_document(
         doc_type=req.doc_type.value,
         title=req.title,
         content=content,
+        form_code=req.form_code,
         section=req.section,
         location=req.location,
         weather=req.weather,
@@ -285,6 +287,15 @@ async def list_documents(
     query = query.order_by(Document.created_at.desc())
     result = await db.execute(query)
     docs = result.scalars().all()
+    creator_ids = {d.creator_id for d in docs if d.creator_id}
+    # 日记是按作者查自己的汇总（原型「仅个人可见」）：列表带回 creator_id，
+    # 调用方据此过滤，再显示 creator_name，避免前端拿 id 反查。
+    user_names: dict[int, str] = {}
+    if creator_ids:
+        rows = await db.execute(
+            select(User.id, User.real_name, User.username).where(User.id.in_(creator_ids))
+        )
+        user_names = {uid: (real or uname) for uid, real, uname in rows.all()}
     project_names: dict[int, str] = {}
     if scope is None and docs:
         rows = await db.execute(
@@ -304,6 +315,7 @@ async def list_documents(
             "section": d.section,
             "location": d.location,
             "creator_id": d.creator_id,
+            "creator_name": user_names.get(d.creator_id) if d.creator_id else None,
             "pdf_path": d.pdf_path,
             "created_at": d.created_at.isoformat(),
             "updated_at": d.updated_at.isoformat() if d.updated_at else None,
@@ -348,6 +360,7 @@ async def get_document(
         "weather": doc.weather,
         "attached_images": doc.attached_images,
         "pdf_path": doc.pdf_path,
+        "markdown_path": doc.markdown_path,
         "created_at": doc.created_at.isoformat(),
         "updated_at": doc.updated_at.isoformat() if doc.updated_at else None,
     }
@@ -367,7 +380,7 @@ async def retry_project_archive_sync(
         raise HTTPException(status_code=404, detail="文书不存在")
     if doc.creator_id != user.id and not user.has_permission("document_approve"):
         raise HTTPException(status_code=403, detail="无权重试资料库归档")
-    if not (doc.docx_path or doc.pdf_path or doc.signed_pdf_path or doc.form_code):
+    if not (doc.docx_path or doc.pdf_path or doc.markdown_path or doc.signed_pdf_path or doc.form_code):
         raise HTTPException(status_code=409, detail="文书尚无可归档的正式文件")
     await _sync_project_archive_copy(db, doc, user)
     return {
@@ -688,6 +701,33 @@ async def export_pdf(
     pdf_filename = f"doc_{doc.id}_{doc.doc_type}.pdf"
     pdf_path = settings.export_dir / pdf_filename
     rendered = False
+    # 纯 Markdown 日记：正文直接排进 PDF（打印/归档需要时按需转换）
+    if doc.doc_type == DocType.SUPERVISION_DIARY.value and not (
+        doc.signed_pdf_path or doc.attached_images
+    ):
+        from app.services.markdown_pdf import markdown_to_pdf
+        from app.services.period_report_service import build_supervision_log_markdown
+
+        try:
+            target_date = datetime.strptime(
+                str((doc.content or {}).get("date") or doc.created_at.date().isoformat()),
+                "%Y-%m-%d",
+            ).date()
+        except ValueError:
+            target_date = doc.created_at.date()
+        markdown_text = build_supervision_log_markdown(
+            doc.content or {}, target_date, doc_title=doc.doc_type
+        )
+        if doc.markdown_path:
+            from app.services.signature_service import _resolve_file_path
+            md_file = _resolve_file_path(doc.markdown_path)
+            if md_file and md_file.exists():
+                markdown_text = md_file.read_text(encoding="utf-8")
+        await asyncio.to_thread(markdown_to_pdf, markdown_text, str(pdf_path))
+        doc.pdf_path = f"/exports/{pdf_filename}"
+        await db.commit()
+        await _sync_project_archive_copy(db, doc, user)
+        return {"doc_id": doc_id, "pdf_url": doc.pdf_path, "pdf_path": str(pdf_path)}
     from app.routers.form_doc import RECORD_TYPE_TO_FORM
     code = doc.form_code or RECORD_TYPE_TO_FORM.get(doc.doc_type.removesuffix("记录"))
     code = code or {
@@ -748,6 +788,9 @@ async def export_docx(
     doc = await db.get(Document, doc_id)
     if not doc or not can_read_project(doc.project_id, user, all_projects):
         raise HTTPException(404, "文书不存在")
+    # 监理日记正式产物是 Markdown，不再提供省统表 Word 导出
+    if doc.doc_type == DocType.SUPERVISION_DIARY.value:
+        raise HTTPException(400, "监理日记以 Markdown 为正式产物，请使用 PDF 导出")
     from app.services.form_renderer import render_form
     from app.routers.form_doc import RECORD_TYPE_TO_FORM
     code = doc.form_code or RECORD_TYPE_TO_FORM.get(doc.doc_type.removesuffix("记录"))
@@ -812,6 +855,63 @@ async def download_pdf(
     )
 
 
+@router.get("/{doc_id}/markdown")
+async def get_document_markdown(
+    doc_id: int,
+    all_projects: bool = Query(False, description="公司级账号：可查看其他项目（仅读）"),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """读取 Markdown 正文（监理日志等项目级产物不再出 docx/PDF）。"""
+    scope = project_scope_id(user, all_projects)
+    stmt = select(Document).where(Document.id == doc_id)
+    if scope is not None:
+        stmt = stmt.where(Document.project_id == scope)
+    doc = (await db.execute(stmt)).scalar_one_or_none()
+    if not doc:
+        raise HTTPException(status_code=404, detail="文书不存在")
+    if not doc.markdown_path:
+        raise HTTPException(status_code=404, detail="该文书没有 Markdown 正文")
+    from app.services.signature_service import _resolve_file_path
+    path = _resolve_file_path(doc.markdown_path)
+    if not path or not path.exists():
+        raise HTTPException(status_code=404, detail="Markdown 文件不存在")
+    return {
+        "doc_id": doc.id,
+        "title": doc.title,
+        "markdown_path": doc.markdown_path,
+        "markdown": path.read_text(encoding="utf-8"),
+    }
+
+
+@router.get("/{doc_id}/download-markdown")
+async def download_markdown(
+    doc_id: int,
+    all_projects: bool = Query(False, description="公司级账号：可查看其他项目（仅读）"),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """下载 Markdown 文件（监理日志正式产物）。"""
+    scope = project_scope_id(user, all_projects)
+    stmt = select(Document).where(Document.id == doc_id)
+    if scope is not None:
+        stmt = stmt.where(Document.project_id == scope)
+    doc = (await db.execute(stmt)).scalar_one_or_none()
+    if not doc:
+        raise HTTPException(status_code=404, detail="文书不存在")
+    if not doc.markdown_path:
+        raise HTTPException(status_code=404, detail="该文书没有 Markdown 正文")
+    from app.services.signature_service import _resolve_file_path
+    path = _resolve_file_path(doc.markdown_path)
+    if not path or not path.exists():
+        raise HTTPException(status_code=404, detail="Markdown 文件不存在")
+    return FileResponse(
+        path=str(path),
+        media_type="text/markdown; charset=utf-8",
+        filename=f"{doc.title}.md",
+    )
+
+
 @router.delete("/{doc_id}")
 async def delete_document(
     doc_id: int,
@@ -847,8 +947,8 @@ async def delete_document(
 
     await detach_project_archive_copy(db, doc.id)
 
-    # 清理关联文件（PDF/DOCX/签章件/附件图）
-    paths = [doc.pdf_path, doc.docx_path, doc.signed_pdf_path]
+    # 清理关联文件（PDF/DOCX/Markdown/签章件/附件图）
+    paths = [doc.pdf_path, doc.docx_path, doc.markdown_path, doc.signed_pdf_path]
     if isinstance(doc.attached_images, list):
         paths += doc.attached_images
     for path in paths:
@@ -995,7 +1095,7 @@ async def generate_daily_log(
 async def generate_daily_diary(
     date: str = Query(..., description="日期，格式 YYYY-MM-DD"),
     author_id: Optional[int] = Query(None, description="日记归属人 ID，缺省为当前登录用户"),
-    extras: Optional[DailyLogExtras] = None,
+    payload: Optional[dict] = Body(default=None),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -1026,7 +1126,23 @@ async def generate_daily_diary(
         if member is None:
             raise HTTPException(status_code=403, detail="不能为该项目外的成员生成日记")
     target_author = author_id if author_id is not None else user.id
-    ex = extras or DailyLogExtras()
+    record_ids = None
+    ex = DailyLogExtras()
+    if payload and isinstance(payload, dict):
+        if isinstance(payload.get("record_ids"), list):
+            try:
+                record_ids = [int(x) for x in payload["record_ids"] if x is not None]
+            except (TypeError, ValueError):
+                record_ids = None
+        # 兼容旧 body 形态：extras 字段可能直接在顶层
+        try:
+            ex = DailyLogExtras(
+                weather=payload.get("weather") or "",
+                temp_low=payload.get("temp_low") or "",
+                temp_high=payload.get("temp_high") or "",
+            )
+        except Exception:
+            ex = DailyLogExtras()
     return await generate_supervision_log(
         db,
         project_id,
@@ -1039,4 +1155,5 @@ async def generate_daily_diary(
         },
         force=True,
         author_id=target_author,
+        record_ids=record_ids or None,
     )

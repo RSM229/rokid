@@ -469,6 +469,7 @@ async def generate_supervision_log(
     force: bool = True,
     narrative: str | None = None,
     author_id: Optional[int] = None,
+    record_ids: Optional[list[int]] = None,
 ) -> dict:
     """生成指定项目、指定日期的监理日志（PDF，GD-B-220 版式）或监理日记。
 
@@ -486,7 +487,8 @@ async def generate_supervision_log(
     title = f"{kind_label}_{target_date.isoformat()}"
     if not force:
         existing = await _find_existing(
-            db, project_id, title=title, doc_type=DocType.SUPERVISION_LOG.value
+            db, project_id, title=title,
+            doc_type=DocType.SUPERVISION_DIARY.value if is_diary else DocType.SUPERVISION_LOG.value,
         )
         if existing is not None:
             return {
@@ -501,15 +503,25 @@ async def generate_supervision_log(
     day_start = datetime.combine(target_date, datetime.min.time())
     day_end = datetime.combine(target_date + timedelta(days=1), datetime.min.time())
 
+    # 记录筛选（2026-11-18 修正勾选语义）：勾选生成时以勾选为准——
+    # 勾了哪些就汇总哪些，不再叠加「record_date=目标日」窗口，否则补录/跨日
+    # 勾选记录会被日期条件悄悄滤掉，生成出一份全空日记（生产实证）。
+    # 未勾选（按当前全部记录生成）时仍按「业务日期=目标日 or 创建时间在当日」聚合。
+    if is_diary and record_ids:
+        record_filters = [
+            WorkRecord.project_id == project_id,
+            WorkRecord.creator_id == author_id,
+            WorkRecord.id.in_(record_ids),
+        ]
+    else:
+        record_filters = [
+            WorkRecord.project_id == project_id,
+            or_(WorkRecord.record_date == target_date, and_(WorkRecord.record_date.is_(None), WorkRecord.created_at >= day_start, WorkRecord.created_at < day_end)),
+            *((WorkRecord.creator_id == author_id,) if is_diary else ()),
+        ]
     records_result = await db.execute(
         select(WorkRecord)
-        .where(
-            and_(
-                WorkRecord.project_id == project_id,
-                or_(WorkRecord.record_date == target_date, and_(WorkRecord.record_date.is_(None), WorkRecord.created_at >= day_start, WorkRecord.created_at < day_end)),
-                *((WorkRecord.creator_id == author_id,) if is_diary else ()),
-            )
-        )
+        .where(and_(*record_filters))
         .order_by(WorkRecord.created_at)
     )
     work_records = records_result.scalars().all()
@@ -823,45 +835,60 @@ async def generate_supervision_log(
         form_code="jianli_riji" if is_diary else daily_log_form_code(project),
         project_id=project_id,
         creator_id=signer.id,
-        status=DocStatus.DRAFT.value,
+        # 日记是个人当日汇总：生成即生效，不进审批/签认流转。
+        status=(DocStatus.ARCHIVED.value if is_diary else DocStatus.DRAFT.value),
     )
     db.add(doc)
     await db.commit()
     await db.refresh(doc)
 
-    # 产物与省统表同源：render_form 渲 GD-B-220 docx 挂 docx_path，PDF 由 docx 转换；
-    # 任一步失败回退旧的自绘日报版式（文书均已入库，不影响主流程）。
+    # 产物分叉：日记走 Markdown（个人汇总、文本形态）；日志走省统表 docx→PDF
+    # （GD-B-220 / 市政监-24 正式版式）。任一步失败不影响主流程（文书均已入库）。
     diary_suffix = "监理日记" if is_diary else "监理日志"
-    try:
-        from app.services.form_renderer import render_form
-        municipal = is_municipal(project) and not is_diary
-        # 市政项目日志渲染市政监-24（官方版式）：内容按市政栏目重新分发。
-        render_code = daily_log_form_code(project) if municipal else (
-            "jianli_riji" if is_diary else "gd_b_220_rizhi"
-        )
-        render_content = _municipal_rizhi_content(content) if municipal else content
-        docx_out = await asyncio.to_thread(render_form, render_code, render_content)
-        doc.docx_path = f"/exports/{docx_out.name}"
-        await db.commit()
-        from app.services.docx2pdf import convert_docx_to_pdf
-        pdf_filename = f"doc_{doc.id}_{diary_suffix}_{target_date.isoformat()}.pdf"
-        pdf_path = settings.export_dir / pdf_filename
-        await asyncio.to_thread(convert_docx_to_pdf, str(docx_out), str(pdf_path))
-        docx_out.unlink(missing_ok=True)
-        doc.docx_path = None  # docx 已删（中间产物），清空悬空引用，防 Word 下载 404
-        doc.pdf_path = f"/exports/{pdf_filename}"
-        await db.commit()
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("监理日志省统表 docx/PDF 生成失败，回退自绘日报版式（文书已入库）：%s", exc)
+    if is_diary:
+        # 监理日记（个人工作记录）正式产物为 Markdown，不走 docx/PDF 省统表：
+        # 归档、全文检索与 AI 复用都用文本；需要打印时再按需转 PDF。
         try:
-            from app.services.doc_generator import generate_daily_log_pdf
+            md_text = build_supervision_log_markdown(
+                content, target_date, doc_title=diary_suffix
+            )
+            md_filename = f"doc_{doc.id}_{diary_suffix}_{target_date.isoformat()}.md"
+            md_path = settings.export_dir / md_filename
+            md_path.write_text(md_text, encoding="utf-8")
+            doc.markdown_path = f"/exports/{md_filename}"
+            await db.commit()
+        except Exception as exc:  # noqa: BLE001 - 文书已入库，产物失败不阻断
+            logger.warning("%s Markdown 生成失败（文书已入库）：%s", diary_suffix, exc)
+    else:
+        # 项目级监理日志：保持省统表 docx→PDF 产物（原型 N 表式要求）。
+        try:
+            from app.services.form_renderer import render_form
+            municipal = is_municipal(project)
+            # 市政项目日志渲染市政监-24（官方版式）：内容按市政栏目重新分发。
+            render_code = daily_log_form_code(project) if municipal else "gd_b_220_rizhi"
+            render_content = _municipal_rizhi_content(content) if municipal else content
+            docx_out = await asyncio.to_thread(render_form, render_code, render_content)
+            doc.docx_path = f"/exports/{docx_out.name}"
+            await db.commit()
+            from app.services.docx2pdf import convert_docx_to_pdf
             pdf_filename = f"doc_{doc.id}_{diary_suffix}_{target_date.isoformat()}.pdf"
             pdf_path = settings.export_dir / pdf_filename
-            generate_daily_log_pdf(doc, str(pdf_path), target_date)
+            await asyncio.to_thread(convert_docx_to_pdf, str(docx_out), str(pdf_path))
+            docx_out.unlink(missing_ok=True)
+            doc.docx_path = None  # docx 已删（中间产物），清空悬空引用，防 Word 下载 404
             doc.pdf_path = f"/exports/{pdf_filename}"
             await db.commit()
-        except Exception as exc2:  # noqa: BLE001
-            logger.warning("监理日志 PDF 生成失败（文书已入库）：%s", exc2)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("监理日志省统表 docx/PDF 生成失败，回退自绘日报版式（文书已入库）：%s", exc)
+            try:
+                from app.services.doc_generator import generate_daily_log_pdf
+                pdf_filename = f"doc_{doc.id}_{diary_suffix}_{target_date.isoformat()}.pdf"
+                pdf_path = settings.export_dir / pdf_filename
+                generate_daily_log_pdf(doc, str(pdf_path), target_date)
+                doc.pdf_path = f"/exports/{pdf_filename}"
+                await db.commit()
+            except Exception as exc2:  # noqa: BLE001
+                logger.warning("监理日志 PDF 生成失败（文书已入库）：%s", exc2)
 
     from app.services.project_archive import sync_document_to_project_archive
     await sync_document_to_project_archive(db, doc, signer)
@@ -882,11 +909,115 @@ async def generate_supervision_log(
         "doc_number": content["doc_number"],
         "status": doc.status,
         "pdf_url": doc.pdf_path,
+        "markdown_url": doc.markdown_path,
         "skipped": False,
         "work_count": summary["work_records"],
         "hazard_count": summary["hazards"],
         "summary": summary,
     }
+
+def _md_section(text: object, empty_hint: str = "") -> str:
+    """把一栏文字转成 Markdown：多行按条目输出，单行原样保留。"""
+    raw = str(text or "").strip()
+    if not raw:
+        return empty_hint or "无。"
+    lines = [line.strip(" 　\t") for line in raw.splitlines() if line.strip()]
+    if len(lines) <= 1:
+        return lines[0] if lines else (empty_hint or "无。")
+    return "\n".join(f"- {line}" for line in lines)
+
+
+def build_supervision_log_markdown(
+    content: dict, target_date: date, doc_title: str = "监理日志"
+) -> str:
+    """把监理日志/监理日记 content 渲染成 Markdown 正文（正式产物）。
+
+    章节与 GD-B-220 / 市政监-24 的八栏口径一致，但用纯文本表达，
+    便于资料库归档、全文检索与 AI 二次加工。
+    """
+    date_text = f"{target_date.isoformat()}（{content.get('weekday') or ''}）".replace("（）", "")
+    weather_parts = [
+        str(content.get("weather_morning") or "").strip(),
+        str(content.get("weather_afternoon") or "").strip(),
+        str(content.get("weather_night") or "").strip(),
+    ]
+    weather = weather_parts[0] if len(set(weather_parts)) == 1 else " / ".join(
+        f"{label}{value}" for label, value in zip(("上午", "下午", "夜间"), weather_parts) if value
+    )
+    low = str(content.get("temperature_low") or "").strip()
+    high = str(content.get("temperature_high") or "").strip()
+    if low or high:
+        weather = f"{weather}（{low or '-'}℃ ~ {high or '-'}℃）" if weather else f"{low or '-'}℃ ~ {high or '-'}℃"
+    if content.get("weather_source"):
+        weather = f"{weather}（来源：{content['weather_source']}）" if weather else str(content["weather_source"])
+
+    head_rows = [
+        ("工程名称", content.get("project_name") or ""),
+        ("文书编号", content.get("doc_number") or ""),
+        ("日期", date_text),
+        ("天气", weather),
+    ]
+    for label, key in (("建设单位", "owner_unit"), ("施工单位", "construction_unit"), ("监理单位", "supervision_unit")):
+        value = str(content.get(key) or "").strip()
+        if value:
+            head_rows.append((label, value))
+
+    lines = [f"# {doc_title}", ""]
+    lines.extend(f"- {label}：{value}" for label, value in head_rows if value)
+    lines.extend([
+        "",
+        "## 一、施工进展情况",
+        _md_section(content.get("construction_progress"), "当日无施工进展记录。"),
+        "",
+        "## 二、材料进场及见证取样",
+        _md_section(content.get("material_section"), "当日无材料进场及见证取样。"),
+        "",
+        "## 三、旁站及巡视",
+        _md_section(content.get("supervision_section"), "当日无旁站及巡视记录。"),
+        "",
+        "## 四、验收",
+        _md_section(content.get("acceptance_section"), "当日无验收记录。"),
+        "",
+        "## 五、平行检查",
+        _md_section(content.get("parallel_section"), "当日无平行检查记录。"),
+        "",
+        "## 六、存在问题及处理情况",
+        _md_section(content.get("problems_section"), "当日无安全隐患及质量问题。"),
+        "",
+        "## 七、其他有关事项",
+        "### 会议",
+        _md_section(content.get("meeting_section")),
+        "",
+        "### 重要发文",
+        _md_section(content.get("document_section")),
+        "",
+        "### 闭合记录",
+        _md_section(content.get("closure_section")),
+        "",
+        "### 资料上报",
+        _md_section(content.get("report_section")),
+        "",
+        "### 其他",
+        _md_section(content.get("misc_section")),
+    ])
+    check = str(content.get("supervision_check") or "").strip()
+    if check:
+        lines.extend(["", "### 上级/质监站检查", _md_section(check)])
+    lines.extend(["", "## 八、签署"])
+    signer = str(content.get("supervisor") or "").strip()
+    level = str(content.get("supervisor_level") or "").strip()
+    if doc_title == "监理日记":
+        recorder = str(content.get("recorder_name") or signer).strip()
+        if recorder:
+            lines.append(f"- 记录人（签字）：{recorder}{f'（{level}）' if level else ''}")
+        else:
+            lines.append("- 记录人（签字）：")
+    if signer:
+        lines.append(f"- 监理工程师（签字）：{signer}{f'（{level}）' if level else ''}")
+    else:
+        lines.append("- 监理工程师（签字）：")
+    lines.append("")
+    return "\n".join(lines)
 
 
 def _canon_extra_fields(extra: dict | None, form_code: str) -> dict:
@@ -1229,22 +1360,14 @@ async def generate_aggregate_doc(
             narrative=narrative,
         )
         daily_doc = await db.get(Document, daily["doc_id"])
-        # 🔴 这里的二次渲染只为了额外挂一份 docx（PDF 已由 generate_supervision_log 产出）。
-        # 模板缺失时必须只丢 docx 附件、不能让整张文书判失败：2026-11-03 生产缺
-        # 21监理日志-房建新.docx 时抛 TemplateNotFoundError（FileNotFoundError 子类），
-        # 工具层只捕 ValueError/RuntimeError，结果整单被报成「执行…时出错」。
-        daily_code = (daily_doc.form_code if daily_doc else None) or daily_log_form_code(project)
-        try:
-            docx_file = await asyncio.to_thread(render_form, daily_code, daily_doc.content)
-            daily_doc.docx_path = f"/exports/{docx_file.name}"
-            await db.commit()
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("监理日志 docx 附件生成失败（文书与 PDF 已入库，跳过 docx）：%s", exc)
-
-        from app.services.project_archive import sync_document_to_project_archive
-        await sync_document_to_project_archive(db, daily_doc, supervisor)
-        await db.commit()
-        return {**daily, "docx_url": daily_doc.docx_path, "form_code": daily_code, "form_name": "监理日志"}
+        # 监理日志保持省统表 docx/PDF 产物（generate_supervision_log 已渲染并归档），
+        # 这里不再额外挂 docx 附件（历史二次渲染已并入主流程）。
+        return {
+            **daily,
+            "docx_url": daily_doc.docx_path if daily_doc else None,
+            "form_code": daily_doc.form_code if daily_doc else None,
+            "form_name": "监理日志",
+        }
 
     title = spec.default_title.format(date=start.isoformat(), period=period_label) or (
         f"{spec.name}_{period_label}"
@@ -1361,14 +1484,18 @@ async def generate_aggregate_doc(
 
 
 async def generate_daily_batch(
-    target_date: date | None = None, *, force: bool = False
+    target_date: date | None = None, *, force: bool = False,
+    projects: list[tuple[int, str]] | None = None,
 ) -> dict:
-    """遍历所有项目生成指定日期的监理日志（该日期若为一周/一月之末，顺带出周报/月报）。
+    """遍历项目生成指定日期的监理日志（该日期若为一周/一月之末，顺带出周报/月报）。
 
     定时任务的入口，也可用于人工补跑。单个项目失败不影响其它项目。
 
     ``target_date`` 缺省取「运行日 − ``settings.daily_doc_offset_days``」：守护在
     早上 8 点触发，此时要写的是**昨天**整天的日志，而不是刚开始的今天。
+
+    ``projects`` 传入 ``(id, name)`` 列表时只跑这些项目（定时守护按各项目设定的
+    时点筛选）；缺省跑全部项目。
     """
     day = target_date or (
         now_cn().date() - timedelta(days=settings.daily_doc_offset_days)
@@ -1384,18 +1511,9 @@ async def generate_daily_batch(
         "monthly": [],
     }
     async with async_session() as db:
-        result = await db.execute(select(Project).order_by(Project.id))
-        # 🔴 进循环前就把 id/name 解引用成纯数据（不要留 ORM 实例）。
-        # 原写法「for project in projects: pid, pname = project.id, project.name」
-        # 的防护是**无效的**：任何项目失败后内层 `await db.rollback()` 会过期
-        # session 内全部 ORM 实例（expire_on_commit=False 只管 commit，管不到
-        # rollback），于是**下一个** project 读 .id 就触发同步懒加载 →
-        # MissingGreenlet → 整批中断、真正的异常被盖掉。
-        # 生产实证（2026-10-26 日志，相隔 3ms）：
-        #   23:59:50,528 ERROR 项目 1 周报生成失败
-        #   23:59:50,531 WARNING [周期文书] 自动生成异常：greenlet_spawn has not
-        #                  been called … [SQL: SELECT projects … ] [pk_1: 12]
-        projects = [(row.id, row.name) for row in result.scalars().all()]
+        if projects is None:
+            result = await db.execute(select(Project).order_by(Project.id))
+            projects = [(row.id, row.name) for row in result.scalars().all()]
         report["projects"] = len(projects)
 
         for pid, pname in projects:
@@ -1475,6 +1593,36 @@ _BACKOFF_BASE = 300
 _BACKOFF_CAP = 3600
 
 
+def _parse_hhmm(value: str | None) -> tuple[int, int] | None:
+    """``"HH:MM"`` → ``(时, 分)``；空/非法返回 None（由调用方回退全局默认）。"""
+    if not value:
+        return None
+    try:
+        hour, minute = str(value).strip().split(":", 1)
+        hour_i, minute_i = int(hour), int(minute)
+    except (ValueError, AttributeError):
+        return None
+    if 0 <= hour_i < 24 and 0 <= minute_i < 60:
+        return hour_i, minute_i
+    return None
+
+
+def project_daily_time(project) -> tuple[int, int]:
+    """项目设定的日志生成时点；未设或非法时回退全局默认（DAILY_DOC_HOUR/MINUTE）。"""
+    parsed = _parse_hhmm(getattr(project, "log_daily_time", None))
+    if parsed is None:
+        return settings.daily_doc_hour, settings.daily_doc_minute
+    return parsed
+
+
+def _due_for_project(now: datetime, log_daily_time: str | None) -> bool:
+    """守护判定：当前时间是否已到该项目的日志生成时点。"""
+    hour, minute = _parse_hhmm(log_daily_time) or (
+        settings.daily_doc_hour, settings.daily_doc_minute,
+    )
+    return (now.hour, now.minute) >= (hour, minute)
+
+
 def _next_backoff(today_key: str, prev_date: str | None,
                   prev_count: int) -> tuple[str, int, float]:
     """返回 (统计日期, 当日累计失败次数, 本次应 sleep 的秒数)。
@@ -1506,8 +1654,9 @@ async def daily_report_worker() -> None:
     # 启动即打一条：否则守护在"未到点"时完全静默，运维无法区分
     # 「没启动」和「已启动但还没到时间」。
     logger.info(
-        "[周期文书] 守护启动：每日 %02d:%02d（东八区）自动生成前 %s 天的监理日志，"
-        "目标日为周日时补该周周报、为月末时补该月月报（DAILY_DOC_AUTO=%s）",
+        "[周期文书] 守护启动：每日 %02d:%02d（东八区，各项目可在设置中改时间点）"
+        "自动生成前 %s 天的监理日志，目标日为周日时补该周周报、为月末时补该月月报"
+        "（DAILY_DOC_AUTO=%s）",
         settings.daily_doc_hour,
         settings.daily_doc_minute,
         settings.daily_doc_offset_days,
@@ -1526,34 +1675,37 @@ async def daily_report_worker() -> None:
         try:
             now = now_cn()
             today_key = now.isoformat()[:10]
-            due = (now.hour, now.minute) >= (
-                settings.daily_doc_hour,
-                settings.daily_doc_minute,
-            )
-            if settings.daily_doc_auto and due and last_run != today_key:
-                report = await generate_daily_batch()
-                if report["errors"]:
-                    fail_date, fail_count, sleep_for = _next_backoff(
-                        today_key, fail_date, fail_count
-                    )
-                    logger.warning(
-                        "[周期文书] %s 自动生成存在失败（当日第 %s 次），%s 秒后重试：%s",
-                        report["date"], fail_count, int(sleep_for),
-                        report["errors"][:5],
-                    )
-                else:
-                    last_run = today_key
-                    fail_date, fail_count = None, 0
-                    logger.info(
-                        "[周期文书] %s 自动生成完成：新建 %s 份 / 已存在 %s 份 / "
-                        "无成员跳过 %s 个项目 / 周报 %s / 月报 %s",
-                        report["date"],
-                        len(report["created"]),
-                        len(report["skipped"]),
-                        len(report["no_member"]),
-                        report["weekly"],
-                        report["monthly"],
-                    )
+            if settings.daily_doc_auto and last_run != today_key:
+                async with async_session() as db:
+                    projects = (await db.execute(select(Project).order_by(Project.id))).scalars().all()
+                    due_projects = [
+                        (p.id, p.name) for p in projects
+                        if _due_for_project(now, getattr(p, "log_daily_time", None))
+                    ]
+                if due_projects:
+                    report = await generate_daily_batch(projects=due_projects)
+                    if report["errors"]:
+                        fail_date, fail_count, sleep_for = _next_backoff(
+                            today_key, fail_date, fail_count
+                        )
+                        logger.warning(
+                            "[周期文书] %s 自动生成存在失败（当日第 %s 次），%s 秒后重试：%s",
+                            report["date"], fail_count, int(sleep_for),
+                            report["errors"][:5],
+                        )
+                    else:
+                        last_run = today_key
+                        fail_date, fail_count = None, 0
+                        logger.info(
+                            "[周期文书] %s 自动生成完成：新建 %s 份 / 已存在 %s 份 / "
+                            "无成员跳过 %s 个项目 / 周报 %s / 月报 %s",
+                            report["date"],
+                            len(report["created"]),
+                            len(report["skipped"]),
+                            len(report["no_member"]),
+                            report["weekly"],
+                            report["monthly"],
+                        )
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001

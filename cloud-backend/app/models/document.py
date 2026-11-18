@@ -46,6 +46,8 @@ class Document(Base):
     # Word 模板渲染产物路径（/exports/xxx.docx）；pdf_path 兼容历史 PDF 产物
     docx_path: Mapped[str | None] = mapped_column(String(256), nullable=True, comment="docx 模板渲染路径")
     pdf_path: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    # 监理日志（项目级自动任务）以 Markdown 为正式产物，落盘 /exports/xxx.md
+    markdown_path: Mapped[str | None] = mapped_column(String(256), nullable=True, comment="Markdown 正文路径")
     content_revision: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     reviewed_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)

@@ -28,6 +28,19 @@ function errorMessage(response: WechatMiniprogram.RequestSuccessCallbackResult):
   const data = response.data as { detail?: unknown; message?: string } | string
   if (typeof data === 'string') return data
   const detail = data?.detail
+  if (Array.isArray(detail)) {
+    // FastAPI 参数校验 422 的 detail 是数组，直接抛「请求失败（422）」用户看不懂
+    const parts = detail
+      .map((item) => {
+        if (!item || typeof item !== 'object') return ''
+        const row = item as { msg?: string; loc?: unknown[] }
+        const field = Array.isArray(row.loc) ? String(row.loc[row.loc.length - 1] ?? '') : ''
+        const msg = String(row.msg || '')
+        return msg ? (field ? `${field}: ${msg}` : msg) : ''
+      })
+      .filter(Boolean)
+    if (parts.length) return `参数校验失败：${parts.slice(0, 3).join('；')}`
+  }
   if (detail && typeof detail === 'object') {
     const message = (detail as { message?: unknown }).message
     if (typeof message === 'string') return message

@@ -50,6 +50,9 @@ def required_any_slot_groups_for(doc):
 def slots_for(doc):
     kind = doc.doc_type
     form_code = getattr(doc, "form_code", None)
+    if kind == "监理日记" or form_code == "jianli_riji":
+        # 日记是个人当日汇总（.md 文本），不是正式表式文书：无签认槽位。
+        return []
     if form_code in {"gdaq_30306_weida", "gdaq_30305_qizhong"}:
         return ["supervisor", "chief"]
     if form_code == "witness_record":

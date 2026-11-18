@@ -1,4 +1,4 @@
-"""台账路由 - 7类台账查询与 Excel/PDF 导出，批量导出/归档/打印"""
+﻿"""台账路由 - 7类台账查询与 Excel/PDF 导出，批量导出/归档/打印"""
 import io
 import re
 import shutil
@@ -223,6 +223,7 @@ async def list_ledger(
                     "location": r.location,
                     "doc_number": r.content.get("doc_number", "") if r.content else "",
                     "pdf_path": r.pdf_path,
+                    "markdown_path": r.markdown_path,
                     "created_at": r.created_at.isoformat(),
                 }
                 for r in records
@@ -835,6 +836,7 @@ async def ledger_record_detail(
             "section": d.section,
             "location": d.location,
             "pdf_path": d.pdf_path,
+            "markdown_path": d.markdown_path,
             "created_at": d.created_at.isoformat(),
             "doc_no": content.get("doc_number", "") if isinstance(content, dict) else "",
             "area": d.section,

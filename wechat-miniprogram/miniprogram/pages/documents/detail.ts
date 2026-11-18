@@ -16,6 +16,7 @@ interface DocumentDetail {
   weather?: string
   attached_images?: string[]
   pdf_path?: string
+  markdown_path?: string | null
   created_at?: string
   signed_pdf_path?: string
   updated_at?: string | null
@@ -84,6 +85,10 @@ Page(themed({
     imageViewerUrls: [] as string[],
     imageViewerCurrent: 0,
     hasPdf: false,
+    isDiary: false,
+    showMarkdown: false,
+    markdownLoading: false,
+    markdownText: '',
     submitting: false,
     generatingPdf: false,
     canApprove: false,
@@ -134,14 +139,18 @@ Page(themed({
         .map((path) => absoluteMediaUrl(path))
         .filter(Boolean)
       const user = session.getUser()
+      // 日记是个人汇总（.md 文本）：不拉签认、无审批按钮，页面按「仅本人可见」呈现
+      const isDiary = doc.doc_type === '监理日记'
       // S2：user.role 是英文 key，比较必须用 key（用中文会静默永假）
       const canApprove = doc.status === '待审批'
         && (isChiefRole(user?.role) || (user?.permissions || []).includes('document_approve'))
-      const signoffs = await request<{ slots: { key: string; label: string; mode?: string; completed?: boolean; completion_type?: string | null }[]; history: { slot: string; label: string; signer?: string; confirmed_by?: string; signed_at: string; revision: number; current: boolean; type?: string; status?: string }[]; project_seal_signature_id?: number }>(`/documents/${id}/signoffs`)
+      const signoffs = isDiary
+        ? { slots: [] as { key: string; label: string; mode?: string; completed?: boolean; completion_type?: string | null }[], history: [] as { slot: string; label: string; signer?: string; confirmed_by?: string; signed_at: string; revision: number; current: boolean; type?: string; status?: string }[], project_seal_signature_id: 0 }
+        : await request<{ slots: { key: string; label: string; mode?: string; completed?: boolean; completion_type?: string | null }[]; history: { slot: string; label: string; signer?: string; confirmed_by?: string; signed_at: string; revision: number; current: boolean; type?: string; status?: string }[]; project_seal_signature_id?: number }>(`/documents/${id}/signoffs`)
       const editableKeys = ['temperature_high', 'temperature_low', 'weather_morning', 'weather_afternoon', 'weather_night', 'construction_progress', 'material_section', 'supervision_section', 'parallel_section', 'acceptance_section', 'other_work_section', 'problems_section', 'meeting_section', 'document_section', 'closure_section', 'report_section', 'misc_section']
       const contentEditor = doc.doc_type === '监理日志' ? editableKeys.map(key => ({ key, label: CONTENT_LABELS[key] || key, value: String(doc.content?.[key] ?? '') })) : []
-      this.setData({ doc, fields, images, contentEditor, signSlots: signoffs.slots, signHistory: signoffs.history, projectSealId: signoffs.project_seal_signature_id || 0, hasPdf: Boolean(doc.signed_pdf_path || doc.pdf_path), canApprove, loading: false })
-      if (autoOpenFile) this.onPdfTap()
+      this.setData({ doc, fields, images, contentEditor, isDiary, signSlots: signoffs.slots, signHistory: signoffs.history, projectSealId: signoffs.project_seal_signature_id || 0, hasPdf: Boolean(doc.signed_pdf_path || doc.pdf_path), canApprove, loading: false })
+      if (autoOpenFile && !isDiary) this.onPdfTap()
     } catch (error) {
       this.setData({ loading: false })
       wx.showModal({ title: '加载失败', content: (error as Error).message, showCancel: false })
@@ -442,6 +451,29 @@ Page(themed({
         fail() { wx.hideLoading(); wx.showToast({ title: 'Word下载失败', icon: 'none' }) },
       })
     }).catch(error => { wx.hideLoading(); wx.showToast({ title: (error as Error).message, icon: 'none' }) })
+  },
+
+  /** 日记（Markdown 产物）正文弹层：查看 / 复制 */
+  async openMarkdown() {
+    const id = this.data.doc?.id
+    if (!id) return
+    this.setData({ showMarkdown: true, markdownLoading: true, markdownText: '' })
+    try {
+      const res = await request<{ markdown?: string }>(`/document/${id}/markdown`)
+      this.setData({ markdownText: res.markdown || '', markdownLoading: false })
+    } catch (error) {
+      this.setData({ markdownLoading: false, showMarkdown: false })
+      wx.showToast({ title: (error as Error).message, icon: 'none' })
+    }
+  },
+
+  closeMarkdown() {
+    this.setData({ showMarkdown: false })
+  },
+
+  copyMarkdown() {
+    if (!this.data.markdownText) return
+    wx.setClipboardData({ data: this.data.markdownText })
   },
 
   async retryArchive() {

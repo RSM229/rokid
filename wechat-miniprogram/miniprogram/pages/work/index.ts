@@ -1,8 +1,9 @@
-import { request } from '../../services/request'
+﻿import { request } from '../../services/request'
 import { config, absoluteMediaUrl } from '../../config'
 import { getCached, CACHE_KEYS, invalidateCache } from '../../services/cache'
 import { requireLogin } from '../../utils/guard'
 import { themed } from '../../utils/theme'
+import { ensurePrivacy } from '../../utils/privacy'
 
 // 获取北京时间
 function beijingNow(): Date {
@@ -90,6 +91,21 @@ function decorateRecord(r: WorkRecordItem): WorkRecordItem {
     statusTone,
     reportDate: (r.created_at || '').slice(0, 10),
   }
+}
+
+interface DiaryDocItem {
+  id: number
+  title: string
+  doc_type: string
+  form_code?: string
+  creator_id?: number
+  creator_name?: string
+  created_at?: string
+}
+
+function humanDiaryTime(createdAt?: string): string {
+  if (!createdAt) return ''
+  return createdAt.slice(0, 16).replace('T', ' ')
 }
 
 interface HazardItem {
@@ -221,6 +237,24 @@ interface FieldSection {
   }[]
 }
 
+interface DocMatchItem {
+  record_id: number
+  record_type: string
+  form_code: string
+  form_name: string
+}
+
+interface DocSheetResult {
+  doc_id: number
+  record_id: number
+  record_type: string
+  form_code: string
+  form_name: string
+  title: string
+  status: string
+  tone: string
+}
+
 interface MenuItem {
   key: string
   label: string
@@ -228,7 +262,7 @@ interface MenuItem {
 }
 
 interface ReportType {
-  key: 'day' | 'week' | 'month'
+  key: 'week' | 'month'
   label: string
   desc: string
   icon: string
@@ -251,7 +285,6 @@ const TIME_RANGES = [
 ]
 
 const REPORT_TYPES: ReportType[] = [
-  { key: 'day', label: '日志', desc: '生成当日监理日志', icon: '📋' },
   { key: 'week', label: '周报', desc: '生成本周监理周报', icon: '📊' },
   { key: 'month', label: '月报', desc: '生成本月监理月报', icon: '📈' },
 ]
@@ -289,6 +322,16 @@ Page(themed({
     deletingBatch: false,
     submittingBatch: false,
 
+    // 个人工作记录（监理日记）置顶卡（原型 N1-N4）
+    diaryCardVisible: true,
+    diaryLoading: false,
+    diarySaving: false,
+    diaryDocs: [] as DiaryDocItem[],
+    showDiarySheet: false,
+    diaryIsEdit: false,
+    diarySelectedIds: [] as number[],
+    diaryPickMap: {} as Record<string, boolean>,
+
     // 详情弹窗
     showDetail: false,
     navHeight: 88,
@@ -307,6 +350,17 @@ Page(themed({
     loadingForms: false,
     /** 按需生成表单区块默认收起，点标题才展开（2026-11-12） */
     formChoiceExpanded: false,
+    /** 文书生成弹层：先展示按项目性质+工作内容自动匹配的表式（原型 N5/N6） */
+    showDocSheet: false,
+    docSheetRecordIds: [] as number[],
+    docSheetMatched: [] as DocMatchItem[],
+    docSheetSubmitting: false,
+    /** 生成 → 审批 → 归档 三段（原型：同页弹层内完成） */
+    docSheetStep: 'gen' as 'gen' | 'approve' | 'archive',
+    docSheetResults: [] as DocSheetResult[],
+    docSheetArchived: [] as DocSheetResult[],
+    docSheetActing: 0,
+    docSheetNote: '',
 
     // 记录菜单
     showRecordMenu: false,
@@ -314,10 +368,10 @@ Page(themed({
     currentRecordId: 0,
     currentRecordType: 'record' as 'record' | 'hazard',
 
-    // 报告生成弹窗
+    // 报告生成弹窗（原型「监理日志是项目级自动任务」：day 型移出，只留周报/月报）
     showReportModal: false,
     reportTypes: REPORT_TYPES,
-    reportType: 'day' as 'day' | 'week' | 'month',
+    reportType: 'week' as 'week' | 'month',
     reportDate: '',
     useLlm: true,
 
@@ -360,6 +414,7 @@ Page(themed({
     this.data.reportDate = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`
     this.setData({ selectedType: this.data.selectedType, reportDate: this.data.reportDate })
     const ready = this.load()
+    void ready.then(() => this.loadDiary())
     if (sharedId) {
       void ready.then(() => {
         this.openDetail({
@@ -452,6 +507,11 @@ Page(themed({
     }
   },
 
+  /** 置顶卡折叠（原型：置顶卡只是展示区，不占满屏） */
+  toggleDiaryCard() {
+    this.setData({ diaryCardVisible: !this.data.diaryCardVisible })
+  },
+
   clearChecked() {
     const records = this.data.records.map((item) => (item.checked ? { ...item, checked: false } : item))
     const hazards = this.data.hazards.map((item) => (item.checked ? { ...item, checked: false } : item))
@@ -525,7 +585,9 @@ Page(themed({
 
   // ========== 批量操作 ==========
   generateReport() {
-    this.setData({ showReportModal: true, generatingReport: false })
+    // 监理日志（day）已按原型移出本页（项目级自动任务），这里只开周报/月报
+    const reportType = (this.data.reportType as string) === 'day' ? 'week' : this.data.reportType
+    this.setData({ showReportModal: true, generatingReport: false, reportType: reportType as 'week' | 'month' })
   },
 
   async batchSubmit() {
@@ -658,13 +720,7 @@ Page(themed({
       const recordIds = this.getSelectedItems()
         .filter((item) => item.type === 'record')
         .map((item) => item.id)
-      if (this.data.reportType === 'day') {
-        // 监理日志：后端按日期聚合当日工作记录与隐患生成（项目维度）
-        result = await request<{ doc_id?: number }>(
-          `/document/generate-daily-log?date=${this.data.reportDate}`,
-          { method: 'POST', data: {}, timeout: 180000 },
-        )
-      } else {
+      if (this.data.reportType === 'week' || this.data.reportType === 'month') {
         // 周报/月报：LLM 生成文书，勾选的记录作为参考材料
         const typeLabel = this.data.reportType === 'week' ? '监理周报' : '监理月报'
         result = await request<{ doc_id?: number }>('/document/generate-with-llm', {
@@ -678,6 +734,12 @@ Page(themed({
           },
           timeout: 180000,
         })
+      } else {
+        // 兼容分支：历史数据里 reportType 仍可能是 day（监理日志属项目级自动任务，正常不会走到）
+        result = await request<{ doc_id?: number }>(
+          `/document/generate-daily-log?date=${this.data.reportDate}`,
+          { method: 'POST', data: {}, timeout: 180000 },
+        )
       }
       wx.hideLoading()
       wx.showToast({ title: '报告生成成功', icon: 'success' })
@@ -692,6 +754,343 @@ Page(themed({
     } finally {
       this.setData({ generatingReport: false })
     }
+  },
+
+  // ========== 个人工作记录（监理日记）：手动生成 + 24 点兜底 ==========
+
+  todayStr(): string {
+    const today = beijingNow()
+    const pad = (n: number) => String(n).padStart(2, '0')
+    return `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`
+  },
+
+  async loadDiary() {
+    this.setData({ diaryLoading: true })
+    try {
+      const result = await request<any>('/document/list', {
+        method: 'GET',
+        data: { doc_type: '监理日记', all_projects: false },
+      })
+      const list: DiaryDocItem[] = Array.isArray(result) ? result : (result?.documents || [])
+      const today = this.todayStr()
+      const docs = list.filter((d) => d.title === `监理日记_${today}`)
+      this.setData({ diaryDocs: docs })
+    } catch (error) {
+      console.warn('加载个人工作记录失败', error)
+      this.setData({ diaryDocs: [] })
+    } finally {
+      this.setData({ diaryLoading: false })
+    }
+  },
+
+  openDiarySheet(event?: any) {
+    const fromIds = Array.isArray(event) ? event as number[] : null
+    const ids = fromIds && fromIds.length
+      ? fromIds
+      : this.getSelectedItems().filter((item) => item.type === 'record').map((item) => item.id)
+    const diaryPickMap: Record<string, boolean> = {}
+    ids.forEach((id) => { diaryPickMap[String(id)] = true })
+    this.setData({
+      showDiarySheet: true,
+      diaryIsEdit: this.data.diaryDocs.length > 0,
+      diarySelectedIds: ids,
+      diaryPickMap,
+    })
+  },
+
+  closeDiarySheet() {
+    this.setData({ showDiarySheet: false })
+  },
+
+  toggleDiaryPick(event: WechatMiniprogram.TouchEvent) {
+    const id = Number(event.currentTarget.dataset.id)
+    if (!id) return
+    const picked = new Set(this.data.diarySelectedIds)
+    const diaryPickMap: Record<string, boolean> = { ...this.data.diaryPickMap }
+    if (picked.has(id)) { picked.delete(id); delete diaryPickMap[String(id)] }
+    else { picked.add(id); diaryPickMap[String(id)] = true }
+    this.setData({ diarySelectedIds: [...picked], diaryPickMap })
+  },
+
+  async confirmDiary(event?: WechatMiniprogram.TouchEvent) {
+    // “按当前全部记录生成”（24 点兜底语义的手动触发）：不传 record_ids，后端汇总本人当日全部记录
+    const autoAll = !!(event && event.currentTarget && event.currentTarget.dataset && event.currentTarget.dataset.auto)
+    const ids = autoAll ? [] : this.data.diarySelectedIds
+    if (!autoAll && !ids.length) {
+      wx.showToast({ title: '请至少选择一条记录', icon: 'none' })
+      return
+    }
+    this.setData({ diarySaving: true })
+    wx.showLoading({ title: '生成中...', mask: true })
+    try {
+      const today = this.todayStr()
+      const oldDocs = [...this.data.diaryDocs]
+      const res = await request<{ doc_id?: number }>(`/document/generate-daily-diary?date=${today}`, {
+        method: 'POST',
+        data: autoAll ? {} : { record_ids: ids },
+        timeout: 180000,
+      })
+      // 生成成功后再清理旧汇总：失败时不会先丢掉已生成的日记
+      for (const doc of oldDocs) {
+        if (res?.doc_id && doc.id === res.doc_id) continue
+        try { await request(`/document/${doc.id}`, { method: 'DELETE' }) } catch (_) { /* ignore */ }
+      }
+      wx.hideLoading()
+      wx.showToast({ title: (autoAll || !this.data.diaryIsEdit) ? '已生成并置顶' : '已更新', icon: 'success' })
+      this.setData({ showDiarySheet: false, diarySelectedIds: [] })
+      await this.loadDiary()
+    } catch (error) {
+      wx.hideLoading()
+      wx.showToast({ title: (error as Error).message, icon: 'none' })
+    } finally {
+      this.setData({ diarySaving: false })
+    }
+  },
+
+  openDiaryDoc(event: WechatMiniprogram.TouchEvent) {
+    const id = Number(event.currentTarget.dataset.id)
+    if (id) wx.navigateTo({ url: `/pages/documents/detail?id=${id}` })
+  },
+
+  // ========== 文书生成（多选 → 自动匹配表式） ==========
+
+  async openDocSheet() {
+    const ids = this.getSelectedItems().filter((item) => item.type === 'record').map((item) => item.id)
+    if (!ids.length) {
+      wx.showToast({ title: '请先勾选工作记录', icon: 'none' })
+      return
+    }
+    this.setData({
+      showDocSheet: true,
+      docSheetRecordIds: ids,
+      docSheetMatched: [],
+      docSheetSubmitting: false,
+      docSheetStep: 'gen',
+      docSheetResults: [],
+      docSheetArchived: [],
+      docSheetActing: 0,
+      docSheetNote: '',
+    })
+    wx.showLoading({ title: '匹配表式中…', mask: true })
+    try {
+      const matched: DocMatchItem[] = []
+      for (const rid of ids) {
+        try {
+          const res = await request<{ forms?: { form_code: string; name: string }[] }>(`/form-docs/record/${rid}/forms`)
+          const forms = res.forms || []
+          const def = forms[0]
+          const rec = this.data.records.find((r) => r.id === rid)
+          matched.push({
+            record_id: rid,
+            record_type: rec?.record_type || '记录',
+            form_code: def?.form_code || '',
+            form_name: def?.name || '',
+          })
+        } catch (_) {
+          matched.push({ record_id: rid, record_type: '记录', form_code: '', form_name: '' })
+        }
+      }
+      this.setData({ docSheetMatched: matched })
+    } finally {
+      wx.hideLoading()
+    }
+  },
+
+  closeDocSheet() {
+    this.setData({ showDocSheet: false })
+  },
+
+  async confirmDocSheet() {
+    const items = this.data.docSheetMatched.filter((m) => m.form_code)
+    if (!items.length) {
+      wx.showToast({ title: '没有可生成的表式', icon: 'none' })
+      return
+    }
+    this.setData({ docSheetSubmitting: true })
+    wx.showLoading({ title: '生成文书中…', mask: true })
+    const results: DocSheetResult[] = []
+    const fails: string[] = []
+    try {
+      for (const item of items) {
+        try {
+          const res = await request<{ doc_id: number; title?: string; status?: string }>('/form-docs/generate', {
+            method: 'POST',
+            data: { record_id: item.record_id, form_code: item.form_code },
+            timeout: 60000,
+          })
+          results.push({
+            doc_id: res.doc_id,
+            record_id: item.record_id,
+            record_type: item.record_type,
+            form_code: item.form_code,
+            form_name: item.form_name,
+            title: res.title || item.form_name,
+            status: res.status || '草稿',
+            tone: this.docTone(res.status || '草稿'),
+          })
+        } catch (e) {
+          fails.push(`#${item.record_id} ${(e as Error).message}`)
+        }
+      }
+      wx.hideLoading()
+      this.setData({
+        docSheetResults: results,
+        docSheetArchived: results.filter((item) => item.tone === 'ok'),
+        docSheetStep: results.length ? 'approve' : 'gen',
+        docSheetNote: fails.length
+          ? `已生成 ${results.length} 份，${fails.length} 份失败：${fails.slice(0, 2).join('；')}`
+          : `已生成 ${results.length} 份文书。审批状态只在系统里，成品签名栏/备注栏留空。`,
+      })
+      if (!results.length && fails.length) {
+        wx.showModal({ title: '生成失败', content: fails.slice(0, 6).join('\n'), showCancel: false })
+      } else {
+        wx.showToast({ title: `已生成 ${results.length} 份`, icon: 'success' })
+      }
+      // 生成后不关闭弹层：审批/归档在同页分段继续（原型要求）
+      this.setData({ selectMode: false, selectedCount: 0, allSelected: false })
+      this.clearChecked()
+      void this.load()
+    } finally {
+      wx.hideLoading()
+      this.setData({ docSheetSubmitting: false })
+    }
+  },
+
+  docTone(status: string): string {
+    if (/驳回|退回/.test(status)) return 'warn'
+    if (/待审批|待审核|审核中/.test(status)) return 'pending'
+    if (/已归档|已审批|通过/.test(status)) return 'ok'
+    return 'draft'
+  },
+
+  switchDocStep(event: WechatMiniprogram.TouchEvent) {
+    const step = String(event.currentTarget.dataset.step || 'gen') as 'gen' | 'approve' | 'archive'
+    if (step === 'approve' && !this.data.docSheetResults.length) {
+      wx.showToast({ title: '请先生成文书', icon: 'none' })
+      return
+    }
+    this.setData({ docSheetStep: step })
+  },
+
+  /** 刷新单份文书状态：优先用动作接口返回值，缺失时再查详情 */
+  async refreshDocResult(docId: number, status?: string) {
+    let nextStatus = status || ''
+    let nextTitle = ''
+    if (!nextStatus) {
+      try {
+        const res = await request<{ status?: string; title?: string }>(`/document/${docId}`)
+        nextStatus = res.status || ''
+        nextTitle = res.title || ''
+      } catch (_) {
+        // 状态刷新失败不阻断审批动作
+        return
+      }
+    }
+    const results = this.data.docSheetResults.map((item) =>
+      item.doc_id === docId
+        ? {
+            ...item,
+            status: nextStatus || item.status,
+            title: nextTitle || item.title,
+            tone: this.docTone(nextStatus || item.status),
+          }
+        : item,
+    )
+    this.setData({
+      docSheetResults: results,
+      docSheetArchived: results.filter((item) => item.tone === 'ok'),
+    })
+  },
+
+  /** 提交审批：必签项未完成时后端返回 400，提示并引导去签认 */
+  async submitDoc(event: WechatMiniprogram.TouchEvent) {
+    const docId = Number(event.currentTarget.dataset.docId)
+    if (!docId || this.data.docSheetActing) return
+    this.setData({ docSheetActing: docId })
+    wx.showLoading({ title: '提交中…', mask: true })
+    try {
+      const res = await request<{ status?: string }>(`/document/${docId}/submit`, { method: 'POST' })
+      wx.hideLoading()
+      await this.refreshDocResult(docId, res?.status)
+      this.setData({ docSheetNote: '已提交。需总监签发的文书进入审批，其余直接归档。' })
+    } catch (error) {
+      wx.hideLoading()
+      const message = (error as Error).message || ''
+      if (/必签|签认/.test(message)) {
+        const confirm = await wx.showModal({
+          title: '还差必签项',
+          content: message,
+          confirmText: '去签认',
+          cancelText: '稍后',
+        })
+        if (confirm.confirm) wx.navigateTo({ url: `/pages/documents/detail?id=${docId}` })
+      } else {
+        wx.showModal({ title: '提交失败', content: message, showCancel: false })
+      }
+    } finally {
+      this.setData({ docSheetActing: 0 })
+    }
+  },
+
+  async approveDoc(event: WechatMiniprogram.TouchEvent) {
+    const docId = Number(event.currentTarget.dataset.docId)
+    if (!docId || this.data.docSheetActing) return
+    const confirm = await wx.showModal({
+      title: '审批通过',
+      content: '确认通过这份文书？通过后状态记为已审批，成品不写入审批字样。',
+    })
+    if (!confirm.confirm) return
+    this.setData({ docSheetActing: docId })
+    wx.showLoading({ title: '审批中…', mask: true })
+    try {
+      const res = await request<{ status?: string }>(`/document/${docId}/approve`, { method: 'POST' })
+      wx.hideLoading()
+      await this.refreshDocResult(docId, res?.status)
+      this.setData({ docSheetNote: '已审批通过。' })
+    } catch (error) {
+      wx.hideLoading()
+      wx.showModal({ title: '审批失败', content: (error as Error).message, showCancel: false })
+    } finally {
+      this.setData({ docSheetActing: 0 })
+    }
+  },
+
+  async rejectDoc(event: WechatMiniprogram.TouchEvent) {
+    const docId = Number(event.currentTarget.dataset.docId)
+    if (!docId || this.data.docSheetActing) return
+    const input = await wx.showModal({
+      title: '退回文书',
+      editable: true,
+      placeholderText: '填写退回原因（可留空）',
+    })
+    if (!input.confirm) return
+    this.setData({ docSheetActing: docId })
+    wx.showLoading({ title: '退回中…', mask: true })
+    try {
+      const res = await request<{ status?: string }>(`/document/${docId}/reject`, {
+        method: 'POST',
+        data: { reason: (input.content || '').trim() },
+      })
+      wx.hideLoading()
+      await this.refreshDocResult(docId, res?.status)
+      this.setData({ docSheetNote: '已退回，审批状态只在系统里，成品不写审核字样。' })
+    } catch (error) {
+      wx.hideLoading()
+      wx.showModal({ title: '退回失败', content: (error as Error).message, showCancel: false })
+    } finally {
+      this.setData({ docSheetActing: 0 })
+    }
+  },
+
+  openDocDetail(event: WechatMiniprogram.TouchEvent) {
+    const docId = Number(event.currentTarget.dataset.docId)
+    if (docId) wx.navigateTo({ url: `/pages/documents/detail?id=${docId}` })
+  },
+
+  openDocArchive(event: WechatMiniprogram.TouchEvent) {
+    const docId = Number(event.currentTarget.dataset.docId)
+    if (!docId) return
+    wx.navigateTo({ url: `/pages/documents/detail?id=${docId}` })
   },
 
   // ========== 记录菜单 ==========
@@ -765,15 +1164,14 @@ Page(themed({
     else wx.showToast({ title: '请先生成该记录的文书', icon: 'none' })
   },
 
-  /** 详情弹窗「生成文书」：记录 → 省统表文书并同步我的资料库；隐患 → 安全隐患整改通知单 */
+  /** 详情弹窗「生成文书」：记录 → 省统表文书并同步我的资料库；隐患 → 安全隐患整改通知单。
+   *
+   * 🔴 2026-11-17 改：不传 form_code，让后端 effective_record_form_code() 自动判断
+   * 工程类型 + 记录类型 → 对应表式。用户无需手动选表。
+   */
   async generateRecordDocument(event?: WechatMiniprogram.TouchEvent) {
     const record = this.data.detail
     if (!record?.id || this.data.generatingDoc) return
-    const formCode = String(event?.currentTarget?.dataset?.formCode || '')
-    if (this.data.detailType === 'record' && !formCode && !record.generated_doc_id) {
-      wx.showToast({ title: '请先选择要生成的表单', icon: 'none' })
-      return
-    }
     this.setData({ generatingDoc: true })
     wx.showLoading({ title: '生成文书...', mask: true })
     try {
@@ -787,9 +1185,10 @@ Page(themed({
         })
         docId = res.doc_id
       } else {
+        // 🔴 不传 form_code，后端 effective_record_form_code() 自动判断表式
         const res = await request<{ doc_id: number; title: string }>('/form-docs/generate', {
           method: 'POST',
-          data: { record_id: record.id, form_code: formCode || undefined },
+          data: { record_id: record.id },
           timeout: 60000,
         })
         docId = res.doc_id
@@ -819,6 +1218,38 @@ Page(themed({
     const editForm = { ...this.data.editForm }
     editForm[field] = event.detail.value
     this.setData({ editForm })
+  },
+
+  /** 「具体位置」旁的定位按钮：微信内置地图选点，取可读地址（省市区+街道门牌+POI 名）回填。
+   *  用 chooseLocation 而非 getLocation —— 后者只给经纬度，监理记录要的是能直接看懂的地址文字。
+   *  返回值 name=地点名、address=详细地址；两者拼接，缺一取其一。 */
+  async chooseLocationForEdit() {
+    const allowed = await ensurePrivacy('位置信息用于填写工作记录的具体位置，')
+    if (!allowed) return
+    wx.chooseLocation({
+      success: (res) => {
+        const name = (res.name || '').trim()
+        const address = (res.address || '').trim()
+        const readable = [name, address].filter(Boolean).filter((part, i, arr) => arr.indexOf(part) === i).join(' · ')
+        if (!readable) {
+          wx.showToast({ title: '未获取到地址，请手动填写', icon: 'none' })
+          return
+        }
+        this.setData({ 'editForm.location': readable })
+        wx.showToast({ title: '已填入具体位置', icon: 'success' })
+      },
+      fail: (err) => {
+        // 用户主动取消不打扰；仅授权/系统失败才引导去设置
+        const msg = String((err as { errMsg?: string })?.errMsg || '')
+        if (/cancel/i.test(msg)) return
+        wx.showModal({
+          title: '无法获取位置',
+          content: '请在设置中允许位置权限，也可直接在输入框手动填写具体位置。',
+          confirmText: '去设置',
+          success: (r) => { if (r.confirm) wx.openSetting({}) },
+        })
+      },
+    })
   },
 
   onEditDateChange(event: WechatMiniprogram.PickerChange) {
@@ -1097,7 +1528,20 @@ Page(themed({
   },
 
   // ========== 通用 ==========
+  /** 「全部」入口：选了巡视/验收等类型后再点它，直接回到全部列表，
+   *  同时保持抽屉展开，方便接着换其它类型；已是全部时仍是展开/收起抽屉。 */
   toggleTypeDrawer() {
+    if (this.data.selectedType !== 'all') {
+      this.setData({
+        selectedType: 'all',
+        selectMode: false,
+        selectedCount: 0,
+        allSelected: false,
+        showTypeDrawer: true,
+      })
+      this.load()
+      return
+    }
     this.setData({ showTypeDrawer: !this.data.showTypeDrawer })
   },
 

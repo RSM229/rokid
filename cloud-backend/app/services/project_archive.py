@@ -349,7 +349,7 @@ async def _target_folder_id(
 async def _ensure_document_file(
     db: AsyncSession, doc: Document
 ) -> Path | None:
-    """Return a current DOCX/PDF, rendering one for legacy rows when possible."""
+    """Return a current DOCX/PDF/Markdown, rendering one for legacy rows when possible."""
     source = _current_source_path(doc)
     if source is not None:
         return source
@@ -380,7 +380,7 @@ async def sync_document_to_project_archive(
     source = await _ensure_document_file(db, doc)
     if source is None:
         doc.archive_sync_status = "pending"
-        doc.archive_sync_error = doc.archive_sync_error or "文书尚无可归档的 DOCX 或 PDF 文件"
+        doc.archive_sync_error = doc.archive_sync_error or "文书尚无可归档的 DOCX、PDF 或 Markdown 文件"
         return None
     target: Path | None = None
     previous_path: Path | None = None
@@ -473,6 +473,7 @@ def _current_source_path(doc: Document) -> Path | None:
             for candidate in (
                 _source_path(doc.signed_pdf_path),
                 _source_path(doc.pdf_path),
+                _source_path(doc.markdown_path),
                 _source_path(doc.docx_path),
             )
             if candidate is not None and candidate.exists()
@@ -498,6 +499,7 @@ async def list_archive_candidates(
                 Document.project_id == project_id,
                 (Document.docx_path.is_not(None))
                 | (Document.pdf_path.is_not(None))
+                | (Document.markdown_path.is_not(None))
                 | (Document.signed_pdf_path.is_not(None))
                 | (Document.form_code.is_not(None)),
             )

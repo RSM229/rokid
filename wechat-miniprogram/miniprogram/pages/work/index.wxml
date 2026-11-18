@@ -24,6 +24,37 @@
     </view>
   </view>
 
+  <!-- 个人工作记录（监理日记）置顶卡：原型要求手动生成 / 24 点兜底、生成后置顶可增改 -->
+  <view wx:if="{{!loading || records.length || hazards.length || diaryDocs.length}}" class="diary-card {{diaryDocs.length ? 'pinned' : 'pending'}}">
+    <view class="diary-card-head">
+      <view class="diary-card-title">个人工作记录 · {{timeRangeLabel === '今天' ? '今日' : '汇总'}}</view>
+      <view class="diary-card-actions">
+        <text wx:if="{{diaryDocs.length}}" class="diary-badge">已置顶</text>
+        <text class="diary-fold" bindtap="toggleDiaryCard">{{diaryCardVisible ? '收起' : '展开'}}</text>
+      </view>
+    </view>
+    <block wx:if="{{diaryCardVisible}}">
+      <view wx:if="{{diaryLoading}}" class="diary-meta">正在加载…</view>
+      <block wx:elif="{{diaryDocs.length}}">
+        <view class="diary-meta">已生成 {{diaryDocs.length}} 份（当日个人汇总，仅个人可见）</view>
+        <view class="diary-doc-row" wx:for="{{diaryDocs}}" wx:key="id" bindtap="openDiaryDoc" data-id="{{item.id}}">
+          <text class="diary-doc-title">{{item.title}}</text>
+          <text class="diary-doc-open">查看 ›</text>
+        </view>
+        <view class="diary-card-btns">
+          <button size="mini" class="primary" bindtap="openDiarySheet">增加内容 / 修改</button>
+        </view>
+      </block>
+      <block wx:else>
+        <view class="diary-meta">尚未生成。勾选当日部分或全部记录后生成；24:00 前未手动生成将由系统自动汇总当时全部记录。</view>
+        <view class="diary-card-btns">
+          <button size="mini" class="primary" bindtap="openDiarySheet">选择记录生成</button>
+          <button size="mini" bindtap="confirmDiary" data-auto="1">按当前全部记录生成</button>
+        </view>
+      </block>
+    </block>
+  </view>
+
   <!-- 全部模式：同时显示工作记录和隐患 -->
   <block wx:if="{{selectedType === 'all'}}">
     <view wx:if="{{selectMode}}" class="select-hint">点击卡片勾选记录，勾选后可在底部操作栏批量处理</view>
@@ -137,17 +168,18 @@
     </view>
   </block>
 
-  <!-- 批量操作栏（任何弹层打开时隐藏，避免压住弹层） -->
-  <view wx:if="{{selectMode && selectedCount > 0 && !showTimeSheet && !showRecordMenu && !showDetail && !showReportModal && !showEditModal}}" class="batch-bar">
+  <!-- 批量操作栏（原型：生成个人工作记录 / 生成文书；监理日志为项目级自动任务不在此处） -->
+  <view wx:if="{{selectMode && selectedCount > 0 && !showTimeSheet && !showRecordMenu && !showDetail && !showReportModal && !showEditModal && !showDiarySheet && !showDocSheet}}" class="batch-bar">
     <view class="batch-top">
       <view class="batch-info">已选 {{selectedCount}} 条</view>
       <view class="batch-select-all" bindtap="toggleSelectAll">{{allSelected ? '取消全选' : '全选'}}</view>
     </view>
     <view class="batch-actions">
-      <button size="mini" class="primary" bindtap="batchSubmit" loading="{{submittingBatch}}">提交审批</button>
-      <button size="mini" class="primary" bindtap="generateReport" loading="{{generatingReport}}">生成报告</button>
+      <button size="mini" class="primary" bindtap="openDiarySheet">生成个人工作记录</button>
+      <button size="mini" class="primary" bindtap="openDocSheet">生成文书</button>
       <button size="mini" class="danger" bindtap="batchDelete" loading="{{deletingBatch}}">删除</button>
     </view>
+    <view class="batch-hint">监理日志由项目级自动任务按设定时间点生成，不在此处操作。</view>
   </view>
 
   <!-- 时间筛选弹窗 -->
@@ -289,45 +321,22 @@
         <button class="doc-btn" bindtap="openTypeModal">修改记录类型</button>
       </view>
 
-      <!-- 文书操作：默认收起，点开才选表式（2026-11-12）；工作记录本身不会自动生成表单。 -->
-      <view wx:if="{{detailType === 'record' && !detail.generated_doc_id}}" class="detail-section form-choice-section">
-        <view class="form-choice-toggle" bindtap="toggleFormChoice">
-          <view class="form-choice-toggle-copy">
-            <text class="form-choice-toggle-title">按需生成表单<text wx:if="{{detailForms.length}}" class="form-choice-count"> · {{detailForms.length}} 种</text></text>
-            <text class="form-choice-toggle-meta">{{formChoiceExpanded ? '收起表单列表' : '点开选择需要的表式'}}</text>
-          </view>
-          <text class="form-choice-arrow {{formChoiceExpanded ? 'expanded' : ''}}">›</text>
-        </view>
-        <block wx:if="{{formChoiceExpanded}}">
-          <view class="form-choice-body">
-            <text class="form-choice-hint">当前只是工作记录。选择一种需要的表单后再生成，未选择时不会创建文书。</text>
-            <view wx:if="{{loadingForms}}" class="form-choice-hint">正在读取可用表单…</view>
-            <view wx:elif="{{!detailForms.length}}" class="form-choice-hint">当前记录暂无可用表单。</view>
-            <view wx:else class="form-choice-list">
-              <view wx:for="{{detailForms}}" wx:key="form_code" class="form-choice {{item.form_code === selectedFormCode ? 'selected' : ''}}" data-form-code="{{item.form_code}}" bindtap="selectRecordForm">
-                <view class="form-choice-main"><text class="form-choice-name">{{item.name}}</text><text wx:if="{{item.form_number}}" class="form-choice-number">{{item.form_number}}</text></view>
-                <text class="form-choice-check">{{item.form_code === selectedFormCode ? '✓' : ''}}</text>
-              </view>
-            </view>
-            <button wx:if="{{selectedFormCode}}" class="doc-btn" bindtap="generateRecordDocument" data-form-code="{{selectedFormCode}}" loading="{{generatingDoc}}">生成选定表单</button>
-          </view>
-        </block>
-      </view>
-      <!-- 已有文书时仍允许查看；如需改用其他表式可先编辑/重新选择。 -->
+      <!-- 🔴 2026-11-17 改：去掉"按需选表式"折叠区 → 用户点"生成文书"按钮，
+           后端 effective_record_form_code() 自动判断：工程类型（房建/市政）+ 记录类型 + 是否危大 → 对应表式 -->
       <view class="doc-btn-row">
         <button wx:if="{{detailType === 'record'}}" class="doc-btn ghost" bindtap="openCollaboration">发起协作</button>
         <button class="doc-btn ghost" bindtap="editDetailRecord">编辑修改</button>
         <button wx:if="{{detail.generated_doc_id}}" class="doc-btn" bindtap="openRecordDocument">查看文书</button>
-        <button wx:elif="{{detailType === 'hazard'}}" class="doc-btn" bindtap="generateRecordDocument" loading="{{generatingDoc}}">生成整改通知</button>
+        <button wx:elif="{{detailType === 'record' || detailType === 'hazard'}}" class="doc-btn" bindtap="generateRecordDocument" loading="{{generatingDoc}}">生成文书</button>
       </view>
     </scroll-view>
   </view>
 
-  <!-- 报告生成弹窗 -->
+  <!-- 报告生成弹窗（周报/月报；监理日志为项目级自动任务） -->
   <view wx:if="{{showReportModal}}" class="mask" bindtap="closeReportModal"></view>
   <view wx:if="{{showReportModal}}" class="sheet">
     <view class="sheet-head">
-      <view class="title">生成报告</view>
+      <view class="title">生成周报 / 月报</view>
       <text class="close" bindtap="closeReportModal">×</text>
     </view>
     <view class="report-options">
@@ -376,7 +385,10 @@
       <textarea wx:if="{{editForm.record_type === '验收'}}" class="edit-field textarea" value="{{editForm.acceptance_content}}" placeholder="验收内容（必填）" bindinput="onEditInput" data-field="acceptance_content" />
       <textarea wx:if="{{editForm.record_type === '验收'}}" class="edit-field textarea" value="{{editForm.acceptance_participants}}" placeholder="实际参验单位及人员（可从项目资料带出后确认）" bindinput="onEditInput" data-field="acceptance_participants" />
       <input class="edit-field" value="{{editForm.section}}" placeholder="施工区域" bindinput="onEditInput" data-field="section" />
-      <input class="edit-field" value="{{editForm.location}}" placeholder="具体位置" bindinput="onEditInput" data-field="location" />
+      <view class="edit-location-row">
+        <input class="edit-field" value="{{editForm.location}}" placeholder="具体位置" bindinput="onEditInput" data-field="location" />
+        <view class="edit-locate-btn" bindtap="chooseLocationForEdit">定位</view>
+      </view>
       <textarea class="edit-field textarea" value="{{editForm.work_content}}" placeholder="工作内容" bindinput="onEditInput" data-field="work_content" />
       <input class="edit-field" value="{{editForm.weather}}" placeholder="天气" bindinput="onEditInput" data-field="weather" wx:if="{{editForm.record_type === '巡视'}}" />
       <textarea class="edit-field textarea" value="{{editForm.inspection_remark}}" placeholder="巡视备注" bindinput="onEditInput" data-field="inspection_remark" wx:if="{{editForm.record_type === '巡视'}}" />
@@ -424,6 +436,126 @@
       <button class="type-modal-cancel" bindtap="closeTypeModal">取消</button>
       <button class="type-modal-confirm" bindtap="confirmRecordType"
               loading="{{savingType}}" disabled="{{!selectedTypeValue || savingType}}">确定</button>
+    </view>
+  </view>
+
+  <!-- 个人工作记录（监理日记）生成/修改弹层 -->
+  <view wx:if="{{showDiarySheet}}" class="mask" bindtap="closeDiarySheet"></view>
+  <view wx:if="{{showDiarySheet}}" class="sheet diary-sheet">
+    <view class="sheet-head">
+      <view class="title">{{diaryIsEdit ? '修改个人工作记录' : '生成个人工作记录'}} · {{timeRangeLabel}}</view>
+      <text class="close" bindtap="closeDiarySheet">×</text>
+    </view>
+    <scroll-view scroll-y class="diary-sheet-scroll">
+      <view class="diary-sheet-hint">勾选当日部分或全部工作记录，生成个人当日汇总并置顶（仅个人可见）。</view>
+      <view wx:if="{{!records.length}}" class="empty">当前列表暂无工作记录</view>
+      <view wx:for="{{records}}" wx:key="id" class="diary-pick-row" bindtap="toggleDiaryPick" data-id="{{item.id}}">
+        <checkbox checked="{{diaryPickMap[item.id]}}" />
+        <view class="diary-pick-main">
+          <view class="diary-pick-title">{{item.titleText || item.record_type}}</view>
+          <view class="diary-pick-meta">{{item.displayTime}} {{item.metaText}}</view>
+        </view>
+      </view>
+    </scroll-view>
+    <view class="sheet-actions">
+      <button class="primary" bindtap="confirmDiary" loading="{{diarySaving}}">{{diaryIsEdit ? '保存修改' : '生成并置顶'}}</button>
+      <button bindtap="closeDiarySheet">取消</button>
+    </view>
+  </view>
+
+  <!-- 文书弹层：生成 → 审批 → 归档 三段（原型：审批状态只在系统里，成品不写审批字样） -->
+  <view wx:if="{{showDocSheet}}" class="mask" bindtap="closeDocSheet"></view>
+  <view wx:if="{{showDocSheet}}" class="sheet doc-sheet">
+    <view class="sheet-head">
+      <view class="title">文书处理 · 已选 {{docSheetRecordIds.length}} 条</view>
+      <text class="close" bindtap="closeDocSheet">×</text>
+    </view>
+
+    <view class="doc-step-bar">
+      <view class="doc-step {{docSheetStep === 'gen' ? 'active' : ''}} {{docSheetResults.length ? 'done' : ''}}" data-step="gen" bindtap="switchDocStep">
+        <text class="doc-step-no">1</text><text class="doc-step-label">生成</text>
+      </view>
+      <view class="doc-step-line"></view>
+      <view class="doc-step {{docSheetStep === 'approve' ? 'active' : ''}} {{docSheetResults.length ? 'done' : ''}}" data-step="approve" bindtap="switchDocStep">
+        <text class="doc-step-no">2</text><text class="doc-step-label">审批</text>
+      </view>
+      <view class="doc-step-line"></view>
+      <view class="doc-step {{docSheetStep === 'archive' ? 'active' : ''}}" data-step="archive" bindtap="switchDocStep">
+        <text class="doc-step-no">3</text><text class="doc-step-label">归档</text>
+      </view>
+    </view>
+
+    <!-- 第 1 段：匹配表式并生成 -->
+    <block wx:if="{{docSheetStep === 'gen'}}">
+      <scroll-view scroll-y class="diary-sheet-scroll">
+        <view class="diary-sheet-hint">按项目性质与记录类型自动匹配省统表表式，逐条生成对应表式文书（同类合并/异类分表仍按现有路由结果）。</view>
+        <view wx:if="{{!docSheetMatched.length}}" class="empty">所选记录暂无可自动匹配的表式</view>
+        <view wx:for="{{docSheetMatched}}" wx:key="record_id" class="doc-match-row">
+          <view class="doc-match-main">
+            <view class="doc-match-title">{{item.record_type}} · #{{item.record_id}}</view>
+            <view class="doc-match-form">{{item.form_name || item.form_code || '待匹配'}}</view>
+          </view>
+          <view class="doc-match-status">{{item.form_code ? '可生成' : '需手选'}}</view>
+        </view>
+      </scroll-view>
+    </block>
+
+    <!-- 第 2 段：审批（草稿可提交、待审批可通过/退回） -->
+    <block wx:elif="{{docSheetStep === 'approve'}}">
+      <scroll-view scroll-y class="diary-sheet-scroll">
+        <view class="diary-sheet-hint">审批状态只记录在系统里，成品签名栏与备注栏留空；需签发的文书提交前必须先完成必签项。</view>
+        <view wx:if="{{!docSheetResults.length}}" class="empty">还没有生成的文书</view>
+        <view wx:for="{{docSheetResults}}" wx:key="doc_id" class="doc-result-row">
+          <view class="doc-result-head">
+            <text class="doc-result-title">{{item.title}}</text>
+            <text class="doc-result-chip chip-{{item.tone}}">{{item.status}}</text>
+          </view>
+          <view class="doc-result-meta">{{item.record_type}} · {{item.form_name || item.form_code}}</view>
+          <view class="doc-result-btns">
+            <block wx:if="{{item.tone === 'draft' || item.tone === 'warn'}}">
+              <button size="mini" class="primary" data-doc-id="{{item.doc_id}}" bindtap="submitDoc" loading="{{docSheetActing === item.doc_id}}">提交审批</button>
+            </block>
+            <block wx:if="{{item.tone === 'pending'}}">
+              <button size="mini" class="primary" data-doc-id="{{item.doc_id}}" bindtap="approveDoc" loading="{{docSheetActing === item.doc_id}}">通过</button>
+              <button size="mini" data-doc-id="{{item.doc_id}}" bindtap="rejectDoc">退回</button>
+            </block>
+            <button size="mini" data-doc-id="{{item.doc_id}}" bindtap="openDocDetail">查看文书</button>
+          </view>
+        </view>
+      </scroll-view>
+    </block>
+
+    <!-- 第 3 段：归档（正式文件落资料库） -->
+    <block wx:else>
+      <scroll-view scroll-y class="diary-sheet-scroll">
+        <view class="diary-sheet-hint">已审批/已归档的文书统一进资料库「项目文件夹/工作记录与表单」，此处只做跳转查看，不在本页重复签认。</view>
+        <view wx:if="{{!docSheetArchived.length}}" class="empty">还没有已归档的文书，先完成审批</view>
+        <view wx:for="{{docSheetArchived}}" wx:key="doc_id" class="doc-result-row">
+          <view class="doc-result-head">
+            <text class="doc-result-title">{{item.title}}</text>
+            <text class="doc-result-chip chip-{{item.tone}}">{{item.status}}</text>
+          </view>
+          <view class="doc-result-meta">{{item.record_type}} · {{item.form_name || item.form_code}}</view>
+          <view class="doc-result-btns">
+            <button size="mini" class="primary" data-doc-id="{{item.doc_id}}" bindtap="openDocArchive">查看归档</button>
+          </view>
+        </view>
+      </scroll-view>
+    </block>
+
+    <view wx:if="{{docSheetNote}}" class="doc-sheet-note">{{docSheetNote}}</view>
+
+    <view class="sheet-actions">
+      <block wx:if="{{docSheetStep === 'gen'}}">
+        <button class="primary" bindtap="confirmDocSheet" loading="{{docSheetSubmitting}}" disabled="{{!docSheetMatched.length}}">生成文书</button>
+      </block>
+      <block wx:elif="{{docSheetStep === 'approve'}}">
+        <button class="primary" data-step="archive" bindtap="switchDocStep" disabled="{{!docSheetArchived.length}}">下一步：归档</button>
+      </block>
+      <block wx:else>
+        <button bindtap="closeDocSheet">完成</button>
+      </block>
+      <button bindtap="closeDocSheet">关闭</button>
     </view>
   </view>
 
