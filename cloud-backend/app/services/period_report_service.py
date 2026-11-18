@@ -1637,6 +1637,21 @@ async def generate_daily_batch(
                 report["errors"].append(f"日志[{pid}] {str(exc)[:200]}")
                 continue
 
+            # N11（按统表要求出两份）：监理日志之外顺带出安全监理日志。
+            # 失败不影响主日志（安全日志缺一份不阻断，守护退避会重试）。
+            try:
+                sres = await generate_safety_log(
+                    db, pid, day, supervisor=creator, force=force
+                )
+                report.setdefault("safety", []).append(
+                    f"{pid}#{sres.get('doc_id')}"
+                    f"{'（已存在）' if sres.get('skipped') else ''}"
+                )
+            except Exception as exc:  # noqa: BLE001
+                await db.rollback()
+                logger.exception("项目 %s 安全监理日志生成失败", pid)
+                report["errors"].append(f"安全日志[{pid}] {str(exc)[:200]}")
+
             # 目标日若是一周的最后一天（周日），顺带把这一周的周报出了。
             # 判定挂在"目标日"而非"运行日"上，这样早上补跑昨天的日志时，
             # 周一 08:00（目标日=周日）自然就把上周的周报一并结了。

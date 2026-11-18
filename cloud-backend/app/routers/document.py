@@ -74,7 +74,14 @@ class DailyLogExtras(BaseModel):
 
 
 # 需要总监签发的文书类型
-NEED_APPROVAL_TYPES = {DocType.RECTIFICATION.value, DocType.MONTHLY.value, DocType.WEEKLY.value}
+# N6/N7（2026-11-18）：危大工程巡视记录按原型口径需总监审批（安全责任文书），
+# 加入需签发集合——其余记录型文书（旁站/巡视/验收等）仍提交即归档。
+NEED_APPROVAL_TYPES = {
+    DocType.RECTIFICATION.value,
+    DocType.MONTHLY.value,
+    DocType.WEEKLY.value,
+    "危大工程巡视记录",
+}
 
 
 def _is_diary_doc(doc: Document) -> bool:
