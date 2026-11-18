@@ -48,6 +48,8 @@ _VALUE_ALIASES: dict[str, tuple[str, ...]] = {
     "problems": ("problems", "problem"),
     "treatment": ("treatment", "handle"),
     "weather": ("weather",),
+    # 验收「举牌验收照片」：照片实际落在 inspection_photos，不能因为键名不同就报缺项
+    "photo": ("photo", "photos", "inspection_photos"),
 }
 
 # 记录类型无法映射到省统表时（例如 A 层「待定」草稿），只提示事实字段，
@@ -275,7 +277,10 @@ async def enrich_action_result(
                 record_type = known
                 break
 
-    missing = missing_fields(record_type, values)
+    # 工具已按真实写库的记录算好缺项时以它为准：多图分组/批量建档的 args
+    # 没有逐条内容，拿 args 再算一次会误报缺项（2026-11-18 真机）。
+    precomputed = (result.get("data") or {}).get("missing_fields")
+    missing = precomputed if isinstance(precomputed, list) else missing_fields(record_type, values)
     result["missing_fields"] = missing
     if missing:
         result["reply"] = str(result.get("reply") or "").rstrip() + "\n" + missing_summary(missing)

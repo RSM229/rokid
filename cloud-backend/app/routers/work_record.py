@@ -1718,7 +1718,7 @@ def _detail_acceptance_points_text(record: WorkRecord) -> str:
     items = [str(p).strip() for p in items if str(p).strip()]
     if not items:
         return ""
-    return "；".join(items) + "（按工作内容匹配，待确认）"
+    return "\n".join(items) + "（按工作内容匹配，待确认）"
 
 
 @router.get("/{record_id}")

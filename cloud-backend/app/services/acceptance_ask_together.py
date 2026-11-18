@@ -371,7 +371,7 @@ async def aggregate_reply(
 # ⑥ 结论生成
 # ---------------------------------------------------------------------------
 def generate_conclusion(aggregated: list[dict]) -> str:
-    """据逐条归集结果生成验收结论（与模版示例一致）。"""
+    """据逐条归集结果生成监理验收结论（与省统表 YS 栏位⑥示例一致）。"""
     if any(a["conclusion"] == "不符合" for a in aggregated):
         bad = [
             f"第{a['item_index']}项{a['note']}".rstrip("：")
@@ -386,6 +386,20 @@ def generate_conclusion(aggregated: list[dict]) -> str:
     if n_na:
         return f"验收合格（{n_na} 项经确认不适用）。同意进入下道工序。"
     return "验收合格，同意进入下道工序。"
+
+
+def generate_self_check_conclusion(aggregated: list[dict]) -> str:
+    """据逐条归集结果生成施工单位自检结论（省统表 YS 栏位⑥-自检）。
+
+    语义：施工单位对自己做的工程的自检确认。若监理验收发现不符合项，
+    则自检结论需如实反映（不能一律写"合格"），供施工单位签字确认。
+    """
+    if any(a["conclusion"] == "不符合" for a in aggregated):
+        bad_count = sum(1 for a in aggregated if a["conclusion"] == "不符合")
+        return f"施工单位自检情况待确认（监理验收发现 {bad_count} 项不符合，需整改后复验）"
+    if all(a["conclusion"] == "不适用" for a in aggregated):
+        return "本工序相关验收项均不适用，无需自检"
+    return "施工单位自检合格"
 
 
 # ---------------------------------------------------------------------------

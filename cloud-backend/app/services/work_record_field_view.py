@@ -141,7 +141,11 @@ _EXTRA_FIELDS: tuple[tuple[str, tuple[str, ...]], ...] = (
 
 
 def _text(value: Any) -> str:
-    """把任意值压成可展示字符串；列表/字典只取可读摘要，绝不塞 JSON 给用户。"""
+    """把任意值压成可展示字符串；列表/字典只取可读摘要，绝不塞 JSON 给用户。
+
+    🔴 2026-11-17 列表/元组改 \\n 拼接：前端 white-space: pre-wrap 自动换行，
+    别把多个要点挤成一段；_text 是所有字段值的唯一出口，改这一处全链路生效。
+    """
     if value is None:
         return ""
     if isinstance(value, bool):
@@ -152,7 +156,7 @@ def _text(value: Any) -> str:
         return value.strip()
     if isinstance(value, (list, tuple)):
         parts = [_text(v) for v in value]
-        return "；".join(p for p in parts if p and p not in _PLACEHOLDERS)
+        return "\n".join(p for p in parts if p and p not in _PLACEHOLDERS)
     if isinstance(value, Mapping):
         for key in ("text", "value", "name", "label"):
             if value.get(key):
@@ -343,7 +347,7 @@ def build_field_sections(
                     and not _text(detail.get("acceptance_content"))
                     and _text(detail.get("acceptance_points_text"))):
                 # 分组建档带出的要点草案还没确认，标清状态，别冒充正式验收内容。
-                note = "；".join(p for p in (note, "要点待确认，确认后写入正式记录") if p)
+                note = "\n".join(p for p in (note, "要点待确认，确认后写入正式记录") if p)
             missing = bool(required and not auto and kind != "signoff" and _is_placeholder(value))
             by_title.setdefault(str(field.get("section") or "基本信息"), []).append({
                 "label": short,

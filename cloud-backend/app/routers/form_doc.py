@@ -285,6 +285,11 @@ def _content_from_record(
     now = record.created_at or datetime.now()
     extracted = _record_extracted_fields(record)
     business = business_record_fields(record, project)
+    # 巡视人兜底：水印往往只印「监理」这种岗位名，没有姓名可写；记录由该监理
+    # 人员本人创建，此时用创建人姓名落栏，避免文书出现空栏（2026-11-18 用户截图）。
+    author_name = str(
+        getattr(user, "real_name", "") or getattr(user, "username", "") or ""
+    ).strip()
     explicit_problems = problem_text(record)
     legacy_remark = str(record.inspection_remark or "").strip()
     if not explicit_problems and legacy_remark and not is_instruction_only(legacy_remark):
@@ -334,6 +339,8 @@ def _content_from_record(
         base.update({
             "section": record.section or "",
             "content": work_content or extracted_content or f"{record.section or '现场'}巡视检查",
+            # 巡视人：业务字段/提取值都没有时落到记录人姓名（水印只印岗位名的情况）
+            "inspector": base["inspector"] or author_name,
             # 问题栏只接受业务问题。没有记录问题时保持空白，不能把“记录”
             # 指令或系统推断伪装成“符合要求”的现场结论。
             "problems": explicit_problems or str(extracted.get("problems") or ""),
@@ -361,21 +368,41 @@ def _content_from_record(
             "supervision_status": record.station_supervision_status or "",
         })
     elif rtype == "验收":
+        cj = record.content_json if isinstance(record.content_json, dict) else {}
+        prov = cj.get("prov_fields") if isinstance(cj.get("prov_fields"), dict) else {}
         acceptance_content = (
             str(extracted.get("acceptance_content") or "").strip()
-            or str((record.content_json or {}).get("acceptance_content") or "").strip()
+            or str(cj.get("acceptance_content") or "").strip()
             or record.work_content or ""
         )
+
+        def _conclusion(key: str) -> str:
+            # 三层兜底：提取候选 → prov_fields（表式必填校验同一数据源）→ content_json 顶层。
+            # 2026-11-18 用户反馈「生成文书里没有自检/验收结论」：此前只读 extracted，
+            # Agent 归集出的结论落在 prov_fields/顶层，渲染时被丢掉。
+            return (
+                str(extracted.get(key) or "").strip()
+                or str(prov.get(key) or "").strip()
+                or str(cj.get(key) or "").strip()
+            )
+
+        self_check_conclusion = _conclusion("self_check_conclusion")
+        supervision_conclusion = _conclusion("supervision_conclusion")
         base.update({
             "section": record.section or "",
             "acceptance_content": acceptance_content,
             "content": acceptance_content,
-            "conclusion": f"验收结果：{record.acceptance_result or ''}",
+            # 监理验收结论优先用归集出的完整结论；没有才退回人工确认的枚举结果。
+            "conclusion": supervision_conclusion or (
+                f"验收结果：{record.acceptance_result}" if record.acceptance_result else ""
+            ),
             "record": acceptance_content,
             "acceptance_result": record.acceptance_result or "",
             "acceptance_type": record.acceptance_type if hasattr(record, "acceptance_type") else str(extracted.get("acceptance_type") or (record.content_json or {}).get("acceptance_type") or ""),
             "acceptance_participants": record.acceptance_participants or "",
             "basis": record.acceptance_basis or str(extracted.get("basis") or ""),
+            "self_check_conclusion": self_check_conclusion,
+            "supervision_conclusion": supervision_conclusion,
         })
     elif rtype == "见证":
         cj = record.content_json or {}

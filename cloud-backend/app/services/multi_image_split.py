@@ -253,6 +253,139 @@ _HINT_CUT_SHORT = re.compile(
     r"(?:^|[\s；;，,、|（(])\s*(?:%s)\s*[:：]" % _label_alternation(_HINT_TAIL_SHORT))
 _HINT_TRIM = " \t\r\n；;，,、。|:：）)】]」』”"
 
+# ---------------------------------------------------------------- 水印相机噪声
+# 水印 App 会把自家品牌、防伪码、拍摄时间和气温一起印在照片上，OCR 拿到的
+# 原文因此混进这些非现场内容（2026-11-18 真机工作内容：
+# 『沙盛四路等4条道路工 广东建设监理；沟槽开挖 日』）。
+_APP_NOISE = re.compile(
+    r"(?:今日水印相机|今日水印|水印相机|相机真实可验|真实可验|防伪\s*[A-Za-z0-9]{4,})"
+)
+# 带年份的完整日期（可含时刻）；「10月27日」这类无年份写法不动，避免误删正文。
+_DT_NOISE = re.compile(
+    r"20\d{2}\s*[.\-/年]\s*\d{1,2}\s*[.\-/月]\s*\d{1,2}\s*日?"
+    r"(?:\s*\d{1,2}\s*[:：]\s*\d{2}(?:\s*[:：]\s*\d{2})?)?"
+)
+_TEMP_NOISE = re.compile(
+    # 水印写法「晴26℃ / 多云31°C」：天气词 + 气温整体是水印栏，不是施工内容
+    r"(?:晴|多云|阴|阵雨|雷阵雨|小雨|中雨|大雨|暴雨|雨夹雪|小雪|中雪|大雪|雾|霾|浮尘|沙尘暴)"
+    r"\s*[-+]?\d{1,2}\s*[℃°]\s*C?"
+    # 独立成词的气温（「… 26℃ …」）；正文里的「控制在20℃以内」不动
+    r"|(?<![0-9\u4e00-\u9fa5])[-+]?\d{1,2}\s*[℃°]\s*C?"
+)
+_NOISE_SEP = re.compile(r"[\s；;，,、|]+")
+# 日期被切剩的孤立「年/月/日」残字（如「沟槽开挖 日」）
+_LONE_DATE_CHAR = re.compile(r"(?:^|[\s；;，,、|])(?:年|月|日)(?=$|[\s；;，,、|])")
+# 单位落款词尾：以这些结尾、又不含工序动词的片段，是水印单位名而非施工内容。
+_ORG_TAIL = ("有限公司", "有限责任公司", "公司", "监理", "建设", "集团", "项目部", "工程局")
+_PROCESS_VERBS = (
+    "开挖", "浇筑", "回填", "夯实", "碾压", "摊铺", "安装", "绑扎", "砌",
+    "验收", "检查", "巡视", "旁站", "焊接", "张拉", "注浆", "检测", "取样",
+    "进场", "吊装", "顶进", "成桩", "养护", "施工", "作业",
+)
+
+
+def scrub_watermark_noise(text: str) -> str:
+    """剔除水印相机自带噪声（品牌/防伪码/拍摄日期/气温/日期残字/裸人员词）。"""
+    s = _APP_NOISE.sub(" ", str(text or ""))
+    s = _DT_NOISE.sub(" ", s)
+    s = _TEMP_NOISE.sub(" ", s)
+    s = _NOISE_SEP.sub(" ", s).strip()
+    s = _LONE_DATE_CHAR.sub(" ", s)
+    # 水印常把人员印成行尾裸词（「… 晴26℃ 监理」），前面带空格才算
+    for person in _PERSON_BARE:
+        if s.endswith(" " + person):
+            s = s[: -len(person)]
+            break
+    return _NOISE_SEP.sub(" ", s).strip(_HINT_TRIM)
+
+
+# 计量读数类词后跟的数值必须落在合理区间，否则是视觉把表盘刻度（1.000/1.200/1.800）
+# 当成了参数值。真机（2026-11-18）：比重计照片 → 「水泥搅拌桩水灰比 800」。
+_RATIO_RANGES: dict[str, tuple[float, float]] = {
+    "水灰比": (0.3, 0.8),
+    "泥浆比重": (0.9, 1.6),
+    "浆液比重": (0.9, 1.6),
+    "水泥掺量": (5.0, 45.0),
+}
+_RATIO_NUM_RE = re.compile(r"(\d+(?:\.\d+)?)")
+
+
+def _ratio_value_ok(key: str, clause: str) -> bool:
+    """该句里的读数是否落在合理区间（「水灰比 0.5」保留，「水灰比 800」不合法）。"""
+    idx = clause.find(key)
+    tail = clause[idx + len(key): idx + len(key) + 12]
+    match = _RATIO_NUM_RE.search(tail)
+    if not match:
+        return False
+    low, high = _RATIO_RANGES[key]
+    try:
+        value = float(match.group(1))
+    except ValueError:
+        return False
+    return low <= value <= high
+
+
+def _drop_ratio_number(clause: str, key: str) -> str:
+    idx = clause.find(key)
+    head, tail = clause[: idx + len(key)], clause[idx + len(key):]
+    tail = re.sub(r"^\s*[:：=]?\s*\d+(?:\.\d+)?\s*(?:mm|cm|m|kg|%)?", "", tail)
+    return (head + tail).strip()
+
+
+def scrub_reading_noise(text: str) -> str:
+    """去掉把表盘刻度读成参数值的残句（真机：「水泥搅拌桩水灰比 800」）。
+
+    按 ；/。 分句：读数合法（水灰比 0.5）保留；附加句只有关键词没有合法读数
+    （「水泥搅拌桩水灰比」）整句丢弃，避免正文留下半截；首句是施工内容本身，
+    只删掉读错的数值，不整句丢。
+    """
+    raw = str(text or "").strip()
+    if not raw:
+        return raw
+    kept: list[str] = []
+    for index, clause in enumerate(c.strip() for c in re.split(r"[；;。]", raw)):
+        if not clause:
+            continue
+        key = next((k for k in _RATIO_RANGES if k in clause), "")
+        if not key:
+            kept.append(clause)
+            continue
+        if _ratio_value_ok(key, clause):
+            kept.append(clause)
+        elif index == 0 and not kept:
+            kept.append(_drop_ratio_number(clause, key))
+    result = "；".join(k for k in kept if k)
+    return result or raw
+
+
+def strip_identity_noise(text: str, project_name: str = "", orgs=()) -> str:
+    """去掉混进内容的项目名/监理单位落款片段（含 OCR 截断的短前缀）。"""
+    s = str(text or "").strip()
+    if not s:
+        return ""
+    # ① 完整项目名 / 单位名原样出现 → 直接删
+    for known in (project_name, *(orgs or ())):
+        known = str(known or "").strip()
+        if len(known) >= 4 and known in s:
+            s = s.replace(known, " ")
+    # ② OCR 截断：项目名被切掉尾巴（「沙盛四路等4条道路工」）→ 按最长前缀删
+    name = str(project_name or "").strip()
+    if len(name) >= 6:
+        for size in range(len(name), 5, -1):
+            frag = name[:size]
+            if frag in s:
+                s = s.replace(frag, " ")
+                break
+    # ③ 单位落款片段（「广东建设监理」）：以公司/监理/建设等结尾且无工序动词 → 删
+    kept = [
+        token for token in _NOISE_SEP.split(s)
+        if token and not (
+            token.endswith(_ORG_TAIL)
+            and not any(verb in token for verb in _PROCESS_VERBS)
+        )
+    ]
+    return _NOISE_SEP.sub(" ", " ".join(kept)).strip(_HINT_TRIM)
+
 # 被切下来的尾巴不能扔：拍摄时间/天气/人员/部位要能落回记录对应字段，
 # 否则「工作内容干净了，日期天气全丢了」——2026-11-13 用户要求「要共存」。
 _TAIL_LABEL_KEY = {
@@ -337,6 +470,10 @@ def _parse_tail_fields(tail: str) -> dict[str, str]:
             if rest and unknown_key and unknown_key not in out:
                 out[unknown_key] = re.sub(r"\s+", " ", rest)
         value = re.sub(r"\s+", " ", raw_value).strip(_HINT_TRIM)
+        # 单位落款里夹着水印 App 品牌/防伪码（真机：「广东建设工程监理有限 今日水印
+        # 公司 相机真实可验 防伪G49…」）：企业名去噪后不再保留空格。
+        if key in ("org", "contact", "postcode"):
+            value = re.sub(r"\s+", "", scrub_watermark_noise(value))
         # 尾部裸人员词（「… 晴27°C 监理」）：剥出来记人员，别留在天气/时间值里
         for person in _PERSON_BARE:
             if value.endswith(person):
@@ -355,6 +492,8 @@ def split_hint(text: str) -> tuple[str, dict[str, str]]:
     例：``顶板钢筋模板验收 摄时间：2026.10.27 15:18 气：多云31°C 监理``
     → ``("顶板钢筋模板验收", {"taken_at": "2026.10.27 15:18", "weather": "多云31°C", "person": "监理"})``
     """
+    # 内容侧剔除水印 App 品牌/防伪码/拍摄日期/气温等噪声；尾巴仍按原文解析，
+    # 否则「摄时间：2026.10.27 15:18」的日期会被提前删掉，拍摄时间就丢了。
     s = str(text or "").strip()
     if not s:
         return "", {}
@@ -367,8 +506,8 @@ def split_hint(text: str) -> tuple[str, dict[str, str]]:
         # 整条就是水印字段串（「拍摄时间：2026-10-27」），没有真正的施工内容
         return "", _parse_tail_fields(s)
     if cut < len(s):
-        return s[:cut].strip(_HINT_TRIM), _parse_tail_fields(s[cut:])
-    return s.strip(_HINT_TRIM), {}
+        return scrub_watermark_noise(s[:cut]), _parse_tail_fields(s[cut:])
+    return scrub_watermark_noise(s), {}
 
 
 def clean_hint(text: str) -> str:
@@ -381,12 +520,16 @@ def looks_like_watermark_tail(text: str) -> bool:
     return bool(_TAIL_ANCHOR.search(str(text or "")))
 
 
-def clean_hints(hints) -> list[str]:
-    """清洗 + 去重保序；清洗后为空的提示直接丢掉（否则「时间：…」会被当成工作内容）。"""
+def clean_hints(hints, project_name: str = "", orgs=()) -> list[str]:
+    """清洗 + 去重保序；清洗后为空的提示直接丢掉（否则「时间：…」会被当成工作内容）。
+
+    ``project_name`` / ``orgs`` 用于剔除 OCR 混进内容的项目名、监理单位落款
+    （2026-11-18 真机：「沙盛四路等4条道路工 广东建设监理；沟槽开挖 日」）。
+    """
     out: list[str] = []
     seen: set[str] = set()
     for hint in hints or []:
-        cleaned = clean_hint(hint)
+        cleaned = strip_identity_noise(clean_hint(hint), project_name, orgs)
         if not cleaned or cleaned in seen:
             continue
         seen.add(cleaned)
@@ -425,19 +568,15 @@ def _short_section(section: str, limit: int = 12) -> str:
     return section if len(section) <= limit else section[:limit] + "…"
 
 
-# 肯定确认词（命中且无否定词即视为同意建记录）
-_CONFIRM_TOKENS = (
-    "确认", "建", "可以", "好的", "好", "行", "确定", "yes", "ok", "嗯", "对",
-    "生成", "创建", "提交", "通过",
-)
-_NEG_TOKENS = ("不用", "不建", "不要", "取消", "否", "别", "暂不", "先不", "等会", "稍后")
-
-
 def is_confirm(message: str) -> bool:
-    """用户回复是否为『确认建』的肯定意图。"""
-    t = (message or "").strip().lower()
-    if not t:
-        return False
-    if any(n in t for n in _NEG_TOKENS):
-        return False
-    return any(c in t for c in _CONFIRM_TOKENS)
+    """多图分组确认轮：用户回复是否可视为「同意按此分组建单」。
+
+    🔴 2026-11-17 核心重构：**默认 True，不做词表匹配**。
+    原因：词表永远补不完（"符合"/"没问题"/"就这个"/"嗯"/"ok"/"直接建"…任何没列出来的
+    说法都会卡死死循环），用穷举代替理解本质是错的。
+
+    上下文锁死意图：上一轮已给出分组回执在等用户确认，用户发消息到这里
+    = 默认想建记录。真不想建（取消/分错了）会被路由层的 parsed 模型意图
+    识别走别的分支——这里只管兜底放行。
+    """
+    return bool((message or "").strip())

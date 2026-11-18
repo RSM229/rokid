@@ -1636,7 +1636,8 @@ def fill_acceptance(doc: DocxDocument, data: dict) -> None:
         (1, 1, data.get("section"), False),
         (2, 1, data.get("acceptance_content") or data.get("content"), False),
         (3, 1, data.get("self_check_conclusion"), False),
-        (4, 1, data.get("conclusion") or data.get("supervision_conclusion"), False),
+        # 监理验收结论：优先归集出的完整结论；conclusion 只是「验收结果：X」的短枚举兜底。
+        (4, 1, data.get("supervision_conclusion") or data.get("conclusion"), False),
         (5, 1, photo_cell, False),
         (6, 1, data.get("acceptance_participants"), False),
     )

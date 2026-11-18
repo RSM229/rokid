@@ -27,6 +27,17 @@ from app.services.form_renderer import (
 _WEEKDAY_CN = ("一", "二", "三", "四", "五", "六", "日")
 
 
+def _append_new_para(cell: _Cell, text: str) -> None:
+    """在单元格末尾另起一段写入（保留预印内容，不覆盖行首标签）。"""
+    text = str(text or "").strip()
+    if not text:
+        return
+    p = cell.add_paragraph()
+    run = p.add_run(text)
+    run.font.name = "宋体"
+    run._element.get_or_add_rPr().get_or_add_rFonts().set(qn("w:eastAsia"), "宋体")
+
+
 def _norm_weekday(value) -> str:
     """星期归一：'二'/'2'/'星期二' → '星期二'；空 → ''。"""
     s = str(value or "").strip()
@@ -225,30 +236,44 @@ def fill_shijian_9_pangzhan(doc, data: dict) -> None:
 
 
 # ---------------------------------------------------------------------------
-# 市政监-11 巡视记录（5 行 × 4 列）
+# 市政监-11 巡视记录（官方版式：4 列 × 5 行）
 # ---------------------------------------------------------------------------
 
 def fill_shijian_11_xunshi(doc, data: dict) -> None:
-    """市政监-11 巡视记录。
+    """市政监-11 巡视记录（官方版式）。
 
-    R0 巡视的工程部位（标签｜值）施工单位（标签｜值）；R1 巡视时间（年 月 日 时 至 …）；
-    R2 巡视内容；R3 巡视发现的问题及处理情况；R4 问题处理情况。
+    R0 工程名称（标签｜值）巡视时间（标签｜值）；R1 巡视部位（标签｜值）巡视人（标签｜值）；
+    R2 巡视内容（预印 1-6 项后追加）；R3 巡视的存在问题情况；R4 问题处理情况。
     """
     table = doc.tables[0]
-    _set_cell_text(table.rows[0].cells[1], str(data.get("section") or ""))
-    _set_cell_text(table.rows[0].cells[3], str(data.get("construction_unit") or ""))
+    _set_cell_text(table.rows[0].cells[1], str(data.get("project_name") or ""))
 
-    # R1 巡视时间占位（合并单元格：年 月 日 时 至 年 月 日 时）
+    # R0 巡视时间（时间跨度优先，退回业务日期）
     span = _span_text(data.get("start_time"), data.get("end_time"), with_time=True)
     if not span:
         span = str(data.get("time") or "")
     if span:
-        _set_cell_text(table.rows[1].cells[1], span)
+        _set_cell_text(table.rows[0].cells[3], span)
 
-    _append_after_label(table.rows[2].cells[0], "巡视内容：", str(data.get("content") or ""))
-    _append_after_label(table.rows[3].cells[0], "巡视发现的问题及处理情况：",
-                        str(data.get("problems") or ""))
-    _append_after_label(table.rows[4].cells[0], "问题处理情况：", str(data.get("handling") or ""))
+    _set_cell_text(table.rows[1].cells[1], str(data.get("section") or ""))
+    _set_cell_text(table.rows[1].cells[3], str(data.get("inspector") or ""))
+
+    _append_new_para(table.rows[2].cells[0], str(data.get("content") or ""))
+    _append_new_para(table.rows[3].cells[0], str(data.get("problems") or ""))
+    _append_new_para(table.rows[4].cells[0], str(data.get("handling") or ""))
+
+    # 表头右上角表号（模板为「市政监-11-□□」）
+    number = str(data.get("doc_number") or "").strip()
+    if number:
+        for p in doc.paragraphs:
+            if p.text.strip().startswith("市政监-11-"):
+                if p.runs:
+                    p.runs[0].text = number
+                    for extra in p.runs[1:]:
+                        extra.text = ""
+                else:
+                    p.add_run(number)
+                break
 
 
 # ---------------------------------------------------------------------------

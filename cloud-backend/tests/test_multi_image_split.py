@@ -162,8 +162,12 @@ class TestSummarizeAndConfirm(unittest.TestCase):
             multi_image_split.summarize(groups),
             "这批图我分了 巡视3 / 旁站3 / 待定3，确认后建。")
 
-    def test_summarize_with_section(self):
-        """按部位拆分后，回执要带上部位名，用户才知道为什么变成多条。"""
+    def test_summarize_merges_sections_by_type(self):
+        """2026-11-16 用户口径「识别的内容只保留到思考里」：
+
+        同一记录类型即使按部位拆成了多组，回执也只按类型合并计数，
+        不把水印识别出的部位名写出来（分组本身仍是按部位拆的）。
+        """
         from app.services.multi_image_split import ImageGroup
         groups = [
             ImageGroup(record_type="验收", images=["a", "b"],
@@ -173,15 +177,24 @@ class TestSummarizeAndConfirm(unittest.TestCase):
         ]
         self.assertEqual(
             multi_image_split.summarize(groups),
-            "这批图我分了 验收·沙盛四路2 / 验收·大兴路1，确认后建。")
+            "这批图我分了 验收3，确认后建。")
 
     def test_is_confirm(self):
+        """2026-11-17 改：零限制，非空即 True。
+
+        用户明确要求「要有足够的自由让智能体来理解用户的说法，不能太多限制」。
+        词表穷举永远补不完，is_confirm 只在空串时返回 False，其余一律 True。
+        路由层的 LLM 意图识别会先判断用户是不是真的要取消/跑题——这里只管兜底放行。
+        """
         self.assertTrue(multi_image_split.is_confirm("确认建"))
         self.assertTrue(multi_image_split.is_confirm("好的，建吧"))
         self.assertTrue(multi_image_split.is_confirm("可以"))
+        self.assertTrue(multi_image_split.is_confirm("取消"))           # 旧测试期望 False → 新逻辑 True
+        self.assertTrue(multi_image_split.is_confirm("不用了，先不建"))   # 同上
+        self.assertTrue(multi_image_split.is_confirm("巡视符合要求，验收符合"))
+        self.assertTrue(multi_image_split.is_confirm("随便说什么都行"))
         self.assertFalse(multi_image_split.is_confirm(""))
-        self.assertFalse(multi_image_split.is_confirm("不用了，先不建"))
-        self.assertFalse(multi_image_split.is_confirm("取消"))
+        self.assertFalse(multi_image_split.is_confirm("   "))
 
 
 # ----------------------------------------------------------------------------

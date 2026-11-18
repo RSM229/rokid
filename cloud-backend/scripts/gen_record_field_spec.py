@@ -530,7 +530,12 @@ def options_for(field: dict) -> list[str]:
     return ENUM_OPTIONS.get(field.get("canonical") or "", [])
 
 
-def form_for_record_type(record_type: str, is_weida: bool = False) -> str | None:
+def form_for_record_type(record_type: str, is_weida: bool = False, project=None) -> str | None:
+    """记录类型 → 缺省表式 code。
+
+    保留 ``project`` 关键字参数是为了向后兼容——旧调用方可能传了它，
+    但当前逻辑不再按工程类型路由不同表式（统一查 RECORD_TYPE_TO_FORM）。
+    """
     if is_weida and record_type == "巡视":
         return "gdaq_30306_weida"
     return RECORD_TYPE_TO_FORM.get(record_type)

@@ -48,10 +48,17 @@ def _clean_label(label: Any, limit: int = 16) -> str:
 
 
 def _pending_labels(rtype: str, *, has_section: bool, has_photo: bool,
-                    has_points: bool, limit: int = 4) -> list[str]:
-    """该类还需用户补的必填栏目，唯一真源 = record_field_spec.FORMS。"""
+                    has_points: bool, filled: set[str] | None = None,
+                    limit: int = 4) -> list[str]:
+    """该类还需用户补的必填栏目，唯一真源 = record_field_spec.FORMS。
+
+    ``filled`` 是建档后**实际已写库**的 canonical 集合：刚由用户确认写入的
+    验收类型/结论、已回填的问题及处理情况等不再列进「待填」，否则回执会
+    一边说已写入、一边说待填（2026-11-18 用户「不知道究竟有没有写入」）。
+    """
     form_key = record_field_spec.RECORD_TYPE_TO_FORM.get(rtype)
     form = record_field_spec.FORMS.get(form_key or "") or {}
+    filled = filled or set()
     skip: set[str] = set()
     if has_section:
         skip.add(_SECTION_FROM_WATERMARK)
@@ -63,11 +70,14 @@ def _pending_labels(rtype: str, *, has_section: bool, has_photo: bool,
     for field in form.get("fields", []):
         if field.get("kind") != "ask":
             continue
+        canonical = str(field.get("canonical") or "")
+        if canonical and canonical in filled:
+            continue
         # 必填栏 + 用户交互专用可选栏（_MUST_ASK_OPTIONAL）一起进「待填」；
         # 其余可选栏（施工作业人数等）仍不强求，不打扰用户。
-        if not field.get("required") and str(field.get("canonical") or "") not in _MUST_ASK_OPTIONAL:
+        if not field.get("required") and canonical not in _MUST_ASK_OPTIONAL:
             continue
-        if field.get("canonical") in skip:
+        if canonical in skip:
             continue
         label = _clean_label(field.get("raw_label"))
         if label and label not in out:
@@ -149,11 +159,15 @@ def build_type_confirmation(
     display: Callable[[str], str] | None = None,
     created_ids: dict[str, list[int]] | None = None,
     stage: str = "created",
+    filled_by_type: dict[str, set[str]] | None = None,
+    closing: str | None = None,
 ) -> str:
     """按记录类型聚合，生成「该类内容/要点 + 待填栏目 + 请确认」。
 
     display 由调用方传入（复用 agent_tools._split_record_display_name），
     避免本模块再复制一份正式表名。stage=plan 时结尾引导点「确认生成」。
+    ``filled_by_type``：建档后各类型实际已写库的 canonical，用于剔除「待填」；
+    ``closing``：调用方按本轮实际情况给出结尾话术（已写入 / 仍需确认）。
     🔴 识别出的施工内容（identified）只作内部依据：用于匹配验收要点、
     落 content_json，不写进标题或正文（2026-11-16 用户「都要」）。
     """
@@ -209,13 +223,16 @@ def build_type_confirmation(
             has_section=_group_has_section(gs),
             has_photo=_group_has_photo(gs),
             has_points=has_points,
+            filled=(filled_by_type or {}).get(rtype) or set(),
         )
         if pending:
             # 分点已逐行排列，待填另起一行，避免挂在最后一条要点尾巴上
             body += "\n待填：" + "、".join(pending)
         lines.extend("  " + line for line in body.split("\n"))
 
-    if stage == "plan":
+    if closing:
+        lines.append(closing)
+    elif stage == "plan":
         lines.append("以上按类型先跟你核对：分类和内容符合就点「确认生成」；要改哪一类直接说。")
     else:
         lines.append("以上按类型带出，请确认是否符合现场情况；不符合直接说要改哪项，"
@@ -246,7 +263,8 @@ def acceptance_points_for(groups: list[Any]) -> dict | None:
         "procedure": str(proc or ""),
         "identified": identified,
         "points": items,
-        "text": "；".join(items),
+        # 🔴 2026-11-17 改 \\n：前端 white-space: pre-wrap 自动换行，别挤成一段
+        "text": "\n".join(items),
         "confirmed": False,
     }
 
@@ -274,13 +292,14 @@ def acceptance_points_text(points: Any) -> str:
 def build_acceptance_content_from_points(points: Any, *, positive: bool = True) -> str:
     """用户确认后，把要点草案转成正式「验收内容」：要点原文 + 逐条结论。
 
-    正式验收文书必须带结论，不能只放要点清单。带否定词时不生成（不能把
-    「不符合」写成「符合」），草案原样保留，由后续追问补真实结论。
+    🔴 2026-11-17 改换行输出：前端用 white-space: pre-wrap 渲染，
+    用 \\n 拼接要点 → 每条独立成行，替代原来的「；」挤在一行。
     """
     if not isinstance(points, dict) or not positive:
         return ""
     items = [str(p).strip() for p in (points.get("points") or []) if str(p).strip()]
     if not items:
         return ""
-    return (f"验收内容（逐项核对，共 {len(items)} 项）："
-            + "；".join(f"{p} —— 符合" for p in items))
+    header = f"验收内容（逐项核对，共 {len(items)} 项）：\n"
+    body = "\n".join(f"{p} —— 符合" for p in items)
+    return header + body
