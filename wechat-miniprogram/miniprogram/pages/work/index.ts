@@ -915,27 +915,35 @@ Page(themed({
     const results: DocSheetResult[] = []
     const fails: string[] = []
     try {
-      for (const item of items) {
-        try {
-          const res = await request<{ doc_id: number; title?: string; status?: string }>('/form-docs/generate', {
-            method: 'POST',
-            data: { record_id: item.record_id, form_code: item.form_code },
-            timeout: 60000,
-          })
-          results.push({
-            doc_id: res.doc_id,
-            record_id: item.record_id,
-            record_type: item.record_type,
-            form_code: item.form_code,
-            form_name: item.form_name,
-            title: res.title || item.form_name,
-            status: res.status || '草稿',
-            tone: this.docTone(res.status || '草稿'),
-          })
-        } catch (e) {
-          fails.push(`#${item.record_id} ${(e as Error).message}`)
-        }
+      // N5/N6（2026-11-18）：批量生成——同表式合并一张文书（栏内分条，
+      // 时段取并集），异表式分表。原先逐条循环调 /generate 会一条一张表。
+      const recordIds = items.map((m) => m.record_id)
+      const res = await request<{
+        results?: {
+          doc_id: number; title: string; form_code: string; form_name?: string;
+          record_ids?: number[]; record_type?: string; status?: string; merged?: boolean;
+        }[]
+        errors?: string[]
+      }>('/form-docs/generate-batch', {
+        method: 'POST',
+        data: { record_ids: recordIds },
+        timeout: 180000,
+      })
+      const recTypeOf = (rid: number) =>
+        this.data.docSheetMatched.find((m) => m.record_id === rid)?.record_type || '记录'
+      for (const r of res.results || []) {
+        results.push({
+          doc_id: r.doc_id,
+          record_id: r.record_ids?.[0] || 0,
+          record_type: r.record_type || (r.record_ids || []).map(recTypeOf).join('·') || '记录',
+          form_code: r.form_code,
+          form_name: r.form_name || '',
+          title: r.title,
+          status: r.status || '草稿',
+          tone: this.docTone(r.status || '草稿'),
+        })
       }
+      for (const e of res.errors || []) fails.push(e)
       wx.hideLoading()
       this.setData({
         docSheetResults: results,
@@ -943,7 +951,7 @@ Page(themed({
         docSheetStep: results.length ? 'approve' : 'gen',
         docSheetNote: fails.length
           ? `已生成 ${results.length} 份，${fails.length} 份失败：${fails.slice(0, 2).join('；')}`
-          : `已生成 ${results.length} 份文书。审批状态只在系统里，成品签名栏/备注栏留空。`,
+          : `已生成 ${results.length} 份文书（同类合并、异类分表）。审批状态只在系统里，成品签名栏/备注栏留空。`,
       })
       if (!results.length && fails.length) {
         wx.showModal({ title: '生成失败', content: fails.slice(0, 6).join('\n'), showCancel: false })
@@ -954,6 +962,10 @@ Page(themed({
       this.setData({ selectMode: false, selectedCount: 0, allSelected: false })
       this.clearChecked()
       void this.load()
+    } catch (error) {
+      wx.hideLoading()
+      // 整批失败：回退提示（保持弹层开着让用户重试/手选表式）
+      wx.showToast({ title: (error as Error).message || '生成失败', icon: 'none' })
     } finally {
       wx.hideLoading()
       this.setData({ docSheetSubmitting: false })
