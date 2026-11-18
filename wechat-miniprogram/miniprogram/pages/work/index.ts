@@ -129,6 +129,8 @@ interface WorkRecordItem {
   id: number
   record_type: string
   status: string
+  creator_id?: number
+  creator_name?: string
   project_name?: string
   system_project_name?: string
   project_mismatch?: boolean
@@ -312,6 +314,14 @@ Page(themed({
     showTimeSheet: false,
     showTypeDrawer: false,
 
+    // 按人筛选（2026-11-18）：选项由已加载列表 distinct 记录人生成，
+    // 前端本地过滤（列表共享口径下人选项随数据走，无需后端权限）
+    showPeopleSheet: false,
+    memberFilterId: null as number | null,
+    memberFilterLabel: '按人',
+    memberOptions: [] as Array<{ id: number; name: string; count: number }>,
+    visibleRecords: [] as WorkRecordItem[],
+
     // 多选模式（勾选状态落在每条记录的 checked 字段上；
     // 早期版本把状态存 selectedIds 数组，WXML 里 .includes() 不生效且 checkbox
     // 脱离 checkbox-group 的 bindchange 不触发，导致选中后操作栏永远不出现）
@@ -450,7 +460,10 @@ Page(themed({
       }
       const query = params.length ? `?${params.join('&')}` : ''
       const result = await request<{ records: WorkRecordItem[] }>(`/work-record/list${query}`)
-      
+      const rawRecords = (result.records || []).map(decorateRecord)
+      // 按人筛选选项由本轮列表 distinct 记录人生成（列表共享，选项即真实有记录的人）
+      this.buildMemberOptions(rawRecords)
+
       if (this.data.selectedType === 'all') {
         const hazards = await getCached<HazardItem[]>(
           CACHE_KEYS.HAZARD_LIST,
@@ -469,15 +482,41 @@ Page(themed({
             evidence_text: (item.evidence || []).join('；'),
             displayTime: humanTime(item.created_at),
           }))
-        this.setData({ records: (result.records || []).map(decorateRecord), hazards: hazardItems })
+        this.setData({ records: rawRecords, hazards: hazardItems, visibleRecords: this.applyMemberFilter(rawRecords) })
       } else {
-        this.setData({ records: (result.records || []).map(decorateRecord) })
+        this.setData({ records: rawRecords, visibleRecords: this.applyMemberFilter(rawRecords) })
       }
     } catch (error) {
       wx.showToast({ title: (error as Error).message, icon: 'none' })
     } finally {
       this.setData({ loading: false })
     }
+  },
+
+  /** 按人筛选：distinct 记录人生成选项 + 当前选中人过滤列表（前端本地，2026-11-18） */
+  buildMemberOptions(records: WorkRecordItem[]) {
+    const counts = new Map<number, { name: string; count: number }>()
+    for (const r of records) {
+      if (r.creator_id == null || !r.creator_name) continue
+      const hit = counts.get(r.creator_id)
+      if (hit) hit.count += 1
+      else counts.set(r.creator_id, { name: r.creator_name, count: 1 })
+    }
+    const options = Array.from(counts.entries())
+      .map(([id, v]) => ({ id, name: v.name, count: v.count }))
+      .sort((a, b) => b.count - a.count)
+    // 选中的人在本轮数据里消失（如切了类型/时间）时清空筛选，避免列表被过滤成空
+    const still = this.data.memberFilterId == null || options.some(o => o.id === this.data.memberFilterId)
+    this.setData({
+      memberOptions: options,
+      ...(still ? {} : { memberFilterId: null, memberFilterLabel: '按人' }),
+    })
+  },
+
+  applyMemberFilter(records: WorkRecordItem[]): WorkRecordItem[] {
+    const fid = this.data.memberFilterId
+    if (fid == null) return records
+    return records.filter(r => r.creator_id === fid)
   },
 
   async loadHazards() {
@@ -518,7 +557,7 @@ Page(themed({
   clearChecked() {
     const records = this.data.records.map((item) => (item.checked ? { ...item, checked: false } : item))
     const hazards = this.data.hazards.map((item) => (item.checked ? { ...item, checked: false } : item))
-    this.setData({ records, hazards })
+    this.setData({ records, hazards, visibleRecords: this.applyMemberFilter(records) })
   },
 
   /** 点击卡片/复选框切换勾选（不依赖 checkbox 的 change 事件） */
@@ -532,7 +571,7 @@ Page(themed({
       const records = this.data.records.map((item) =>
         item.id === id ? { ...item, checked: !item.checked } : item,
       )
-      this.setData({ records })
+      this.setData({ records, visibleRecords: this.applyMemberFilter(records) })
     }
     this.syncSelection()
   },
@@ -548,7 +587,7 @@ Page(themed({
     const target = !this.data.allSelected
     const records = this.data.records.map((item) => ({ ...item, checked: target }))
     const hazards = this.data.hazards.map((item) => ({ ...item, checked: target }))
-    this.setData({ records, hazards })
+    this.setData({ records, hazards, visibleRecords: this.applyMemberFilter(records) })
     this.syncSelection()
   },
 
@@ -1584,6 +1623,29 @@ Page(themed({
     if (!item) return
     this.setData({ timeRange: key, timeRangeLabel: item.label, showTimeSheet: false })
     this.load()
+  },
+
+  // ---- 按人筛选（2026-11-18）----
+
+  openPeopleSheet() {
+    this.setData({ showPeopleSheet: true })
+  },
+
+  closePeopleSheet() {
+    this.setData({ showPeopleSheet: false })
+  },
+
+  selectMemberFilter(event: WechatMiniprogram.TouchEvent) {
+    const raw = event.currentTarget.dataset.id
+    const id = raw === '' || raw === undefined || raw === null ? null : Number(raw)
+    const hit = id == null ? null : this.data.memberOptions.find((m) => m.id === id)
+    this.setData({
+      memberFilterId: id,
+      memberFilterLabel: hit ? hit.name : '按人',
+      showPeopleSheet: false,
+    })
+    // 选人后立即重算可见列表（数据已在手，无需再拉接口）
+    this.setData({ visibleRecords: this.applyMemberFilter(this.data.records) })
   },
 
   computeRange(): { start: string; end: string } | null {

@@ -1453,6 +1453,7 @@ async def list_work_records(
     status: Optional[str] = None,
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
+    creator_id: Optional[int] = Query(None, description="按创建人过滤（前端「按人筛选」）"),
     all_projects: bool = Query(False, description="公司级账号：跨项目汇总（仅读）"),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -1460,6 +1461,7 @@ async def list_work_records(
     """查询工作记录列表（按项目返回，同一项目内所有用户可见，支持眼镜端记录同步到小程序）
 
     支持按创建日期范围过滤（start_date/end_date，含端点），与小程序端时间范围筛选对应。
+    creator_id 按创建人过滤（2026-11-18 小程序「按人筛选」），与类型/时间筛选同一位置叠加。
     公司级账号带 ``all_projects=1`` 时不限项目（顶部「全部项目」视角）。
     """
     scope = project_scope_id(user, all_projects)
@@ -1470,6 +1472,8 @@ async def list_work_records(
         query = query.where(WorkRecord.record_type == record_type)
     if status:
         query = query.where(WorkRecord.status == status)
+    if creator_id is not None:
+        query = query.where(WorkRecord.creator_id == creator_id)
     if start_date:
         query = query.where(WorkRecord.created_at >= datetime.combine(start_date, datetime.min.time()))
     if end_date:
@@ -1482,6 +1486,12 @@ async def list_work_records(
         select(Project).where(Project.id.in_(project_ids))
     )).scalars().all() if project_ids else []
     projects_by_id = {item.id: item for item in project_rows}
+    # 创建人 id→姓名（2026-11-18「按人筛选」：列表行回显记录人，详情口早已回 supervisor）
+    creator_ids = {item.creator_id for item in records if item.creator_id is not None}
+    creator_rows = (await db.execute(
+        select(User.id, User.real_name).where(User.id.in_(creator_ids))
+    )).all() if creator_ids else []
+    creators_by_id = {row_id: row_name for row_id, row_name in creator_rows}
     from app.services.record_fields import business_record_fields
 
     items = []
@@ -1491,6 +1501,8 @@ async def list_work_records(
             "id": r.id,
             "record_type": r.record_type,
             "status": r.status,
+            "creator_id": r.creator_id,
+            "creator_name": creators_by_id.get(r.creator_id) or "",
             "project_id": r.project_id,
             "project_name": business.get("business_project_name") or "",
             "system_project_name": business.get("system_project_name") or "",

@@ -6,6 +6,7 @@
     <view class="title">工作记录</view>
     <view class="toolbar-right">
       <view class="time-btn" bindtap="openTimeSheet">{{timeRangeLabel}} ▾</view>
+      <view class="time-btn" bindtap="openPeopleSheet">{{memberFilterLabel}} ▾</view>
       <view class="select-btn" bindtap="toggleSelectMode">
         {{selectMode ? '完成' : '选择'}}
       </view>
@@ -59,10 +60,11 @@
   <block wx:if="{{selectedType === 'all'}}">
     <view wx:if="{{selectMode}}" class="select-hint">点击卡片勾选记录，勾选后可在底部操作栏批量处理</view>
     <view wx:if="{{loading && !records.length && !hazards.length}}" class="empty">正在加载…</view>
+    <view wx:elif="{{records.length && !visibleRecords.length && !hazards.length}}" class="empty">该成员暂无记录</view>
     <view wx:elif="{{!records.length && !hazards.length}}" class="empty">暂无记录</view>
     
     <!-- 工作记录 -->
-    <view wx:for="{{records}}" wx:key="id" class="card record" data-type="record" data-id="{{item.id}}">
+    <view wx:for="{{visibleRecords}}" wx:key="id" class="card record" data-type="record" data-id="{{item.id}}">
       <view wx:if="{{selectMode}}" class="record-checkbox-inline" data-type="record" data-id="{{item.id}}" bindtap="onCardTap">
         <checkbox value="{{item.id}}" checked="{{item.checked}}" data-type="record" />
       </view>
@@ -82,6 +84,8 @@
         <!-- 清洗后的摘要：无 Markdown、无机器标签、无截断原文 -->
         <view class="rec-summary">{{item.summaryText}}</view>
         <view class="rec-foot" wx:if="{{!selectMode}}">
+          <!-- 记录人：2026-11-18 列表补 creator 字段后回显，便于总监按人核查 -->
+          <text wx:if="{{item.creator_name}}" class="rec-creator">{{item.creator_name}}</text>
           <view wx:if="{{item.missingCount}}" class="rec-missing" catchtap="onCardFill" data-id="{{item.id}}" data-missing="{{item.missingHint}}" data-count="{{item.missingCount}}">待补充 {{item.missingCount}} 项 ›</view>
           <text wx:else class="rec-complete">信息齐全</text>
         </view>
@@ -139,8 +143,9 @@
   <block wx:else>
     <view wx:if="{{selectMode}}" class="select-hint">点击卡片勾选记录，勾选后可在底部操作栏批量处理</view>
     <view wx:if="{{loading && !records.length}}" class="empty">正在加载工作记录…</view>
+    <view wx:elif="{{records.length && !visibleRecords.length}}" class="empty">该成员暂无{{selectedType === 'all' ? '' : selectedType}}记录</view>
     <view wx:elif="{{!records.length}}" class="empty">暂无工作记录</view>
-    <view wx:for="{{records}}" wx:key="id" class="card record" data-type="record" data-id="{{item.id}}">
+    <view wx:for="{{visibleRecords}}" wx:key="id" class="card record" data-type="record" data-id="{{item.id}}">
       <view wx:if="{{selectMode}}" class="record-checkbox-inline" data-type="record" data-id="{{item.id}}" bindtap="onCardTap">
         <checkbox value="{{item.id}}" checked="{{item.checked}}" data-type="record" />
       </view>
@@ -160,6 +165,8 @@
         <!-- 清洗后的摘要：无 Markdown、无机器标签、无截断原文 -->
         <view class="rec-summary">{{item.summaryText}}</view>
         <view class="rec-foot" wx:if="{{!selectMode}}">
+          <!-- 记录人：2026-11-18 列表补 creator 字段后回显，便于总监按人核查 -->
+          <text wx:if="{{item.creator_name}}" class="rec-creator">{{item.creator_name}}</text>
           <view wx:if="{{item.missingCount}}" class="rec-missing" catchtap="onCardFill" data-id="{{item.id}}" data-missing="{{item.missingHint}}" data-count="{{item.missingCount}}">待补充 {{item.missingCount}} 项 ›</view>
           <text wx:else class="rec-complete">信息齐全</text>
         </view>
@@ -190,6 +197,19 @@
       <text class="close" bindtap="closeTimeSheet">×</text>
     </view>
     <view wx:for="{{timeRanges}}" wx:key="key" class="sheet-item {{timeRange === item.key ? 'active' : ''}}" data-key="{{item.key}}" bindtap="selectTimeRange">{{item.label}}</view>
+  </view>
+
+  <!-- 按人筛选弹窗（2026-11-18）：选项由列表 distinct 记录人生成，无需额外权限 -->
+  <view wx:if="{{showPeopleSheet}}" class="mask" bindtap="closePeopleSheet"></view>
+  <view wx:if="{{showPeopleSheet}}" class="sheet">
+    <view class="sheet-head">
+      <view class="title">按人筛选</view>
+      <text class="close" bindtap="closePeopleSheet">×</text>
+    </view>
+    <view class="sheet-item {{memberFilterId === null ? 'active' : ''}}" data-id="" bindtap="selectMemberFilter">全部成员</view>
+    <view wx:for="{{memberOptions}}" wx:key="id" class="sheet-item {{memberFilterId === item.id ? 'active' : ''}}" data-id="{{item.id}}" bindtap="selectMemberFilter">
+      {{item.name}}<text wx:if="{{item.count}}" class="people-count">{{item.count}} 条</text>
+    </view>
   </view>
 
   <!-- 记录操作菜单 -->

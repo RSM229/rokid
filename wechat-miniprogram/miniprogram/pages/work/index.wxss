@@ -62,6 +62,10 @@
 .rec-missing { font-size: 23rpx; color: #b26a12; font-weight: 600; padding: 6rpx 0; }
 .rec-complete { font-size: 23rpx; color: #13795b; }
 .rec-missing:active { opacity: 0.6; }
+/* 记录人（2026-11-18 按人筛选配套）：foot 左侧淡色显示，不与「信息齐全」抢焦点 */
+.rec-creator { font-size: 22rpx; color: #7d8b9b; margin-right: auto; padding: 6rpx 0; }
+/* 按人筛选弹层：条数灰字 */
+.people-count { float: right; font-size: 22rpx; color: #9aa9ba; font-weight: 400; }
 
 .card-menu { position: absolute; right: 20rpx; top: 50%; transform: translateY(-50%); font-size: 40rpx; color: #9aa9bc; padding: 10rpx; z-index: 5; }
 .card-menu:active { color: var(--brand, #1677ff); }
