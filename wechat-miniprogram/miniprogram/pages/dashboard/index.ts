@@ -120,6 +120,17 @@ Page(themed({
     showDonut: false,
     categories: [] as { name: string; count: number; pct: number; color: string }[],
     loading: false,
+    // ⑥ 项目成员（2026-11-18）：名单全员可见，邀请仅 member_manage 持有者
+    members: [] as Array<{ user_id: number; real_name: string; role_label: string; extra_text: string; is_present: boolean }>,
+    canManageMembers: false,
+    // 邀请弹层
+    showInvite: false,
+    inviteRoles: ['监理员', '专业监理工程师', '安全监理员', '资料员', '见证员', '总监代表'],
+    inviteDayOptions: [7, 30, 90],
+    inviteRole: '监理员',
+    inviteDays: 7,
+    inviteCode: '',
+    inviteCreating: false,
   },
   onShow() {
     if (!session.getToken()) {
@@ -127,9 +138,98 @@ Page(themed({
       return
     }
     this.load()
+    this.loadMembers()
   },
   onPullDownRefresh() {
     this.load().finally(() => wx.stopPullDownRefresh())
+  },
+
+  /** ⑥ 项目成员名单 + 本人是否可发邀请码（member_manage） */
+  async loadMembers() {
+    const user = session.getUser() as { project_id?: number; permissions?: string[] } | null
+    const pid = user?.project_id
+    if (!pid) {
+      this.setData({ members: [], canManageMembers: false })
+      return
+    }
+    this.setData({ canManageMembers: (user?.permissions || []).includes('member_manage') })
+    try {
+      const res = await request<{ items: Array<{
+        user_id: number; real_name: string; role_label: string
+        extra_roles: string[]; is_present: boolean
+      }> }>(`/project/${pid}/members`)
+      const items = res.items || []
+      // 岗位 label 由后端出（role_label），附加岗拼进副行
+      this.setData({
+        members: items.map(m => ({
+          user_id: m.user_id,
+          real_name: m.real_name || '未命名',
+          role_label: m.role_label || '成员',
+          extra_text: (m.extra_roles && m.extra_roles.length) ? ` · 兼 ${m.extra_roles.length} 岗` : '',
+          is_present: m.is_present !== false,
+        })),
+      })
+    } catch {
+      // 名单拉不到不影响看板其它卡片
+      this.setData({ members: [] })
+    }
+  },
+
+  openInvite() {
+    this.setData({ showInvite: true, inviteCode: '' })
+  },
+
+  closeInvite() {
+    this.setData({ showInvite: false })
+  },
+
+  pickInviteRole(event: WechatMiniprogram.TouchEvent) {
+    this.setData({ inviteRole: String(event.currentTarget.dataset.role || '') })
+  },
+
+  pickInviteDays(event: WechatMiniprogram.TouchEvent) {
+    this.setData({ inviteDays: Number(event.currentTarget.dataset.days || 7) })
+  },
+
+  /** 中文岗位名 → 后端英文 key（与 UserRole 枚举对应） */
+  async generateInviteCode() {
+    if (this.data.inviteCreating) return
+    const roleMap: Record<string, string> = {
+      '监理员': 'inspector',
+      '专业监理工程师': 'special_supervisor',
+      '安全监理员': 'safety_supervisor',
+      '资料员': 'documenter',
+      '见证员': 'witness',
+      '总监代表': 'deputy_chief',
+    }
+    const roleKey = roleMap[this.data.inviteRole] || 'inspector'
+    const user = session.getUser() as { project_id?: number } | null
+    if (!user?.project_id) {
+      wx.showToast({ title: '未加入项目，无法邀请', icon: 'none' })
+      return
+    }
+    this.setData({ inviteCreating: true })
+    try {
+      const res = await request<{ code: string; expires_at?: string | null }>(
+        `/auth/projects/${user.project_id}/invite-codes`, {
+          method: 'POST',
+          data: { role: roleKey, level: 'personal', max_uses: 1, expires_in_days: this.data.inviteDays },
+        },
+      )
+      this.setData({ inviteCode: res.code })
+    } catch (error) {
+      wx.showToast({ title: (error as Error).message, icon: 'none' })
+    } finally {
+      this.setData({ inviteCreating: false })
+    }
+  },
+
+  copyInviteCode() {
+    if (!this.data.inviteCode) return
+    wx.setClipboardData({
+      data: this.data.inviteCode,
+      success: () => wx.showToast({ title: '已复制，发给同事即可', icon: 'none' }),
+    })
   },
   safe<T>(promise: Promise<T>): Promise<T | null> {
     return promise.catch(() => null)
