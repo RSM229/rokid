@@ -4,8 +4,10 @@ Component({
   },
   data: {
     // 顺序：工作台居中（2026-10-09 调整，工作台为第 3 格）
+    // 2026-11-16：第 1 格由「隐患识别」改为「待办事项」（入口原在左侧栏）；
+    // 隐患识别仍可从工作台模型下拉菜单进入（agent/index.wxml 的 model-menu-hazard）。
     tabs: [
-      { key: 'hazard', label: '隐患识别', icon: 'ic-hazard', url: '/pages/capture/index?mode=hazard' },
+      { key: 'todo', label: '待办事项', icon: 'ic-list', url: '/pages/todo/index' },
       { key: 'work', label: '工作记录', icon: 'ic-memo', url: '/pages/work/index' },
       { key: 'agent', label: '工作台', icon: 'ic-chat-v', url: '/pages/agent/index' },
       { key: 'kb', label: '资料库', icon: 'ic-collection', url: '/pages/kb/index' },

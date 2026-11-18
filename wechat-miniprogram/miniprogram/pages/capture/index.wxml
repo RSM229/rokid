@@ -1,6 +1,7 @@
 <view class="page tab-host" style="{{themeStyle}}">
   <glass-nav-bar title="现场采集" left="back" />
-  <tab-bar active="hazard" />
+  <!-- 2026-11-16：隐患识别已移出底部 tab（改由工作台模型下拉进入），不再高亮任何 tab -->
+  <tab-bar active="" />
 
   <block wx:if="{{!aiMode}}">
     <view class="camera-wrap">

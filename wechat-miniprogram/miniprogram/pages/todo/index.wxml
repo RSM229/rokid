@@ -1,5 +1,7 @@
 <view class="page tab-host" style="{{themeStyle}}">
   <glass-nav-bar title="待办事项" left="back" />
+  <!-- 2026-11-16：待办事项已成为底部第 1 个 tab（原「隐患识别」入口），补回常驻底栏 -->
+  <tab-bar active="todo" />
 
   <view class="inbox-head">
     <text class="inbox-title">待办协作中心</text>

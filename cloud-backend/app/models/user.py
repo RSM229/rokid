@@ -335,6 +335,11 @@ class Project(Base):
         DateTime, nullable=True, comment="结项时间（NULL=未结项）"
     )
     # ---- Step 1 结束 ----
+    # 监理日志（项目级自动任务）设定时间点，由总监在系统设置里填 HH:MM。
+    # NULL = 未设置，沿用全局 DAILY_DOC_HOUR/MINUTE 默认 08:00；设了则以项目为准。
+    log_daily_time: Mapped[str | None] = mapped_column(
+        String(5), nullable=True, comment="监理日志自动生成时点 HH:MM（NULL=用全局默认）"
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
     # 创建 / 负责的管理员（项目负责人）。用于「按管理员授权」时界定
     # "某管理员名下的项目" = 其创建 / 负责的项目，而非其作为成员的全部项目。

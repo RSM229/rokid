@@ -40,11 +40,12 @@
   "__usePrivacyCheck__": true,
   "permission": {
     "scope.userLocation": {
-      "desc": "用于为现场影像添加位置水印"
+      "desc": "用于为现场影像添加位置水印、为工作记录填写具体位置"
     }
   },
   "requiredPrivateInfos": [
-    "getLocation"
+    "getLocation",
+    "chooseLocation"
   ],
   "networkTimeout": {
     "request": 30000,

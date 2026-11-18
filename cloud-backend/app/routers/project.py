@@ -97,6 +97,8 @@ class CreateProjectRequest(BaseModel):
     latitude: Optional[str] = None
     longitude: Optional[str] = None
     seal_signature_id: Optional[int] = None
+    # 监理日志项目级自动任务的设定时点（HH:MM，NULL=用全局默认 DAILY_DOC_HOUR）
+    log_daily_time: Optional[str] = None
 
 
 
@@ -114,6 +116,7 @@ class UpdateProjectRequest(BaseModel):
     latitude: Optional[str] = None
     longitude: Optional[str] = None
     seal_signature_id: Optional[int] = None
+    log_daily_time: Optional[str] = None
 
 
 
@@ -132,6 +135,8 @@ class ProjectInfo(BaseModel):
     latitude: Optional[str] = None
     longitude: Optional[str] = None
     seal_signature_id: Optional[int] = None
+    # 监理日志自动任务时点（HH:MM，NULL=全局默认）
+    log_daily_time: Optional[str] = None
 
     # Step 5：项目生命周期状态（active=进行中 / completed=已完工 / archived=已归档）
     status: str = "active"
@@ -168,6 +173,7 @@ def _project_info(project: Project) -> ProjectInfo:
         latitude=project.latitude,
         longitude=project.longitude,
         seal_signature_id=project.seal_signature_id,
+        log_daily_time=getattr(project, "log_daily_time", None),
 
         status=project.status or PROJECT_STATUS_ACTIVE,
         completed_at=project.completed_at.isoformat() if project.completed_at else None,
@@ -336,7 +342,7 @@ async def update_project(
     if not user.has_permission("project_edit"):
         raise HTTPException(403, "需要项目编辑权限")
     await _validate_project_fields(db, user, req, previous=project)
-    for key in ("eng_type", "construction_unit", "supervision_unit", "supervision_org", "acceptance_participants", "latitude", "longitude", "seal_signature_id"):
+    for key in ("eng_type", "construction_unit", "supervision_unit", "supervision_org", "acceptance_participants", "latitude", "longitude", "seal_signature_id", "log_daily_time"):
         if key in req.model_fields_set:
             value = getattr(req, key)
             setattr(project, key, (value.strip() or None) if isinstance(value, str) else value)

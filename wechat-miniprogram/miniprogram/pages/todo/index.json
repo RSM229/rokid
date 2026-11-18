@@ -3,6 +3,7 @@
   "enablePullDownRefresh": true,
   "navigationStyle": "custom",
   "usingComponents": {
-    "glass-nav-bar": "/components/glass-nav-bar/index"
+    "glass-nav-bar": "/components/glass-nav-bar/index",
+    "tab-bar": "/components/tab-bar/index"
   }
 }
