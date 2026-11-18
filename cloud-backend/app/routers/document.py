@@ -99,6 +99,40 @@ def _ensure_diary_visible(doc: Document, user: User) -> None:
         raise HTTPException(status_code=404, detail="文书不存在")
 
 
+async def _ensure_images_in_project(
+    db: AsyncSession, project_id: int, images: list[str] | None
+) -> None:
+    """文书附图归属校验（第 6 轮，2026-11-18）。
+
+    ``/document/create``、``PUT /{doc_id}`` 的 ``req.attached_images`` 与
+    schema 路径 image 字段值都是客户端直传的 /uploads/ 地址，此前无校验
+    ——恶意请求可把他项目的照片挂进本项目文书（详情页与导出 PDF 会渲染）。
+    与 agent chat 的本人双闸不同：文书的影像是「项目共享」口径（详情页
+    项目内可见），因此只要求「同项目上传的媒体」；不存在/他项目的拒绝。
+    """
+    if not images:
+        return
+    urls = [str(u).strip() for u in images if isinstance(u, str) and str(u).strip()]
+    upload_urls = [u for u in urls if u.startswith("/uploads/")]
+    if not upload_urls:
+        return
+    from app.models.miniprogram import MediaRecord, MediaType
+
+    rows = (await db.execute(select(MediaRecord).where(
+        MediaRecord.project_id == project_id,
+        MediaRecord.media_type == MediaType.IMAGE.value,
+    ))).scalars().all()
+    owned = {row.original_path for row in rows} | {
+        row.processed_path for row in rows if row.processed_path
+    }
+    bad = [u for u in upload_urls if u not in owned]
+    if bad:
+        raise HTTPException(
+            status_code=403,
+            detail=f"图片不存在或不属于当前项目：{', '.join(bad[:3])}",
+        )
+
+
 def _auto_fill_content(doc_type: str, user: User, req: DocCreateRequest) -> dict:
     """根据文书类型自动填充基础字段"""
     now = datetime.now()
@@ -127,6 +161,7 @@ async def create_document(
 ):
     """创建监理文书（自动填充基础字段）"""
     content = _auto_fill_content(req.doc_type.value, user, req)
+    await _ensure_images_in_project(db, require_project_id(user), req.attached_images)
     doc = Document(
         doc_type=req.doc_type.value,
         title=req.title,
@@ -189,6 +224,8 @@ async def create_document_from_schema(
     # 表单里拍照/选图上传的照片地址落到 attached_images，文书详情页「关联影像」
     # 与导出 PDF/docx 的附图都从这里取（否则只在 content['photo'] 里会出现裸 URL）
     attached_images = provform_schema.image_field_urls(req.form_code, req.fields)
+    # image 字段值是客户端直传 URL：同项目媒体校验（防挂他项目照片）
+    await _ensure_images_in_project(db, project_id, attached_images)
     doc = Document(
         doc_type=doc_type_for(req.form_code),
         title=req.title or schema["name"],
@@ -250,6 +287,8 @@ async def update_document_from_schema(
     doc.content = new_content
     # 表单重传照片时同步更新影像列表；无照片字段的表不动既有影像（保留聊天补的图）
     form_images = provform_schema.image_field_urls(doc.form_code, req.fields)
+    # image 字段值是客户端直传 URL：同项目媒体校验（防挂他项目照片）
+    await _ensure_images_in_project(db, project_id, form_images)
     if form_images or old_images:
         existing = [u for u in (doc.attached_images or [])
                     if isinstance(u, str) and u not in old_images]
@@ -471,6 +510,7 @@ async def update_document(
     if req.weather is not None:
         doc.weather = req.weather
     if req.attached_images is not None:
+        await _ensure_images_in_project(db, doc.project_id, req.attached_images)
         doc.attached_images = req.attached_images
 
     await db.commit()

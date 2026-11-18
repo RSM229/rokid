@@ -69,15 +69,69 @@ def _safe_resolve(base: Path, rest: str) -> Path:
 async def serve_upload(
     rest: str,
     user: User = Depends(_user_from_file_request),
+    db: AsyncSession = Depends(get_db),
 ):
     """受控返回用户上传文件（巡检照片、图纸、签章、文书原图等）。
 
     要求登录（Authorization header 或 ?access_token= 二选一，供小程序
-    <image> 标签使用）；具体项目的归属隔离为后续 per-category 清单增强项。
+    <image> 标签使用），并按路径反查归属（2026-11-18 第 6 轮补漏，
+    此前仅要求登录——知 URL 即可读的纵深防御欠账）：
+
+    - ``media/…``：MediaRecord 反查（同项目即可读；项目内成员在详情页
+      本来就能看到彼此的现场照片）；
+    - ``signatures/…``：仅签章归属人本人可读（签章图片可被拿去伪造
+      文书，个人维度防护，404 防探测）；
+    - ``task-results/{task_id}/…``：任务的派单人或被指派人；
+    - ``drawings/``、``archives/{project_id}/…``：项目归属（can_read_project）；
+    - 其余（tts 等非敏感生成物）：仅要求登录。
     """
     path = _safe_resolve(settings.upload_dir, rest)
     if not path.is_file():
         raise HTTPException(status_code=404, detail="文件不存在")
+
+    parts = [p for p in rest.split("/") if p]
+    if parts:
+        from sqlalchemy import select as _select
+        from app.models.miniprogram import MediaRecord
+        from app.models.signature import Signature
+        from app.models.task_assignment import TaskAssignment
+
+        if parts[0] == "media":
+            # 媒体文件：按 original/processed 路径反查，同项目可读
+            row = (await db.execute(_select(MediaRecord).where(
+                (MediaRecord.original_path == f"/uploads/{rest}")
+                | (MediaRecord.processed_path == f"/uploads/{rest}")
+            ))).scalars().first()
+            if row is not None and not can_read_project(row.project_id, user):
+                raise HTTPException(status_code=403, detail="无权访问该媒体文件")
+        elif parts[0] == "signatures":
+            # 签章图片：仅归属人本人（404 防探测，签章泄露可被用于伪造文书）
+            row = (await db.execute(_select(Signature).where(
+                Signature.image_path == f"/uploads/{rest}"
+            ))).scalars().first()
+            if row is not None and row.user_id != user.id:
+                raise HTTPException(status_code=404, detail="文件不存在")
+        elif parts[0] == "task-results" and len(parts) >= 2 and parts[1].isdigit():
+            # 任务成果附件：派单人或被指派人
+            task = await db.get(TaskAssignment, int(parts[1]))
+            if task is not None and task.assignee_id != user.id and task.assigner_id != user.id:
+                raise HTTPException(status_code=403, detail="无权访问该任务成果")
+        elif parts[0] == "archives" and len(parts) >= 2 and parts[1].isdigit():
+            # 项目归档包：项目归属
+            if not can_read_project(int(parts[1]), user):
+                raise HTTPException(status_code=403, detail="无权访问该项目文件")
+        elif parts[0] == "drawings":
+            # 图纸：项目归属记录在同目录 .meta.json（见 project.py 上传逻辑）
+            meta_path = path.with_suffix(path.suffix + ".meta.json")
+            pid = None
+            if meta_path.is_file():
+                import json as _json
+                try:
+                    pid = _json.loads(meta_path.read_text(encoding="utf-8")).get("project_id")
+                except Exception:
+                    pid = None
+            if pid is not None and not can_read_project(int(pid), user):
+                raise HTTPException(status_code=403, detail="无权访问该项目图纸")
     return FileResponse(path)
 
 
