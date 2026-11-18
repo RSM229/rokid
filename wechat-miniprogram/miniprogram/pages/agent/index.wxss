@@ -128,63 +128,7 @@
 .message-actions { margin-top: 12rpx; }
 .message-prompts { width: 100%; max-width: 100%; box-sizing: border-box; padding: 8rpx 4rpx 14rpx; line-height: 1.65; font-size: 26rpx; background: transparent; border: 0; box-shadow: none; word-break: break-word; }
 
-/* 对话内整理计划：水印日期先作为线索展示，用户点击采用后才进入确认状态。 */
-.inline-review { width: 100%; margin-top: 12rpx; padding: 18rpx; box-sizing: border-box; border: 1rpx solid rgba(39,66,81,.14); border-radius: 8rpx; background: rgba(255,255,255,.82); box-shadow: none; }
-.inline-review-head { display: flex; align-items: flex-start; flex-wrap: wrap; justify-content: space-between; gap: 6rpx 12rpx; margin-bottom: 12rpx; }
-.inline-review-title { min-width: 0; flex: 1; font-size: 27rpx; font-weight: 700; color: #245f56; line-height: 1.4; }
-.inline-review-meta, .inline-review-event-count, .inline-review-selected { max-width: 100%; font-size: 21rpx; line-height: 1.4; color: var(--ink-3, #6b7c93); }
-.inline-review-meta { flex: 0 1 auto; margin-left: auto; text-align: right; }
-.inline-review-empty { padding: 16rpx 0; color: var(--ink-3, #6b7c93); font-size: 24rpx; }
-.inline-review-event { padding: 18rpx 0; border-top: 1rpx solid rgba(20,45,65,.10); }
-.inline-review-event-head, .inline-review-date-row, .inline-review-form-row { display: flex; align-items: center; flex-wrap: wrap; justify-content: space-between; gap: 8rpx 12rpx; }
-.inline-merge-toggle { flex: none; padding: 7rpx 12rpx; border: 1rpx solid rgba(36,95,86,.24); border-radius: 12rpx; color: #245f56; background: rgba(255,255,255,.75); font-size: 20rpx; }
-.inline-merge-toggle.selected { color: #fff; border-color: #245f56; background: #245f56; }
-.inline-review-event-title { min-width: 0; flex: 1; font-size: 25rpx; color: var(--ink, #12253d); font-weight: 600; line-height: 1.45; overflow-wrap: anywhere; }
-.inline-review-label { font-size: 23rpx; color: var(--ink-3, #6b7c93); }
-.inline-review-date-status { font-size: 24rpx; font-weight: 600; }
-.inline-review-date-status.confirmed { color: #245f56; }
-.inline-review-date-status.pending { color: #b06b20; }
-.inline-review-source { display: block; margin-top: 8rpx; font-size: 21rpx; color: #71827e; line-height: 1.5; }
-.inline-review-clues { margin-top: 12rpx; padding: 12rpx; border-radius: 12rpx; background: rgba(36,95,86,.06); }
-.inline-review-clue-label { display: block; font-size: 22rpx; color: #5d766f; margin-bottom: 8rpx; }
-.inline-review-chip-row { display: flex; flex-wrap: wrap; gap: 10rpx; margin-top: 10rpx; }
-.inline-review-chip { padding: 9rpx 16rpx; border-radius: 16rpx; font-size: 22rpx; color: #245f56; background: rgba(255,255,255,.84); border: 1rpx solid rgba(36,95,86,.22); }
-.inline-review-chip.selected { color: #fff; background: #245f56; border-color: #245f56; }
-.inline-review-date-picker { display: inline-flex; align-items: center; gap: 8rpx; margin-top: 12rpx; padding: 9rpx 14rpx; border-radius: 14rpx; font-size: 22rpx; color: var(--ink-3, #6b7c93); background: rgba(20,45,65,.05); }
-.inline-review-form-row { margin-top: 18rpx; }
-.inline-review-selected { margin-top: 10rpx; }
-.inline-review-issues { margin-top: 12rpx; padding: 12rpx 14rpx; border: 1rpx solid rgba(200,120,51,.18); border-radius: 8rpx; background: rgba(200,120,51,.08); }
-.inline-review-issue { display: block; font-size: 22rpx; line-height: 1.6; color: #8b5427; }
-.inline-review-missing { display: flex; flex-wrap: wrap; align-items: center; gap: 8rpx; margin-top: 12rpx; padding: 10rpx 12rpx; border-radius: 12rpx; background: rgba(200,120,51,.08); }
-.inline-review-missing-title { font-size: 21rpx; color: #8b5427; font-weight: 600; }
-.inline-review-missing-item { padding: 4rpx 9rpx; border-radius: 9rpx; background: rgba(255,255,255,.8); color: #8b5427; font-size: 20rpx; }
-.inline-review-field { margin-top: 12rpx; }
-.inline-review-field > text { display: block; margin-bottom: 6rpx; color: var(--ink-3, #6b7c93); font-size: 21rpx; }
-.inline-review-field input, .inline-review-field textarea { width: 100%; min-height: 62rpx; padding: 10rpx 12rpx; box-sizing: border-box; border: 1rpx solid rgba(20,45,65,.13); border-radius: 10rpx; background: rgba(255,255,255,.82); color: var(--ink, #12253d); font-size: 23rpx; }
-.inline-review-field textarea { min-height: 92rpx; line-height: 1.5; }
-.inline-review-field.entity-field { padding: 12rpx; border: 1rpx solid rgba(20,45,65,.10); border-radius: 12rpx; background: rgba(255,255,255,.56); }
-.inline-review-field.entity-field.conflict { border-color: rgba(176,107,32,.42); background: rgba(255,249,239,.82); }
-.inline-form-schema { margin-top: 16rpx; padding: 14rpx; border: 1rpx solid rgba(36,95,86,.16); border-radius: 12rpx; background: rgba(246,251,249,.74); }
-.inline-form-schema-head { display: flex; align-items: center; justify-content: space-between; gap: 12rpx; }
-.inline-form-schema-title { color: #245f56; font-size: 23rpx; font-weight: 600; }
-.inline-review-field.form-schema-field { padding: 11rpx 12rpx; border: 1rpx solid rgba(20,45,65,.10); border-radius: 10rpx; background: rgba(255,255,255,.74); }
-.inline-review-field.form-schema-field.required-missing { border-color: rgba(176,107,32,.38); background: rgba(255,249,239,.82); }
-.inline-review-field.form-schema-field input[disabled], .inline-review-field.form-schema-field textarea[disabled] { color: #5d766f; background: rgba(235,242,239,.82); }
-.form-option-row { margin-top: 2rpx; }
-.inline-review-entity-head { display: flex; align-items: center; justify-content: space-between; gap: 10rpx; margin-bottom: 7rpx; color: var(--ink-3, #6b7c93); font-size: 21rpx; }
-.inline-review-conflict, .inline-review-source-tag { padding: 3rpx 9rpx; border-radius: 8rpx; font-size: 19rpx; }
-.inline-review-conflict { color: #9a5b17; background: rgba(201,131,52,.13); }
-.inline-review-source-tag { color: #245f56; background: rgba(36,95,86,.08); }
-.entity-choice-row { margin-top: 8rpx; }
-.inline-review-field-grid { display: flex; gap: 12rpx; }
-.inline-review-field-grid .inline-review-field { flex: 1; min-width: 0; }
-.inline-evidence-actions { display: flex; flex-wrap: wrap; gap: 12rpx; margin-top: 10rpx; }
-.inline-review-action { padding: 8rpx 12rpx; border-radius: 10rpx; border: 1rpx solid rgba(36,95,86,.2); background: rgba(255,255,255,.76); color: #245f56; font-size: 21rpx; }
-.inline-review-remove { margin-top: 14rpx; color: #a65d35; font-size: 21rpx; text-align: right; }
-.inline-review-merge { margin: 14rpx 0 0; height: 62rpx; line-height: 62rpx; border-radius: 12rpx; color: #fff; background: #3e7469; font-size: 23rpx; }
-.inline-review-confirm { margin: 18rpx 0 0; height: 72rpx; line-height: 72rpx; border-radius: 16rpx; color: #fff; background: #245f56; font-size: 25rpx; }
-.inline-review-confirm[disabled] { opacity: .55; }
-.inline-review-result, .inline-review-done { display: block; margin-top: 14rpx; font-size: 23rpx; color: #245f56; }
+
 .chat-generate-btn { display: inline-block; margin: 16rpx 0 0; padding: 0 30rpx; height: 60rpx; line-height: 60rpx; border-radius: 30rpx; font-size: 24rpx; color: #fff; background: #245f56; }
 .chat-generate-btn[disabled] { opacity: .55; }
 .chat-generate-done { display: block; margin-top: 14rpx; font-size: 23rpx; color: #245f56; }
@@ -209,6 +153,10 @@
 .inline-hazard-evidence text { display: block; }
 .inline-hazard-error { display: block; margin-top: 8rpx; color: #b43f32; font-size: 20rpx; }
 .inline-hazard-discard { display: block; margin-top: 8rpx; color: #8d6653; text-align: right; font-size: 20rpx; }
+/* 隐患候选卡的确认按钮 + 结果文本——原 inline-review 表单卡遗留的同名类被复用于此 */
+.inline-review-confirm { margin: 18rpx 0 0; height: 72rpx; line-height: 72rpx; border-radius: 16rpx; color: #fff; background: #245f56; font-size: 25rpx; }
+.inline-review-confirm[disabled] { opacity: .55; }
+.inline-review-result { display: block; margin-top: 14rpx; font-size: 23rpx; color: #245f56; }
 .message-hint { padding: 0; box-shadow: none; }
 
 /* ===== 对话内任务表单：在回复气泡里一次完成选择、填写和上传 ===== */
@@ -586,25 +534,10 @@
 .agent-chip { padding: 12rpx 30rpx; border-radius: 999rpx; font-size: 26rpx; font-weight: 500; color: var(--brand, #0a2e5c); background: rgba(var(--brand-rgb, 22,119,255), 0.10); border: 1rpx solid rgba(var(--brand-rgb, 22,119,255), 0.28); transition: background 0.15s ease, transform 0.12s ease; }
 .agent-chip:active { transform: scale(0.95); background: rgba(var(--brand-rgb, 22,119,255), 0.20); }
 
-/* 参考备案助手的阶段性任务区，但保持监理对话为唯一主入口。 */
-.review-progress { display: flex; align-items: flex-start; justify-content: space-between; gap: 8rpx; margin: 18rpx 0 12rpx; padding: 14rpx 12rpx; border-radius: 14rpx; background: rgba(var(--brand-rgb, 22,119,255), .055); }
-.review-progress-step { position: relative; flex: 1; display: flex; flex-direction: column; align-items: center; gap: 5rpx; color: #9aa7b5; font-size: 19rpx; text-align: center; line-height: 1.25; }
-.review-progress-step:not(:last-child)::after { content: ''; position: absolute; top: 17rpx; left: calc(50% + 18rpx); width: calc(100% - 36rpx); height: 2rpx; background: rgba(120,140,160,.22); }
-.review-progress-dot { width: 34rpx; height: 34rpx; display: flex; align-items: center; justify-content: center; border-radius: 50%; color: #fff; background: #b7c0ca; font-size: 21rpx; font-weight: 600; z-index: 1; }
-.review-progress-step.done { color: #267866; }.review-progress-step.done .review-progress-dot { background: #2e9b79; }.review-progress-step.current { color: var(--brand, #1767a5); font-weight: 600; }.review-progress-step.current .review-progress-dot { background: var(--brand, #1677ff); }
-.inline-review-summary { display: block; margin: 6rpx 0 14rpx; padding: 12rpx 14rpx; border: 1rpx solid rgba(77,147,178,.16); border-radius: 8rpx; background: rgba(77,147,178,.08); color: #4d6475; font-size: 22rpx; line-height: 1.5; }
 .inline-review-preview { display: flex; align-items: center; justify-content: space-between; gap: 12rpx; margin: 0 0 12rpx; padding: 12rpx 14rpx; border: 1rpx solid rgba(36,95,86,.18); border-radius: 6rpx; background: #f7fbf9; color: #2f5d53; font-size: 22rpx; font-weight: 500; }
 .inline-review-preview:active { background: #eef7f3; }
 .inline-review-preview-arrow { color: #5d7a70; font-size: 28rpx; line-height: 1; transition: transform .18s ease; }
 .inline-review-preview-arrow.expanded { transform: rotate(90deg); }
-.inline-review-detail { display: block; margin-top: 8rpx; color: #405568; font-size: 22rpx; line-height: 1.45; }
-.inline-watermark-photo { margin-top: 12rpx; padding: 12rpx; border: 1rpx solid rgba(36,95,86,.14); border-radius: 8rpx; background: rgba(255,255,255,.55); }
-.inline-watermark-head { display: flex; align-items: center; gap: 10rpx; color: #526b69; font-size: 21rpx; }
-.inline-watermark-head image { width: 52rpx; height: 52rpx; flex: 0 0 52rpx; border-radius: 4rpx; }
-.inline-watermark-head text:last-child { margin-left: auto; text-align: right; }
-.inline-watermark-field { display: grid; grid-template-columns: 1fr 1.5fr; gap: 8rpx; margin-top: 8rpx; }
-.inline-watermark-field input { min-width: 0; height: 60rpx; padding: 0 10rpx; box-sizing: border-box; border: 1rpx solid rgba(20,45,65,.14); border-radius: 6rpx; font-size: 21rpx; background: #fff; }
-.inline-watermark-add { margin-top: 10rpx; color: #245f56; font-size: 21rpx; }
 
 .agent-progress { width: 100%; box-sizing: border-box; margin: 4rpx 0 12rpx; padding: 14rpx 18rpx; border: 0; border-left: 6rpx solid #13795b; border-radius: 14rpx; background: rgba(19,121,91,0.06); overflow: visible; }
 .agent-progress.done { border-left-color: #9aa6ac; background: rgba(19,121,91,0.04); }
@@ -678,3 +611,9 @@
 .doc-review-tag { flex: none; padding: 3rpx 10rpx; border-radius: 8rpx; background: rgba(19,121,91,.1); color: #13795b; font-size: 19rpx; }
 .doc-review-tag.must { background: rgba(200,90,51,.12); color: #a44a24; }
 .doc-review-text { flex: 1; font-size: 22rpx; line-height: 1.5; color: var(--ink-2, #2f4157); }
+
+/* 草稿被拦的可见解释（2026-11-18）：reviewResult/reviewIssues 长期只写不渲染 */
+.chat-generate-blocked { width: 100%; margin-top: 12rpx; padding: 16rpx 18rpx; box-sizing: border-box; border: 1rpx solid rgba(133,71,35,.25); border-radius: 8rpx; background: rgba(133,71,35,.06); }
+.chat-generate-blocked-title { display: block; color: #854723; font-size: 25rpx; font-weight: 700; }
+.chat-generate-blocked-text { display: block; margin-top: 6rpx; color: #6b564a; font-size: 22rpx; line-height: 1.5; }
+.chat-generate-blocked-hint { display: block; margin-top: 8rpx; color: #8a7568; font-size: 20rpx; line-height: 1.45; }

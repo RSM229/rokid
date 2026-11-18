@@ -135,155 +135,16 @@
               </view>
             </view>
           </view>
-          <!-- 用户要求：去掉填表形式，改纯对话。暂时用 wx:if=false 隐藏草稿卡片（数据逻辑保留，可随时恢复）。 -->
-          <view wx:if="{{false}}" class="inline-review">
-            <view class="inline-review-head">
-              <text class="inline-review-title">工作记录草稿</text>
-              <text class="inline-review-meta">{{item.reviewPlan.evidence.length}} 张图片 · {{item.reviewPlan.events.length}} 个事项</text>
-            </view>
-            <text wx:if="{{item.reviewSummary}}" class="inline-review-summary">{{item.reviewSummary}}</text>
-            <view wx:if="{{(item.reviewEvents && item.reviewEvents.length) || (item.reviewUnassignedEvidence && item.reviewUnassignedEvidence.length)}}" class="inline-review-preview" data-index="{{mi}}" bindtap="toggleInlineReviewDetails">
-              <text>{{item.reviewDetailsExpanded ? '收起草稿详情' : '查看草稿详情'}}</text>
-              <text class="inline-review-preview-arrow {{item.reviewDetailsExpanded ? 'expanded' : ''}}">›</text>
-            </view>
-            <view wx:if="{{!item.reviewEvents || !item.reviewEvents.length}}" class="inline-review-empty">照片已收到，正在等待你确定用途。可点下面的记录类型，也可继续用下方输入框打字、语音或添加图片。</view>
-            <view wx:if="{{item.reviewPurposeOptions && item.reviewPurposeOptions.length}}" class="inline-review-chip-row review-purpose-options">
-              <view wx:if="{{item.reviewRecommendation}}" class="review-ai-recommendation">
-                <view><text class="review-ai-recommendation-title">智能体建议：{{item.reviewRecommendation.recordType}}</text><text class="review-ai-recommendation-reason">{{item.reviewRecommendation.reason}}</text></view>
-                <button class="inline-review-chip selected" data-index="{{mi}}" data-purpose="record_type:{{item.reviewRecommendation.recordType}}" bindtap="chooseInlineReviewPurpose">采用建议</button>
-              </view>
-              <button wx:for="{{item.reviewPurposeOptions}}" wx:for-item="purpose" wx:key="value" class="inline-review-chip" data-index="{{mi}}" data-purpose="{{purpose.value}}" bindtap="chooseInlineReviewPurpose">{{purpose.label}}</button>
-            </view>
-            <block wx:if="{{item.reviewDetailsExpanded}}">
-            <view wx:if="{{item.reviewUnassignedEvidence && item.reviewUnassignedEvidence.length}}" class="inline-review-unassigned">
-              <text class="inline-review-label">尚未分配的照片证据</text>
-              <view wx:for="{{item.reviewUnassignedEvidence}}" wx:for-item="photo" wx:key="id" class="inline-watermark-photo">
-                <view class="inline-watermark-head"><image src="{{photo.image}}" mode="aspectFill" data-url="{{photo.image}}" data-mi="{{mi}}" bindtap="previewInlineImages" data-group="{{item.reviewUnassignedEvidence}}"/><text>图片水印信息</text><text>{{photo.status}}</text></view>
-                <block wx:if="{{photo.items.length}}">
-                  <view wx:for="{{photo.items}}" wx:for-item="field" wx:key="index" class="inline-review-source">{{field.label}}：{{field.value || '未识别/未知'}}</view>
-                </block>
-                <text wx:else class="inline-review-source">暂未提取到可显示的水印字段；原图仍已保留。</text>
-                <text wx:if="{{photo.note}}" class="inline-review-source">图片内容与原始识别：{{photo.note}}</text>
-                <view class="inline-evidence-actions">
-                  <picker wx:if="{{item.reviewEventOptions && item.reviewEventOptions.length}}" range="{{item.reviewEventOptions}}" range-key="title" data-index="{{mi}}" data-evidence="{{photo.id}}" bindchange="assignInlineEvidence">
-                    <view class="inline-review-action">加入已有事项</view>
-                  </picker>
-                  <view class="inline-review-action" data-index="{{mi}}" data-evidence="{{photo.id}}" bindtap="addInlineEventForEvidence">设为独立事项</view>
-                </view>
-              </view>
-            </view>
-            <view wx:for="{{item.reviewEvents}}" wx:for-item="event" wx:for-index="ei" wx:key="id" class="inline-review-event">
-              <view class="inline-review-event-head">
-                <view class="inline-merge-toggle {{event.mergeSelected ? 'selected' : ''}}" data-index="{{mi}}" data-id="{{event.id}}" bindtap="toggleInlineMerge">{{event.mergeSelected ? '已选' : '选择合并'}}</view>
-                <text class="inline-review-event-title">{{ei + 1}}. {{event.title}}</text>
-                <text class="inline-review-event-count">{{event.evidenceCount}} 张图片</text>
-              </view>
-              <view wx:if="{{event.missingFields.length}}" class="inline-review-missing">
-                <text class="inline-review-missing-title">待补信息</text>
-                <text wx:for="{{event.missingFields}}" wx:key="*this" class="inline-review-missing-item">{{item}}</text>
-              </view>
-              <view wx:if="{{event.issues.length}}" class="inline-review-clues">
-                <text wx:for="{{event.issues}}" wx:key="*this" class="inline-review-issue">{{item}}</text>
-              </view>
-              <view class="inline-review-field">
-                <text>工作名称</text>
-                <input value="{{event.title}}" placeholder="例如：3号楼二层钢筋绑扎巡视" data-index="{{mi}}" data-id="{{event.id}}" data-field="title" bindblur="changeInlineReviewField" />
-              </view>
-              <view class="inline-review-field-grid">
-                <view class="inline-review-field"><text>地点</text><input value="{{event.location}}" placeholder="可补充" data-index="{{mi}}" data-id="{{event.id}}" data-field="location" bindblur="changeInlineReviewField" /></view>
-                <view class="inline-review-field"><text>施工部位</text><input value="{{event.section}}" placeholder="可补充" data-index="{{mi}}" data-id="{{event.id}}" data-field="section" bindblur="changeInlineReviewField" /></view>
-              </view>
-              <view wx:for="{{event.entityFieldRows}}" wx:for-item="entityField" wx:for-index="efi" wx:key="field" class="inline-review-field entity-field {{entityField.conflict ? 'conflict' : ''}}">
-                <view class="inline-review-entity-head">
-                  <text>{{entityField.label}}</text>
-                  <text wx:if="{{entityField.conflict}}" class="inline-review-conflict">待确认</text>
-                  <text wx:elif="{{entityField.value}}" class="inline-review-source-tag">已有识别值</text>
-                </view>
-                <input value="{{entityField.value}}" placeholder="未识别，可直接补充" data-index="{{mi}}" data-id="{{event.id}}" data-field="{{entityField.field}}" bindblur="changeInlineReviewEntityField" />
-                <view wx:if="{{entityField.values.length > 1}}" class="inline-review-chip-row entity-choice-row">
-                  <view wx:for="{{entityField.values}}" wx:for-item="choice" wx:for-index="choiceIndex" wx:key="choiceIndex" class="inline-review-chip {{entityField.value === choice ? 'selected' : ''}}" data-index="{{mi}}" data-id="{{event.id}}" data-field="{{entityField.field}}" data-value="{{choice}}" bindtap="changeInlineReviewEntityField">采用 {{choice}}</view>
-                </view>
-              </view>
-              <view wx:if="{{event.formFields && event.formFields.length}}" class="inline-form-schema">
-                <view class="inline-form-schema-head">
-                  <text class="inline-form-schema-title">待定工作记录草稿 · {{event.draftStatusLabel}}</text>
-                  <text class="inline-review-source-tag">{{event.formCode}} · {{event.contractVersion}}</text>
-                </view>
-                <view wx:for="{{event.formFields}}" wx:for-item="formField" wx:key="canonical" class="inline-review-field form-schema-field {{formField.missing || formField.conflict || formField.validationError ? 'required-missing' : ''}}">
-                  <view class="inline-review-entity-head">
-                    <text>{{formField.label}}{{formField.required ? ' *' : ''}}</text>
-                    <text wx:if="{{formField.conflict}}" class="inline-review-conflict">待确认</text>
-                    <text wx:elif="{{formField.missing}}" class="inline-review-conflict">待补</text>
-                    <text wx:elif="{{formField.validationError}}" class="inline-review-conflict">格式待修正</text>
-                    <text wx:elif="{{formField.autoResolved}}" class="inline-review-source-tag">已自动填写·可改</text>
-                    <text wx:elif="{{formField.source === 'watermark'}}" class="inline-review-source-tag">水印识别</text>
-                    <text wx:elif="{{formField.value}}" class="inline-review-source-tag">已填写</text>
-                  </view>
-                  <text wx:if="{{formField.validationError}}" class="inline-review-source">{{formField.validationError}}</text>
-                  <view wx:if="{{formField.candidates.length}}" class="inline-review-chip-row form-option-row">
-                    <view wx:for="{{formField.candidates}}" wx:for-item="candidate" wx:for-index="candidateIndex" wx:key="candidateIndex" class="inline-review-chip {{formField.value === candidate.value ? 'selected' : ''}}" data-index="{{mi}}" data-id="{{event.id}}" data-form-code="{{event.formCode}}" data-field="{{formField.canonical}}" data-value="{{candidate.value}}" bindtap="chooseInlineReviewFormOption">采用 {{candidate.value}}</view>
-                  </view>
-                  <date-time-picker wx:if="{{formField.control === 'datetime-local'}}" value="{{formField.value}}" reference-date="{{event.date}}" reference-enabled="{{formField.required}}" disabled="{{formField.readonly}}" data-index="{{mi}}" data-id="{{event.id}}" data-form-code="{{event.formCode}}" data-field="{{formField.canonical}}" bind:change="changeInlineReviewDateTime" />
-                  <date-time-picker wx:elif="{{formField.control === 'time'}}" mode="time" value="{{formField.value}}" reference-enabled="{{formField.required}}" disabled="{{formField.readonly}}" data-index="{{mi}}" data-id="{{event.id}}" data-form-code="{{event.formCode}}" data-field="{{formField.canonical}}" bind:change="changeInlineReviewDateTime" />
-                  <textarea wx:elif="{{formField.control === 'textarea'}}" value="{{formField.value}}" disabled="{{formField.readonly}}" auto-height maxlength="-1" placeholder="{{formField.question || '请填写'}}" data-index="{{mi}}" data-id="{{event.id}}" data-form-code="{{event.formCode}}" data-field="{{formField.canonical}}" bindblur="changeInlineReviewFormField" />
-                  <view wx:elif="{{formField.control === 'select' && formField.options.length}}" class="inline-review-chip-row form-option-row">
-                    <view wx:for="{{formField.options}}" wx:for-item="option" wx:for-index="optionIndex" wx:key="optionIndex" class="inline-review-chip {{formField.value === option ? 'selected' : ''}}" data-index="{{mi}}" data-id="{{event.id}}" data-form-code="{{event.formCode}}" data-field="{{formField.canonical}}" data-value="{{option}}" bindtap="chooseInlineReviewFormOption">{{option}}</view>
-                  </view>
-                  <input wx:else value="{{formField.value}}" disabled="{{formField.readonly}}" type="{{formField.control === 'number' ? 'number' : 'text'}}" placeholder="{{formField.question || (formField.readonly ? '由系统带出' : '请填写')}}" data-index="{{mi}}" data-id="{{event.id}}" data-form-code="{{event.formCode}}" data-field="{{formField.canonical}}" bindblur="changeInlineReviewFormField" />
-                </view>
-              </view>
-              <view class="inline-review-field"><text>工作描述</text><textarea value="{{event.content}}" auto-height maxlength="-1" placeholder="补充现场工作情况" data-index="{{mi}}" data-id="{{event.id}}" data-field="content" bindblur="changeInlineReviewField" /></view>
-              <view class="inline-review-date-row">
-                <text class="inline-review-label">业务日期</text>
-                <text class="inline-review-date-status {{event.date ? 'confirmed' : 'pending'}}">{{event.date ? event.date : '待补充'}}</text>
-              </view>
-              <text wx:if="{{event.dateSource}}" class="inline-review-source">日期依据：{{event.dateSource === 'watermark' ? '照片水印' : (event.dateSource === 'exif' ? '照片 EXIF' : (event.dateSource === 'watermark_or_exif' ? '照片水印/EXIF' : (event.dateSource === 'user_message' ? '你的文字描述' : event.dateSource)))}}</text>
-              <text wx:if="{{event.evidenceSummary}}" class="inline-review-source">图片证据：{{event.evidenceSummary}}</text>
-              <text wx:if="{{event.watermarkSummary}}" class="inline-review-source">水印字段（待核对）：{{event.watermarkSummary}}</text>
-              <text wx:if="{{!event.watermarkSummary && event.evidenceCount}}" class="inline-review-source">水印字段未识别到；地点、区域、参建单位及记录表所需信息可在对话中补充。</text>
-              <view wx:for="{{event.evidenceFields}}" wx:for-item="photo" wx:key="id" class="inline-watermark-photo">
-                <view class="inline-watermark-head"><image src="{{photo.image}}" mode="aspectFill" data-url="{{photo.image}}" data-mi="{{mi}}" bindtap="previewInlineImages" data-group="{{event.evidenceFields}}"/><text>图片水印信息</text><text>{{photo.status}}</text></view>
-                <view wx:for="{{photo.items}}" wx:for-item="field" wx:key="index" class="inline-watermark-field">
-                  <input value="{{field.label}}" placeholder="字段名（如施工区域）" data-index="{{mi}}" data-evidence="{{photo.id}}" data-item="{{field.index}}" data-key="label" bindblur="changeInlineWatermarkField" />
-                  <input value="{{field.value}}" placeholder="未识别/未知，可补充" data-index="{{mi}}" data-evidence="{{photo.id}}" data-item="{{field.index}}" data-key="value" bindblur="changeInlineWatermarkField" />
-                </view>
-                <view class="inline-watermark-add" data-index="{{mi}}" data-evidence="{{photo.id}}" bindtap="addInlineWatermarkField">+ 补充字段或备注</view>
-                <view class="inline-evidence-actions">
-                  <view class="inline-review-action" data-index="{{mi}}" data-evidence="{{photo.id}}" bindtap="releaseInlineEvidence">移出本事项</view>
-                  <view wx:if="{{event.evidenceCount > 1}}" class="inline-review-action" data-index="{{mi}}" data-evidence="{{photo.id}}" bindtap="splitInlineEvidence">拆成独立事项</view>
-                </view>
-              </view>
-              <text wx:if="{{event.sourceText}}" class="inline-review-source">证据来源：{{event.sourceText}}</text>
-              <view wx:if="{{event.dateOptions && event.dateOptions.length}}" class="inline-review-clues">
-                <text class="inline-review-clue-label">照片水印识别到：</text>
-                <view class="inline-review-chip-row">
-                  <view wx:for="{{event.dateOptions}}" wx:for-item="date" wx:key="*this" class="inline-review-chip {{event.date === date && event.dateConfirmed ? 'selected' : ''}}" data-index="{{mi}}" data-id="{{event.id}}" data-date="{{date}}" bindtap="adoptInlineReviewDate">采用 {{date}}</view>
-                </view>
-              </view>
-              <picker mode="date" value="{{event.date || '2000-01-01'}}" data-index="{{mi}}" data-id="{{event.id}}" bindchange="changeInlineReviewDate">
-                <view class="inline-review-date-picker">{{event.dateConfirmed ? '修改日期' : (event.dateOptions && event.dateOptions.length ? '从照片日期中选择' : '补充业务日期')}} <text>▾</text></view>
-              </picker>
-              <view class="inline-review-form-row">
-                <text class="inline-review-label">工作记录类型</text>
-                <text class="inline-review-date-status {{event.recordType === '待定' ? 'pending' : 'confirmed'}}">{{event.recordType}} · {{event.draftStatusLabel}}</text>
-              </view>
-              <view class="inline-review-chip-row">
-                <view wx:for="{{event.recordTypeOptions}}" wx:for-item="type" wx:key="label" class="inline-review-chip form-chip {{type.checked ? 'selected' : ''}}" data-index="{{mi}}" data-id="{{event.id}}" data-type="{{type.label}}" bindtap="changeInlineReviewType">{{type.label}}</view>
-              </view>
-              <text wx:if="{{event.recordTypeReason}}" class="inline-review-source">判断依据：{{event.recordTypeReason}}</text>
-              <view class="inline-review-remove" data-index="{{mi}}" data-id="{{event.id}}" bindtap="removeInlineReviewEvent">删除此事项（照片保留到待分配）</view>
-            </view>
-            <button wx:if="{{item.reviewMergeSelection.length >= 2}}" class="inline-review-merge" data-index="{{mi}}" bindtap="mergeInlineReview">合并已选 {{item.reviewMergeSelection.length}} 个事项</button>
-            </block>
-            <view wx:if="{{item.reviewIssues && item.reviewIssues.length}}" class="inline-review-issues">
-              <text wx:for="{{item.reviewIssues}}" wx:key="*this" class="inline-review-issue">{{item}}</text>
-            </view>
-            <text wx:if="{{item.reviewResult}}" class="inline-review-result">{{item.reviewResult}}</text>
-            <button wx:if="{{item.reviewPlan.status !== 'executed'}}" class="inline-review-confirm" disabled="{{item.reviewBusy}}" loading="{{item.reviewBusy}}" bindtap="confirmInlineReview" data-index="{{mi}}">{{item.reviewBusy ? '正在生成' : (item.reviewIssues && item.reviewIssues.length ? '先处理待确认项' : '确认并生成工作记录')}}</button>
-            <text wx:if="{{item.reviewPlan.status === 'executed'}}" class="inline-review-done">已完成建档，正式记录已创建。</text>
-          </view>
+
           <!-- 纯对话下的轻量生成入口：草稿就绪且无待确认项时出现，复用 confirmInlineReview 建单 -->
           <button wx:if="{{item.reviewPlan && item.reviewPlan.status !== 'executed' && item.reviewCanConfirm}}" class="chat-generate-btn" disabled="{{item.reviewBusy}}" loading="{{item.reviewBusy}}" bindtap="confirmInlineReview" data-index="{{mi}}">{{item.reviewBusy ? '正在生成…' : '生成工作记录'}}</button>
+          <!-- 草稿还有待确认项：明确列出缺什么、指引进对话补字（2026-11-18 修复：
+               reviewResult 一直写进 data 但没有任何渲染口，被拦后用户只看到 toast 一闪） -->
+          <view wx:if="{{item.reviewPlan && item.reviewPlan.status !== 'executed' && !item.reviewCanConfirm}}" class="chat-generate-blocked">
+            <text class="chat-generate-blocked-title">尚未生成正式工作记录</text>
+            <text class="chat-generate-blocked-text">还差 {{item.reviewIssues.length}} 项待确认：{{item.reviewIssues[0]}}{{item.reviewIssues.length > 1 ? ' 等' : ''}}</text>
+            <text class="chat-generate-blocked-hint">直接回复补充信息（如日期、部位），我会自动并入草稿</text>
+          </view>
           <text wx:if="{{item.reviewPlan && item.reviewPlan.status === 'executed'}}" class="chat-generate-done">已完成建档，正式记录已创建。</text>
           <view wx:if="{{item.hazardCandidates && item.hazardCandidates.length}}" class="inline-hazard-candidates">
             <view class="inline-hazard-head">

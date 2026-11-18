@@ -195,6 +195,8 @@ interface DetailItem {
   acceptance_guide_ref?: string
   acceptance_result?: string
   acceptance_basis?: string
+  acceptance_participants?: string
+  acceptance_content?: string
   station_project_name?: string
   station_content?: string
   station_conclusion?: string
