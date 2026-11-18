@@ -277,6 +277,8 @@ async def get_document_form_values(
     doc = result.scalar_one_or_none()
     if not doc:
         raise HTTPException(status_code=404, detail="文书不存在")
+    # A1 补漏（2026-11-18）：编辑回显也是读口——日记对非本人/无审批权限者 404。
+    _ensure_diary_visible(doc, user)
     code = doc.form_code
     schema = provform_schema.get_schema(code) if code else None
     mp = provform_schema.CONTENT_MAP.get(code, {}) if code else {}
@@ -875,6 +877,9 @@ async def download_pdf(
     doc = result.scalar_one_or_none()
     if not doc:
         raise HTTPException(status_code=404, detail="文书不存在")
+    # A1 补漏（2026-11-18）：同项目无审批权限者拿到日记 doc_id 可直接下载他人
+    # 日记 PDF（export-pdf 有守卫、此口漏拦）。与其它读口同口径 404 防探测。
+    _ensure_diary_visible(doc, user)
     if not (doc.signed_pdf_path or doc.pdf_path):
         raise HTTPException(status_code=400, detail="PDF尚未生成，请先导出")
 

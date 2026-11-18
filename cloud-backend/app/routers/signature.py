@@ -596,6 +596,10 @@ async def download_signed_pdf(
     doc = result.scalar_one_or_none()
     if not doc:
         raise HTTPException(status_code=404, detail="文书不存在")
+    # A1 补漏（2026-11-18）：与其它读口同口径——日记对非本人/无审批权限者 404。
+    # （日记无签认槽位，signed_pdf_path 恒空，此口对日记本就 400；守卫是防口径漂移。）
+    from app.routers.document import _ensure_diary_visible
+    _ensure_diary_visible(doc, user)
     if not doc.signed_pdf_path:
         raise HTTPException(status_code=400, detail="该文书尚未签署")
 
