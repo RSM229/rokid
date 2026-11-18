@@ -1364,7 +1364,8 @@ Page(themed({
       wx.showToast({ title: '请点击右上角转发', icon: 'none' })
       
       // 保存分享数据供 onShareAppMessage 使用
-      wx.setStorageSync('share_record_data', {
+      // user 维度 key（2026-11-18）：title 含部位等业务信息，换账号后不再串给他人。
+      wx.setStorageSync(`share_record_data_u${session.storageUid()}`, {
         title,
         desc,
         path,
@@ -1604,10 +1605,10 @@ Page(themed({
 
   // 分享回调
   onShareAppMessage() {
-    const shareData = wx.getStorageSync('share_record_data')
+    const shareData = wx.getStorageSync(`share_record_data_u${session.storageUid()}`)
     if (shareData) {
       // 用后即清，避免下一次分享读到上一条记录的标题与路径
-      wx.removeStorageSync('share_record_data')
+      wx.removeStorageSync(`share_record_data_u${session.storageUid()}`)
       return {
         title: shareData.title,
         path: shareData.path,
@@ -1621,7 +1622,7 @@ Page(themed({
   },
 
   onShareTimeline() {
-    const shareData = wx.getStorageSync('share_record_data')
+    const shareData = wx.getStorageSync(`share_record_data_u${session.storageUid()}`)
     if (shareData) {
       return {
         title: shareData.title,

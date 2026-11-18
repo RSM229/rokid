@@ -1,10 +1,13 @@
 import { config } from '../config'
+import { session } from './session'
 
 /**
  * 分步表单的本地草稿与表式结构离线缓存（19.x 断网续填）。
  *
- * 草稿按「form_code + docId(0=新建)」隔离，输入即存，保存成功后清除；
+ * 草稿按「user + form_code + docId(0=新建)」隔离，输入即存，保存成功后清除；
  * 表式结构按 form_code 缓存一份，断网重开表单时兜底渲染，配合草稿离线续填。
+ * 2026-11-18 补 user 维度：同一台手机换账号登录后，A 未提交的草稿
+ * （工程名/部位/问题描述等）不再回显给打开同表式的 B。
  */
 
 export interface FormDraft {
@@ -14,7 +17,7 @@ export interface FormDraft {
 }
 
 function draftKey(code: string, docId: number): string {
-  return `gdjl_${config.storageScope}_form_draft_${docId || 0}_${code}`
+  return `gdjl_${config.storageScope}_u${session.storageUid()}_form_draft_${docId || 0}_${code}`
 }
 
 function schemaKey(code: string): string {

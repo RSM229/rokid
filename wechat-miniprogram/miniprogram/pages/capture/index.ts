@@ -6,6 +6,7 @@ import {
   uploadVideo,
   uploadWorkRecordPhoto,
 } from '../../services/upload'
+import { session } from '../../services/session'
 import { uploadQueue } from '../../services/uploadQueue'
 import { ensurePrivacy } from '../../utils/privacy'
 import { createIdempotencyKey } from '../../utils/idempotency'
@@ -107,7 +108,7 @@ Page(themed({
       wx.setNavigationBarTitle({ title: '新建工作记录' })
       this.setData({ workMode: true, triggerDetection: false })
     }
-    const context = wx.getStorageSync('gdjl_capture_context') as {
+    const context = wx.getStorageSync(`gdjl_capture_context_u${session.storageUid()}`) as {
       businessType?: string
       businessId?: number
     }
@@ -117,7 +118,7 @@ Page(themed({
         businessId: context.businessId,
         triggerDetection: context.businessType !== 'hazard',
       })
-      wx.removeStorageSync('gdjl_capture_context')
+      wx.removeStorageSync(`gdjl_capture_context_u${session.storageUid()}`)
     }
     this.refreshQueue()
   },

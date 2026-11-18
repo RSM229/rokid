@@ -14,6 +14,11 @@ export const session = {
   getUser(): UserInfo | null {
     return wx.getStorageSync(USER_KEY) || null
   },
+  /** 本地缓存隔离用：当前用户维度（未登录回退 0，避免读 storage 造成循环依赖） */
+  storageUid(): string {
+    const user = wx.getStorageSync(USER_KEY) as UserInfo | null | ''
+    return user && user.user_id ? String(user.user_id) : '0'
+  },
   save(token: string, user: UserInfo): void {
     wx.setStorageSync(TOKEN_KEY, token)
     wx.setStorageSync(USER_KEY, user)

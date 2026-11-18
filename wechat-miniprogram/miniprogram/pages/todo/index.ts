@@ -1,4 +1,5 @@
 import { request } from '../../services/request'
+import { session } from '../../services/session'
 import { requestSubscribeMessage, preloadNoticeTemplates, NOTICE_TEMPLATE_KEYS } from '../../services/notice'
 import { requireLogin } from '../../utils/guard'
 import { themed } from '../../utils/theme'
@@ -577,7 +578,9 @@ Page(themed({
     })
   },
   capture(event: WechatMiniprogram.TouchEvent) {
-    wx.setStorageSync('gdjl_capture_context', {
+    // user 维度 key（2026-11-18）：A 写入后未消费、B 登录直接进拍照页时，
+    // 不把 A 的任务关联带给 B（后端还有 project/uploader 双闸，此处纯防串扰）。
+    wx.setStorageSync(`gdjl_capture_context_u${session.storageUid()}`, {
       businessType: 'task',
       businessId: Number(event.currentTarget.dataset.id),
     })
