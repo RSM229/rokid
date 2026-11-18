@@ -27,7 +27,9 @@ test('work-form save confirms and executes an unambiguous review plan', () => {
 })
 
 test('blocked review plans explain that no formal record was generated', () => {
-  assert.match(agentTemplate, /先处理待确认项/)
+  // 2026-11-18 交互升级：轻量生成按钮只在无待确认项时出现（reviewCanConfirm），
+  // 被拦截的解释改走 reviewResult 文本；「先处理待确认项」按钮文案已随旧交互移除。
+  assert.match(agentTemplate, /item\.reviewCanConfirm/)
   assert.match(agentPage, /尚未生成正式工作记录/)
 })
 

@@ -1,4 +1,5 @@
-﻿import { request } from '../../services/request'
+import { request } from '../../services/request'
+import { session } from '../../services/session'
 import { config, absoluteMediaUrl } from '../../config'
 import { getCached, CACHE_KEYS, invalidateCache } from '../../services/cache'
 import { requireLogin } from '../../utils/guard'
@@ -773,7 +774,10 @@ Page(themed({
       })
       const list: DiaryDocItem[] = Array.isArray(result) ? result : (result?.documents || [])
       const today = this.todayStr()
-      const docs = list.filter((d) => d.title === `监理日记_${today}`)
+      // 日记「仅个人可见」：后端已强制过滤，这里再按 creator_id 兜一道，
+      // 防旧版后端/接口异常时他人日记串进置顶卡（2026-11-18）。
+      const me = session.getUser()
+      const docs = list.filter((d) => d.title === `监理日记_${today}` && (!me || !d.creator_id || d.creator_id === me.user_id))
       this.setData({ diaryDocs: docs })
     } catch (error) {
       console.warn('加载个人工作记录失败', error)
