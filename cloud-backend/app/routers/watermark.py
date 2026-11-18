@@ -15,10 +15,38 @@ from pydantic import BaseModel
 
 from app.config import settings
 from app.routers.auth import get_current_user
+from app.services.media_validation import assert_valid_image
 # 字体查找的唯一真源，避免与 watermark_service 的候选集漂移
 from app.services.watermark_service import get_font_path
 
 router = APIRouter()
+
+# 上传口防护口径与 hazard._read_valid_image 对齐（2026-11-18 第 9 轮）：
+# 此前三个上传口无大小/类型/数量校验，登录用户可传超大或任意文件
+# 直接读进内存，造成内存与磁盘填充 DoS。
+_WM_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
+_WM_MAX_PHOTOS = 20
+
+
+async def _read_valid_photo(image: UploadFile, *, allow_missing: bool = False) -> bytes:
+    """读取并校验一张现场照片：扩展名白名单 + 大小上限 + Pillow 魔数解析。
+
+    ``allow_missing``：批量口遇到空文件跳过而不是 400（保持原有行为，
+    单文件口仍是 400）。
+    """
+    ext = Path(image.filename or "").suffix.lower()
+    if ext and ext not in _WM_IMAGE_EXTS:
+        raise HTTPException(status_code=400, detail="仅支持 jpg、png、webp 图片")
+    image_bytes = await image.read(settings.max_image_bytes + 1)
+    await image.close()
+    if not image_bytes:
+        if allow_missing:
+            return b""
+        raise HTTPException(status_code=400, detail="图片为空")
+    if len(image_bytes) > settings.max_image_bytes:
+        raise HTTPException(status_code=413, detail="图片超过大小限制")
+    assert_valid_image(image_bytes)
+    return image_bytes
 
 
 async def fetch_weather(lat: Optional[float], lon: Optional[float], city: Optional[str]) -> str:
@@ -68,9 +96,7 @@ async def apply_watermark(
     - 楼栋/楼层/部位
     - 隐患标识
     """
-    image_bytes = await image.read()
-    if not image_bytes:
-        raise HTTPException(status_code=400, detail="图片为空")
+    image_bytes = await _read_valid_photo(image)
 
     # 自动获取天气
     if not weather and (lat or lon):
@@ -119,9 +145,7 @@ async def apply_watermark_stream(
     user: dict = Depends(get_current_user),
 ):
     """叠加水印并直接返回图片流（不保存）"""
-    image_bytes = await image.read()
-    if not image_bytes:
-        raise HTTPException(status_code=400, detail="图片为空")
+    image_bytes = await _read_valid_photo(image)
 
     try:
         watermarked = _apply_watermark_to_image(
@@ -157,12 +181,16 @@ async def upload_photos(
     """
     if not photos:
         raise HTTPException(status_code=400, detail="没有上传任何照片")
+    if len(photos) > _WM_MAX_PHOTOS:
+        raise HTTPException(
+            status_code=400, detail=f"单次最多上传 {_WM_MAX_PHOTOS} 张照片"
+        )
 
     results = []
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     for i, photo in enumerate(photos):
-        image_bytes = await photo.read()
+        image_bytes = await _read_valid_photo(photo, allow_missing=True)
         if not image_bytes:
             continue
 
