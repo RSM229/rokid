@@ -84,3 +84,14 @@
   -webkit-mask-image: url("data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2024%2024%22%3E%3Cpath%20fill=%22%236b46c1%22%20d=%22M12 17.27 18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z%22/%3E%3C/svg%3E");
   mask-image: url("data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2024%2024%22%3E%3Cpath%20fill=%22%236b46c1%22%20d=%22M12 17.27 18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z%22/%3E%3C/svg%3E");
 }
+
+/* 派单：纸飞机（发送/指派），主题蓝，与 AI 记忆紫区分 */
+.entry-icon.ic-send {
+  background: rgba(22,119,255,0.10);
+  border-color: rgba(22,119,255,0.20);
+}
+.entry-icon.ic-send::before {
+  background-color: #1677ff;
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2024%2024%22%3E%3Cpath%20fill=%22%231677ff%22%20d=%22M2.01 21 23 12 2.01 3 2 10l15 2-15 2z%22/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2024%2024%22%3E%3Cpath%20fill=%22%231677ff%22%20d=%22M2.01 21 23 12 2.01 3 2 10l15 2-15 2z%22/%3E%3C/svg%3E");
+}

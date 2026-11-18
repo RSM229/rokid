@@ -736,6 +736,15 @@ Page(themed({
     this.initRecorder()
     if (['inspection', 'station', 'acceptance', 'witness'].includes(options.createRecord || '')) {
       this.openWorkForm(options.createRecord!)
+    } else if (options.dispatch === '1') {
+      // 🔴 「我的」页派单入口（2026-11-18 方案②）：不弹表单，进入对话引导——
+      // 用户口述「派给谁、做什么」，后端 dispatch_task 工具落地并通知对方。
+      // 无项目时按 startVoiceWorkFromChat 同款模式弹「去加入项目」引导。
+      if (!this.data.projectCreated) {
+        this.guideJoinProject('派单会创建任务并通知项目成员')
+      } else {
+        this.beginDispatchConversation()
+      }
     } else {
       void this.restoreLatestConversation(openingSessionId)
     }
@@ -4133,6 +4142,18 @@ Page(themed({
         { label: '先发照片', command: 'work-guide:photo' },
         { label: '用文字描述', command: 'work-guide:text' },
       ],
+    })
+  },
+
+  /**
+   * 「我的」页派单入口注入的引导对话（2026-11-18 方案②）。
+   * 不弹表单：像「开启语音，记录现场工作」一样，由 AI 在当前聊天里带用户
+   * 口述「派给谁 + 做什么」，后端 dispatch_task 工具 + 关键词兜底负责落地。
+   */
+  beginDispatchConversation() {
+    this.addMessage({
+      role: 'assistant',
+      text: '我来帮你把任务派给项目成员，一句话就行。例如：\n「让张三去检查3号楼二层的临边防护」\n「给李四派个单：复查昨天那条隐患的整改情况」\n派单后对方会在眼镜端和微信收到通知。要派给谁、做什么？',
     })
   },
 

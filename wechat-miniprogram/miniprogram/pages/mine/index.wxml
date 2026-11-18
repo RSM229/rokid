@@ -107,6 +107,18 @@
       </view>
       <text class="cell-arrow">›</text>
     </view>
+    <!-- 派单入口：仅持 task_assign 权限（总监/总代等）显示。
+         方案②：跳 agent 对话页带派单指令，对 AI 说一句话即可派单，不弹独立表单。 -->
+    <view class="cell entry-item entry-tint" wx:if="{{canDispatch}}" bindtap="openDispatch">
+      <view class="entry-main">
+        <view class="entry-icon ic-send"></view>
+        <view class="entry-text">
+          <text class="entry-title">派单</text>
+          <text class="entry-desc">对 AI 说一句话，把任务指派给项目成员</text>
+        </view>
+      </view>
+      <text class="cell-arrow">›</text>
+    </view>
   </view>
 
   <button class="logout-btn" bindtap="logout">退出登录</button>

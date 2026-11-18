@@ -16,6 +16,9 @@ Page(themed({
     noticeSubscribed: 0,
     // 待补全草稿数量（聊天即操作的半成品，落库持久化、跨会话可见）
     draftCount: 0,
+    // 派单入口门控：仅持 task_assign 权限（总监/总代等）显示。
+    // permissions 来自 /auth/me（get_current_user 合成的有效权限集），缓存兜底 session.getUser()
+    canDispatch: false,
   },
 
   onShow() {
@@ -28,6 +31,12 @@ Page(themed({
     this.refreshUploads()
     this.loadDrafts()
     void this.loadNoticeStatus()
+  },
+
+  /** /auth/me 返回后更新派单入口门控（loadProfile 成功路径里调用） */
+  refreshCanDispatch() {
+    const perms = (this.data.user as UserInfo).permissions || []
+    this.setData({ canDispatch: perms.includes('task_assign') })
   },
 
   /** 拉取通知订阅进度，用于「设置」入口卡副提示（x/y）；订阅本身在二级页操作 */
@@ -118,10 +127,20 @@ Page(themed({
     wx.navigateTo({ url: '/pages/project-memory/index' })
   },
 
+  /**
+   * 派单入口（2026-11-18 方案②）：跳 agent 对话页并带 dispatch=1。
+   * 页面加载后注入一条派单引导消息（AI 带用户口述派单），不弹独立表单——
+   * 与 2026-11-16「卡片是对话入口、不跳表单页」的产品口径一致。
+   */
+  openDispatch() {
+    wx.navigateTo({ url: '/pages/agent/index?dispatch=1' })
+  },
+
   async loadProfile() {
     try {
       const me = await request<Record<string, unknown>>('/auth/me')
       this.setData({ user: me })
+      this.refreshCanDispatch()
     } catch {
       // 静默失败，使用缓存数据
     }
