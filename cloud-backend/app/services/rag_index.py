@@ -854,6 +854,12 @@ def _collect_documents(session: Session) -> list[dict]:
 
     sources: list[dict] = []
     for doc in session.execute(select(Document)).scalars().all():
+        # A1 口径补漏（2026-11-18）：监理日记是「个人维度、仅本人可见」的文书，
+        # 但 RAG 检索只有 project 维度过滤——同项目他人在 agent 对话里一检索
+        # 就能带出别人日记的正文片段（citations + LLM 上下文）。收录阶段直接
+        # 排除，语义最干净：project 维度语料只收项目共享文书。
+        if doc.doc_type == "监理日记" or getattr(doc, "form_code", None) == "jianli_riji":
+            continue
         parts = [
             f"文书类型：{doc.doc_type or ''}",
             f"文书编号：{doc.doc_number}" if doc.doc_number else "",
