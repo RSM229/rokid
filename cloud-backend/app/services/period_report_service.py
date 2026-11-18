@@ -1509,6 +1509,62 @@ async def generate_aggregate_doc(
     }
 
 
+async def generate_personal_diaries(
+    db: AsyncSession, project_id: int, target_date: date,
+) -> dict:
+    """N3（24 点个人日记兜底）：为项目里当日有工作记录的每个成员生成个人日记。
+
+    - 只为「当日确有记录」的人生成（空日记是污染，不生成——A3 教训）。
+    - ``force=False``：已有同名日记（手动生成过）直接跳过 → N4「手动生成不被
+      覆盖」；A2 的 force 清理只作用于手动重生成路径，不影响这里。
+    - 单人失败不影响其它人。
+    """
+    report: dict = {"created": [], "skipped": [], "errors": []}
+    day_start = datetime.combine(target_date, datetime.min.time())
+    day_end = datetime.combine(target_date + timedelta(days=1), datetime.min.time())
+
+    # 当日有记录的成员（业务日期=目标日，或无业务日期但创建时间在当日）
+    rows = await db.execute(
+        select(WorkRecord.creator_id)
+        .where(
+            WorkRecord.project_id == project_id,
+            WorkRecord.creator_id.isnot(None),
+            or_(
+                WorkRecord.record_date == target_date,
+                and_(
+                    WorkRecord.record_date.is_(None),
+                    WorkRecord.created_at >= day_start,
+                    WorkRecord.created_at < day_end,
+                ),
+            ),
+        )
+        .group_by(WorkRecord.creator_id)
+    )
+    author_ids = [r[0] for r in rows.all() if r[0]]
+    if not author_ids:
+        return report
+
+    for uid in author_ids:
+        try:
+            author = await db.get(User, uid)
+            if author is None:
+                continue
+            res = await generate_supervision_log(
+                db, project_id, target_date,
+                supervisor=author, author_id=uid, force=False,
+            )
+            key = f"{project_id}#{uid}"
+            if res.get("skipped"):
+                report["skipped"].append(key)
+            else:
+                report["created"].append(f"{key}#{res.get('doc_id')}")
+        except Exception as exc:  # noqa: BLE001
+            await db.rollback()
+            logger.exception("成员 %s 日记兜底生成失败（项目 %s）", uid, project_id)
+            report["errors"].append(f"用户{uid} {str(exc)[:200]}")
+    return report
+
+
 async def generate_daily_batch(
     target_date: date | None = None, *, force: bool = False,
     projects: list[tuple[int, str]] | None = None,
@@ -1549,6 +1605,22 @@ async def generate_daily_batch(
                 # 在客户端复核签字，每天出一份空白日志只会污染文书台账。
                 report["no_member"].append(f"{pid}:{pname}")
                 continue
+
+            # N3/N4（个人日记 24 点兜底）：为当日有记录的每个成员生成个人日记。
+            # 与项目级日志并行：日志面向归档台账，日记面向个人工作汇总。
+            # force=False 幂等 + _find_existing 跳过已有 → N4 语义天然成立：
+            # 用户手动生成过的日记不会被兜底覆盖。
+            try:
+                diary_report = await generate_personal_diaries(
+                    db, pid, day
+                )
+                report.setdefault("diaries", []).extend(diary_report.get("created", []))
+                for err in diary_report.get("errors", []):
+                    report["errors"].append(f"日记[{pid}] {str(err)[:200]}")
+            except Exception as exc:  # noqa: BLE001
+                await db.rollback()
+                logger.exception("项目 %s 个人日记兜底失败", pid)
+                report["errors"].append(f"日记[{pid}] {str(exc)[:200]}")
 
             try:
                 res = await generate_supervision_log(

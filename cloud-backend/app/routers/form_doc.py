@@ -675,6 +675,277 @@ async def generate_doc_from_record(
 
 
 # ---------------------------------------------------------------------------
+# 批量生成（N5/N6：同类合并一张表，异类分表）
+# ---------------------------------------------------------------------------
+
+class GenerateBatchRequest(BaseModel):
+    record_ids: list[int]
+    form_code: Optional[str] = None   # 不传则逐条自动匹配
+
+
+def _merge_record_fields(records: list[WorkRecord], content: dict) -> dict:
+    """N5：多条同类记录合并进一张表的内容字段。
+
+    原型口径：合并一张市政监-9，栏内分多条，时间起止齐全。做法——
+    - 多值栏（部位/内容/问题/结论）用「（1）（2）…」分条拼接；
+    - 时段栏取并集（最早开始、最晚结束），每条起止写进分条文本；
+    - 单值栏（天气/施工区域/参建单位等）取第一条非空值。
+    """
+    def join_multi(key: str) -> str:
+        parts = []
+        for i, rec in enumerate(records, 1):
+            val = str(content_of(rec).get(key) or "").strip()
+            if val:
+                parts.append(f"（{i}）{val}")
+        return "\n".join(parts)
+
+    def content_of(rec: WorkRecord) -> dict:
+        # 单条记录 → 该表式字段（轻量重算，不走完整 _content_from_record，
+        # 避免 N 次照片/权限附件查询；这里只取文本字段做合并展示）。
+        cj = rec.content_json if isinstance(rec.content_json, dict) else {}
+        return {
+            "content": str(rec.work_content or cj.get("work_content") or cj.get("content") or "").strip(),
+            "station_part": str(rec.station_location or rec.section or "").strip(),
+            "station_process": str(rec.station_process or "").strip(),
+            "problems": str(rec.inspection_remark or cj.get("problems") or "").strip(),
+            "conclusion": str(rec.station_conclusion or cj.get("conclusion") or "").strip(),
+            "start_time": (rec.inspection_start_time or rec.station_start_time or None),
+            "end_time": (rec.inspection_end_time or rec.station_end_time or None),
+            "worker_count": rec.worker_count,
+            "section": str(rec.section or "").strip(),
+        }
+
+    contents = [content_of(r) for r in records]
+    rtype = records[0].record_type if records else ""
+
+    # 时段并集：最早开始 → 最晚结束
+    starts = [c["start_time"] for c in contents if c["start_time"]]
+    ends = [c["end_time"] for c in contents if c["end_time"]]
+    start_str = min(starts).isoformat(sep=" ", timespec="minutes") if starts else ""
+    end_str = max(ends).isoformat(sep=" ", timespec="minutes") if ends else ""
+
+    # 分条文本：每条「部位 · 工序 · 起止时间 · 内容」
+    entries = []
+    for i, (rec, c) in enumerate(zip(records, contents), 1):
+        seg = []
+        place = c["station_part"] or c["section"]
+        if place and rtype == "旁站":
+            seg.append(place)
+        proc = c["station_process"]
+        if proc and rtype == "旁站":
+            seg.append(proc)
+        if c["start_time"]:
+            t0 = c["start_time"].strftime("%H:%M")
+            t1 = c["end_time"].strftime("%H:%M") if c["end_time"] else ""
+            seg.append(f"{t0}{'-' + t1 if t1 else ''}")
+        if c["content"]:
+            seg.append(c["content"])
+        entries.append(f"（{i}）" + "，".join(x for x in seg if x))
+
+    return {
+        "entries": entries,
+        "start_time": start_str,
+        "end_time": end_str,
+        "worker_count": sum(c["worker_count"] or 0 for c in contents) or None,
+        "problems": join_multi("problems") if len(records) > 1 else (contents[0].get("problems") or ""),
+        "problems_parts": [c["problems"] for c in contents if c["problems"]],
+    }
+
+
+@router.post("/generate-batch")
+async def generate_docs_batch(
+    req: GenerateBatchRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """N5/N6：勾选多条记录 → 同表式合并一份文书，异表式分表生成。
+
+    原型口径：
+    - N5：勾 2 条同部位旁站 → 合并一张市政监-9，栏内分两条，时间起止齐全；
+    - N6：勾旁站 + 危大巡视 → 分出两张表（危大表标需审批，旁站表确认归档）。
+
+    实现分叉：
+    - 单条记录或组内仅 1 条 → 走现有 ``generate_form_from_record``（保持
+      照片附件、必填闸、既有覆盖语义完全不变）；
+    - 组内 ≥ 2 条 → 合并渲染：多值栏分条拼接、时段取并集、单值栏取首个
+      非空值，渲染为一张统表 docx。
+    """
+    if not req.record_ids:
+        raise HTTPException(400, "请至少勾选一条记录")
+    project_id = require_project_id(user)
+    rows = (await db.execute(
+        select(WorkRecord).where(
+            WorkRecord.id.in_(req.record_ids),
+            WorkRecord.project_id == project_id,
+        )
+    )).scalars().all()
+    if not rows:
+        raise HTTPException(404, "工作记录不存在")
+    by_id = {r.id: r for r in rows}
+    records = [by_id[i] for i in req.record_ids if i in by_id]
+    # 权限：本人记录或 task_manage（与单条生成同闸）
+    for r in records:
+        if r.creator_id != user.id and not user.has_permission("task_manage"):
+            raise HTTPException(403, "无权基于该记录生成文书")
+
+    project = await db.get(Project, project_id)
+
+    # 分组：form_code 相同 → 同组（N5 合并）；不同 → 分表（N6）
+    groups: dict[str, list[WorkRecord]] = {}
+    for rec in records:
+        if req.form_code:
+            code = req.form_code
+        else:
+            from app.services.form_routing import effective_record_form_code
+            saved = (rec.content_json or {}).get("form_code") if isinstance(rec.content_json, dict) else None
+            code = effective_record_form_code(saved, rec.record_type, project=project, record=rec) or ""
+        groups.setdefault(code, []).append(rec)
+
+    results = []
+    errors = []
+    for code, recs in groups.items():
+        if not code:
+            errors.append(f"{recs[0].record_type}记录无可匹配表式，请手选")
+            continue
+        try:
+            if len(recs) == 1:
+                doc, spec, content = await generate_form_from_record(
+                    db, user, project, recs[0], code
+                )
+                await db.commit()
+                await sync_document_to_project_archive(db, doc, user)
+                await db.commit()
+                results.append({
+                    "doc_id": doc.id,
+                    "title": doc.title,
+                    "form_code": spec.form_code,
+                    "form_name": spec.name,
+                    "record_ids": [recs[0].id],
+                    "record_type": recs[0].record_type,
+                    "status": doc.status,
+                    "merged": False,
+                })
+            else:
+                doc_payload = await _generate_merged_doc(
+                    db, user, project, code, recs
+                )
+                results.append(doc_payload)
+                await db.commit()
+        except HTTPException as exc:
+            await db.rollback()
+            errors.append(f"[{code}] {exc.detail}")
+        except Exception as exc:  # noqa: BLE001
+            await db.rollback()
+            logger.exception("批量生成失败（表式 %s）", code)
+            errors.append(f"[{code}] {str(exc)[:200]}")
+
+    return {"results": results, "errors": errors}
+
+
+async def _generate_merged_doc(
+    db: AsyncSession, user: User, project: Project | None,
+    code: str, records: list[WorkRecord],
+) -> dict:
+    """组内 ≥2 条：合并渲染一张统表（N5 栏内分条 + 时段并集）。"""
+    spec = FORM_BY_CODE.get(code)
+    if spec is None:
+        raise HTTPException(400, f"未知表式 {code}")
+
+    # 必填闸：逐条校验（合并不能掩盖缺字段）
+    from app.services.agent_form_requirements import resolve_record_form
+    for rec in records:
+        requirements = resolve_record_form(rec, project, code)
+        if requirements.get("missing_labels") or requirements.get("conflict_labels"):
+            blockers = list(requirements.get("missing_labels") or []) + list(requirements.get("conflict_labels") or [])
+            raise HTTPException(
+                422,
+                f"记录 #{rec.id} 缺少必填项：" + "、".join(dict.fromkeys(blockers)),
+            )
+
+    merged = _merge_record_fields(records, {})
+    author = await db.get(User, records[0].creator_id) or user
+    content = _content_from_record(records[0], author, project)
+    # 合并字段覆盖
+    content["doc_number"] = f"{spec.form_number}-{records[0].id:05d}"
+    if merged["start_time"]:
+        content["start_time"] = merged["start_time"]
+        content["time"] = merged["start_time"]
+    if merged["end_time"]:
+        content["end_time"] = merged["end_time"]
+    content["content"] = "\n".join(merged["entries"])
+    if merged["worker_count"]:
+        content["worker_count"] = merged["worker_count"]
+    if merged["problems"]:
+        content["problems"] = merged["problems"]
+    # 旁站合并：部位/工序分条
+    if records[0].record_type == "旁站":
+        places = []
+        for i, rec in enumerate(records, 1):
+            p = str(rec.station_location or rec.section or "").strip()
+            proc = str(rec.station_process or "").strip()
+            if p:
+                places.append(f"（{i}）{p}" + (f"·{proc}" if proc else ""))
+        if places:
+            content["station_part"] = "\n".join(places)
+        procs = [str(rec.station_process or "").strip() for rec in records if str(rec.station_process or "").strip()]
+        if procs:
+            content["station_process"] = "；".join(procs)
+
+    # 照片：各条记录附件并集
+    photos: list[str] = []
+    for rec in records:
+        photos.extend(await _record_attach_photos(db, rec))
+    content["attached_images"] = photos
+
+    # 既有文书覆盖语义：组内任一条挂了 generated_doc_id 且非草稿 → 拒绝
+    existing_ids = {r.generated_doc_id for r in records if r.generated_doc_id}
+    for did in existing_ids:
+        old = await db.get(Document, did)
+        if old and old.status != DocStatus.DRAFT.value:
+            raise HTTPException(409, "已提交文书不能覆盖生成，请先驳回")
+
+    try:
+        docx_file = await asyncio.to_thread(render_form, code, content)
+    except FileNotFoundError as exc:
+        raise HTTPException(500, f"模板文件缺失：{exc}") from exc
+    except Exception as exc:
+        logger.exception("合并渲染省统表失败（%s）", code)
+        raise HTTPException(500, f"合并渲染失败：{exc}") from exc
+
+    doc = Document(
+        doc_type=_doc_type_for(code, records[0].record_type),
+        title=f"工作记录_{_record_business_date(records[0])}（{len(records)}条合并）",
+        content=content,
+        form_code=code,
+        section=records[0].section,
+        location=records[0].location,
+        project_id=project.id if project else records[0].project_id,
+        creator_id=user.id,
+        status=DocStatus.DRAFT.value,
+        attached_images=photos,
+        pdf_path=None,
+        docx_path=f"/exports/{docx_file.name}",
+    )
+    db.add(doc)
+    await db.flush()
+    # 合并文书与各条记录挂钩（首条写 generated_doc_id，其余记录进 content）
+    records[0].generated_doc_id = doc.id
+    content["merged_record_ids"] = [r.id for r in records]
+    await sync_document_to_project_archive(db, doc, user)
+
+    return {
+        "doc_id": doc.id,
+        "title": doc.title,
+        "form_code": spec.form_code,
+        "form_name": spec.name,
+        "record_ids": [r.id for r in records],
+        "record_type": records[0].record_type,
+        "status": doc.status,
+        "merged": True,
+    }
+
+
+# ---------------------------------------------------------------------------
 # 日/周/月聚合生成
 # ---------------------------------------------------------------------------
 

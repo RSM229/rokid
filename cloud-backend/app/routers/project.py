@@ -25,6 +25,7 @@ from app.models.project_member import ProjectMember
 from app.models.project_view_grant import ProjectViewGrant
 from app.models.security_audit import SecurityAudit
 from app.routers.auth import (
+
     _can_view_all_projects,
     _is_project_member,
     get_current_user,
@@ -33,6 +34,10 @@ from app.routers.auth import (
     require_role,
 )
 from app.config import settings
+
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -146,6 +151,9 @@ class ProjectInfo(BaseModel):
     # 项目负责人（创建 / 负责的管理员；owner_name 为回填的姓名，便于列表直显）
     owner_id: Optional[int] = None
     owner_name: Optional[str] = None
+
+    # N12：设置日志时点过早时的告警（仅 update 响应携带，其余场景为 None）
+    warning: Optional[str] = None
 
 
 # Step 5：项目生命周期状态取值（与 Project.status 的 comment 同口径）
@@ -342,6 +350,23 @@ async def update_project(
     if not user.has_permission("project_edit"):
         raise HTTPException(403, "需要项目编辑权限")
     await _validate_project_fields(db, user, req, previous=project)
+    # N12（时点冲突防护）：日志时点若设在前一日 24 点之前（即当天极早），
+    # 目标日=「运行日−1」的日志会在兜底记录尚未补录时就出稿，漏掉当晚记录。
+    # 这里做两层：格式非法直接 400；设得过早给出明确告警文案（仍允许保存——
+    # 总监可能有特殊排班，但必须让后果可见）。
+    log_hint = ""
+    if "log_daily_time" in req.model_fields_set:
+        raw_time = (req.log_daily_time or "").strip()
+        if raw_time:
+            if not re.match(r"^([01]\d|2[0-3]):[0-5]\d$", raw_time):
+                raise HTTPException(status_code=400, detail="日志时点格式应为 HH:MM（00:00–23:59）")
+            hh, mm = raw_time.split(":")
+            if int(hh) * 60 + int(mm) < 6 * 60:
+                log_hint = (
+                    "日志时点设在 06:00 之前：自动任务会在当天很早出前一日日志，"
+                    "前一晚补录的记录可能赶不上汇总。建议设在 06:00 之后。"
+                )
+                logger.warning("[项目设置] 项目 %s 日志时点设为 %s（早于 06:00，可能漏当晚补录）", project_id, raw_time)
     for key in ("eng_type", "construction_unit", "supervision_unit", "supervision_org", "acceptance_participants", "latitude", "longitude", "seal_signature_id", "log_daily_time"):
         if key in req.model_fields_set:
             value = getattr(req, key)
@@ -363,7 +388,10 @@ async def update_project(
 
     await db.commit()
     await db.refresh(project)
-    return _project_info(project)
+    info = _project_info(project)
+    # N12 告警透出：过早时点已保存但要让总监看到后果
+    info.warning = log_hint or None
+    return info
 
 
 class TransferProjectRequest(BaseModel):
