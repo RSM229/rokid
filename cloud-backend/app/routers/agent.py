@@ -466,6 +466,50 @@ async def _validate_review_plan_media(
         raise HTTPException(403, f"资料不存在、不是图片或不属于当前项目：{', '.join(missing)}")
 
 
+async def _validate_chat_images(
+    db: AsyncSession, user: User, project_id: int | None, images: Any
+) -> list[str]:
+    """校验 chat 请求随消息携带的图片 URL 归属（第 5 轮方向④）。
+
+    ``req.images`` 是客户端直传的服务端媒体地址（/uploads/…），此前全链路
+    无校验：恶意请求可把他人/他项目的照片 URL 挂进自己的草稿与记录
+    （``ctx.images`` → ``_agent_images`` → ``inspection_photos``）。
+    与 review-plan 的 media_id 双闸同口径，这里按 URL 反查 MediaRecord：
+    只放行「本人上传且属于当前项目」的图片；不匹配则整轮拒绝（不能静默
+    丢弃——静默会让用户以为照片已挂上，实际没挂，产生错账）。
+    仅展示用途的历史 URL（非 /uploads/ 前缀）原样放行。
+    """
+    if not isinstance(images, list) or not images:
+        return []
+    cleaned: list[str] = []
+    for url in images[:9]:
+        text = str(url or "").strip()
+        if text:
+            cleaned.append(text)
+    if not cleaned:
+        return []
+    # 只校验指向本服务 /uploads/ 的地址；外链（https://…）模型上下文不收，
+    # 仅存展示历史，风险面是展示层而非记录字段，保持原样。
+    upload_urls = [u for u in cleaned if u.startswith("/uploads/")]
+    if not upload_urls:
+        return cleaned
+    if project_id is None:
+        raise HTTPException(status_code=400, detail="请先选择项目再发送现场照片")
+    rows = (await db.execute(select(MediaRecord).where(
+        MediaRecord.uploader_id == user.id,
+        MediaRecord.project_id == project_id,
+        MediaRecord.media_type == MediaType.IMAGE.value,
+    ))).scalars().all()
+    owned = {row.original_path for row in rows} | {row.processed_path for row in rows if row.processed_path}
+    bad = [u for u in upload_urls if u not in owned]
+    if bad:
+        raise HTTPException(
+            status_code=403,
+            detail=f"图片不存在或不属于当前账号与项目：{', '.join(bad[:3])}",
+        )
+    return cleaned
+
+
 # 🔴 2026-10-16 改版（跑分 75.0% → 97.5%，repeat=3 严格模式）：
 # 原 prompt 里「关键参数缺失→先追问不要调工具」与「省略即可（服务端会追问）」
 # 两条约束打架，模型把任意字段缺失都当成"关键参数缺失"→ 返回 tool:null 反问用户，
@@ -1803,6 +1847,13 @@ async def _agent_chat_impl(
         inspector=user.real_name or "",
     )
     prefill = req.prefill if isinstance(req.prefill, dict) else {}
+    # 🔴 图片归属校验（2026-11-18，第 5 轮方向④）：req.images 是客户端直传的
+    # 服务端媒体地址，此前无任何校验——恶意请求可把他人/他项目的 /uploads/
+    # 照片 URL 挂进自己的草稿与记录（ctx.images → _agent_images →
+    # inspection_photos，全链路无闸）。review-plan 链路早有
+    # _validate_review_plan_media（uploader+project 双闸），这里补齐同口径：
+    # 每张 URL 反查 MediaRecord，非本人/本项目上传的一律拒绝。
+    req.images = await _validate_chat_images(db, user, project_id, req.images)
     earlier_messages = await agent_tools.record_conversation_message(
         db, user.id, conversation_id, message, images=req.images,
         project_id=project_id,
@@ -3259,12 +3310,14 @@ async def create_review_plan(
     )
     # 带 attachments 建记录的这轮不走 /agent/chat，用户消息（含图）必须在这里落进
     # 展示历史，否则「查看历史记录」看不到这条消息和照片。落库失败不阻断建计划。
-    if str(stored_plan.get("request_text") or "").strip() or req.images:
+    # 图片 URL 与 /agent/chat 同口径校验（防挂他人照片进展示历史/证据链）。
+    _display_images = await _validate_chat_images(db, user, project_id, req.images)
+    if str(stored_plan.get("request_text") or "").strip() or _display_images:
         try:
             await agent_tools.record_conversation_message(
                 db, user_id, conversation_id,
                 str(stored_plan.get("request_text") or ""),
-                images=req.images,
+                images=_display_images,
                 project_id=project_id,
             )
         except Exception:  # noqa: BLE001 - 历史落库失败不能挡记录整理
