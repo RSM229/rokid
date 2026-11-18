@@ -271,6 +271,11 @@ async def document_signoffs(doc_id: int, all_projects: bool = Query(False, descr
     doc = await db.get(Document, doc_id)
     if not doc or not can_read_project(doc.project_id, user, all_projects):
         raise HTTPException(404, "文书不存在")
+    # 日记守卫与 document.py 读口同口径（第 7 轮补漏）：同项目无审批权限
+    # 用户不能经 signoffs 口看到他人日记的签认历史（签名人姓名/时间）
+    from app.routers.document import _is_diary_doc, _ensure_diary_visible
+
+    _ensure_diary_visible(doc, user)
     history = (await db.execute(select(DocumentSignoff).where(DocumentSignoff.document_id == doc.id).order_by(DocumentSignoff.signed_at))).scalars().all()
     project = await db.get(Project, doc.project_id)
     signing = dict((doc.content or {}).get("signing") or {})
