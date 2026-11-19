@@ -40,6 +40,7 @@ from app.services import (
     agent_preferences,
     agent_project_memories,
     agent_request_plan,
+    agent_refs,
     agent_runtime,
     agent_scope,
     agent_tools,
@@ -1838,6 +1839,18 @@ async def _agent_chat_impl(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     project_id = scope.project_id
     project = await db.get(Project, project_id) if project_id else None
+    # @[引用] 解析：小程序 @ 面板插入的是纯文本标注（记录#/隐患#/规范/资料库），
+    # 此前没有任何解析，模型只看到字面量、拿不到正文，于是回答「无法读取文件」。
+    # 这里在进入模型前读出被引用资料的正文，作为 system 上下文注入。
+    ref_context = ""
+    if "@[" in message:
+        try:
+            _, ref_context = await agent_refs.resolve_message_refs(
+                db, user, project_id, message,
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning("@ 引用解析失败，本轮按无引用继续", exc_info=True)
+            ref_context = ""
     project_facts = project_context(project)
     system_facts = agent_fact_model.build_system_facts(
         project_name=project_facts["project_name"],
@@ -1918,6 +1931,8 @@ async def _agent_chat_impl(
         messages.append({"role": "system", "content": project_memory_block})
     if personal_memory_block:
         messages.append({"role": "system", "content": personal_memory_block})
+    if ref_context:
+        messages.append({"role": "system", "content": ref_context})
     if pend_for_context:
         messages.append({"role": "system", "content": render_context_summary(
             draft_for_context.get("args"), draft_for_context.get("facts"),

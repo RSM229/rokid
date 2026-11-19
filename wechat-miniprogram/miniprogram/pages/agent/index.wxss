@@ -88,9 +88,10 @@
 .at-panel-close { width: 44rpx; height: 44rpx; text-align: center; line-height: 40rpx; font-size: 36rpx; color: var(--ink-3, #6b7c93); }
 .at-search { height: 72rpx; padding: 0 20rpx; border-radius: 16rpx; background: rgba(var(--wash-rgb, 234,243,255), 0.7); font-size: 26rpx; color: var(--ink, #12253d); box-sizing: border-box; }
 .at-search-ph { color: var(--ink-3, #6b7c93); }
-.at-tabs { display: flex; gap: 10rpx; margin: 16rpx 0 10rpx; }
-.at-tab { flex: 1; text-align: center; padding: 12rpx 0; border-radius: 14rpx; font-size: 24rpx; color: var(--ink-3, #6b7c93); background: rgba(var(--wash-rgb, 234,243,255), 0.6); }
-.at-tab.active { color: #fff; font-weight: 600; background: var(--brand, #1677ff); }
+/* 资料库下钻返回栏：一眼看出当前在哪个文件夹里 */
+.at-drill-bar { display: flex; align-items: center; gap: 12rpx; padding: 10rpx 12rpx; margin-bottom: 6rpx; border-radius: 12rpx; background: rgba(var(--wash-rgb, 234,243,255), 0.9); }
+.at-drill-back { flex-shrink: 0; font-size: 24rpx; font-weight: 600; color: var(--brand, #1677ff); }
+.at-drill-path { flex: 1; min-width: 0; font-size: 22rpx; color: var(--ink-3, #6b7c93); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .at-list { flex: 1; min-height: 120rpx; max-height: 46vh; }
 .at-empty { padding: 40rpx 0; text-align: center; font-size: 25rpx; color: var(--ink-3, #6b7c93); }
 .at-item { display: flex; align-items: center; gap: 16rpx; padding: 16rpx 12rpx; border-radius: 14rpx; }
@@ -99,7 +100,7 @@
 .at-item-body { display: flex; flex-direction: column; gap: 4rpx; min-width: 0; }
 .at-item-label { font-size: 26rpx; font-weight: 600; color: var(--ink, #12253d); }
 .at-item-desc { font-size: 22rpx; color: var(--ink-3, #6b7c93); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.at-avatar { width: 44rpx; height: 44rpx; flex-shrink: 0; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 24rpx; color: #fff; background: var(--brand, #1677ff); }
+.at-item-more { flex-shrink: 0; margin-left: auto; padding-left: 12rpx; font-size: 30rpx; color: var(--ink-3, #6b7c93); line-height: 1; }
 
 /* 模型选择气泡锚点容器：absolute 气泡相对按钮定位，不随页面滚动/麦克风显隐漂移 */
 .model-anchor { position: relative; flex-shrink: 0; }

@@ -500,17 +500,19 @@ function sessionIdFromConversationId(conversationId: string): number {
  *  - provider='huagong' 走华南理工独立供应商（未配置则后端自动回退默认模型）。 */
 const CHAT_MODELS = MODEL_CATALOG
 
-/** @ 提及面板：快捷指令项（点选后把提示词填进输入框，用户可继续补充） */
-interface AtQuickItem { key: string; icon: string; label: string; desc: string; prompt: string }
-const AT_QUICK_ITEMS: AtQuickItem[] = [
-  { key: 'write-record', icon: '📝', label: '写工作记录', desc: '口述现场情况，带你逐项补齐', prompt: '帮我写一条工作记录：' },
-  { key: 'hazard', icon: '🔍', label: '隐患识别', desc: '拍照识别现场安全隐患', prompt: '帮我识别这张照片里的安全隐患' },
-  { key: 'query-spec', icon: '📚', label: '查规范', desc: '查规范条文与验收要点', prompt: '帮我查一下这条规范的要求：' },
-  { key: 'daily-log', icon: '📋', label: '生成监理日志', desc: '按当日记录汇总日志', prompt: '帮我生成今天的监理日志' },
-  { key: 'acceptance', icon: '✅', label: '验收要点', desc: '列出某工序必查项', prompt: '帮我列出这个工序的验收必查项：' },
-]
-interface AtMember { id: number; real_name: string }
-interface AtBizItem { key: string; icon: string; label: string; desc: string; ref: string }
+interface AtBizItem {
+  key: string
+  icon: string
+  label: string
+  desc: string
+  ref: string
+  /** ref=直接插入引用；folder=可下钻的文件夹；folder-ref=引用整个文件夹；doc=单个文件 */
+  kind?: 'ref' | 'folder' | 'folder-ref' | 'doc'
+  folderId?: number
+  docId?: number
+  path?: string
+  children?: Array<Record<string, unknown>>
+}
 
 /** 工作记录字段候选值：语音里没说清楚的字段，先给常用项让用户点选，不合适再自己填写 */
 const FIELD_SUGGESTIONS: Record<string, string[]> = {
@@ -641,15 +643,18 @@ Page(themed({
     modelShortName: 'DeepSeek V4.1',
     showModelMenu: false,
     showPlusPanel: false,
-    /** @ 提及面板：输入卡里的统一引用选择器（快捷指令 / 成员 / 业务引用） */
+    /** @ 提及面板：输入卡里的资料/记录引用选择器（支持文件夹下钻到具体文件） */
     showAtPanel: false,
-    atTab: 'quick' as 'quick' | 'member' | 'biz',
     atQuery: '',
-    atQuickItems: AT_QUICK_ITEMS,
-    atMembers: [] as AtMember[],
     atBiz: [] as AtBizItem[],
-    atVisibleItems: AT_QUICK_ITEMS as AtQuickItem[] | AtMember[] | AtBizItem[],
+    atVisibleItems: [] as AtBizItem[],
     atLoading: false,
+    /** @ 面板 — 资料库下钻：kbId / 层级栈 / 当前层文件列表 */
+    atKbId: 0,
+    atDrillStack: [] as Array<{ path: string; items: AtBizItem[] }>,
+    atDrillItems: [] as AtBizItem[],
+    atDrillPath: '',
+    atDrillLoading: false,
     /** 待发送附件：图片/文件可多选先挂在这里，补充文字后一次性发送识别 */
     attachments: [] as Attachment[],
     /**
@@ -844,14 +849,6 @@ Page(themed({
   toggleAgentForm(event: WechatMiniprogram.TouchEvent) {
     const messageIndex = Number(event.currentTarget.dataset.message)
     this.updateAgentForm(messageIndex, form => ({ ...form, expanded: !form.expanded }))
-  },
-
-  toggleInlineReviewDetails(event: WechatMiniprogram.TouchEvent) {
-    const index = Number(event.currentTarget.dataset.index)
-    const messages = [...this.data.messages]
-    if (!messages[index]?.reviewPlan) return
-    messages[index] = { ...messages[index], reviewDetailsExpanded: !messages[index].reviewDetailsExpanded }
-    this.setData({ messages })
   },
 
   /** 分组建单一次回多张记录卡：默认收起，避免刷屏；点开才展示，单条仍直接显示 */
@@ -2325,254 +2322,6 @@ Page(themed({
     })
     this.inlinePlanSaveQueues[key] = task
     return task
-  },
-
-  changeInlineReviewDate(event: WechatMiniprogram.PickerChange) {
-    const index = Number(event.currentTarget.dataset.index)
-    const id = String(event.currentTarget.dataset.id)
-    const plan = this.data.messages[index]?.reviewPlan
-    if (!plan) return
-    const candidate = editEvent(plan, id, { date: String(event.detail.value), dateConfirmed: true, dateSource: 'user' })
-    void this.updateInlineReview(index, candidate).catch(error => wx.showToast({ title: `日期保存失败：${(error as Error).message}`, icon: 'none' }))
-  },
-
-  adoptInlineReviewDate(event: WechatMiniprogram.TouchEvent) {
-    const index = Number(event.currentTarget.dataset.index)
-    const id = String(event.currentTarget.dataset.id)
-    const date = String(event.currentTarget.dataset.date)
-    const plan = this.data.messages[index]?.reviewPlan
-    if (!plan) return
-    const candidate = editEvent(plan, id, { date, dateConfirmed: true, dateSource: 'watermark' })
-    void this.updateInlineReview(index, candidate).catch(error => wx.showToast({ title: `日期保存失败：${(error as Error).message}`, icon: 'none' }))
-  },
-
-  changeInlineWatermarkField(event: WechatMiniprogram.Input) {
-    const index = Number(event.currentTarget.dataset.index)
-    const evidenceId = String(event.currentTarget.dataset.evidence)
-    const itemIndex = Number(event.currentTarget.dataset.item)
-    const key = String(event.currentTarget.dataset.key) as 'label' | 'value'
-    const plan = this.data.messages[index]?.reviewPlan
-    if (!plan) return
-    const candidate = editEvidenceWatermark(plan, evidenceId, itemIndex, key, event.detail.value)
-    void this.updateInlineReview(index, candidate).catch(error => wx.showToast({ title: `水印信息保存失败：${(error as Error).message}`, icon: 'none' }))
-  },
-
-  addInlineWatermarkField(event: WechatMiniprogram.TouchEvent) {
-    const index = Number(event.currentTarget.dataset.index)
-    const evidenceId = String(event.currentTarget.dataset.evidence)
-    const plan = this.data.messages[index]?.reviewPlan
-    if (!plan) return
-    void this.updateInlineReview(index, addEvidenceWatermark(plan, evidenceId)).catch(error => wx.showToast({ title: `字段保存失败：${(error as Error).message}`, icon: 'none' }))
-  },
-
-  changeInlineReviewType(event: WechatMiniprogram.TouchEvent) {
-    const index = Number(event.currentTarget.dataset.index)
-    const id = String(event.currentTarget.dataset.id)
-    const recordType = String(event.currentTarget.dataset.type)
-    const plan = this.data.messages[index]?.reviewPlan
-    const target = plan?.events.find(item => item.id === id)
-    if (!plan || !target) return
-    const compatibleForms = ({
-      '巡视': ['gd_b_214_xunshi', 'gdaq_30306_weida'],
-      '旁站': ['gd_b_212_pangzhan'],
-      '平行检验': ['gd_b_213_pingxing'],
-      '起重机械安拆检查': ['gdaq_30305_qizhong'],
-      '验收': ['acceptance_record'],
-      '见证': ['witness_record'],
-    } as Record<string, string[]>)[recordType] || []
-    const defaultForm = ({
-      '巡视': '巡视记录',
-      '旁站': '旁站记录',
-      '平行检验': '平行检验记录',
-      '验收': '验收记录',
-      '见证': '见证取样记录',
-      '起重机械安拆检查': '起重机械安拆检查',
-    } as Record<string, string>)[recordType]
-    const currentFormCodes = target.forms.map(form => FORM_CODE_BY_LABEL[form] || form)
-    const keepForm = target.recordType === recordType
-      && currentFormCodes.length === 1
-      && compatibleForms.includes(currentFormCodes[0])
-    const candidate = editEvent(plan, id, {
-      recordType, recordTypeConfirmed: true, recordTypeConfidence: 1, recordTypeReason: '用户在对话中确认记录类型',
-      forms: keepForm
-        ? target.forms
-        : (defaultForm ? [defaultForm] : []),
-      missingFields: (target.missingFields || []).filter(field => field !== 'record_type'),
-    })
-    void this.updateInlineReview(index, candidate).catch(error => wx.showToast({ title: `记录类型保存失败：${(error as Error).message}`, icon: 'none' }))
-  },
-
-  changeInlineReviewField(event: WechatMiniprogram.Input) {
-    const index = Number(event.currentTarget.dataset.index)
-    const id = String(event.currentTarget.dataset.id)
-    const field = String(event.currentTarget.dataset.field) as 'title' | 'location' | 'section' | 'content'
-    const value = String(event.detail.value || '')
-    const plan = this.data.messages[index]?.reviewPlan
-    const target = plan?.events.find(item => item.id === id)
-    if (!plan || !target || !['title', 'location', 'section', 'content'].includes(field)) return
-    const patch = field === 'title' ? { title: value }
-      : field === 'content' ? { content: value }
-        : field === 'location' ? { location: value } : { section: value }
-    const sourceKey = field === 'section' ? 'section' : field === 'location' ? 'location' : ''
-    const unresolvedKey = field === 'content' ? 'work_content' : sourceKey
-    const candidate = editEvent(plan, id, {
-      ...patch,
-      ...(sourceKey ? { fieldSources: { ...target.fieldSources, [sourceKey]: 'user_message' } } : {}),
-      ...(unresolvedKey ? {
-        unresolvedConflicts: (target.unresolvedConflicts || []).filter(item => item !== unresolvedKey),
-      } : {}),
-      missingFields: value.trim() ? (target.missingFields || []).filter(item => item !== field) : target.missingFields,
-    })
-    void this.updateInlineReview(index, candidate).catch(error => wx.showToast({ title: `字段保存失败：${(error as Error).message}`, icon: 'none' }))
-  },
-
-  changeInlineReviewEntityField(event: WechatMiniprogram.Input) {
-    const index = Number(event.currentTarget.dataset.index)
-    const id = String(event.currentTarget.dataset.id)
-    const field = String(event.currentTarget.dataset.field)
-    const value = String(event.currentTarget.dataset.value ?? event.detail?.value ?? '').trim()
-    const plan = this.data.messages[index]?.reviewPlan
-    const target = plan?.events.find(item => item.id === id)
-    if (!plan || !target || !field) return
-    const candidate = editEvent(plan, id, {
-      entityFields: { ...(target.entityFields || {}), [field]: value },
-      unresolvedConflicts: (target.unresolvedConflicts || []).filter(item => item !== field),
-      fieldSources: { ...(target.fieldSources || {}), [field]: 'user_message' },
-    })
-    void this.updateInlineReview(index, candidate).catch(error => wx.showToast({ title: `事项字段保存失败：${(error as Error).message}`, icon: 'none' }))
-  },
-
-  changeInlineReviewFormField(event: WechatMiniprogram.Input) {
-    const index = Number(event.currentTarget.dataset.index)
-    const id = String(event.currentTarget.dataset.id)
-    const formCode = String(event.currentTarget.dataset.formCode || '')
-    const field = String(event.currentTarget.dataset.field || '')
-    if (!formCode || !field) return
-    const plan = this.data.messages[index]?.reviewPlan
-    if (!plan) return
-    const candidate = editFormField(plan, id, formCode, field, String(event.detail.value || '').trim())
-    void this.updateInlineReview(index, candidate)
-      .catch(error => wx.showToast({ title: `表单字段保存失败：${(error as Error).message}`, icon: 'none' }))
-  },
-
-  changeInlineReviewDateTime(event: WechatMiniprogram.CustomEvent<{ value: string }>) {
-    const index = Number(event.currentTarget.dataset.index)
-    const id = String(event.currentTarget.dataset.id || '')
-    const formCode = String(event.currentTarget.dataset.formCode || '')
-    const field = String(event.currentTarget.dataset.field || '')
-    const plan = this.data.messages[index]?.reviewPlan
-    if (!plan || !formCode || !field) return
-    const candidate = editFormField(plan, id, formCode, field, event.detail.value)
-    void this.updateInlineReview(index, candidate)
-      .catch(error => wx.showToast({ title: `时间保存失败：${(error as Error).message}`, icon: 'none' }))
-  },
-
-  chooseInlineReviewFormOption(event: WechatMiniprogram.TouchEvent) {
-    const index = Number(event.currentTarget.dataset.index)
-    const id = String(event.currentTarget.dataset.id)
-    const formCode = String(event.currentTarget.dataset.formCode || '')
-    const field = String(event.currentTarget.dataset.field || '')
-    let value = String(event.currentTarget.dataset.value || '')
-    if (!formCode || !field) return
-    const plan = this.data.messages[index]?.reviewPlan
-    if (!plan) return
-    const fieldState = plan.events.find(item => item.id === id)?.formFields?.find(item => item.canonical === field)
-    if (fieldState?.control === 'datetime-local' || fieldState?.control === 'time') {
-      const normalized = normalizeDateTimeInput(value, fieldState.control === 'time' ? 'time' : 'datetime')
-      if (!normalized) {
-        wx.showToast({ title: '这个时间候选无法识别，请用时间滚轮选择', icon: 'none' })
-        return
-      }
-      value = normalized
-    }
-    const candidate = editFormField(plan, id, formCode, field, value)
-    void this.updateInlineReview(index, candidate)
-      .catch(error => wx.showToast({ title: `表单字段保存失败：${(error as Error).message}`, icon: 'none' }))
-  },
-
-  toggleInlineMerge(event: WechatMiniprogram.TouchEvent) {
-    const index = Number(event.currentTarget.dataset.index)
-    const id = String(event.currentTarget.dataset.id)
-    const messages = [...this.data.messages]
-    const message = messages[index]
-    if (!message?.reviewPlan) return
-    const current = message.reviewMergeSelection || []
-    const selected = current.includes(id) ? current.filter(value => value !== id) : [...current, id]
-    messages[index] = {
-      ...message,
-      reviewMergeSelection: selected,
-      reviewEvents: this.inlineReviewEvents(message.reviewPlan, selected),
-    }
-    this.setData({ messages })
-  },
-
-  mergeInlineReview(event: WechatMiniprogram.TouchEvent) {
-    const index = Number(event.currentTarget.dataset.index)
-    const message = this.data.messages[index]
-    const plan = message?.reviewPlan
-    const selected = message?.reviewMergeSelection || []
-    if (!plan || selected.length < 2) return
-    const id = `merged-${Date.now()}`
-    void this.updateInlineReview(index, mergeEvents(plan, selected, id))
-      .catch(error => wx.showToast({ title: `合并失败：${(error as Error).message}`, icon: 'none' }))
-  },
-
-  splitInlineEvidence(event: WechatMiniprogram.TouchEvent) {
-    const index = Number(event.currentTarget.dataset.index)
-    const evidenceId = String(event.currentTarget.dataset.evidence)
-    const plan = this.data.messages[index]?.reviewPlan
-    if (!plan) return
-    void this.updateInlineReview(index, splitEvidence(plan, evidenceId, `event-${Date.now()}`))
-      .catch(error => wx.showToast({ title: (error as Error).message, icon: 'none' }))
-  },
-
-  releaseInlineEvidence(event: WechatMiniprogram.TouchEvent) {
-    const index = Number(event.currentTarget.dataset.index)
-    const evidenceId = String(event.currentTarget.dataset.evidence)
-    const plan = this.data.messages[index]?.reviewPlan
-    if (!plan) return
-    void this.updateInlineReview(index, releaseEvidence(plan, evidenceId))
-      .catch(error => wx.showToast({ title: (error as Error).message, icon: 'none' }))
-  },
-
-  assignInlineEvidence(event: WechatMiniprogram.PickerChange) {
-    const index = Number(event.currentTarget.dataset.index)
-    const evidenceId = String(event.currentTarget.dataset.evidence)
-    const message = this.data.messages[index]
-    const plan = message?.reviewPlan
-    const target = message?.reviewEventOptions?.[Number(event.detail.value)]
-    if (!plan || !target) return
-    void this.updateInlineReview(index, assignEvidence(plan, evidenceId, target.id))
-      .catch(error => wx.showToast({ title: (error as Error).message, icon: 'none' }))
-  },
-
-  addInlineEventForEvidence(event: WechatMiniprogram.TouchEvent) {
-    const index = Number(event.currentTarget.dataset.index)
-    const evidenceId = String(event.currentTarget.dataset.evidence)
-    const plan = this.data.messages[index]?.reviewPlan
-    if (!plan) return
-    const eventId = `event-${Date.now()}`
-    const withEvent = addEvent(plan, eventId)
-    void this.updateInlineReview(index, assignEvidence(withEvent, evidenceId, eventId))
-      .catch(error => wx.showToast({ title: (error as Error).message, icon: 'none' }))
-  },
-
-  removeInlineReviewEvent(event: WechatMiniprogram.TouchEvent) {
-    const index = Number(event.currentTarget.dataset.index)
-    const id = String(event.currentTarget.dataset.id)
-    const plan = this.data.messages[index]?.reviewPlan
-    if (!plan) return
-    void this.updateInlineReview(index, removeEvent(plan, id))
-      .catch(error => wx.showToast({ title: (error as Error).message, icon: 'none' }))
-  },
-
-  chooseInlineReviewPurpose(event: WechatMiniprogram.TouchEvent) {
-    const index = Number(event.currentTarget.dataset.index)
-    const purpose = String(event.currentTarget.dataset.purpose || '')
-    if (!purpose || this.data.loading) return
-    this.setData({ loading: true })
-    void this.applyReviewPurposeReply(index, purpose, { role: 'user', text: purpose, timeText: formatMessageTime() })
-      .finally(() => this.setData({ loading: false }))
   },
 
   confirmInlineReview(event: WechatMiniprogram.TouchEvent) {
@@ -5454,7 +5203,6 @@ Page(themed({
     }
   },
 
-  /** 拉取当前项目概况（名称/地点/描述），用于侧边栏顶部展示与「点进去修改」回填 */
   /** 历史搜索过滤：标题或消息内容命中即保留（大小写不敏感） */
   filterHistoryByQuery(list: ChatHistory[]): ChatHistory[] {
     const q = (this.data.historyQuery || '').trim().toLowerCase()
@@ -5485,6 +5233,7 @@ Page(themed({
     this.setData({ historyQuery: '', historyList: this.data.historyListAll })
   },
 
+  /** 拉取当前项目概况（名称/地点/描述），用于侧边栏顶部展示与「点进去修改」回填 */
   async loadProjectSummary() {
     if (!this.data.currentProjectId) return
     try {
@@ -5726,21 +5475,19 @@ Page(themed({
   // 两个气泡互斥：开 @ 面板时关模型菜单，反之亦然
   toggleAtPanel() {
     const opening = !this.data.showAtPanel
-    this.setData({ showAtPanel: opening, showModelMenu: false, atQuery: '', atTab: 'quick', atVisibleItems: AT_QUICK_ITEMS })
+    this.setData({
+      showAtPanel: opening, showModelMenu: false, atQuery: '',
+      atVisibleItems: this.data.atBiz,
+      // 每次打开都回到根层级，避免上次下钻的文件夹残留
+      atDrillStack: [], atDrillItems: [], atDrillPath: '',
+    })
     // 按钮唤起：清掉打字标记（此路径点选走追加插入，不替换触发词）
     this.atOpenedByTyping = false
     if (opening) void this.loadAtData()
   },
 
-  switchAtTab(event: WechatMiniprogram.TouchEvent) {
-    const tab = event.currentTarget.dataset.tab as 'quick' | 'member' | 'biz'
-    const items = tab === 'quick' ? this.data.atQuickItems : tab === 'member' ? this.data.atMembers : this.data.atBiz
-    this.setData({ atTab: tab, atQuery: '', atVisibleItems: items })
-    void this.loadAtData()
-  },
-
   onAtSearch(event: WechatMiniprogram.Input) {
-    // 防抖（2026-11-19）：@ 面板数据量可达数百条（成员/业务引用），
+    // 防抖（2026-11-19）：@ 面板数据量可达数百条（记录/文件），
     // 每敲一个字符都全量过滤 + setData 会掉帧。先回显输入，过滤延迟合并。
     const raw = event.detail.value
     this.setData({ atQuery: raw })
@@ -5749,33 +5496,12 @@ Page(themed({
     }
     this.atSearchTimer = setTimeout(() => {
       this.atSearchTimer = null
-      const q = raw.trim().toLowerCase()
-      const source = this.data.atTab === 'quick' ? this.data.atQuickItems
-        : this.data.atTab === 'member' ? this.data.atMembers : this.data.atBiz
-      const match = (s: string) => !q || s.toLowerCase().includes(q)
-      const visible = source.filter((i: AtQuickItem | AtMember | AtBizItem) => {
-        if (this.data.atTab === 'quick') { const x = i as AtQuickItem; return match(x.label) || match(x.desc) }
-        if (this.data.atTab === 'member') { const x = i as AtMember; return match(x.real_name) }
-        const x = i as AtBizItem; return match(x.label) || match(x.desc)
-      })
-      this.setData({ atVisibleItems: visible as AtQuickItem[] | AtMember[] | AtBizItem[] })
+      this.runAtFilter(raw)
     }, 120)
   },
 
-  // 打开面板 / 切到对应 tab 时按需加载；失败静默（面板仍可用快捷指令）
+  // 打开面板时按需加载；失败静默（记录/隐患/规范/资料库各自独立降级）
   async loadAtData() {
-    const tab = this.data.atTab
-    if (tab === 'quick') return
-    if (tab === 'member') {
-      if (this.data.atMembers.length) return
-      this.setData({ atLoading: true })
-      try {
-        const users = await request<AtMember[]>('/task/assignable-users')
-        this.setData({ atMembers: users || [], atVisibleItems: users || [] })
-      } catch { /* ignore */ } finally { this.setData({ atLoading: false }) }
-      return
-    }
-    // biz：一次拉记录 / 隐患 / 规范 / 资料库文件夹，各自失败不影响其它
     if (this.data.atBiz.length) return
     this.setData({ atLoading: true })
     const results = await Promise.allSettled([
@@ -5786,6 +5512,8 @@ Page(themed({
       (async () => {
         const kb = await request<{ id: number }>('/kb/mine')
         if (!kb || !kb.id) return []
+        // 下钻文件列表要用到 kbId，先记下来
+        this.setData({ atKbId: kb.id })
         return await request<{ items: Array<Record<string, unknown>> }>(`/kb/${kb.id}/folders`)
       })(),
     ])
@@ -5828,6 +5556,7 @@ Page(themed({
       items.push({ key: `reg-${id}`, icon: '📚', label: '规范', desc: name, ref: `@[规范 ${name}]` })
     }
     // 资料库文件夹：树形拍平，带层级路径 + 文档数，插到业务引用最前（用户最常按文件夹找资料）
+    // 点文件夹不再直接插入「整个文件夹」引用，而是下钻到里面选具体文件（2026-11-19）。
     const folderItems: AtBizItem[] = []
     const flattenFolder = (nodes: Array<Record<string, unknown>>, prefix: string) => {
       for (const f of nodes) {
@@ -5835,54 +5564,108 @@ Page(themed({
         if (!name) continue
         const path = prefix ? `${prefix}/${name}` : name
         const count = Number(f.count || 0)
-        folderItems.push({ key: `kb-${f.id}`, icon: '📁', label: path,
-          desc: count ? `${count} 份资料` : '空文件夹', ref: `@[资料库 ${path}]` })
         const children = Array.isArray(f.children) ? f.children as Array<Record<string, unknown>> : []
+        folderItems.push({ key: `kb-${f.id}`, icon: '📁', label: path,
+          desc: count ? `${count} 份资料` : (children.length ? `${children.length} 个子文件夹` : '空文件夹'),
+          ref: `@[资料库 ${path}]`, kind: 'folder', folderId: Number(f.id), path, children })
         if (children.length) flattenFolder(children, path)
       }
     }
     flattenFolder(asArray(ok(3)), '')
     items.unshift(...folderItems)
     const finalItems = items.slice(0, 60)
-    this.setData({ atBiz: finalItems, atVisibleItems: this.data.atTab === 'biz' ? finalItems : this.data.atVisibleItems, atLoading: false })
+    this.setData({ atBiz: finalItems, atVisibleItems: finalItems, atLoading: false })
+    // 打字唤起时先到了空列表，加载完成后补一次过滤
+    if (this.data.atQuery) this.runAtFilter(this.data.atQuery)
   },
 
-  // 点选：把引用/提示词插进输入框，关闭面板并聚焦
-  pickAtQuick(event: WechatMiniprogram.TouchEvent) {
-    const key = event.currentTarget.dataset.key as string
-    const item = this.data.atQuickItems.find(i => i.key === key)
-    if (!item) return
-    // 隐患识别需要拍照/选图，直接跳采集页，与模型下拉里的同名入口一致
-    if (key === 'hazard') {
-      this.setData({ showAtPanel: false })
-      this.atOpenedByTyping = false
-      wx.navigateTo({ url: '/pages/capture/index?mode=hazard' })
-      return
-    }
-    this.insertAtText(item.prompt, false)
-  },
-
-  pickAtMember(event: WechatMiniprogram.TouchEvent) {
-    const id = Number(event.currentTarget.dataset.id)
-    const user = this.data.atMembers.find(m => m.id === id)
-    if (!user) return
-    // 打字唤起：替换「@关键词」原文，避免 @zh@张三 双份（2026-11-19）
-    if (this.atOpenedByTyping) {
-      this.replaceAtTrigger(`@${user.real_name} `)
-      return
-    }
-    this.insertAtText(`@${user.real_name} `, false)
-  },
-
+  // 点选：把引用插进输入框，关闭面板并聚焦
   pickAtBiz(event: WechatMiniprogram.TouchEvent) {
     const key = event.currentTarget.dataset.key as string
-    const item = this.data.atBiz.find(i => i.key === key)
+    // 下钻后列表来自 atDrillItems，未下钻时来自 atBiz
+    const pool = this.data.atDrillStack.length ? this.data.atDrillItems : this.data.atBiz
+    const item = pool.find(i => i.key === key)
     if (!item) return
+    // 文件夹：进入下一层选具体文件，而不是直接引用整层
+    if (item.kind === 'folder') {
+      void this.openAtFolder(item)
+      return
+    }
     if (this.atOpenedByTyping) {
       this.replaceAtTrigger(`${item.ref} `)
       return
     }
     this.insertAtText(`${item.ref} `, false)
+  },
+
+  /** 进入资料库文件夹：列出子文件夹 + 该层文件（文件可单独 @ 引用） */
+  async openAtFolder(item: AtBizItem) {
+    const kbId = this.data.atKbId
+    if (!kbId || !item.folderId) return
+    const path = item.path || item.label
+    const subItems: AtBizItem[] = []
+    for (const child of item.children || []) {
+      const name = String(child.name || '').trim()
+      if (!name) continue
+      const childPath = `${path}/${name}`
+      const childChildren = Array.isArray(child.children) ? child.children as Array<Record<string, unknown>> : []
+      const count = Number(child.count || 0)
+      subItems.push({
+        key: `kb-${child.id}`, icon: '📁', label: name,
+        desc: count ? `${count} 份资料` : (childChildren.length ? `${childChildren.length} 个子文件夹` : '空文件夹'),
+        ref: `@[资料库 ${childPath}]`, kind: 'folder', folderId: Number(child.id),
+        path: childPath, children: childChildren,
+      })
+    }
+
+    this.setData({ atDrillLoading: true })
+    let docItems: AtBizItem[] = []
+    try {
+      const res = await request<{ items?: Array<Record<string, unknown>> }>(
+        `/kb/${kbId}/documents?folder_id=${item.folderId}`,
+      )
+      const docs = Array.isArray(res?.items) ? res.items.slice(0, 100) : []
+      docItems = docs.map(d => {
+        const name = String(d.name || d.filename || '未命名文件')
+        return {
+          key: `doc-${d.id}`, icon: '📄', label: name,
+          desc: String(d.filename || ''), ref: `@[文件#${d.id} ${name}]`, kind: 'doc',
+          docId: Number(d.id),
+        } as AtBizItem
+      })
+    } catch {
+      docItems = []
+    }
+
+    // 第一行固定给「引用整个文件夹」，其余是子文件夹 + 文件
+    const items: AtBizItem[] = [
+      {
+        key: `kb-ref-${item.folderId}`, icon: '📎', label: '引用整个文件夹',
+        desc: `${path}（读取其中全部资料）`, ref: `@[资料库 ${path}]`, kind: 'folder-ref',
+      },
+      ...subItems, ...docItems,
+    ]
+    const stack = this.data.atDrillStack.concat([{ path, items }])
+    this.setData({
+      atDrillStack: stack, atDrillItems: items, atVisibleItems: items,
+      atDrillPath: path, atQuery: '', atDrillLoading: false,
+    })
+  },
+
+  /** 下钻返回：回到上一层，栈空时回到全部引用 */
+  atDrillBack() {
+    const stack = this.data.atDrillStack.slice(0, -1)
+    if (!stack.length) {
+      this.setData({
+        atDrillStack: [], atDrillItems: [], atDrillPath: '',
+        atVisibleItems: this.data.atBiz, atQuery: '',
+      })
+      return
+    }
+    this.setData({
+      atDrillStack: stack, atVisibleItems: stack[stack.length - 1].items,
+      atDrillPath: stack[stack.length - 1].path, atQuery: '',
+    })
   },
 
   /** 打字唤起面板后的点选：把输入串末尾的「@关键词」整段替换为选中项 */
@@ -5931,14 +5714,13 @@ Page(themed({
     const keyword = m[2]
     const opening = !this.data.showAtPanel
     if (opening) {
-      // 打字唤起：默认进「成员」tab（@ 最常用来提及人），可再切
+      // 打字唤起：直接进资料/记录引用列表
       this.atOpenedByTyping = true
       this.setData({
         showAtPanel: true,
         showModelMenu: false,
         atQuery: keyword,
-        atTab: 'member',
-        atVisibleItems: this.data.atMembers.length ? this.data.atMembers : this.data.atQuickItems,
+        atVisibleItems: this.data.atBiz,
       })
       void this.loadAtData()
       if (keyword) this.runAtFilter(keyword)
@@ -5958,15 +5740,10 @@ Page(themed({
   /** @ 触发词过滤：与 onAtSearch 同一套匹配逻辑（打字唤起路径复用） */
   runAtFilter(rawQuery: string) {
     const q = (rawQuery || '').trim().toLowerCase()
-    const source = this.data.atTab === 'quick' ? this.data.atQuickItems
-      : this.data.atTab === 'member' ? this.data.atMembers : this.data.atBiz
+    const source = this.data.atDrillStack.length ? this.data.atDrillItems : this.data.atBiz
     const match = (s: string) => !q || s.toLowerCase().includes(q)
-    const visible = source.filter((i: AtQuickItem | AtMember | AtBizItem) => {
-      if (this.data.atTab === 'quick') { const x = i as AtQuickItem; return match(x.label) || match(x.desc) }
-      if (this.data.atTab === 'member') { const x = i as AtMember; return match(x.real_name) }
-      const x = i as AtBizItem; return match(x.label) || match(x.desc)
-    })
-    this.setData({ atVisibleItems: visible as AtQuickItem[] | AtMember[] | AtBizItem[] })
+    const visible = source.filter(i => match(i.label) || match(i.desc))
+    this.setData({ atVisibleItems: visible })
   },
 
   onLogDateChange(event: WechatMiniprogram.PickerChange) {
