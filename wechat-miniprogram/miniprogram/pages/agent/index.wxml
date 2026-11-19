@@ -681,7 +681,7 @@
       <text class="at-panel-title">引用或指令</text>
       <view class="at-panel-close" catchtap="toggleAtPanel">×</view>
     </view>
-    <input class="at-search" value="{{atQuery}}" placeholder="搜索快捷指令、成员、记录…" placeholder-class="at-search-ph" bindinput="onAtSearch" confirm-type="search" />
+    <input class="at-search" value="{{atQuery}}" placeholder="搜索快捷指令、成员、记录…（打 @ 号也可直接唤起）" placeholder-class="at-search-ph" bindinput="onAtSearch" confirm-type="search" />
     <view class="at-tabs">
       <view class="at-tab {{atTab === 'quick' ? 'active' : ''}}" data-tab="quick" catchtap="switchAtTab">快捷指令</view>
       <view class="at-tab {{atTab === 'member' ? 'active' : ''}}" data-tab="member" catchtap="switchAtTab">成员</view>

@@ -556,6 +556,8 @@ Page(themed({
   activeChatAbort: null as (() => void) | null,
   /** @ 面板搜索防抖计时器（2026-11-19） */
   atSearchTimer: null as number | null,
+  /** @ 面板本次是否由「打字打出 @」唤起（2026-11-19）：决定打字同步/删词收起行为 */
+  atOpenedByTyping: false,
   /** 历史搜索防抖计时器（2026-11-19） */
   historySearchTimer: null as number | null,
 
@@ -1333,7 +1335,9 @@ Page(themed({
     }
 
     const userMsg: Message = { role: 'user', text, timeText: formatMessageTime() }
-    this.setData({ input: '', canSend: false })
+    // 发送时收掉可能开着的 @ 面板（打字唤起后未选直接发送的场景）
+    this.setData({ input: '', canSend: false, ...(this.data.showAtPanel ? { showAtPanel: false, atQuery: '' } : {}) })
+    this.atOpenedByTyping = false
 
     // 确定性本地动作：「返回主页」精确匹配 → 重置会话（其余自然语言交后端智能体）
     if (this.tryLocalReset(text, userMsg)) return
@@ -5695,6 +5699,7 @@ Page(themed({
   onPageTap() {
     if (this.data.showModelMenu || this.data.showAtPanel) {
       this.setData({ showModelMenu: false, showAtPanel: false })
+      this.atOpenedByTyping = false
     }
   },
 
@@ -5722,6 +5727,8 @@ Page(themed({
   toggleAtPanel() {
     const opening = !this.data.showAtPanel
     this.setData({ showAtPanel: opening, showModelMenu: false, atQuery: '', atTab: 'quick', atVisibleItems: AT_QUICK_ITEMS })
+    // 按钮唤起：清掉打字标记（此路径点选走追加插入，不替换触发词）
+    this.atOpenedByTyping = false
     if (opening) void this.loadAtData()
   },
 
@@ -5848,6 +5855,7 @@ Page(themed({
     // 隐患识别需要拍照/选图，直接跳采集页，与模型下拉里的同名入口一致
     if (key === 'hazard') {
       this.setData({ showAtPanel: false })
+      this.atOpenedByTyping = false
       wx.navigateTo({ url: '/pages/capture/index?mode=hazard' })
       return
     }
@@ -5858,6 +5866,11 @@ Page(themed({
     const id = Number(event.currentTarget.dataset.id)
     const user = this.data.atMembers.find(m => m.id === id)
     if (!user) return
+    // 打字唤起：替换「@关键词」原文，避免 @zh@张三 双份（2026-11-19）
+    if (this.atOpenedByTyping) {
+      this.replaceAtTrigger(`@${user.real_name} `)
+      return
+    }
     this.insertAtText(`@${user.real_name} `, false)
   },
 
@@ -5865,7 +5878,20 @@ Page(themed({
     const key = event.currentTarget.dataset.key as string
     const item = this.data.atBiz.find(i => i.key === key)
     if (!item) return
+    if (this.atOpenedByTyping) {
+      this.replaceAtTrigger(`${item.ref} `)
+      return
+    }
     this.insertAtText(`${item.ref} `, false)
+  },
+
+  /** 打字唤起面板后的点选：把输入串末尾的「@关键词」整段替换为选中项 */
+  replaceAtTrigger(text: string) {
+    const current = this.data.input
+    const next = current.replace(/@([^\s@]*)$/, text)
+    this.setData({ input: next, canSend: true, showAtPanel: false, atQuery: '', draftFocus: false })
+    this.atOpenedByTyping = false
+    setTimeout(() => this.setData({ draftFocus: true }), 60)
   },
 
   // 统一插入：追加到现有输入末尾（已有的话留一个空格），重算 canSend
@@ -5880,6 +5906,67 @@ Page(themed({
   onInput(event: WechatMiniprogram.Input) {
     const input = event.detail.value
     this.setData({ input, canSend: Boolean(input.trim()) || this.data.attachments.length > 0 })
+    this.detectAtTrigger(input)
+  },
+
+  /**
+   * 打字打出 @ 自动唤起引用面板（2026-11-19）。
+   * 触发口径：输入串以「@」结尾，或末段存在「空白+@关键词」且光标（=输入串末尾）就在
+   * 关键词后 —— 即用户正在打一个新的 @。已通过面板点选插入的引用（@张三 ）后面
+   * 跟了空格，不满足「无空格的 @词在末尾」，不会重复弹。
+   * 面板已开时，把 @ 后的关键词同步进面板搜索；删掉 @ 则收起。
+   */
+  detectAtTrigger(input: string) {
+    // 光标位置 = 输入串末尾（textarea 无 selectionStart 事件详情时按此近似；
+    // 我们只关心「正在末尾打字」的场景，中间编辑不触发也合理）
+    const m = /(^|\s)@([^\s@]*)$/.exec(input)
+    if (!m) {
+      // 没有 @ 在打：已开的面板收起（用户删掉了触发词）
+      if (this.data.showAtPanel && this.atOpenedByTyping) {
+        this.setData({ showAtPanel: false, atQuery: '' })
+        this.atOpenedByTyping = false
+      }
+      return
+    }
+    const keyword = m[2]
+    const opening = !this.data.showAtPanel
+    if (opening) {
+      // 打字唤起：默认进「成员」tab（@ 最常用来提及人），可再切
+      this.atOpenedByTyping = true
+      this.setData({
+        showAtPanel: true,
+        showModelMenu: false,
+        atQuery: keyword,
+        atTab: 'member',
+        atVisibleItems: this.data.atMembers.length ? this.data.atMembers : this.data.atQuickItems,
+      })
+      void this.loadAtData()
+      if (keyword) this.runAtFilter(keyword)
+    } else if (this.atOpenedByTyping) {
+      // 面板已开（打字开的）：关键词实时同步进搜索并过滤
+      this.setData({ atQuery: keyword })
+      if (this.atSearchTimer !== null) {
+        clearTimeout(this.atSearchTimer)
+      }
+      this.atSearchTimer = setTimeout(() => {
+        this.atSearchTimer = null
+        this.runAtFilter(this.data.atQuery)
+      }, 120)
+    }
+  },
+
+  /** @ 触发词过滤：与 onAtSearch 同一套匹配逻辑（打字唤起路径复用） */
+  runAtFilter(rawQuery: string) {
+    const q = (rawQuery || '').trim().toLowerCase()
+    const source = this.data.atTab === 'quick' ? this.data.atQuickItems
+      : this.data.atTab === 'member' ? this.data.atMembers : this.data.atBiz
+    const match = (s: string) => !q || s.toLowerCase().includes(q)
+    const visible = source.filter((i: AtQuickItem | AtMember | AtBizItem) => {
+      if (this.data.atTab === 'quick') { const x = i as AtQuickItem; return match(x.label) || match(x.desc) }
+      if (this.data.atTab === 'member') { const x = i as AtMember; return match(x.real_name) }
+      const x = i as AtBizItem; return match(x.label) || match(x.desc)
+    })
+    this.setData({ atVisibleItems: visible as AtQuickItem[] | AtMember[] | AtBizItem[] })
   },
 
   onLogDateChange(event: WechatMiniprogram.PickerChange) {
