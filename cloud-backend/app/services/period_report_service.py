@@ -16,6 +16,8 @@
 """
 from __future__ import annotations
 
+import re
+
 import asyncio
 import json
 import logging
@@ -185,32 +187,46 @@ async def aggregate_records(
     )
     parallels = parallel_result.scalars().all()
 
-    # 进度
+    # 进度：**只放巡视** —— 旁站/验收/见证各归各 section，施工进展栏目只讲现场巡视看到的面
     progress_lines = []
     by_type: dict[str, list[str]] = {"巡视": [], "验收": [], "旁站": [], "见证": []}
     other_lines = []
+
+    def _compact(text: str) -> str:
+        """干掉前后标点和空白、内部连续标点，空壳（只剩标点）返回空串。"""
+        s = str(text or "").strip()
+        # 连续标点压缩成单个
+        s = re.sub(r"[，,；;：:]+", lambda m: m.group(0)[0], s)
+        # 前后标点/空格去掉
+        s = s.strip(" ，,；;：:")
+        return s
+
     for r in records:
-        loc = f"{r.section or ''} {r.location or ''}".strip()
+        loc = _compact(f"{r.section or ''} {r.location or ''}")
         if r.record_type == "巡视":
-            by_type["巡视"].append(f"{loc}：{r.work_content or r.inspection_remark or ''}".strip("："))
+            line = _compact(f"{loc}：{r.work_content or r.inspection_remark or ''}")
+            if line:
+                by_type["巡视"].append(line)
             progress_lines.append(f"巡视{loc}，{r.work_content or '现场巡查'}")
         elif r.record_type == "验收":
-            by_type["验收"].append(
-                f"{loc}：{(r.content_json or {}).get('acceptance_type') or '验收'}，"
-                f"结果{r.acceptance_result or ''}"
-            )
-            progress_lines.append(f"对{loc}进行{(r.content_json or {}).get('acceptance_type') or '验收'}")
+            acc_type = (r.content_json or {}).get("acceptance_type") or "验收"
+            acc_result = r.acceptance_result or ""
+            line = _compact(f"{loc}：{acc_type}，结果{acc_result}")
+            if line:
+                by_type["验收"].append(line)
         elif r.record_type == "旁站":
-            by_type["旁站"].append(f"{loc}：{r.station_content or ''}")
-            progress_lines.append(f"旁站{loc}（{r.station_project_name or ''}）")
+            line = _compact(f"{loc}：{r.station_content or ''}")
+            if line:
+                by_type["旁站"].append(line)
         elif r.record_type == "见证":
-            by_type["见证"].append(
-                f"{r.witness_material_name or ''} {r.witness_material_spec or ''}，{loc}"
-            )
-            progress_lines.append(f"见证取样{r.witness_material_name or '材料'}送检")
+            material_line = _compact(f"{r.witness_material_name or ''} {r.witness_material_spec or ''}，{loc}")
+            if material_line:
+                by_type["见证"].append(material_line)
         else:
-            other_lines.append(r.work_content or r.remark or "")
-    progress = "；".join(ln for ln in progress_lines if ln) or "无施工记录。"
+            line = _compact(r.work_content or r.remark or "")
+            if line:
+                other_lines.append(line)
+    progress = "；".join(ln for ln in progress_lines if _compact(ln)) or "无施工记录。"
 
     # 问题
     problems = [f"{r.record_type} {r.section or ''}：{problem_text(r)}" for r in records if r.problems or r.treatment]
@@ -228,9 +244,11 @@ async def aggregate_records(
     acc_sec = "；".join(by_type["验收"]) or "无验收记录。"
     other_sec = "；".join(other_lines) or "无。"
     parallel_sec = "\n".join(
-        f"{item.part} {item.item}：{item.result_detail}，结论：{item.conclusion}，"
-        f"依据：{item.basis}，方法：{item.method or ''}"
+        _compact(f"{item.part} {item.item}：{item.result_detail}，结论：{item.conclusion}，"
+                 f"依据：{item.basis}，方法：{item.method or ''}")
         for item in parallels
+        if _compact(f"{item.part} {item.item}：{item.result_detail}，结论：{item.conclusion}，"
+                    f"依据：{item.basis}，方法：{item.method or ''}")
     ) or "本期无平行检验记录。"
 
     return {
@@ -1451,7 +1469,7 @@ async def generate_aggregate_doc(
         "acceptance_section": agg["acceptance_section"],
         "other_work_section": agg["other_work_section"],
         "problems_section": agg["problems_section"],
-        "other_section": agg["problems_section"],
+        "other_section": agg["other_work_section"],
         "temperature_high": "",
         "temperature_low": "",
         "weather_morning": "",

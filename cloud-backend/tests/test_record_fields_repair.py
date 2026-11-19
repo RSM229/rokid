@@ -138,7 +138,12 @@ class RecordRepairTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(rendered['content'],'')
         from app.services.agent_form_requirements import resolve_record_form
         requirements=resolve_record_form(r,self.p,'gd_b_214_xunshi')
-        self.assertIn('content',requirements['missing_fields'])
+        # 3467ee6（11-09「auto 栏位不计缺失」）：巡视 content 契约 kind=auto，
+        # 清空后不再计入 missing_fields（交由渲染层带出）；但快照里的旧候选
+        # 也不得回填——values 里不能出现旧值。
+        self.assertNotIn('旧Agent巡视内容',requirements['values'].get('content',''))
+        self.assertNotIn('旧OCR候选内容',requirements['values'].get('content',''))
+        self.assertNotIn('content',requirements['missing_fields'])
 
     async def test_reversed_times_and_invalid_result_rejected(self):
         r=self.rec('旁站',station_start_time=datetime(2026,10,8,10),station_end_time=datetime(2026,10,8,11))
@@ -386,7 +391,11 @@ class RecordRepairTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_project_info_contract_and_stale_model_compatibility(self):
         # 响应字段必须都在 ORM 上存在，防止再次出现「路由先加了字段、模型没加」。
-        missing=set(project.ProjectInfo.model_fields)-set(Project.__table__.columns.keys())
+        # 例外（响应合成字段，非 ORM 列）：
+        #   - owner_name: b7a11fc 由 _fill_owner_names 查 User 回填（便于列表直显）
+        #   - warning: 875d6b5 N12 日志时点告警，仅 update 响应携带
+        SYNTHETIC_RESPONSE_FIELDS = {"owner_name", "warning"}
+        missing=set(project.ProjectInfo.model_fields)-set(Project.__table__.columns.keys())-SYNTHETIC_RESPONSE_FIELDS
         self.assertFalse(missing,f'ProjectInfo 字段缺少 ORM 列: {sorted(missing)}')
         # 滚动发布时旧 Project 模型可能还没有 eng_type；列表读取必须降级为 None 而不是 500。
         stale=SimpleNamespace(
@@ -394,6 +403,8 @@ class RecordRepairTests(unittest.IsolatedAsyncioTestCase):
             construction_unit=None,supervision_unit=None,supervision_org=None,
             acceptance_participants=None,latitude=None,longitude=None,seal_signature_id=None,
             status='active',completed_at=None,
+            owner_id=None,  # b7a11fc 负责人列（rolling release 旧模型可能缺）
+            log_daily_time=None,  # 169655d 日志时点列
         )
         self.assertIsNone(project._project_info(stale).eng_type)
 

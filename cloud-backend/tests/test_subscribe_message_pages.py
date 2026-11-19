@@ -60,7 +60,7 @@ class SubscribePageWhitelistTests(unittest.TestCase):
         """扫描 routers 下所有 page= 关键字参数，杜绝再次写错页面路径。"""
         found: list[tuple[str, int, str]] = []
         for source in sorted(ROUTERS_DIR.glob("*.py")):
-            tree = ast.parse(source.read_text(encoding="utf-8"), filename=str(source))
+            tree = ast.parse(source.read_text(encoding="utf-8-sig"), filename=str(source))
             for node in ast.walk(tree):
                 if not isinstance(node, ast.Call):
                     continue

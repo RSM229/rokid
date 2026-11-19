@@ -51,6 +51,26 @@ def _sec(title: str, *fields: dict) -> dict:
     return {"title": title, "fields": list(fields)}
 
 
+# AQSZ-J-2.5-1~7 危大巡视表（市政）共用栏目：7 张模板结构同构，仅预印的
+# 检查项清单不同；11 项固定检查内容不进 schema——渲染端按模板预印项
+# 勾选（checklist 传逐项结果），schema 只登记采集面。
+# 字段 key 与 record_field_spec._AQSZ_2_5_WEIDA_FIELDS、CONTENT_MAP、
+# municipal_fillers.fill_aqsz_weida 的取数 key 三方对齐。
+_AQSZ_2_5_WEIDA_SECTIONS = [
+    _sec("基本信息",
+         _f("project_name", "工程名称", "text", True, system=True),
+         _f("construction_unit", "施工单位名称", "text", True, system=True),
+         _f("inspection_date", "巡视日期", "date", True, system=True),
+         _f("hazard_type", "分部分项工程名称", "text", True),
+         _f("section", "巡视部位", "text", True)),
+    _sec("检查内容",
+         _f("checklist", "检查项目结论（11 项：符合/不符合/其他）", "textarea", False)),
+    _sec("意见与签章",
+         _f("inspector_opinion", "巡视监理人员意见", "textarea", True),
+         _f("chief_opinion", "总监理工程师意见", "textarea", False)),
+]
+
+
 SCHEMAS: dict[str, dict] = {
     "gd_b_212_pangzhan": {
         "form_code": "gd_b_212_pangzhan", "form_number": "GD-B-212", "name": "旁站记录", "version": SCHEMA_VERSION,
@@ -733,7 +753,172 @@ SCHEMAS: dict[str, dict] = {
             {'role': '监理检查人员', 'required': False},
             {'role': '总监理工程师', 'required': False},
         ],
-    }
+    },
+    # ---- 市政工程统表（municipal，e9a20d4 接入，2026-11-19 补字段契约）----
+    # 3 个 aggregate（日志类）字段按 municipal_fillers 各填充器实际读取的
+    # content key 整理；9 个 record 表式与 record_field_spec 市政契约同口径。
+    "shijian_24_rizhi": {
+        "form_code": "shijian_24_rizhi", "form_number": "市政监-24", "name": "市政监-24 监理日志", "version": SCHEMA_VERSION,
+        "sections": [
+            _sec("基本信息",
+                 _f("m_01", "工程名称", "text", True, system=True),
+                 _f("m_02", "施工单位", "text", True, system=True),
+                 _f("m_03", "日期", "date", True, system=True),
+                 _f("m_04", "星期", "text", True, system=True),
+                 _f("weather", "天气", "select", True, ["晴", "多云", "阴", "雨", "雪", "大风"], system=True),
+                 _f("temp_high", "最高气温（℃）", "number", False, system=True),
+                 _f("temp_low", "最低气温（℃）", "number", False, system=True)),
+            _sec("作业面情况",
+                 _f("m_08", "作业面（含进度/人数/机械，最多三组）", "textarea", True, system=True)),
+            _sec("监理工作",
+                 _f("m_09", "现场巡视发现问题及处理情况", "textarea", True, system=True),
+                 _f("m_10", "工程质量情况", "textarea", True, system=True),
+                 _f("m_11", "工程材料、大型机械进退场检查情况、材料试件见证取样送检情况", "textarea", True, system=True),
+                 _f("m_12", "安全、文明施工情况", "textarea", True, system=True),
+                 _f("m_13", "重要人员往来、指示或通知", "textarea", False, system=True),
+                 _f("m_14", "监理主要工作、活动（会议、指令、文件、检查等）、存在问题", "textarea", True, system=True),
+                 _f("m_15", "设计变更、工程洽商情况", "textarea", False, system=True),
+                 _f("m_16", "其它重要事项", "textarea", False, system=True)),
+            _sec("签章",
+                 _f("m_05", "总监理工程师/总监代表（签名）", "text", False),
+                 _f("m_06", "填表人（签名）", "text", True),
+                 _f("m_07", "填表日期", "date", True, system=True)),
+        ],
+        "signoffs": [{"role": "总监理工程师/总监代表", "required": False}, {"role": "填表人", "required": True}],
+    },
+    "shijian_9_pangzhan": {
+        "form_code": "shijian_9_pangzhan", "form_number": "市政监-9", "name": "市政监-9 旁站监理记录表", "version": SCHEMA_VERSION,
+        "sections": [
+            _sec("基本信息",
+                 _f("project_name", "单位（子单位）工程名称", "text", True, system=True),
+                 _f("station_date", "旁站日期", "date", True, system=True),
+                 _f("weekday", "星期", "text", True, system=True),
+                 _f("weather", "旁站时气候", "text", False, system=True)),
+            _sec("旁站内容",
+                 _f("station_part", "旁站监理的部位或工序", "text", True),
+                 _f("station_time", "旁站监理时间", "text", True),
+                 _f("start_time", "旁站开始时间", "datetime", True),
+                 _f("end_time", "旁站结束时间", "datetime", False),
+                 _f("content", "施工情况", "textarea", True),
+                 _f("supervision", "监理情况", "textarea", True)),
+            _sec("问题与处理",
+                 _f("problems", "发现问题", "textarea"),
+                 _f("handling", "处理意见", "textarea"),
+                 _f("remark", "备注", "text")),
+        ],
+        "signoffs": [{"role": "旁站监理人员", "required": True}],
+    },
+    "shijian_11_xunshi": {
+        "form_code": "shijian_11_xunshi", "form_number": "市政监-11", "name": "市政监-11 巡视记录", "version": SCHEMA_VERSION,
+        "sections": [
+            _sec("基本信息",
+                 _f("project_name", "工程名称", "text", True, system=True),
+                 _f("doc_number", "编号", "text", True, system=True),
+                 _f("start_time", "巡视开始时间", "datetime", True),
+                 _f("end_time", "巡视结束时间", "datetime", False)),
+            _sec("巡视内容",
+                 _f("section", "巡视部位", "text", True),
+                 _f("inspector", "巡视人", "text", True),
+                 _f("content", "巡视内容", "textarea", True)),
+            _sec("问题与处理",
+                 _f("problems", "巡视的存在问题情况", "textarea"),
+                 _f("handling", "问题处理情况", "textarea")),
+        ],
+        "signoffs": [{"role": "巡视监理人员", "required": True}],
+    },
+    "aqsz_2_2_anquan_rizhi": {
+        "form_code": "aqsz_2_2_anquan_rizhi", "form_number": "AQSZ-J-2.2", "name": "安全监理日志（AQSZ-J-2.2）", "version": SCHEMA_VERSION,
+        "sections": [
+            _sec("基本信息",
+                 _f("m_20", "工程名称", "text", True, system=True),
+                 _f("m_21", "日期", "date", True, system=True),
+                 _f("m_22", "星期", "text", True, system=True),
+                 _f("weather_am", "天气（上午）", "text", True, system=True),
+                 _f("weather_pm", "天气（下午）", "text", False, system=True),
+                 _f("weather_night", "天气（夜间）", "text", False, system=True)),
+            _sec("内容",
+                 _f("m_23", "施工内容", "textarea", True, system=True),
+                 _f("m_24", "安全检查情况（包括巡视监理情况）", "textarea", True, system=True),
+                 _f("m_25", "处理措施（限期整改、暂时停工、上报建设单位或有关部门）", "textarea", True, system=True),
+                 _f("m_26", "施工单位隐患整改情况", "textarea", True, system=True),
+                 _f("m_27", "危险性较大分部分项工程安全状况", "textarea", True, system=True),
+                 _f("m_28", "其他", "textarea", False, system=True)),
+            _sec("签章",
+                 _f("m_29", "安全监理员（签名）", "text", True),
+                 _f("m_30", "总监/总监代表（审阅签名）", "text", False),
+                 _f("m_31", "审阅日期", "date", False)),
+        ],
+        "signoffs": [{"role": "安全监理员", "required": True}, {"role": "总监理工程师/总监代表", "required": False}],
+    },
+    "jianli_riji": {
+        # 监理日记（个人维度）：模板与栏目复用 GD-B-220 监理日志，聚合生成走
+        # generate_supervision_log（markdown 产物 + fill_rizhi docx 双版式）。
+        # 此前无 schema 是聚合流程设计；2026-11-19 契约守门扩到全注册表式后补齐，
+        # 字段与 gd_b_220_rizhi 同构，name/编号前缀不同。
+        "form_code": "jianli_riji", "form_number": "GD-JL-RJ", "name": "监理日记", "version": SCHEMA_VERSION,
+        "sections": [
+            _sec("基本信息",
+                 _f("7_01", "工程项目名称", "text", True, system=True),
+                 _f("7_02", "编号", "text", True, system=True),
+                 _f("date", "日期", "date", True, system=True),
+                 _f("7_04", "星期", "text", True, system=True),
+                 _f("weather", "天气", "select", True, ["晴", "暴雨", "雨", "阴", "台风"], system=True),
+                 _f("temp_high", "最高气温（℃）", "number", False, system=True),
+                 _f("temp_low", "最低气温（℃）", "number", False, system=True)),
+            _sec("内容",
+                 _f("7_08", "当日各部位施工进展", "text", True, system=True),
+                 _f("7_09", "当日材料/构配件/设备进场情况", "text", True, system=True),
+                 _f("7_10", "当日监理工作情况（旁站/巡视/平行检验/验收）", "text", True, system=True),
+                 _f("7_11", "当日存在问题及处理情况", "text", True, system=True),
+                 _f("7_12", "上级/质监站检查情况", "text", False),
+                 _f("7_13", "其他有关事项", "text", False)),
+            _sec("签章",
+                 _f("7_14", "审阅日期", "date", False),
+                 _f("duty_supervisor", "当日值班监理人员（签名）", "text", True),
+                 _f("professional_supervisor", "专业监理工程师（审阅签名）", "text", False),
+                 _f("chief_supervisor", "总监理工程师/代表（审阅签名）", "text", False)),
+        ],
+        "signoffs": [{"role": "当日值班监理人员", "required": True}, {"role": "专业监理工程师", "required": False}, {"role": "总监理工程师/总监理工程师代表", "required": False}],
+    },
+    # ---- AQSZ-J-2.5-1~7 危大工程监理巡视检查记录表（市政，7 张模板同构）----
+    # 字段口径与 record_field_spec._AQSZ_2_5_WEIDA_FIELDS 及
+    # municipal_fillers.fill_aqsz_weida 的取数 key 对齐；7 张表必须各自
+    # 独立条目（守门测试逐表 get_schema），sections 同构、仅表号/名称不同。
+    "aqsz_2_5_1_weida": {
+        "form_code": "aqsz_2_5_1_weida", "form_number": "AQSZ-J-2.5-1", "name": "危大工程监理巡视检查记录表（通用/AQSZ-J-2.5-1）", "version": SCHEMA_VERSION,
+        "sections": _AQSZ_2_5_WEIDA_SECTIONS,
+        "signoffs": [{"role": "巡视监理人员", "required": True}, {"role": "总监理工程师", "required": False}],
+    },
+    "aqsz_2_5_2_weida": {
+        "form_code": "aqsz_2_5_2_weida", "form_number": "AQSZ-J-2.5-2", "name": "危大工程监理巡视检查记录表（基坑/AQSZ-J-2.5-2）", "version": SCHEMA_VERSION,
+        "sections": _AQSZ_2_5_WEIDA_SECTIONS,
+        "signoffs": [{"role": "巡视监理人员", "required": True}, {"role": "总监理工程师", "required": False}],
+    },
+    "aqsz_2_5_3_weida": {
+        "form_code": "aqsz_2_5_3_weida", "form_number": "AQSZ-J-2.5-3", "name": "危大工程监理巡视检查记录表（模板/AQSZ-J-2.5-3）", "version": SCHEMA_VERSION,
+        "sections": _AQSZ_2_5_WEIDA_SECTIONS,
+        "signoffs": [{"role": "巡视监理人员", "required": True}, {"role": "总监理工程师", "required": False}],
+    },
+    "aqsz_2_5_4_weida": {
+        "form_code": "aqsz_2_5_4_weida", "form_number": "AQSZ-J-2.5-4", "name": "危大工程监理巡视检查记录表（脚手架/AQSZ-J-2.5-4）", "version": SCHEMA_VERSION,
+        "sections": _AQSZ_2_5_WEIDA_SECTIONS,
+        "signoffs": [{"role": "巡视监理人员", "required": True}, {"role": "总监理工程师", "required": False}],
+    },
+    "aqsz_2_5_5_weida": {
+        "form_code": "aqsz_2_5_5_weida", "form_number": "AQSZ-J-2.5-5", "name": "危大工程监理巡视检查记录表（起重/AQSZ-J-2.5-5）", "version": SCHEMA_VERSION,
+        "sections": _AQSZ_2_5_WEIDA_SECTIONS,
+        "signoffs": [{"role": "巡视监理人员", "required": True}, {"role": "总监理工程师", "required": False}],
+    },
+    "aqsz_2_5_6_weida": {
+        "form_code": "aqsz_2_5_6_weida", "form_number": "AQSZ-J-2.5-6", "name": "危大工程监理巡视检查记录表（暗挖/AQSZ-J-2.5-6）", "version": SCHEMA_VERSION,
+        "sections": _AQSZ_2_5_WEIDA_SECTIONS,
+        "signoffs": [{"role": "巡视监理人员", "required": True}, {"role": "总监理工程师", "required": False}],
+    },
+    "aqsz_2_5_7_weida": {
+        "form_code": "aqsz_2_5_7_weida", "form_number": "AQSZ-J-2.5-7", "name": "危大工程监理巡视检查记录表（有限空间/AQSZ-J-2.5-7）", "version": SCHEMA_VERSION,
+        "sections": _AQSZ_2_5_WEIDA_SECTIONS,
+        "signoffs": [{"role": "巡视监理人员", "required": True}, {"role": "总监理工程师", "required": False}],
+    },
 }
 
 # ---------------------------------------------------------------------------
@@ -822,6 +1007,77 @@ CONTENT_MAP: dict[str, dict[str, str]] = {
         "special_plan": "special_plan", "emergency_preparation": "emergency_preparation",
         "warning_measures": "warning_measures", "plan_execution": "plan_execution",
         "other_checks": "other_checks", "problems": "problems",
+    },
+    # ---- 市政工程统表（与 record_field_spec 市政契约同口径）----
+    "shijian_9_pangzhan": {
+        "project_name": "project_name", "station_date": "date", "weekday": "weekday", "weather": "weather",
+        "station_part": "section", "station_time": "station_time", "start_time": "start_time",
+        "end_time": "end_time", "content": "content", "supervision": "supervision",
+        "problems": "problems", "handling": "handling", "remark": "remark",
+    },
+    "shijian_11_xunshi": {
+        "project_name": "project_name", "doc_number": "doc_number", "start_time": "start_time",
+        "end_time": "end_time", "section": "section", "inspector": "inspector",
+        "content": "content", "problems": "problems", "handling": "handling",
+    },
+    "aqsz_2_5_1_weida": {
+        "project_name": "project_name", "construction_unit": "construction_unit", "inspection_date": "date",
+        "hazard_type": "hazard_name", "section": "section", "checklist": "checklist",
+        "inspector_opinion": "inspector_opinion", "chief_opinion": "chief_opinion",
+    },
+    "aqsz_2_5_2_weida": {
+        "project_name": "project_name", "construction_unit": "construction_unit", "inspection_date": "date",
+        "hazard_type": "hazard_name", "section": "section", "checklist": "checklist",
+        "inspector_opinion": "inspector_opinion", "chief_opinion": "chief_opinion",
+    },
+    "aqsz_2_5_3_weida": {
+        "project_name": "project_name", "construction_unit": "construction_unit", "inspection_date": "date",
+        "hazard_type": "hazard_name", "section": "section", "checklist": "checklist",
+        "inspector_opinion": "inspector_opinion", "chief_opinion": "chief_opinion",
+    },
+    "aqsz_2_5_4_weida": {
+        "project_name": "project_name", "construction_unit": "construction_unit", "inspection_date": "date",
+        "hazard_type": "hazard_name", "section": "section", "checklist": "checklist",
+        "inspector_opinion": "inspector_opinion", "chief_opinion": "chief_opinion",
+    },
+    "aqsz_2_5_5_weida": {
+        "project_name": "project_name", "construction_unit": "construction_unit", "inspection_date": "date",
+        "hazard_type": "hazard_name", "section": "section", "checklist": "checklist",
+        "inspector_opinion": "inspector_opinion", "chief_opinion": "chief_opinion",
+    },
+    "aqsz_2_5_6_weida": {
+        "project_name": "project_name", "construction_unit": "construction_unit", "inspection_date": "date",
+        "hazard_type": "hazard_name", "section": "section", "checklist": "checklist",
+        "inspector_opinion": "inspector_opinion", "chief_opinion": "chief_opinion",
+    },
+    "aqsz_2_5_7_weida": {
+        "project_name": "project_name", "construction_unit": "construction_unit", "inspection_date": "date",
+        "hazard_type": "hazard_name", "section": "section", "checklist": "checklist",
+        "inspector_opinion": "inspector_opinion", "chief_opinion": "chief_opinion",
+    },
+    "shijian_24_rizhi": {
+        "m_01": "project_name", "m_02": "construction_unit", "m_03": "date", "m_04": "weekday",
+        "weather": "weather", "temp_high": "temperature_high", "temp_low": "temperature_low",
+        "m_05": "chief_supervisor", "m_06": "recorder", "m_07": "date",
+        "m_08": "work_surfaces", "m_09": "content_inspection", "m_10": "content_quality",
+        "m_11": "content_material", "m_12": "content_safety", "m_13": "content_personnel",
+        "m_14": "content_supervision", "m_15": "content_change", "m_16": "content_other",
+    },
+    "aqsz_2_2_anquan_rizhi": {
+        "m_20": "project_name", "m_21": "date", "m_22": "weekday", "weather_am": "weather_am",
+        "weather_pm": "weather_pm", "weather_night": "weather_night", "m_23": "content",
+        "m_24": "safety_check", "m_25": "treatment", "m_26": "rectify_status",
+        "m_27": "hazard_status", "m_28": "other", "m_29": "safety_supervisor",
+        "m_30": "chief_supervisor", "m_31": "review_date",
+    },
+    "jianli_riji": {
+        # 与 gd_b_220_rizhi 同构（模板/栏目复用）
+        "7_01": "project_name", "7_02": "doc_number", "date": "date", "7_04": "weekday",
+        "weather": "weather", "temp_high": "temperature_high", "temp_low": "temperature_low",
+        "7_08": "construction_progress", "7_09": "material_section", "7_10": "supervision_section",
+        "7_11": "problems_section", "7_12": "supervision_check", "7_13": "other_section",
+        "7_14": "review_date", "duty_supervisor": "duty_supervisor",
+        "professional_supervisor": "professional_supervisor", "chief_supervisor": "chief_supervisor",
     },
 }
 

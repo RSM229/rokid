@@ -2453,10 +2453,75 @@ def render_form(form_code: str, data: dict, output_dir: Path | None = None) -> P
 
 
 def _render_plain_docx(spec, data: dict, output_dir: Path | None) -> Path:
-    """无固定模板时的降级渲染：标题 + 标签值表。"""
+    """无固定模板时的降级渲染：标题 + 标签值表。
+
+    aggregate 类型（周报/月报/监理日志）在此追加正文各 section ——
+    这三类在 form_registry 里 template=None，若只走下面的白名单标签渲染，
+    construction_progress / material_section / supervision_section /
+    acceptance_section / problems_section / parallel_section 等聚合正文
+    会全部丢弃，周报只剩一行封面元信息（2026-11-19 真机复现）。
+    """
     from docx.shared import Pt
 
     doc = DocxDocument()
+
+    # ---- 聚合类文书专门分支 ----
+    if getattr(spec, "source", None) == "aggregate":
+        title_p = doc.add_paragraph()
+        run = title_p.add_run(spec.name)
+        run.bold = True
+        run.font.size = Pt(18)
+
+        meta_lines = [
+            ("工程项目名称", data.get("project_name")),
+            ("编号", data.get("doc_number")),
+            ("日期", data.get("date")),
+            ("周期", data.get("period") or data.get("period_label")),
+            ("施工单位", data.get("construction_unit")),
+            ("项目监理机构", data.get("supervision_org")),
+            ("监理工程师", data.get("supervisor")),
+        ]
+        for label, val in meta_lines:
+            if val:
+                p = doc.add_paragraph()
+                p.add_run(f"{label}：").bold = True
+                p.add_run(str(val))
+        doc.add_paragraph("")
+
+        sections = [
+            ("施工进展情况", "construction_progress"),
+            ("材料进场及见证取样", "material_section"),
+            ("旁站及巡视", "supervision_section"),
+            ("验收", "acceptance_section"),
+            ("其他监理工作", "other_work_section"),
+            ("平行检查", "parallel_section"),
+            ("存在问题及处理情况", "problems_section"),
+            ("其他事项", "other_section"),
+        ]
+        for title_text, key in sections:
+            text = str(data.get(key) or "").strip()
+            if not text:
+                continue
+            h = doc.add_paragraph()
+            h.add_run(f"【{title_text}】").bold = True
+            doc.add_paragraph(text)
+
+        # 签署
+        signer = data.get("supervisor") or data.get("chief_supervisor") or ""
+        if signer:
+            doc.add_paragraph("")
+            doc.add_paragraph(f"总监理工程师（签名）：{signer}")
+
+        _append_images(doc, data)
+        out_dir = (output_dir or settings.export_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        import uuid
+        filename = f"{spec.form_code}_{uuid.uuid4().hex[:8]}.docx"
+        output = out_dir / filename
+        doc.save(str(output))
+        return output
+
+    # ---- 非聚合类：原白名单标签渲染 ----
     title = doc.add_paragraph()
     run = title.add_run(spec.name)
     run.bold = True

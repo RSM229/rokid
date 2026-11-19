@@ -34,6 +34,10 @@ PUBLIC_ENDPOINTS: dict[str, str] = {
     "POST /api/auth/forgot/verify": "忘记密码：校验密保答案换重置凭证（未登录态）",
     "POST /api/auth/forgot/reset": "忘记密码：凭重置凭证设新密码（未登录态）",
     "POST /api/auth/glasses/scan": "眼镜端用一次性 ticket 换 token，ticket 由已登录端签发",
+    # 扫码登录（5ecbb8c）：Web 未登录态发起/轮询，与登录接口同级；
+    # create 只产一次性 ticket+secret，status 凭 secret 才换 token
+    "POST /api/auth/scan-login/create": "扫码登录：Web 未登录时生成一次性二维码 ticket",
+    "GET /api/auth/scan-login/status": "扫码登录：Web 凭 ticket+secret 轮询并换发 token",
     "POST /api/miniprogram/auth/login": "小程序登录",
     "POST /api/miniprogram/auth/register": "小程序注册",
     "POST /api/miniprogram/auth/wechat-register": "小程序微信注册",

@@ -1,10 +1,17 @@
 import asyncio
+from pathlib import Path
 from types import SimpleNamespace
 
 from app.services import period_report_service
 
 
 def test_weekly_aggregate_uses_period_values_without_daily_weather_locals(monkeypatch):
+    # sync_document_to_project_archive._ensure_document_file 会按
+    # 「docx_path 对应文件存在」决定是否兜底重渲染（函数内 import 真
+    # render_form，patch 不到）。fake 渲染产物必须真实落盘，否则兜底
+    # 会用真渲染覆盖 docx_path，断言漂移。
+    fake_out = Path(period_report_service.settings.export_dir) / "weekly-report.docx"
+    fake_out.write_bytes(b"PK fake docx")
     aggregate = {
         "work_records": 2, "hazards": 0,
         "construction_progress": "完成两项工作",
@@ -57,10 +64,8 @@ def test_weekly_aggregate_uses_period_values_without_daily_weather_locals(monkey
     monkeypatch.setattr(period_report_service, "aggregate_records", aggregate_records)
     monkeypatch.setattr(period_report_service, "pick_creator", pick_creator)
     monkeypatch.setattr(period_report_service, "project_fields", lambda _project: {})
-    monkeypatch.setattr(
-        period_report_service, "render_form",
-        lambda _form, _content: SimpleNamespace(name="weekly-report.docx"),
-    )
+    monkeypatch.setattr(period_report_service, "render_form",
+                        lambda _form, _content: SimpleNamespace(name=fake_out.name))
     db = FakeDb()
 
     result = asyncio.run(period_report_service.generate_aggregate_doc(

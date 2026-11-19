@@ -1,7 +1,7 @@
 /* 玻璃拟态改造（浅色版） */
 .login-page { padding-top: 120rpx; }
 .brand { text-align: center; margin-bottom: 56rpx; }
-.brand-mark { width: 108rpx; height: 108rpx; margin: 0 auto 24rpx; border-radius: 30rpx; line-height: 108rpx; color: #fff; background: linear-gradient(135deg, var(--brand-l, #3b8cff), var(--brand-d, #0b5fd0)); box-shadow: 0 8rpx 24rpx rgba(var(--brand-rgb, 22,119,255), 0.28); font-size: 54rpx; font-weight: 700; }
+.brand-mark { width: 108rpx; height: 108rpx; display: block; margin: 0 auto 24rpx; border-radius: 30rpx; background: #fff; box-shadow: 0 8rpx 24rpx rgba(var(--brand-rgb, 22,119,255), 0.28); }
 .brand .title { margin-bottom: 12rpx; font-size: 48rpx; }
 .section-title { font-size: 34rpx; font-weight: 650; }
 .note { margin: 16rpx 0 28rpx; }

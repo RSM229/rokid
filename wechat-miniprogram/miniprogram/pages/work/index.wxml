@@ -395,42 +395,91 @@
     <scroll-view scroll-y class="edit-scroll">
       <view class="edit-field-label">业务日期</view>
       <picker mode="date" value="{{editForm.record_date || '2000-01-01'}}" bindchange="onEditDateChange"><view class="edit-field edit-picker-value">{{editForm.record_date || '选择业务日期'}}<text>›</text></view></picker>
-      <input wx:if="{{editForm.record_type === '巡视'}}" class="edit-field" type="number" value="{{editForm.worker_count}}" placeholder="施工人数（必填，可填0）" bindinput="onEditInput" data-field="worker_count" />
-      <view wx:if="{{editForm.record_type === '巡视'}}" class="edit-field-label">巡视开始时间</view>
-      <date-time-picker wx:if="{{editForm.record_type === '巡视'}}" value="{{editForm.inspection_start_time}}" reference-date="{{editForm.record_date}}" data-field="inspection_start_time" bind:change="onEditDateTimeChange" />
-      <view wx:if="{{editForm.record_type === '巡视'}}" class="edit-field-label">巡视结束时间</view>
-      <date-time-picker wx:if="{{editForm.record_type === '巡视'}}" value="{{editForm.inspection_end_time}}" reference-date="{{editForm.record_date}}" reference-enabled="false" data-field="inspection_end_time" bind:change="onEditDateTimeChange" />
-      <input wx:if="{{editForm.record_type === '旁站'}}" class="edit-field" value="{{editForm.station_location}}" placeholder="旁站关键部位（必填）" bindinput="onEditInput" data-field="station_location" />
-      <input wx:if="{{editForm.record_type === '旁站'}}" class="edit-field" value="{{editForm.station_process}}" placeholder="旁站关键工序（必填）" bindinput="onEditInput" data-field="station_process" />
-      <textarea wx:if="{{editForm.record_type === '验收'}}" class="edit-field textarea" value="{{editForm.acceptance_content}}" placeholder="验收内容（必填）" bindinput="onEditInput" data-field="acceptance_content" />
-      <textarea wx:if="{{editForm.record_type === '验收'}}" class="edit-field textarea" value="{{editForm.acceptance_participants}}" placeholder="实际参验单位及人员（可从项目资料带出后确认）" bindinput="onEditInput" data-field="acceptance_participants" />
-      <input class="edit-field" value="{{editForm.section}}" placeholder="施工区域" bindinput="onEditInput" data-field="section" />
+      <!-- 每个输入框都带字段名：原来只靠 placeholder 承载字段名，一旦有值
+           （如天气「多云 30℃」）就认不出这是哪个字段（2026-11-18 用户反馈）。
+           placeholder 只放填写提示，不再重复字段名。 -->
+      <block wx:if="{{editForm.record_type === '巡视'}}">
+        <view class="edit-field-label">施工人数（必填）</view>
+        <input class="edit-field" type="number" value="{{editForm.worker_count}}" placeholder="当日无人施工可填 0" bindinput="onEditInput" data-field="worker_count" />
+        <view class="edit-field-label">巡视开始时间</view>
+        <date-time-picker value="{{editForm.inspection_start_time}}" reference-date="{{editForm.record_date}}" data-field="inspection_start_time" bind:change="onEditDateTimeChange" />
+        <view class="edit-field-label">巡视结束时间</view>
+        <date-time-picker value="{{editForm.inspection_end_time}}" reference-date="{{editForm.record_date}}" reference-enabled="false" data-field="inspection_end_time" bind:change="onEditDateTimeChange" />
+      </block>
+
+      <block wx:if="{{editForm.record_type === '旁站'}}">
+        <view class="edit-field-label">旁站关键部位（必填）</view>
+        <input class="edit-field" value="{{editForm.station_location}}" placeholder="如：3# 楼二层梁板" bindinput="onEditInput" data-field="station_location" />
+        <view class="edit-field-label">旁站关键工序（必填）</view>
+        <input class="edit-field" value="{{editForm.station_process}}" placeholder="如：混凝土浇筑" bindinput="onEditInput" data-field="station_process" />
+        <view class="edit-field-label">工程名称</view>
+        <input class="edit-field" value="{{editForm.station_project_name}}" placeholder="与合同工程名称一致" bindinput="onEditInput" data-field="station_project_name" />
+        <view class="edit-field-label">旁站内容</view>
+        <textarea class="edit-field textarea" value="{{editForm.station_content}}" placeholder="旁站过程中看到的情况" bindinput="onEditInput" data-field="station_content" />
+        <view class="edit-field-label">旁站监理情况</view>
+        <textarea class="edit-field textarea" value="{{editForm.station_supervision_status}}" placeholder="监理到岗、旁站执行情况" bindinput="onEditInput" data-field="station_supervision_status" />
+        <view class="edit-field-label">旁站结论</view>
+        <textarea class="edit-field textarea" value="{{editForm.station_conclusion}}" placeholder="是否符合设计及规范要求" bindinput="onEditInput" data-field="station_conclusion" />
+        <view class="edit-field-label">旁站开始时间</view>
+        <date-time-picker value="{{editForm.station_start_time}}" reference-date="{{editForm.record_date}}" data-field="station_start_time" bind:change="onEditDateTimeChange" />
+        <view class="edit-field-label">旁站结束时间</view>
+        <date-time-picker value="{{editForm.station_end_time}}" reference-date="{{editForm.record_date}}" data-field="station_end_time" bind:change="onEditDateTimeChange" />
+      </block>
+
+      <block wx:if="{{editForm.record_type === '验收'}}">
+        <view class="edit-field-label">验收内容（必填）</view>
+        <textarea class="edit-field textarea" value="{{editForm.acceptance_content}}" placeholder="本次验收的部位与内容" bindinput="onEditInput" data-field="acceptance_content" />
+        <view class="edit-field-label">实际参验单位及人员</view>
+        <textarea class="edit-field textarea" value="{{editForm.acceptance_participants}}" placeholder="可从项目资料带出后确认" bindinput="onEditInput" data-field="acceptance_participants" />
+        <view class="edit-field-label">验收类型</view>
+        <input class="edit-field" value="{{editForm.acceptance_guide_ref}}" placeholder="如：检验批验收" bindinput="onEditInput" data-field="acceptance_guide_ref" />
+        <view class="edit-field-label">验收结论</view>
+        <picker range="{{acceptanceResults}}" bindchange="onAcceptanceResultChange"><view class="edit-field edit-picker-value">{{editForm.acceptance_result || '请人工确认'}}<text>›</text></view></picker>
+        <view class="edit-field-label">检验依据</view>
+        <textarea class="edit-field textarea" value="{{editForm.acceptance_basis}}" placeholder="设计文件、规范条款" bindinput="onEditInput" data-field="acceptance_basis" />
+      </block>
+
+      <view class="edit-field-label">施工区域</view>
+      <input class="edit-field" value="{{editForm.section}}" placeholder="如：建材纵一路" bindinput="onEditInput" data-field="section" />
+      <view class="edit-field-label">具体位置</view>
       <view class="edit-location-row">
-        <input class="edit-field" value="{{editForm.location}}" placeholder="具体位置" bindinput="onEditInput" data-field="location" />
+        <input class="edit-field" value="{{editForm.location}}" placeholder="也可点右侧「定位」自动填写" bindinput="onEditInput" data-field="location" />
         <view class="edit-locate-btn" bindtap="chooseLocationForEdit">定位</view>
       </view>
-      <textarea class="edit-field textarea" value="{{editForm.work_content}}" placeholder="工作内容" bindinput="onEditInput" data-field="work_content" />
-      <input class="edit-field" value="{{editForm.weather}}" placeholder="天气" bindinput="onEditInput" data-field="weather" wx:if="{{editForm.record_type === '巡视'}}" />
-      <textarea class="edit-field textarea" value="{{editForm.inspection_remark}}" placeholder="巡视备注" bindinput="onEditInput" data-field="inspection_remark" wx:if="{{editForm.record_type === '巡视'}}" />
-      <textarea class="edit-field textarea" value="{{editForm.problems}}" placeholder="发现的问题" bindinput="onEditInput" data-field="problems" wx:if="{{editForm.record_type === '巡视' || editForm.record_type === '旁站'}}" />
-      <textarea class="edit-field textarea" value="{{editForm.treatment}}" placeholder="处理意见及措施" bindinput="onEditInput" data-field="treatment" wx:if="{{editForm.record_type === '巡视' || editForm.record_type === '旁站' || editForm.record_type === '验收'}}" />
-      <input class="edit-field" value="{{editForm.acceptance_guide_ref}}" placeholder="验收类型" bindinput="onEditInput" data-field="acceptance_guide_ref" wx:if="{{editForm.record_type === '验收'}}" />
-      <picker wx:if="{{editForm.record_type === '验收'}}" range="{{acceptanceResults}}" bindchange="onAcceptanceResultChange"><view class="edit-field">验收结论：{{editForm.acceptance_result || '请人工确认'}}</view></picker>
-      <textarea class="edit-field textarea" value="{{editForm.acceptance_basis}}" placeholder="检验依据" bindinput="onEditInput" data-field="acceptance_basis" wx:if="{{editForm.record_type === '验收'}}" />
-      <input class="edit-field" value="{{editForm.station_project_name}}" placeholder="工程名称" bindinput="onEditInput" data-field="station_project_name" wx:if="{{editForm.record_type === '旁站'}}" />
-      <textarea class="edit-field textarea" value="{{editForm.station_content}}" placeholder="旁站内容" bindinput="onEditInput" data-field="station_content" wx:if="{{editForm.record_type === '旁站'}}" />
-      <textarea class="edit-field textarea" value="{{editForm.station_supervision_status}}" placeholder="旁站监理情况" bindinput="onEditInput" data-field="station_supervision_status" wx:if="{{editForm.record_type === '旁站'}}" />
-      <textarea class="edit-field textarea" value="{{editForm.station_conclusion}}" placeholder="旁站结论" bindinput="onEditInput" data-field="station_conclusion" wx:if="{{editForm.record_type === '旁站'}}" />
-      <view wx:if="{{editForm.record_type === '旁站'}}" class="edit-field-label">旁站开始时间</view>
-      <date-time-picker wx:if="{{editForm.record_type === '旁站'}}" value="{{editForm.station_start_time}}" reference-date="{{editForm.record_date}}" data-field="station_start_time" bind:change="onEditDateTimeChange" />
-      <view wx:if="{{editForm.record_type === '旁站'}}" class="edit-field-label">旁站结束时间</view>
-      <date-time-picker wx:if="{{editForm.record_type === '旁站'}}" value="{{editForm.station_end_time}}" reference-date="{{editForm.record_date}}" data-field="station_end_time" bind:change="onEditDateTimeChange" />
-      <input class="edit-field" value="{{editForm.witness_material_name}}" placeholder="材料名称" bindinput="onEditInput" data-field="witness_material_name" wx:if="{{editForm.record_type === '见证'}}" />
-      <input class="edit-field" value="{{editForm.witness_material_spec}}" placeholder="规格型号" bindinput="onEditInput" data-field="witness_material_spec" wx:if="{{editForm.record_type === '见证'}}" />
-      <input class="edit-field" value="{{editForm.witness_quantity}}" placeholder="取样数量" bindinput="onEditInput" data-field="witness_quantity" wx:if="{{editForm.record_type === '见证'}}" />
-      <input class="edit-field" value="{{editForm.witness_unit}}" placeholder="单位" bindinput="onEditInput" data-field="witness_unit" wx:if="{{editForm.record_type === '见证'}}" />
-      <input class="edit-field" value="{{editForm.witness_cert_no}}" placeholder="合格证/检测报告编号" bindinput="onEditInput" data-field="witness_cert_no" wx:if="{{editForm.record_type === '见证'}}" />
-      <input class="edit-field" value="{{editForm.witness_accept_result}}" placeholder="进场验收结论" bindinput="onEditInput" data-field="witness_accept_result" wx:if="{{editForm.record_type === '见证'}}" />
+      <view class="edit-field-label">工作内容</view>
+      <textarea class="edit-field textarea" value="{{editForm.work_content}}" placeholder="本次记录的主要工作内容" bindinput="onEditInput" data-field="work_content" />
+
+      <block wx:if="{{editForm.record_type === '巡视'}}">
+        <view class="edit-field-label">天气</view>
+        <input class="edit-field" value="{{editForm.weather}}" placeholder="如：多云 30℃" bindinput="onEditInput" data-field="weather" />
+        <view class="edit-field-label">巡视备注</view>
+        <textarea class="edit-field textarea" value="{{editForm.inspection_remark}}" placeholder="补充说明（选填）" bindinput="onEditInput" data-field="inspection_remark" />
+      </block>
+
+      <block wx:if="{{editForm.record_type === '巡视' || editForm.record_type === '旁站'}}">
+        <view class="edit-field-label">发现的问题</view>
+        <textarea class="edit-field textarea" value="{{editForm.problems}}" placeholder="未发现问题可留空" bindinput="onEditInput" data-field="problems" />
+      </block>
+
+      <block wx:if="{{editForm.record_type === '巡视' || editForm.record_type === '旁站' || editForm.record_type === '验收'}}">
+        <view class="edit-field-label">处理意见及措施</view>
+        <textarea class="edit-field textarea" value="{{editForm.treatment}}" placeholder="针对上述问题的处理意见" bindinput="onEditInput" data-field="treatment" />
+      </block>
+
+      <block wx:if="{{editForm.record_type === '见证'}}">
+        <view class="edit-field-label">材料名称</view>
+        <input class="edit-field" value="{{editForm.witness_material_name}}" placeholder="如：HRB400 钢筋" bindinput="onEditInput" data-field="witness_material_name" />
+        <view class="edit-field-label">规格型号</view>
+        <input class="edit-field" value="{{editForm.witness_material_spec}}" placeholder="如：Φ20" bindinput="onEditInput" data-field="witness_material_spec" />
+        <view class="edit-field-label">取样数量</view>
+        <input class="edit-field" value="{{editForm.witness_quantity}}" placeholder="填写数量" bindinput="onEditInput" data-field="witness_quantity" />
+        <view class="edit-field-label">数量单位</view>
+        <input class="edit-field" value="{{editForm.witness_unit}}" placeholder="如：组 / 根 / t" bindinput="onEditInput" data-field="witness_unit" />
+        <view class="edit-field-label">合格证/检测报告编号</view>
+        <input class="edit-field" value="{{editForm.witness_cert_no}}" placeholder="填写编号" bindinput="onEditInput" data-field="witness_cert_no" />
+        <view class="edit-field-label">进场验收结论</view>
+        <input class="edit-field" value="{{editForm.witness_accept_result}}" placeholder="合格 / 不合格" bindinput="onEditInput" data-field="witness_accept_result" />
+      </block>
     </scroll-view>
     <view class="sheet-actions">
       <button class="primary" bindtap="saveEditRecord" loading="{{savingEdit}}">保存</button>

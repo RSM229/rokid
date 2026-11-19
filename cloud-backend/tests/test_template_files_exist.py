@@ -46,6 +46,9 @@ class TestTemplateFilesExist(unittest.TestCase):
             return kb_dir / "省统表word版"
         if folder == "safety":
             return kb_dir / "第三节安全监理用表" / "安全监理用表"
+        # e9a20d4（11-10 市政统表）新增 municipal 子目录路由
+        if folder == "municipal":
+            return kb_dir / "市政统表word版"
         return kb_dir
 
     def test_all_declared_templates_exist_in_every_candidate_kb(self):

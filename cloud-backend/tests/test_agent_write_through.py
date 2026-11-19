@@ -321,8 +321,9 @@ class WriteThroughMissingFieldsInteractionTest(unittest.TestCase):
         ))
         self.assertTrue(result and result["ok"])
         self.assertEqual(["验收类型"], list(result.get("need_more") or []))
-        self.assertIn("施工单位自检结论", result.get("pending_labels") or [])
-        self.assertIn("监理验收结论", result.get("pending_labels") or [])
+        # ded7822（11-18）：肯定语气自动落两条结论默认值，不再追问这两栏
+        self.assertNotIn("施工单位自检结论", result.get("pending_labels") or [])
+        self.assertNotIn("监理验收结论", result.get("pending_labels") or [])
         self.assertEqual("awaiting_fields",
                          record.content_json["agent_write_through"]["status"])
         # 已确认的要点仍要真正落库，不能因为追问而整批不写
@@ -349,9 +350,18 @@ class WriteThroughMissingFieldsInteractionTest(unittest.TestCase):
         ))
         self.assertTrue(result and result["ok"])
         self.assertEqual("隐蔽工程", record.content_json.get("acceptance_type"))
-        self.assertEqual(["施工单位自检结论"], list(result.get("need_more") or []))
-        self.assertEqual(["施工单位自检结论", "监理验收结论"],
-                         list(result.get("pending_labels") or []))
+        # ded7822（11-18）：要点确认为肯定语气时自动落两条结论默认值
+        # （施工单位自检合格/验收合格），这两栏不再进入追问；
+        # 全部栏位落定 → need_more 为空、状态 completed。
+        self.assertEqual(
+            "施工单位自检合格",
+            record.content_json.get("self_check_conclusion"))
+        self.assertEqual(
+            "验收合格，同意进入下道工序。",
+            record.content_json.get("supervision_conclusion"))
+        self.assertFalse(result.get("need_more"))
+        self.assertEqual("completed",
+                         (record.content_json.get("agent_write_through") or {}).get("status"))
 
     def test_field_question_gets_hint_and_is_never_written(self):
         """用户问「这栏怎么填」→ 给通用口径，问句绝不能被当成栏位值写库。"""

@@ -135,7 +135,8 @@ class ProjectMemoryServiceTests(unittest.IsolatedAsyncioTestCase):
             await db.commit()
             rows = await agent_project_memories.list_active_memories(db, 1)
             block = agent_project_memories.render_project_memories_block(rows)
-            self.assertIn("本项目记忆", block)
+            # c3e5559（11-12 术语对齐生产）：「项目记忆」→「项目规约」
+            self.assertIn("本项目规约", block)
             self.assertIn("整改回复必须附前后对比照片", block)
             self.assertIn("以本条为准", block)
             self.assertEqual(agent_project_memories.render_project_memories_block([]), "")

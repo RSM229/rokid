@@ -2,7 +2,7 @@
   <glass-nav-bar title="广东建设智慧监理" left="none" />
 
   <view class="brand">
-    <view class="brand-mark">监</view>
+    <image class="brand-mark" src="/assets/app-logo.png" mode="aspectFit" aria-label="广东建设智慧监理 Logo" />
     <view class="title">广东建设智慧监理</view>
     <view class="muted">工程监理智能体 · 微信小程序端</view>
   </view>

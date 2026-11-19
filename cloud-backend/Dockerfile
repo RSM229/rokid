@@ -33,7 +33,24 @@ ARG PIP_MIRROR=https://mirrors.aliyun.com/pypi/simple/
 # 只复制依赖清单：requirements.txt 不变时这一层直接命中缓存，不重装
 COPY requirements.txt /tmp/requirements.txt
 RUN PIP_INDEX_URL=${PIP_MIRROR} pip install --no-cache-dir dashscope \
- && PIP_INDEX_URL=${PIP_MIRROR} pip install --no-cache-dir -r /tmp/requirements.txt
+ && PIP_INDEX_URL=${PIP_MIRROR} pip install --no-cache-dir -r /tmp/requirements.txt \
+ # pip 以 root 把包烘进镜像后，site-packages 默认 644 可读；显式放宽一条，
+ # 防止某些包（如 RapidOCR 模型权重）带着 600 权限导致运行用户读不到。
+ && chmod -R a+rX /usr/local/lib/python3.12/site-packages \
+ && chmod -R a+rX /usr/local/bin
+
+# 运行用户统一为 baize（uid=1000 / gid=1000）——与宿主保持一致，
+# 避免容器 root 写出来的文件在主机上变成 root:root（logs/app.log、轮转备份、
+# exports/*.docx、uploads/**、知识库文件都曾踩过这个坑）。
+# apt/pip 必须在 root 下完成，所以 USER 切换放在最后。
+RUN groupadd -g 1000 baize \
+ && useradd -m -u 1000 -g 1000 -s /bin/bash baize \
+ && mkdir -p /app /app/logs /app/exports /tmp \
+ && chown -R baize:baize /app /tmp \
+ && chmod 777 /tmp
+
+USER baize
+WORKDIR /app
 
 EXPOSE 8000
 

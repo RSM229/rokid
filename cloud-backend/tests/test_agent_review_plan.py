@@ -175,10 +175,17 @@ def test_agent_record_form_matrix_has_a_contract_and_export_mapping():
     from app.services import provform_schema, record_field_spec
     from app.services import record_steps
 
+    # e9a20d4（11-10 市政统表）把 9 个市政 record 表式挂上
+    # agent_work_record_type 后，EXECUTABLE 集合由 7 扩到 16（派生自
+    # form_registry，见 agent_review_plan L16）。
     assert review_plan.EXECUTABLE_RECORD_FORMS == {
         "gd_b_212_pangzhan", "gd_b_214_xunshi", "gdaq_30306_weida",
         "acceptance_record", "witness_record", "gd_b_213_pingxing",
         "gdaq_30305_qizhong",
+        "shijian_9_pangzhan", "shijian_11_xunshi",
+        "aqsz_2_5_1_weida", "aqsz_2_5_2_weida", "aqsz_2_5_3_weida",
+        "aqsz_2_5_4_weida", "aqsz_2_5_5_weida", "aqsz_2_5_6_weida",
+        "aqsz_2_5_7_weida",
     }
     for form_code in review_plan.EXECUTABLE_RECORD_FORMS:
         contract_fields = record_field_spec.fields_of(form_code)

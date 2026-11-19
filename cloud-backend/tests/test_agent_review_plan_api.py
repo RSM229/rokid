@@ -137,7 +137,10 @@ def test_unique_index_race_is_translated_to_recoverable_active_plan_conflict(tra
     assert raised.value.status_code == 409
     assert raised.value.detail["code"] == "ACTIVE_PLAN_EXISTS"
     assert raised.value.detail["plan_id"] == 23
-    assert db.query_count == 2
+    # 2 → 4：5eb8089 在 create_review_plan 前置 _validate_chat_images
+    # 与 record_conversation_message（用户轮次含 request_text 时落展示历史，
+    # FakeDb 下失败被吞）各多一次 execute。原有 scope + existing 两次不变。
+    assert db.query_count == 4
     assert trace_recorder[-1]["user_id"] == 4
 
 

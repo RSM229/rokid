@@ -68,7 +68,8 @@ def _walk(t, mod_names, out, path):
 def scan_undefined_globals(path: Path) -> list[tuple[str, str, int, str]]:
     """返回该文件里「解析到全局层但模块级并不存在」的可疑名字。"""
     try:
-        src = path.read_text(encoding="utf-8")
+        # utf-8-sig：容许 ab9539a 起 ledger.py 带的 UTF-8 BOM（import 容忍，纯读不剥）
+        src = path.read_text(encoding="utf-8-sig")
     except OSError as exc:
         return [(str(path), "<read>", 0, f"READ_FAIL {exc}")]
     try:

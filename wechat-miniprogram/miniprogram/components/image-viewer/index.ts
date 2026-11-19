@@ -57,11 +57,6 @@ Component({
       this.setData({ activeIndex: (activeIndex + 1) % urls.length })
     },
 
-    /** 点击图片收起提示 */
-    dismissHint() {
-      if (this.data.showHint) this.setData({ showHint: false })
-    },
-
     close() {
       // 立即收起（父页面同时把 visible 置 false，双保险）
       this.setData({ open: false, showHint: true })

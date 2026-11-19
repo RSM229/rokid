@@ -107,8 +107,9 @@ class ResolveProvformFormCodeTests(unittest.TestCase):
             self.assertEqual(m.resolve_provform_form_code(code), code)
 
     # 不填字段表单、改由 generate_supervision_log 按日聚合个人记录生成的表式。
-    # form_registry 里 source="aggregate"；没有字段级 schema 是设计，不是缺项。
-    AGGREGATE_WITHOUT_SCHEMA = {"jianli_riji"}
+    # form_registry 里 source="aggregate"。jianli_riji 2026-11-19 补齐 schema
+    # （复用 GD-B-220 栏目）后移出豁免。
+    AGGREGATE_WITHOUT_SCHEMA = set()
 
     def test_all_choices_have_schema(self):
         """desc 承诺可聊天创建的表式，必须真有 schema，否则用户会撞「暂不支持」。"""

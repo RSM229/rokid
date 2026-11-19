@@ -21,6 +21,25 @@ ENUM_OPTIONS = {'weather': ['晴', '多云', '阴', '小雨', '大雨', '大风'
 RECORD_TYPE_TO_FORM = {'巡视': 'gd_b_214_xunshi', '旁站': 'gd_b_212_pangzhan', '验收': 'acceptance_record', '见证': 'witness_record', '起重机械安拆检查': 'gdaq_30305_qizhong'}
 
 
+# AQSZ-J-2.5-1~7 危大巡视（市政通用版）共用字段：7 张模板结构同构，仅
+# 检查项清单不同；契约同组复用。字段口径与 municipal_fillers.fill_aqsz_weida
+# 实际读取的 content key 对齐（hazard_type/section/checklist/inspector_opinion…）。
+# 11 项固定检查内容不进字段表——渲染端按模板预印项勾选（checklist 传入
+# item/result 对应），契约只登记采集面。
+_AQSZ_2_5_WEIDA_FIELDS = [
+    {'key': 'project_name', 'canonical': 'project_name', 'label': '工程名称', 'raw_label': '工程名称', 'section': '基本信息', 'table_type': '文本', 'auto': True, 'required': True, 'kind': 'auto', 'arg': None},
+    {'key': 'construction_unit', 'canonical': 'construction_unit', 'label': '施工单位名称', 'raw_label': '施工单位名称', 'section': '基本信息', 'table_type': '文本', 'auto': True, 'required': True, 'kind': 'auto', 'arg': None},
+    {'key': 'inspection_date', 'canonical': 'date', 'label': '巡视日期', 'raw_label': '巡视日期', 'section': '基本信息', 'table_type': '日期', 'auto': True, 'required': True, 'kind': 'auto', 'arg': None},
+    {'key': 'hazard_type', 'canonical': 'hazard_name', 'label': '分部分项工程名称', 'raw_label': '分部分项工程名称', 'section': '基本信息', 'table_type': '文本', 'auto': False, 'required': True, 'kind': 'ask', 'arg': 'hazard_type'},
+    {'key': 'section', 'canonical': 'section', 'label': '巡视部位', 'raw_label': '巡视部位', 'section': '基本信息', 'table_type': '文本（精准到楼栋/楼层/区域）', 'auto': False, 'required': True, 'kind': 'ask', 'arg': 'section'},
+    {'key': 'checklist', 'canonical': 'checklist', 'label': '检查项目结论（11 项：符合/不符合/其他）', 'raw_label': '检查项目结论', 'section': '检查内容', 'table_type': '列表（逐项结果）', 'auto': False, 'required': False, 'kind': 'ask', 'arg': None},
+    {'key': 'inspector_opinion', 'canonical': 'inspector_opinion', 'label': '巡视监理人员意见', 'raw_label': '巡视监理人员意见', 'section': '意见与签章', 'table_type': '文本', 'auto': False, 'required': True, 'kind': 'ask', 'arg': None},
+    {'key': 'chief_opinion', 'canonical': 'chief_opinion', 'label': '总监理工程师意见', 'raw_label': '总监理工程师意见', 'section': '意见与签章', 'table_type': '文本', 'auto': False, 'required': False, 'kind': 'ask', 'arg': None},
+    {'key': None, 'canonical': None, 'label': '巡视监理人员（签名）', 'raw_label': '巡视监理人员（签名）', 'section': '意见与签章', 'table_type': '文本（签章控件）', 'kind': 'signoff', 'auto': False, 'required': True, 'arg': None},
+    {'key': None, 'canonical': None, 'label': '总监理工程师（签名）', 'raw_label': '总监理工程师（签名）', 'section': '意见与签章', 'table_type': '文本（签章控件）', 'kind': 'signoff', 'auto': False, 'required': False, 'arg': None},
+]
+
+
 FORMS: dict[str, dict] = {
     # GD-B-212  旁站记录
     'gd_b_212_pangzhan': {
@@ -275,6 +294,94 @@ FORMS: dict[str, dict] = {
             {'key': 'acceptance_result', 'canonical': 'acceptance_result', 'label': '见证结论', 'raw_label': '见证结论', 'section': '检测结果', 'table_type': '枚举', 'auto': False, 'required': True, 'kind': 'ask', 'arg': 'acceptance_result'},
             {'key': 'remark', 'canonical': 'remark', 'label': '备注', 'raw_label': '备注', 'section': '其他', 'table_type': '文本', 'auto': False, 'required': False, 'kind': 'ask', 'arg': None},
         ],
+    },
+    # ---- 市政工程统表（municipal，e9a20d4 接入，2026-11-19 补字段契约）----
+    # 字段口径与 municipal_fillers 各填充器实际读取的 content key 对齐：
+    # canonical 即渲染取数键，arg 挂 agent 已有归集参数（section/content/
+    # problems/start_time/end_time 等），不新增采集面。
+    # 市政监-9 旁站监理记录表
+    'shijian_9_pangzhan': {
+        "form_number": '市政监-9',
+        "name": '市政监-9 旁站监理记录表',
+        "signoffs": [{'role': '旁站监理人员', 'required': True}],
+        "fields": [
+            {'key': 'project_name', 'canonical': 'project_name', 'label': '单位（子单位）工程名称', 'raw_label': '单位（子单位）工程名称', 'section': '基本信息', 'table_type': '文本', 'auto': True, 'required': True, 'kind': 'auto', 'arg': None},
+            {'key': 'station_date', 'canonical': 'date', 'label': '旁站日期', 'raw_label': '旁站日期', 'section': '基本信息', 'table_type': '日期', 'auto': True, 'required': True, 'kind': 'auto', 'arg': None},
+            {'key': 'weekday', 'canonical': 'weekday', 'label': '星期', 'raw_label': '星期', 'section': '基本信息', 'table_type': '文本', 'auto': True, 'required': False, 'kind': 'auto', 'arg': None},
+            {'key': 'weather', 'canonical': 'weather', 'label': '旁站时气候', 'raw_label': '旁站时气候', 'section': '基本信息', 'table_type': '枚举（晴/多云/阴/雨/雪/大风等）', 'auto': True, 'required': False, 'kind': 'ask', 'arg': 'weather'},
+            {'key': 'station_part', 'canonical': 'section', 'label': '旁站监理的部位或工序', 'raw_label': '旁站监理的部位或工序', 'section': '旁站内容', 'table_type': '文本（楼栋/楼层/轴线）', 'auto': False, 'required': True, 'kind': 'ask', 'arg': 'section'},
+            {'key': 'station_time', 'canonical': 'station_time', 'label': '旁站监理时间', 'raw_label': '旁站监理时间', 'section': '旁站内容', 'table_type': '日期时间（起止）', 'auto': False, 'required': False, 'kind': 'auto', 'arg': None},
+            {'key': 'start_time', 'canonical': 'start_time', 'label': '旁站开始时间', 'raw_label': '旁站监理时间（开始）', 'section': '旁站内容', 'table_type': '日期时间', 'auto': False, 'required': True, 'kind': 'ask', 'arg': 'start_time'},
+            {'key': 'end_time', 'canonical': 'end_time', 'label': '旁站结束时间', 'raw_label': '旁站监理时间（结束）', 'section': '旁站内容', 'table_type': '日期时间', 'auto': False, 'required': False, 'kind': 'ask', 'arg': 'end_time'},
+            {'key': 'content', 'canonical': 'content', 'label': '施工情况', 'raw_label': '施工情况', 'section': '旁站内容', 'table_type': '文本', 'auto': False, 'required': True, 'kind': 'ask', 'arg': 'work_content'},
+            {'key': 'supervision', 'canonical': 'supervision', 'label': '监理情况', 'raw_label': '监理情况', 'section': '旁站内容', 'table_type': '文本', 'auto': False, 'required': True, 'kind': 'ask', 'arg': None},
+            {'key': 'problems', 'canonical': 'problems', 'label': '发现问题', 'raw_label': '发现问题', 'section': '问题与处理', 'table_type': '文本', 'auto': False, 'required': False, 'kind': 'ask', 'arg': 'problems'},
+            {'key': 'handling', 'canonical': 'handling', 'label': '处理意见', 'raw_label': '处理意见', 'section': '问题与处理', 'table_type': '文本', 'auto': False, 'required': False, 'kind': 'ask', 'arg': None},
+            {'key': 'remark', 'canonical': 'remark', 'label': '备注', 'raw_label': '备注', 'section': '问题与处理', 'table_type': '文本', 'auto': False, 'required': False, 'kind': 'ask', 'arg': None},
+            {'key': None, 'canonical': None, 'label': '旁站监理人员（签名）', 'raw_label': '旁站监理人员（签名）', 'section': '签章', 'table_type': '文本（签章控件）', 'kind': 'signoff', 'auto': False, 'required': True, 'arg': None},
+        ],
+    },
+    # 市政监-11 巡视记录
+    'shijian_11_xunshi': {
+        "form_number": '市政监-11',
+        "name": '市政监-11 巡视记录',
+        "signoffs": [{'role': '巡视监理人员', 'required': True}],
+        "fields": [
+            {'key': 'project_name', 'canonical': 'project_name', 'label': '工程名称', 'raw_label': '工程名称', 'section': '基本信息', 'table_type': '文本', 'auto': True, 'required': True, 'kind': 'auto', 'arg': None},
+            {'key': 'doc_number', 'canonical': 'doc_number', 'label': '编号', 'raw_label': '编号', 'section': '基本信息', 'table_type': '文本', 'auto': True, 'required': True, 'kind': 'auto', 'arg': None},
+            {'key': 'start_time', 'canonical': 'start_time', 'label': '巡视开始时间', 'raw_label': '巡视时间（开始）', 'section': '基本信息', 'table_type': '日期时间', 'auto': False, 'required': True, 'kind': 'ask', 'arg': 'start_time'},
+            {'key': 'end_time', 'canonical': 'end_time', 'label': '巡视结束时间', 'raw_label': '巡视时间（结束）', 'section': '基本信息', 'table_type': '日期时间', 'auto': False, 'required': False, 'kind': 'ask', 'arg': 'end_time'},
+            {'key': 'section', 'canonical': 'section', 'label': '巡视部位', 'raw_label': '巡视部位', 'section': '巡视内容', 'table_type': '文本（精准到楼栋/楼层/区域）', 'auto': False, 'required': True, 'kind': 'ask', 'arg': 'section'},
+            {'key': 'inspector', 'canonical': 'inspector', 'label': '巡视人', 'raw_label': '巡视人', 'section': '巡视内容', 'table_type': '文本', 'auto': False, 'required': True, 'kind': 'ask', 'arg': 'inspector'},
+            {'key': 'content', 'canonical': 'content', 'label': '巡视内容', 'raw_label': '巡视内容', 'section': '巡视内容', 'table_type': '文本', 'auto': False, 'required': True, 'kind': 'ask', 'arg': 'work_content'},
+            {'key': 'problems', 'canonical': 'problems', 'label': '巡视的存在问题情况', 'raw_label': '巡视的存在问题情况', 'section': '问题与处理', 'table_type': '文本', 'auto': False, 'required': False, 'kind': 'ask', 'arg': 'problems'},
+            {'key': 'handling', 'canonical': 'handling', 'label': '问题处理情况', 'raw_label': '问题处理情况', 'section': '问题与处理', 'table_type': '文本', 'auto': False, 'required': False, 'kind': 'ask', 'arg': None},
+            {'key': None, 'canonical': None, 'label': '巡视人（签名）', 'raw_label': '巡视人（签名）', 'section': '签章', 'table_type': '文本（签章控件）', 'kind': 'signoff', 'auto': False, 'required': True, 'arg': None},
+        ],
+    },
+    # AQSZ-J-2.5-1~7 危大工程监理巡视检查记录表（市政通用版，7 张模板同构，
+    # 字段一致仅检查项清单不同；契约复用同一组 spec）
+    'aqsz_2_5_1_weida': {
+        "form_number": 'AQSZ-J-2.5-1',
+        "name": '危大工程监理巡视检查记录表（通用）',
+        "signoffs": [{'role': '巡视监理人员', 'required': True}, {'role': '总监理工程师', 'required': False}],
+        "fields": _AQSZ_2_5_WEIDA_FIELDS,
+    },
+    'aqsz_2_5_2_weida': {
+        "form_number": 'AQSZ-J-2.5-2',
+        "name": '危大工程监理巡视检查记录表（基坑）',
+        "signoffs": [{'role': '巡视监理人员', 'required': True}, {'role': '总监理工程师', 'required': False}],
+        "fields": _AQSZ_2_5_WEIDA_FIELDS,
+    },
+    'aqsz_2_5_3_weida': {
+        "form_number": 'AQSZ-J-2.5-3',
+        "name": '危大工程监理巡视检查记录表（模板）',
+        "signoffs": [{'role': '巡视监理人员', 'required': True}, {'role': '总监理工程师', 'required': False}],
+        "fields": _AQSZ_2_5_WEIDA_FIELDS,
+    },
+    'aqsz_2_5_4_weida': {
+        "form_number": 'AQSZ-J-2.5-4',
+        "name": '危大工程监理巡视检查记录表（脚手架）',
+        "signoffs": [{'role': '巡视监理人员', 'required': True}, {'role': '总监理工程师', 'required': False}],
+        "fields": _AQSZ_2_5_WEIDA_FIELDS,
+    },
+    'aqsz_2_5_5_weida': {
+        "form_number": 'AQSZ-J-2.5-5',
+        "name": '危大工程监理巡视检查记录表（起重）',
+        "signoffs": [{'role': '巡视监理人员', 'required': True}, {'role': '总监理工程师', 'required': False}],
+        "fields": _AQSZ_2_5_WEIDA_FIELDS,
+    },
+    'aqsz_2_5_6_weida': {
+        "form_number": 'AQSZ-J-2.5-6',
+        "name": '危大工程监理巡视检查记录表（暗挖）',
+        "signoffs": [{'role': '巡视监理人员', 'required': True}, {'role': '总监理工程师', 'required': False}],
+        "fields": _AQSZ_2_5_WEIDA_FIELDS,
+    },
+    'aqsz_2_5_7_weida': {
+        "form_number": 'AQSZ-J-2.5-7',
+        "name": '危大工程监理巡视检查记录表（有限空间）',
+        "signoffs": [{'role': '巡视监理人员', 'required': True}, {'role': '总监理工程师', 'required': False}],
+        "fields": _AQSZ_2_5_WEIDA_FIELDS,
     },
 }
 
