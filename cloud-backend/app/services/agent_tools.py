@@ -1689,6 +1689,12 @@ async def _create_split_records(ctx: "ToolContext", groups: list) -> dict:
             project_id=ctx.project_id,
             record_date=split_date,
             section=(wm_fields["section"][:128] if wm_fields["section"] else None),
+            # 🔴 2026-11-19「工作台生成的记录每条都缺位置」：水印里的位置（拍照时
+            # GPS 取的可读地址，如「四会市大沙镇马房工业开发区内」）落到「具体位置」
+            # 栏。此前只存 content_json.watermark_location 留档、该栏恒空，详情页
+            # 「具体位置」全靠用户手填。多图地址去重后与 section 同口径 join，
+            # 列宽 256 截断；无水印位置照旧为 NULL（不臆造）。
+            location=((" / ".join(wm_fields["locations"]))[:256] if wm_fields["locations"] else None),
             weather=(wm_fields["weather"][:16] if wm_fields["weather"] else None),
             inspection_photos=(None if is_witness else photos),
             witness_photos=(photos if is_witness else None),
@@ -1768,7 +1774,12 @@ async def _create_split_records(ctx: "ToolContext", groups: list) -> dict:
     lines = ["已按分组创建以下记录："]
     for rtype, rec, photos in created:
         lines.append(f"· {_split_record_display_name(rtype)} #{rec.id}（{len(photos)}张照片）")
-    lines.append("施工部位、业务日期已按各张照片水印自动填入。")
+    # 回执总结行同步口径（2026-11-19：水印有位置时具体位置栏也自动填了）
+    _loc_filled = sum(1 for _t, rec, _p in created if rec.location)
+    lines.append(
+        "施工部位、业务日期已按各张照片水印自动填入。"
+        + (f"具体位置也已按水印自动填入（{_loc_filled}/{len(created)}条）。" if _loc_filled else "")
+    )
     # 回执必须说清「写了什么」：用户回完「巡视符合、验收符合」后，如果只列记录
     # 编号、还把已写入的栏位挂在「待填」里，用户根本不知道到底有没有写进去
     # （2026-11-18 真机截图）。filled_by_type 同时用于剔除「待填」。
@@ -1779,6 +1790,8 @@ async def _create_split_records(ctx: "ToolContext", groups: list) -> dict:
         filled = filled_by_type.setdefault(rtype, set())
         if rec.section:
             filled.add("section")
+        if rec.location:
+            filled.add("location")
         if rec.work_content:
             filled.update({"content", "work_content"})
         if rec.problems:
