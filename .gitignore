@@ -44,6 +44,8 @@ __MACOSX/
 **/.workbuddy/
 **/backups/
 **/src.bak/
+# 后端运行日志（RotatingFileHandler 落盘，不入库）
+cloud-backend/logs/
 
 # ===== 根级 tmp/：只忽略部署载荷与本地运行产物（dev_local.py 等开发脚本保留可提交）=====
 # 注：tmp/sdk/ 由上面「第三方 SDK 二进制」规则覆盖；tmp/exports、tmp/uploads 由导出规则覆盖
