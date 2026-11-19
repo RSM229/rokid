@@ -62,6 +62,15 @@
 .send-fab-ic { width: 34rpx; height: 34rpx; background-color: rgba(var(--brand-rgb, 22,119,255), 0.55); -webkit-mask: url("data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%201024%201024%22%3E%3Cpath%20fill=%22%23ffffff%22%20d=%22M536.6%20188.1c-13.8-13.8-36.1-13.8-49.9%200L224.4%20450.4c-13.8%2013.8-13.8%2036.1%200%2049.9s36.1%2013.8%2049.9%200L476%20298.7v513.1c0%2019.5%2015.8%2035.3%2035.3%2035.3s35.3-15.8%2035.3-35.3V296l204.4%20204.3c13.8%2013.8%2036.1%2013.8%2049.9%200s13.8-36.1%200-49.9L536.6%20188.1z%22/%3E%3C/svg%3E") center / 100% 100% no-repeat; mask: url("data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%201024%201024%22%3E%3Cpath%20fill=%22%23ffffff%22%20d=%22M536.6%20188.1c-13.8-13.8-36.1-13.8-49.9%200L224.4%20450.4c-13.8%2013.8-13.8%2036.1%200%2049.9s36.1%2013.8%2049.9%200L476%20298.7v513.1c0%2019.5%2015.8%2035.3%2035.3%2035.3s35.3-15.8%2035.3-35.3V296l204.4%20204.3c13.8%2013.8%2036.1%2013.8%2049.9%200s13.8-36.1%200-49.9L536.6%20188.1z%22/%3E%3C/svg%3E") center / 100% 100% no-repeat; }
 .send-fab.active .send-fab-ic { background-color: #fff; }
 
+/* 停止生成（2026-11-19）：loading 时发送键变停止键（白方块，通用「停止」语义） */
+.send-fab.stop { background: linear-gradient(135deg, #e8595b, #c9383a); border-color: transparent; box-shadow: 0 4rpx 16rpx rgba(201, 56, 58, 0.30); }
+.stop-square { width: 22rpx; height: 22rpx; border-radius: 6rpx; background: #fff; }
+
+/* 发送失败标记（2026-11-19）：用户气泡头部红色「点击重发」 */
+.msg-failed { padding: 4rpx 14rpx; border-radius: 999rpx; background: rgba(232, 89, 91, 0.12); }
+.msg-failed-text { font-size: 20rpx; color: #e8595b; }
+.message.user.failed .bubble { opacity: 0.75; border-color: rgba(232, 89, 91, 0.35); }
+
 /* + 号放大（原 60rpx → 78rpx）
    双写类名提升优先级：本文件后段还有同优先级的 60rpx 定义，后定义者胜，
    单写会被压回原尺寸（2026-10-09 实测 31px 而非 39px） */
@@ -371,6 +380,12 @@
 .history-new .side-icon { width: 32rpx; height: 32rpx; background-repeat: no-repeat; background-position: center; background-size: contain; }
 .history-new .side-icon.ic-plus { background-image: url("data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%201024%201024%22%3E%3Cpath%20fill=%22%23ffffff%22%20d=%22M352%20480h320a32%2032%200%201%201%200%2064H352a32%2032%200%200%201%200-64%22/%3E%3Cpath%20fill=%22%23ffffff%22%20d=%22M480%20672V352a32%2032%200%201%201%2064%200v320a32%2032%200%200%201-64%200%22/%3E%3Cpath%20fill=%22%23ffffff%22%20d=%22M512%20896a384%20384%200%201%200%200-768%20384%20384%200%200%200%200%20768m0%2064a448%20448%200%201%201%200-896%20448%20448%200%200%201%200%20896%22/%3E%3C/svg%3E"); }
 .history-item { display: flex; align-items: center; gap: 16rpx; padding: 20rpx 8rpx; border-bottom: 1rpx solid rgba(var(--deep-rgb, 10,46,92), 0.08); }
+
+/* 历史搜索框（2026-11-19） */
+.history-search { position: relative; margin: 12rpx 0 4rpx; }
+.history-search-input { height: 64rpx; padding: 0 64rpx 0 24rpx; border-radius: 16rpx; background: rgba(var(--deep-rgb, 10,46,92), 0.05); font-size: 24rpx; color: var(--ink, #12253d); box-sizing: border-box; }
+.history-search-ph { color: #a3b1c2; }
+.history-search-clear { position: absolute; right: 20rpx; top: 50%; transform: translateY(-50%); width: 40rpx; height: 40rpx; line-height: 40rpx; text-align: center; border-radius: 50%; background: rgba(var(--deep-rgb, 10,46,92), 0.12); color: #64748b; font-size: 26rpx; }
 .history-main { flex: 1; min-width: 0; }
 .history-title { display: block; font-size: 28rpx; color: var(--ink, #12253d); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .history-time { display: block; font-size: 22rpx; color: #a3b1c2; margin-top: 6rpx; }

@@ -45,10 +45,14 @@
         </view>
       </view>
       <block wx:else>
-        <view wx:for="{{messages}}" wx:for-index="mi" wx:key="index" class="message {{item.role}}" id="msg-{{mi}}"
+        <view wx:for="{{messages}}" wx:for-index="mi" wx:key="index" class="message {{item.role}} {{item.failed ? 'failed' : ''}}" id="msg-{{mi}}"
               data-index="{{mi}}" bindlongpress="onMessageLongPress">
           <view class="message-head">
             <text class="message-role">{{item.role === 'assistant' ? '监理智能体' : '我'}}</text>
+            <!-- 发送失败：可点击重发（2026-11-19，文字不再默默丢掉） -->
+            <view wx:if="{{item.failed}}" class="msg-failed" data-index="{{mi}}" catchtap="resendMessage">
+              <text class="msg-failed-text">发送失败 · 点击重发</text>
+            </view>
           </view>
           <view wx:if="{{item.text || item.image || (item.images && item.images.length)}}" class="bubble">
             <image wx:if="{{item.image}}" class="msg-image" src="{{item.image}}" mode="widthFix" data-url="{{item.image}}" bindtap="previewImageUrl" binderror="onMsgImgError" data-mi="{{mi}}" data-imgidx="0" />
@@ -396,7 +400,11 @@
         <!-- 麦克风：按住说话、松手结束（与输入框一致；touchcancel 也按松手处理，避免滑出丢话） -->
         <view wx:if="{{!input && !attachments.length}}" class="round-btn {{recording ? 'ic-stop recording' : 'ic-mic'}}"
               bindtouchstart="onMicTouchStart" bindtouchend="onMicTouchEnd" bindtouchcancel="onMicTouchEnd"></view>
-        <view class="send-fab {{canSend ? 'active' : ''}}" bindtap="send">
+        <!-- loading=用户点停止；否则正常发送 -->
+        <view wx:if="{{loading}}" class="send-fab stop" bindtap="stopGeneration">
+          <view class="stop-square"></view>
+        </view>
+        <view wx:else class="send-fab {{canSend ? 'active' : ''}}" bindtap="send">
           <view class="send-fab-ic"></view>
         </view>
       </view>
@@ -604,6 +612,12 @@
             <view class="drawer-arrow {{drawerHistoryExpanded ? 'open' : ''}}"></view>
           </view>
           <block wx:if="{{drawerHistoryExpanded}}">
+            <!-- 历史搜索（2026-11-19）：项目期长后列表几十条，标题/内容找起来费劲 -->
+            <view class="history-search">
+              <input class="history-search-input" value="{{historyQuery}}" placeholder="搜索对话标题或内容…"
+                     placeholder-class="history-search-ph" bindinput="onHistorySearch" confirm-type="search" />
+              <text wx:if="{{historyQuery}}" class="history-search-clear" catchtap="clearHistorySearch">×</text>
+            </view>
             <view class="history-item" wx:for="{{historyList}}" wx:key="id" data-id="{{item.id}}" bindtap="loadHistoryItem">
               <view class="history-main">
                 <text class="history-title">{{item.title}}</text>
@@ -611,7 +625,7 @@
               </view>
               <view class="history-del" catchtap="deleteHistoryItem" data-id="{{item.id}}">删除</view>
             </view>
-            <view class="history-empty" wx:if="{{historyList.length === 0}}">暂无历史对话</view>
+            <view class="history-empty" wx:if="{{historyList.length === 0}}">{{historyQuery ? '没有匹配的对话' : '暂无历史对话'}}</view>
           </block>
         </view>
       </scroll-view>

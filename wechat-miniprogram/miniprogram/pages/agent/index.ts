@@ -1,4 +1,4 @@
-import { request } from '../../services/request'
+import { request, abortableRequest } from '../../services/request'
 import { isExecutionRecoverable, newOperationId, waitForAgentExecution } from '../../services/agent-execution'
 import { session } from '../../services/session'
 import { uploadAudio, uploadDocument, uploadImage, friendlyServerError } from '../../services/upload'
@@ -221,6 +221,8 @@ interface Message {
   text: string
   /** 消息头展示时间（备案助手样式：名称 + 时间） */
   timeText?: string
+  /** 发送失败标记（2026-11-19）：失败的用户消息显示「点击重发」，不再让文字默默丢掉 */
+  failed?: boolean
   hint?: string
   image?: string
   images?: string[]
@@ -548,6 +550,14 @@ Page(themed({
   /** 页面正在卸载（切 tab / 切后台 / 关闭）：此时在飞的请求会被微信中止，
    *  属预期，catch 里据此不打刺眼「调用失败」。 */
   pageUnloading: false,
+  /** 用户主动点了「停止生成」（2026-11-19）：区分「用户停」与「真失败」的文案 */
+  chatAborted: false,
+  /** 在飞的 /agent/chat 的 abort 句柄（停止生成用） */
+  activeChatAbort: null as (() => void) | null,
+  /** @ 面板搜索防抖计时器（2026-11-19） */
+  atSearchTimer: null as number | null,
+  /** 历史搜索防抖计时器（2026-11-19） */
+  historySearchTimer: null as number | null,
 
   data: {
     messages: [] as Message[],
@@ -585,6 +595,9 @@ Page(themed({
     // 侧边栏历史对话默认收起，避免抽屉过长
     drawerHistoryExpanded: false,
     historyList: [] as ChatHistory[],
+    // 历史搜索（2026-11-19）：全量 + 当前过滤视图
+    historyQuery: '',
+    historyListAll: [] as ChatHistory[],
     mode: 'chat' as 'chat' | 'hazard',
 
     showProjectForm: false,
@@ -1007,7 +1020,7 @@ Page(themed({
     void this.reportAgentProgress(requestId, 'input_received', 'running', title, detail)
   },
 
-  async finishAgentProgress(requestId: string, status: 'completed' | 'failed' | 'waiting', title: string, detail: Record<string, unknown> = {}) {
+  async finishAgentProgress(requestId: string, status: 'completed' | 'failed' | 'waiting' | 'cancelled' | 'skipped', title: string, detail: Record<string, unknown> = {}) {
     await this.reportAgentProgress(requestId, 'turn_result', status, title, detail, true)
     if (activeProgressRequestId === requestId) this.stopAgentProgressTimers()
     this.updateAgentProgressMessage(requestId, message => ({ ...message, progressTerminal: true }))
@@ -3675,20 +3688,23 @@ Page(themed({
       .slice(-7, -1)
       .map(m => ({ role: m.role, text: m.text }))
 
+    // 2026-11-19「停止生成」：请求可中止，abort 后 catch 走「已停止」分支
+    const { promise, abort } = abortableRequest<AgentChatResponse>('/agent/chat', {
+      method: 'POST',
+      data: {
+        message: text,
+        request_id: requestId,
+        conversation_id: conversationIdFor(this.currentSessionId),
+        history,
+        mode: this.data.mode,
+        provider: selModel?.provider || undefined,
+        model: selModel?.model || undefined,
+      },
+      timeout: 120000,
+    })
+    this.activeChatAbort = abort
     try {
-      const result = await request<AgentChatResponse>('/agent/chat', {
-        method: 'POST',
-        data: {
-          message: text,
-          request_id: requestId,
-          conversation_id: conversationIdFor(this.currentSessionId),
-          history,
-          mode: this.data.mode,
-          provider: selModel?.provider || undefined,
-          model: selModel?.model || undefined,
-        },
-        timeout: 120000,
-      })
+      const result = await promise
       this.applyAgentReply(result, this.data.messages)
       await this.finishAgentProgress(
         requestId,
@@ -3702,18 +3718,61 @@ Page(themed({
     } catch (error) {
       const errMsg = (error as Error).message || ''
       const aborted = /abort/i.test(errMsg)
-      // 用户已切走/切后台时请求被微信中止属预期，不打刺眼「调用失败」；
-      // 仍在页内却被中断（偶发抖动）给柔和提示，真错误仍原样上报。
-      if (!(aborted && this.pageUnloading)) {
-        this.addMessage({
-          role: 'assistant',
-          text: aborted ? '请求被中断，请重新发送消息重试。' : `调用失败：${errMsg}`,
-        })
+      if (aborted && this.chatAborted) {
+        // 用户主动停止：不打「失败」，把话收干净即可。
+        // 进度状态上报用 skipped（后端白名单无 cancelled），文案仍是「用户停止」。
+        this.addMessage({ role: 'assistant', text: '已停止生成。' })
+        await this.finishAgentProgress(requestId, 'skipped', '用户停止了本轮生成', {})
+      } else {
+        // 用户已切走/切后台时请求被微信中止属预期，不打刺眼「调用失败」；
+        // 仍在页内却被中断（偶发抖动）给柔和提示，真错误仍原样上报。
+        if (!(aborted && this.pageUnloading)) {
+          this.addMessage({
+            role: 'assistant',
+            text: aborted ? '请求被中断，请重新发送消息重试。' : `调用失败：${errMsg}`,
+          })
+          // 失败的用户消息标红「点击重发」，文字不丢（2026-11-19）
+          this.markLastUserMessageFailed()
+        }
+        await this.finishAgentProgress(requestId, 'failed', 'Agent 请求失败，未返回成功结果', { error: errMsg })
       }
-      await this.finishAgentProgress(requestId, 'failed', 'Agent 请求失败，未返回成功结果', { error: errMsg })
     } finally {
+      this.chatAborted = false
+      this.activeChatAbort = null
       this.setData({ loading: false })
       void this.loadPendingDrafts()
+    }
+  },
+
+  /** 把最近一条用户消息标记为失败（供「点击重发」交互） */
+  markLastUserMessageFailed() {
+    const messages = [...this.data.messages]
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      if (messages[i].role === 'user') {
+        messages[i] = { ...messages[i], failed: true }
+        break
+      }
+    }
+    this.setData({ messages })
+  },
+
+  /** 失败消息上的「重新发送」：取原文重新走 send 路径 */
+  resendMessage(event: WechatMiniprogram.TouchEvent) {
+    const idx = Number(event.currentTarget.dataset.index)
+    const msg = this.data.messages[idx]
+    if (!msg || msg.role !== 'user') return
+    // 清掉失败标记后重发（直接走 send 的完整分流逻辑）
+    const messages = [...this.data.messages]
+    messages[idx] = { ...msg, failed: false }
+    this.setData({ messages, input: msg.text, canSend: true }, () => { void this.send() })
+  },
+
+  /** 停止生成（2026-11-19）：中止在飞的 /agent/chat 请求 */
+  stopGeneration() {
+    if (!this.data.loading) return
+    this.chatAborted = true
+    if (this.activeChatAbort) {
+      this.activeChatAbort()
     }
   },
 
@@ -5366,6 +5425,8 @@ Page(themed({
     )
     this.setData({
       historyList: local,
+      historyListAll: local,
+      historyQuery: '',
       showHistory: true,
       drawerHistoryExpanded: true,
     })
@@ -5382,13 +5443,44 @@ Page(themed({
       })
       const remoteIds = new Set(remote.map(item => item.conversationId))
       const localOnly = local.filter(item => !item.conversationId || !remoteIds.has(item.conversationId))
-      this.setData({ historyList: [...remote, ...localOnly].slice(0, 30) })
+      const merged = [...remote, ...localOnly].slice(0, 30)
+      this.setData({ historyList: this.filterHistoryByQuery(merged), historyListAll: merged })
     } catch {
       // 服务端暂时不可用时保留本地历史，不阻塞侧边栏。
     }
   },
 
   /** 拉取当前项目概况（名称/地点/描述），用于侧边栏顶部展示与「点进去修改」回填 */
+  /** 历史搜索过滤：标题或消息内容命中即保留（大小写不敏感） */
+  filterHistoryByQuery(list: ChatHistory[]): ChatHistory[] {
+    const q = (this.data.historyQuery || '').trim().toLowerCase()
+    if (!q) return list
+    return list.filter(item => {
+      if ((item.title || '').toLowerCase().includes(q)) return true
+      return (item.messages || []).some(m => (m.text || '').toLowerCase().includes(q))
+    })
+  },
+
+  onHistorySearch(event: WechatMiniprogram.Input) {
+    // 先回显，过滤防抖 200ms（历史含全部消息文本，全量扫有成本）
+    this.setData({ historyQuery: event.detail.value })
+    if (this.historySearchTimer !== null) {
+      clearTimeout(this.historySearchTimer)
+    }
+    this.historySearchTimer = setTimeout(() => {
+      this.historySearchTimer = null
+      this.setData({ historyList: this.filterHistoryByQuery(this.data.historyListAll) })
+    }, 200)
+  },
+
+  clearHistorySearch() {
+    if (this.historySearchTimer !== null) {
+      clearTimeout(this.historySearchTimer)
+      this.historySearchTimer = null
+    }
+    this.setData({ historyQuery: '', historyList: this.data.historyListAll })
+  },
+
   async loadProjectSummary() {
     if (!this.data.currentProjectId) return
     try {
@@ -5564,7 +5656,9 @@ Page(themed({
     const local = ((wx.getStorageSync(storageKey) || []) as ChatHistory[]).filter(h => h.id !== id)
     wx.setStorageSync(storageKey, local)
     const historyList = this.data.historyList.filter(h => h.id !== id)
-    this.setData({ historyList })
+    // 全量列表同步删除（2026-11-19：搜索态下删除，清空搜索后不复活）
+    const historyListAll = this.data.historyListAll.filter(h => h.id !== id)
+    this.setData({ historyList, historyListAll })
     if (this.currentSessionId === id) {
       this.currentSessionId = 0
       this.initMessages()
@@ -5639,16 +5733,26 @@ Page(themed({
   },
 
   onAtSearch(event: WechatMiniprogram.Input) {
-    const q = event.detail.value.trim().toLowerCase()
-    const source = this.data.atTab === 'quick' ? this.data.atQuickItems
-      : this.data.atTab === 'member' ? this.data.atMembers : this.data.atBiz
-    const match = (s: string) => !q || s.toLowerCase().includes(q)
-    const visible = source.filter((i: AtQuickItem | AtMember | AtBizItem) => {
-      if (this.data.atTab === 'quick') { const x = i as AtQuickItem; return match(x.label) || match(x.desc) }
-      if (this.data.atTab === 'member') { const x = i as AtMember; return match(x.real_name) }
-      const x = i as AtBizItem; return match(x.label) || match(x.desc)
-    })
-    this.setData({ atQuery: event.detail.value, atVisibleItems: visible as AtQuickItem[] | AtMember[] | AtBizItem[] })
+    // 防抖（2026-11-19）：@ 面板数据量可达数百条（成员/业务引用），
+    // 每敲一个字符都全量过滤 + setData 会掉帧。先回显输入，过滤延迟合并。
+    const raw = event.detail.value
+    this.setData({ atQuery: raw })
+    if (this.atSearchTimer !== null) {
+      clearTimeout(this.atSearchTimer)
+    }
+    this.atSearchTimer = setTimeout(() => {
+      this.atSearchTimer = null
+      const q = raw.trim().toLowerCase()
+      const source = this.data.atTab === 'quick' ? this.data.atQuickItems
+        : this.data.atTab === 'member' ? this.data.atMembers : this.data.atBiz
+      const match = (s: string) => !q || s.toLowerCase().includes(q)
+      const visible = source.filter((i: AtQuickItem | AtMember | AtBizItem) => {
+        if (this.data.atTab === 'quick') { const x = i as AtQuickItem; return match(x.label) || match(x.desc) }
+        if (this.data.atTab === 'member') { const x = i as AtMember; return match(x.real_name) }
+        const x = i as AtBizItem; return match(x.label) || match(x.desc)
+      })
+      this.setData({ atVisibleItems: visible as AtQuickItem[] | AtMember[] | AtBizItem[] })
+    }, 120)
   },
 
   // 打开面板 / 切到对应 tab 时按需加载；失败静默（面板仍可用快捷指令）

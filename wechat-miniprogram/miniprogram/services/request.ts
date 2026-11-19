@@ -119,3 +119,52 @@ export function request<T>(
     })
   })
 }
+
+/**
+ * 可中止的请求（2026-11-19 工作台「停止生成」）：
+ * 返回 promise + abort()。abort 后 promise 以 AbortError reject，
+ * errMsg 形如 "request:fail abort"，与页面侧 /abort/i 判定一致。
+ */
+export function abortableRequest<T>(
+  path: string,
+  options: RequestOptions = {},
+): { promise: Promise<T>; abort: () => void } {
+  let task: WechatMiniprogram.RequestTask | null = null
+  const promise = new Promise<T>((resolve, reject) => {
+    const token = session.getToken()
+    const header: Record<string, string> = { 'Content-Type': 'application/json' }
+    if (options.auth !== false && token) {
+      header.Authorization = `Bearer ${token}`
+    }
+    task = wx.request({
+      url: `${config.apiBaseUrl}${path}`,
+      method: options.method || 'GET',
+      data: options.data || {},
+      header,
+      timeout: options.timeout || 30000,
+      success(response) {
+        if (response.statusCode >= 200 && response.statusCode < 300) {
+          resolve(response.data as T)
+          return
+        }
+        reject(new ApiRequestError(errorMessage(response), {
+          statusCode: response.statusCode,
+          code: errorCode(response),
+        }))
+      },
+      fail(error) {
+        reject(new ApiRequestError(error.errMsg || '网络请求失败', { networkError: true }))
+      },
+    })
+  })
+  return {
+    promise,
+    abort: () => {
+      try {
+        task?.abort()
+      } catch {
+        // task 可能尚未创建（请求还没发出）或已完成，忽略
+      }
+    },
+  }
+}
