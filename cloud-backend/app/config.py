@@ -1,4 +1,5 @@
 """全局配置"""
+import json
 import os
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pathlib import Path
@@ -174,6 +175,14 @@ class Settings(BaseSettings):
         "document_rejected": os.getenv("WECHAT_TEMPLATE_DOC_REJECTED", ""),
         "hazard_detected": os.getenv("WECHAT_TEMPLATE_HAZARD_DETECTED", ""),
     }
+
+    # 穗建通数据采集（21 类 /tenantgz/e-api/ods/push/**；文档全是占位符，
+    # 待穗建通下发后填 env。未配置时推送客户端直接拒绝，不猜地址不空跑。）
+    szcj_push_base_url: str = os.getenv("SZCJ_PUSH_BASE_URL", "")  # 如 http://x.x.x.x:port
+    szcj_app_code: str = os.getenv("SZCJ_APP_CODE", "")           # appCode（数值串）
+    szcj_bearer_token: str = os.getenv("SZCJ_BEARER_TOKEN", "")   # Bearer 凭证
+    # 项目编码映射（本地项目 id → 穗建通 PRJ2026…），JSON：{"1": "PRJ2026...", ...}
+    szcj_project_codes: dict = json.loads(os.getenv("SZCJ_PROJECT_CODES", "{}") or "{}")
 
     public_api_base_url: str = os.getenv("PUBLIC_API_BASE_URL", "http://localhost:8000")
     public_ws_base_url: str = os.getenv("PUBLIC_WS_BASE_URL", "ws://localhost:8000")
