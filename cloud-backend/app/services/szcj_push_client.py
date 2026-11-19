@@ -87,7 +87,13 @@ async def push_payload(
 
     凭证缺失 → PushNotConfiguredError（调用方据 needs_more 类似口径提示运营配置）；
     网络错误/5xx/429 → 退避重试 3 次；4xx/code!=0 → PushRejectedError 包进 result。
+
+    payload 兼容两种形态：已是 ``{"data": {...}}``（001 mapper 产物）原样发送；
+    裸 dict（002/005/006/007/012/021 批量 mapper 产物）统一包裹成 ``{"data": ...}``——
+    手册 21 类接口的 body 全部是 data 包裹结构，收口在发送前一处。
     """
+    if "data" not in payload:
+        payload = {"data": payload}
     base, app_code, token = _require_config()
     url = f"{base}{_PUSH_PREFIX}/{endpoint.lstrip('/')}"
     headers = {

@@ -4,6 +4,7 @@ import os
 import asyncio
 from contextlib import suppress
 from contextlib import asynccontextmanager
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -27,6 +28,7 @@ from app.routers import form_doc
 from app.routers import work_session
 from app.routers import provform, meeting, progress, parallel, resources, visa, equipment, archive
 from app.routers import stats_company
+from app.routers import szcj_push
 from app.routers import files
 from app.routers import role_permissions
 from app.routers import agent
@@ -39,12 +41,30 @@ from app.db import close_db, ensure_agent_history_schema, init_db
 # 项目原先没有任何 logging 配置：root logger 无 handler，于是所有 logger.info
 # （RAG 预热结果、索引载入规模、增量刷新…）静默丢失，只剩 WARNING 借
 # logging.lastResort 落到 stderr —— 「索引到底刷没刷」只能靠猜。
-# 这里补一个最小配置。uvicorn 的 dictConfig 是 disable_existing_loggers=False
-# 且不含 root 键，不会覆盖它；uvicorn --reload 重启会重复执行，但 basicConfig
-# 幂等，无害。
+# 这里补一个最小配置：控制台（保留原效果）+ 文件轮转（持久化）。
+# uvicorn 的 dictConfig 是 disable_existing_loggers=False 且不含 root 键，
+# 不会覆盖它；uvicorn --reload 重启会重复执行，但 basicConfig 幂等，无害。
+_LOG_FORMAT = "%(asctime)s %(levelname)s [%(name)s] %(message)s"
+_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
+_LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+
+_logs_dir = Path(os.getenv("LOG_DIR", str(Path(os.getenv("EXPORT_DIR", "./exports")).parent / "logs")))
+_logs_dir.mkdir(parents=True, exist_ok=True)
+_file_handler = RotatingFileHandler(
+    _logs_dir / "app.log",
+    maxBytes=int(os.getenv("LOG_MAX_BYTES", str(10 * 1024 * 1024))),  # 10MB
+    backupCount=int(os.getenv("LOG_BACKUP_COUNT", "10")),
+    encoding="utf-8",
+)
+_file_handler.setLevel(_LOG_LEVEL)
+_file_handler.setFormatter(logging.Formatter(_LOG_FORMAT, _DATE_FORMAT))
+
 logging.basicConfig(
-    level=os.getenv("LOG_LEVEL", "INFO").upper(),
-    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+    level=_LOG_LEVEL,
+    format=_LOG_FORMAT,
+    datefmt=_DATE_FORMAT,
+    handlers=[logging.StreamHandler(), _file_handler],
+    force=True,
 )
 
 logger = logging.getLogger(__name__)
@@ -277,6 +297,11 @@ app.include_router(
     stats_company.router,
     prefix="/api/stats",
     tags=["公司级看板"],
+)
+app.include_router(
+    szcj_push.router,
+    prefix="/api/szcj",
+    tags=["穗建通数据推送"],
 )
 app.include_router(
     role_permissions.router,

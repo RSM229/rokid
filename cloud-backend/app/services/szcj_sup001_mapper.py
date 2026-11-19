@@ -24,9 +24,9 @@ from typing import Any, Callable
 class MissingRequiredError(ValueError):
     """必填字段缺失或为空，禁止上报。"""
 
-    def __init__(self, fields: list[str]):
+    def __init__(self, fields, code: str = "001"):
         self.fields = fields
-        super().__init__(f"SUP-001 必填字段缺失: {', '.join(fields)}")
+        super().__init__(f"SUP-{code} 必填字段缺失: {', '.join(fields)}")
 
 
 # SUP-001 接口要求的必填字段（来自手册「请求参数（Body）」表）
