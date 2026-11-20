@@ -166,7 +166,7 @@ test('输入框内 @ 引用渲染成行内胶囊：editor 为主、textarea 兜�
   assert.match(agent, /onEditorInput\(event: \{ detail: \{ html\?: string; text\?: string \} \}\)/)
 
   // 胶囊用内联样式，不依赖页面 wxss 的类（editor 内部不一定吃到）
-  assert.match(agent, /function pill|const pill = \(raw: string\) =>/)
+  assert.match(agent, /const pill = \(raw: string, mention\?: AtMention\) =>/)
   assert.match(agent, /background:rgba\(10,109,255,0\.12\);border-radius:999px/)
   // 胶囊里保留完整 token，mentions 才能从纯文本可靠恢复（属性可能被运行时清洗）
   assert.match(agent, /@\\\[资料库\(\?:检索\)\?\\s\[\^\\\]\]\*\\\]\/g/)
@@ -176,4 +176,7 @@ test('输入框内 @ 引用渲染成行内胶囊：editor 为主、textarea 兜�
   assert.match(agent, /clearEditor\(\) \{/)
   assert.match(agent, /this\.editorCtx\.clear\(\{\}\)/)
   assert.match(agent, /this\.clearEditor\(\)/)
+  // 胶囊自带结构化属性（type/key/kb-id），便于将来做短名展示或自愈；
+  // 但 mentions 的权威来源是纯文本 token —— 属性可能被运行时清洗，文本不会
+  assert.match(agent, /data-type="\$\{mention\.type\}" data-key="\$\{mention\.key\}" data-kb-id="\$\{mention\.kb_id\}"/)
 })

@@ -6276,14 +6276,21 @@ Page(themed({
    * 样式只是让它「看起来不一样」，结构不依赖 HTML 属性（属性可能被运行时清洗）。
    */
   inputToEditorHtml(text: string): string {
-    const pill = (raw: string) =>
-      `<span style="color:#0a6dff;background:rgba(10,109,255,0.12);border-radius:999px;padding:2px 8px;font-size:inherit">${raw}</span>`
+    const pill = (raw: string, mention?: AtMention) => {
+      // 结构化属性：type/key/kbId 让胶囊在 HTML 里可被识别（供将来做短名展示或自愈）
+      // 但 mentions 的权威来源仍是纯文本 token —— 属性可能被运行时清洗，文本不会。
+      const attrs = mention
+        ? ` data-type="${mention.type}" data-key="${mention.key}" data-kb-id="${mention.kb_id}"`
+        : ''
+      return `<span${attrs} style="color:#0a6dff;background:rgba(10,109,255,0.12);border-radius:999px;padding:2px 8px;font-size:inherit">${raw}</span>`
+    }
     const escaped = text
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
+    const byToken = new Map(this.data.mentions.map(m => [m.token, m]))
     // 与 MENTION_TOKEN_RE 同口径：把每个 token 包成胶囊，其余文本原样
-    return escaped.replace(/@\[资料库(?:检索)?\s[^\]]*\]/g, m => pill(m)) + '<br/>'
+    return escaped.replace(/@\[资料库(?:检索)?\s[^\]]*\]/g, m => pill(m, byToken.get(m))) + '<br/>'
   },
 
   /** 把「当前 editor 内容 + 新胶囊」写回 editor（追加到末尾，与 token 追加一致） */
