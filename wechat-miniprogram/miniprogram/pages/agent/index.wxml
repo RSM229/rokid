@@ -88,7 +88,6 @@
             <view class="agent-progress-head" data-index="{{mi}}" bindtap="toggleAgentProgress">
               <view class="agent-progress-title-wrap">
                 <view class="agent-progress-title-row">
-                  <view class="agent-progress-dot {{item.progressTerminal ? 'settled' : 'live'}}"></view>
                   <text class="agent-progress-title">{{item.progressTerminal ? '思考完成' : '思考中'}}</text>
                 </view>
                 <text class="agent-progress-current">{{item.progressHeadline || (item.progressTerminal ? '已完成本轮思考' : '正在理解你的需求')}}</text>

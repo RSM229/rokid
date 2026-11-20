@@ -104,9 +104,11 @@ test('思考进度卡改平面：去掉左侧绿色竖条，改用脉冲状态�
   assert.doesNotMatch(agentWxss, /#13795b/)
   assert.doesNotMatch(agentWxss, /rgba\(19,121,91/)
 
-  // "正在思考"的信号改由圆点承担：thinking 时呼吸、完成后静止
-  assert.match(agentWxss, /\.agent-progress-dot\.live \{[^}]*animation: progressPulse/)
-  assert.match(agentWxss, /\.agent-progress-dot\.settled \{/)
+  // 「正在思考」不再用动态指示（呼吸灯被视为干扰），状态只由文字表达
+  assert.doesNotMatch(agentWxss, /progressPulse/)
+  assert.doesNotMatch(agentWxss, /agent-progress-dot/)
+  assert.doesNotMatch(agentWxml, /agent-progress-dot/)
+  assert.match(agentWxml, /class="agent-progress-title">\{\{item\.progressTerminal \? '思考完成' : '思考中'\}\}/)
   // 右侧用状态文字 + 折叠箭头，不再有「收起/展开」两行文案
   assert.match(agentWxml, /class="agent-progress-chevron \{\{item\.progressExpanded \? 'up' : ''\}\}"/)
   assert.match(agentWxss, /\.agent-progress-chevron\.up \{ transform: rotate\(-90deg\); \}/)
