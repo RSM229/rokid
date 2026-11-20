@@ -5,8 +5,8 @@
   "compileType": "miniprogram",
   "miniprogramRoot": "miniprogram/",
   "setting": {
-    "es6": true,
-    "enhance": true,
+    "es6": false,
+    "enhance": false,
     "postcss": true,
     "minified": true,
     "coverView": true,
