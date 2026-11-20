@@ -348,7 +348,23 @@
               bindtouchstart="onInputTouchStart"
               bindtouchend="onInputTouchEnd"
               bindtouchcancel="onInputTouchCancel">
-          <textarea wx:if="{{!recording}}"
+          <!-- 富文本输入（基础库 ≥2.7.0）：@ 引用渲染成行内彩色胶囊，和普通文字明显区分。
+               微信 <textarea> 只能放纯文本，行内样式只有 <editor> 能做到。
+               低版本基础库 wx:if 为 false，自动回退到下面的 textarea + 纯文本 token。 -->
+          <editor wx:if="{{useEditor && !recording}}"
+            id="chat-editor"
+            class="chat-input chat-editor"
+            placeholder="{{attachments.length ? '可补充说明，再点发送' : (noProject ? '问我规范、工艺、天气都行；记录现场工作需先加入项目' : '发消息或按住说话')}}"
+            placeholder-class="input-placeholder"
+            bindready="onEditorReady"
+            bindinput="onEditorInput"
+            bindfocus="onEditorFocus"
+            bindblur="onEditorBlur"
+            show-confirm-bar="{{false}}"
+            adjust-position="{{false}}"
+            cursor-spacing="{{20}}"
+          />
+          <textarea wx:elif="{{!recording}}"
             class="chat-input chat-textarea"
             focus="{{draftFocus}}"
             value="{{input}}"

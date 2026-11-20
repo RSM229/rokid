@@ -665,6 +665,10 @@ Page(themed({
   atInFlight: 0,
   /** loading 看门狗：防止请求回调丢失导致面板永久停在「搜索中」 */
   atLoadingTimer: null as number | null,
+  /** editor 上下文（基础库 ≥2.7.0 才有） */
+  editorCtx: null as WechatMiniprogram.EditorContext | null,
+  /** editor 当前 HTML：用于在追加胶囊时基于最新内容重建 */
+  editorHtml: '',
   /** @ 面板本次是否由「打字打出 @」唤起（2026-11-19）：决定打字同步/删词收起行为 */
   atOpenedByTyping: false,
   /** 历史搜索防抖计时器（2026-11-19） */
@@ -841,6 +845,10 @@ Page(themed({
     // 待补全草稿（聊天即操作的半成品，落库持久化、跨会话可见）：顶部横幅用
     pendingDrafts: [] as Array<{ tool: string; label: string; missingText: string }>,
     draftFocus: false,
+    /** 是否用 <editor> 渲染行内胶囊（基础库 ≥2.7.0）；否则回退 textarea */
+    useEditor: false,
+    /** 输入框是否聚焦：胶囊样式在聚焦态更实 */
+    inputFocused: false,
   },
 
   /** 语音记录现场工作：说完自动提取的防抖定时器 */
@@ -862,6 +870,9 @@ Page(themed({
       }
     } catch { /* 缓存坏了不影响功能 */ }
 
+    // 富文本输入：基础库够新就用 <editor>，@ 引用可以渲染成行内胶囊；
+    // 老版本自动回退到 textarea（纯文本 token）。
+    this.setData({ useEditor: this.supportsEditor() })
     // 键盘高度监听：页面是 100vh 固定布局，必须自己拿到键盘高度才能把
     // @ 面板与输入区抬到键盘之上（微信的 adjust-position 只管输入框，不管 fixed 层）
     this.keyboardHandler = (res: { height: number }) => {
@@ -6134,12 +6145,15 @@ Page(themed({
       this.atOpenedByTyping = false
       this.setData({ input: next, canSend: true })
       this.refreshMentions(mentions)
+      // editor 模式下把新胶囊同步进输入框（textarea 模式下是空操作）
+      void this.syncEditorWithInput()
       return
     }
     const current = this.data.input
     const next = current ? `${current.replace(/\s+$/, '')} ${token} ` : `${token} `
     this.setData({ input: next, canSend: true })
     this.refreshMentions(mentions)
+    void this.syncEditorWithInput()
   },
 
   /**
@@ -6209,6 +6223,75 @@ Page(themed({
       this.refreshMentions(kept)
     }
   },
+
+  // ============ 富文本输入（<editor>）：@ 引用渲染成行内胶囊 ============
+
+  /** 基础库是否支持 <editor>（2.7.0+）。不支持时整条链路回退到 textarea + 纯文本 token。 */
+  supportsEditor(): boolean {
+    try {
+      const v = String(wx.getSystemInfoSync().SDKVersion || "0.0.0")
+      const [a, b] = v.split(".").map(n => parseInt(n, 10) || 0)
+      return a > 2 || (a === 2 && b >= 7)
+    } catch {
+      return false
+    }
+  },
+
+  /** editor 初始化完成：拿到 EditorContext，并把已有草稿灌进去 */
+  onEditorReady() {
+    wx.createSelectorQuery()
+      .select('#chat-editor')
+      .context((res: WechatMiniprogram.ContextCallbackResult) => {
+        this.editorCtx = (res?.context as WechatMiniprogram.EditorContext) || null
+        if (!this.editorCtx) return
+        const html = this.data.input ? this.inputToEditorHtml(this.data.input) : ""
+        if (html) this.editorCtx.setContents({ html })
+      })
+      .exec()
+  },
+
+  /** editor 内容变化：text 是纯文本（含 token），html 带胶囊样式 */
+  onEditorInput(event: { detail: { html?: string; text?: string } }) {
+    const text = event.detail.text || ""
+    this.editorHtml = event.detail.html || ""
+    // 复用 textarea 的既有处理：同步 canSend / 撤销引用 / 打 @ 唤起面板
+    this.onInput({ detail: { value: text } } as unknown as WechatMiniprogram.Input)
+  },
+
+  onEditorFocus() {
+    this.setData({ inputFocused: true })
+  },
+
+  onEditorBlur() {
+    this.setData({ inputFocused: false })
+  },
+
+  /**
+   * 把纯文本里的 @[资料库 …] token 转成带内联样式的胶囊。
+   *
+   * 为什么胶囊里仍然保留完整 token 文本：editor 的 text 是纯文本，
+   * 只有文本里还有 token，mentions 才能在每次输入后从文本可靠恢复；
+   * 样式只是让它「看起来不一样」，结构不依赖 HTML 属性（属性可能被运行时清洗）。
+   */
+  inputToEditorHtml(text: string): string {
+    const pill = (raw: string) =>
+      `<span style="color:#0a6dff;background:rgba(10,109,255,0.12);border-radius:999px;padding:2px 8px;font-size:inherit">${raw}</span>`
+    const escaped = text
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+    // 与 MENTION_TOKEN_RE 同口径：把每个 token 包成胶囊，其余文本原样
+    return escaped.replace(/@\[资料库(?:检索)?\s[^\]]*\]/g, m => pill(m)) + '<br/>'
+  },
+
+  /** 把「当前 editor 内容 + 新胶囊」写回 editor（追加到末尾，与 token 追加一致） */
+  async syncEditorWithInput() {
+    if (!this.data.useEditor || !this.editorCtx) return
+    const html = this.inputToEditorHtml(this.data.input)
+    this.editorHtml = html
+    this.editorCtx.setContents({ html })
+  },
+
 
   onInput(event: WechatMiniprogram.Input) {
     const input = event.detail.value

@@ -149,3 +149,27 @@ test('@ 面板搜索不会永久卡在「搜索中」：loading 由在飞计数�
   assert.match(agent, /console\.warn\('\[kb\/search\] 失败:',/)
   assert.match(wxml, /class="at-empty at-empty-error">\{\{atError\}\}/)
 })
+test('输入框内 @ 引用渲染成行内胶囊：editor 为主、textarea 兜底', () => {
+  const agent = fs.readFileSync(path.join(root, 'pages/agent/index.ts'), 'utf8')
+  const wxml = fs.readFileSync(path.join(root, 'pages/agent/index.wxml'), 'utf8')
+
+  // textarea 只能放纯文本，行内样式必须靠 <editor>
+  assert.match(wxml, /<editor wx:if="\{\{useEditor && !recording\}\}"[\s\S]{0,120}id="chat-editor"/)
+  // 低版本基础库回退到 textarea（原有整条链路不动）
+  assert.match(wxml, /<textarea wx:elif="\{\{!recording\}\}"/)
+  assert.match(agent, /supportsEditor\(\): boolean \{/)
+  assert.match(agent, /this\.setData\(\{ useEditor: this\.supportsEditor\(\) \}\)/)
+
+  // editor 事件：ready 拿上下文、input 回传 html/text
+  assert.match(agent, /onEditorReady\(\) \{/)
+  assert.match(agent, /\.select\('#chat-editor'\)/)
+  assert.match(agent, /onEditorInput\(event: \{ detail: \{ html\?: string; text\?: string \} \}\)/)
+
+  // 胶囊用内联样式，不依赖页面 wxss 的类（editor 内部不一定吃到）
+  assert.match(agent, /function pill|const pill = \(raw: string\) =>/)
+  assert.match(agent, /background:rgba\(10,109,255,0\.12\);border-radius:999px/)
+  // 胶囊里保留完整 token，mentions 才能从纯文本可靠恢复（属性可能被运行时清洗）
+  assert.match(agent, /@\\\[资料库\(\?:检索\)\?\\s\[\^\\\]\]\*\\\]\/g/)
+  // 追加引用后要把胶囊同步进 editor
+  assert.match(agent, /void this\.syncEditorWithInput\(\)/)
+})
