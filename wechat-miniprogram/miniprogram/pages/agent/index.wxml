@@ -687,13 +687,13 @@
 
   <!-- @ 提及面板：放页面根层（脱离 input-card 的 backdrop-filter 包含块），fixed 相对视口横向铺满，避免宽面板向左溢出屏幕被裁切 -->
   <view class="at-panel" wx:if="{{showAtPanel}}" catchtap="noop">
+    <!-- 顶部：这是「选择模式」的标题栏——左边报数、右边唯一的出口 -->
     <view class="at-panel-head">
-      <text class="at-panel-title">引用资料库</text>
-      <view class="at-panel-close" catchtap="toggleAtPanel">×</view>
+      <text class="at-panel-title">引用资料库{{mentions.length ? '（已选 ' + mentions.length + ' 项）' : ''}}</text>
+      <view class="at-panel-done" catchtap="finishAtPanel">完成</view>
     </view>
     <!-- 已选区：唯一表达"选了什么"的地方。同一对象不会在候选列表里再出现一次。 -->
     <view class="at-selected" wx:if="{{mentionChips.length}}">
-      <view class="at-selected-head">已选 {{mentions.length}} 项</view>
       <view class="at-selected-item" wx:for="{{mentionChips}}" wx:key="key" data-key="{{item.key}}" catchtap="removeMention">
         <text class="at-selected-icon">{{item.type === 'kb_folder' ? '📁' : (item.type === 'kb_doc' ? '📄' : '🔍')}}</text>
         <view class="at-selected-body">
@@ -732,6 +732,11 @@
         <view wx:if="{{atHasMore}}" class="at-more" catchtap="loadMoreAt">{{atLoading ? '加载中…' : '加载更多'}}</view>
       </block>
     </scroll-view>
+    <!-- 底部固定「完成」：选择模式的唯一出口，紧贴面板底、远离输入框区域，不会被误触。
+         零选择时也显示（灰态），让用户始终知道怎么结束。 -->
+    <view class="at-done-bar {{mentions.length ? 'active' : ''}}" catchtap="finishAtPanel">
+      {{mentions.length ? '完成（已选 ' + mentions.length + ' 项）' : '完成'}}
+    </view>
   </view>
 </view>
 

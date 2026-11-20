@@ -1177,6 +1177,22 @@ Page(themed({
     setTimeout(() => this.setData({ draftFocus: true }), 60)
   },
 
+  /**
+   * 选择模式的主出口：收起面板并把焦点交回输入框。
+   *
+   * 为什么要有这个而不是让用户点右上 ×：
+   * 用户的操作是「先选资料，再写需求」，选完就该能直接打字。之前面板常驻
+   * 且不聚焦，用户得「关面板 → 点输入框 → 才开始打字」三步，中途还容易点到
+   * 页面空白把面板误关。这里把「结束选择」和「开始输入」合成一个动作。
+   *
+   * 一项都没选时也可用：只是收起面板，不产生任何引用。
+   */
+  finishAtPanel() {
+    this.atOpenedByTyping = false
+    this.setData({ showAtPanel: false, atQuery: '', atAllItems: [], atRecent: [] })
+    this.focusDraftInput()
+  },
+
   /** 放弃当前横幅展示的那条草稿 */
   discardDraft() {
     const d = this.data.pendingDrafts[0]

@@ -169,3 +169,29 @@ test('已选项从候选列表移除：同一对象不再同时出现在两处�
   // 候选行不再显示勾（勾只保留在「最近」快捷条上表示状态）
   assert.doesNotMatch(template, /class="at-item-check"/)
 })
+test('选择模式有明确出口：完成按钮收起面板并把焦点交回输入框', () => {
+  // 用户的操作是「先选资料，再写需求」，选完必须能直接打字，
+  // 而不是「关面板 → 点输入框 → 才开始打字」三步。
+  assert.match(page, /finishAtPanel\(\) \{/)
+  assert.match(page, /this\.setData\(\{ showAtPanel: false, atQuery: '', atAllItems: \[\], atRecent: \[\] \}\)/)
+  // 复用已有的「先失焦再聚焦」写法：textarea 本来就是 true 时直接 setData true 不会重新聚焦
+  assert.match(page, /this\.focusDraftInput\(\)/)
+  assert.match(page, /focusDraftInput\(\) \{\s*\n\s*this\.setData\(\{ draftFocus: false \}\)/)
+  // 顶部与底部各一个出口
+  assert.match(template, /class="at-panel-done" catchtap="finishAtPanel">完成/)
+  assert.match(template, /class="at-done-bar \{\{mentions\.length \? 'active' : ''\}\}" catchtap="finishAtPanel"/)
+  // 零选择时按钮仍在（灰态），避免用户找不到怎么结束
+  assert.match(template, /\{\{mentions\.length \? '完成（已选 ' \+ mentions\.length \+ ' 项）' : '完成'\}\}/)
+  assert.match(styles, /\.at-done-bar\.active \{/)
+})
+
+test('面板不再常驻：高度收缩并与输入框留出间距，降低误触', () => {
+  // 64vh 会贴到输入框顶边，手指点底部行时容易误触
+  assert.match(styles, /\.at-panel \{[^}]*max-height: 52vh/)
+  assert.match(styles, /\.at-panel \{[^}]*bottom: calc\(360rpx \+ env\(safe-area-inset-bottom\)\)/)
+  assert.match(styles, /\.at-list \{[^}]*max-height: 38vh/)
+  // 标题栏直接报数，用户随时知道选了几项
+  assert.match(template, /引用资料库\{\{mentions\.length \? '（已选 ' \+ mentions\.length \+ ' 项）' : ''\}\}/)
+  // 旧的 × 关闭入口让位给「完成」，避免两个语义相近的出口
+  assert.doesNotMatch(template, /class="at-panel-close"/)
+})
