@@ -139,6 +139,17 @@ class RecordMentionsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(written, 1)
         self.assertEqual(existing.hits, 5)
 
+    async def test_accepts_pydantic_objects_not_only_dicts(self) -> None:
+        # 路由层传进来的是模型对象；只认 dict 会把所有上报静默丢掉（线上踩过）
+        from app.routers.knowledge_base import MentionStatItem
+
+        session = _QueuedSession([])
+        with patch.object(kb_search, "accessible_kb_ids", return_value=[3]):
+            written = await kb_search.record_mentions(
+                session, 1,
+                [MentionStatItem(kb_id=3, target_type="folder", target_id=11)],
+            )
+        self.assertEqual(written, 1)
     async def test_rejects_foreign_kb_and_bad_type(self) -> None:
         session = _QueuedSession()
         with patch.object(kb_search, "accessible_kb_ids", return_value=[3]):

@@ -271,6 +271,10 @@ async def record_mentions(
     now = datetime.now()
     written = 0
     for raw in items or []:
+        # 路由层传的是 Pydantic 模型，直接调用方可能传 dict——两种都收，
+        # 否则 isinstance(dict) 会把所有上报静默丢掉（线上踩过）。
+        if not isinstance(raw, dict):
+            raw = getattr(raw, "model_dump", lambda: None)() or {}
         if not isinstance(raw, dict):
             continue
         try:
