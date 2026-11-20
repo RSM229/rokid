@@ -312,10 +312,11 @@ interface Message {
 interface KbSearchResponse {
   query: string
   kb_ids: number[]
-  folders: Array<{ id: number; kb_id: number; name: string; path: string; count: number; score: number }>
+  folders: Array<{ id: number; kb_id: number; kb_name?: string; name: string; path: string; count: number; score: number }>
   documents: Array<{
     id: number
     kb_id: number
+    kb_name?: string
     name: string
     folder_id?: number | null
     folder_path: string
@@ -532,6 +533,8 @@ interface AtKbItem {
   path: string
   /** 文件夹整棵子树下的文档数；文档为 undefined */
   count?: number
+  /** 所属资料库名称：个人库与项目库各有一份同名预设树，多库时需要区分 */
+  kbName?: string
   score: number
   /** 是否已被选中（列表里打勾，避免重复添加） */
   picked?: boolean
@@ -5794,14 +5797,14 @@ Page(themed({
         incoming.push({
           kind: 'folder', key: `kb-folder-${folder.id}`, kbId: folder.kb_id,
           id: folder.id, name: folder.name, path: folder.path,
-          count: folder.count, score: folder.score,
+          count: folder.count, kbName: folder.kb_name, score: folder.score,
         })
       }
       for (const doc of result.documents || []) {
         incoming.push({
           kind: 'doc', key: `kb-doc-${doc.id}`, kbId: doc.kb_id,
           id: doc.id, name: doc.name, path: doc.folder_path,
-          score: doc.score,
+          kbName: doc.kb_name, score: doc.score,
         })
       }
       // 模糊词入口：用户不想挑具体文件、只想「按这个词查资料」时选它。

@@ -191,6 +191,25 @@ async def _folder_path_map(db: AsyncSession, kb_ids: Sequence[int]) -> dict[int,
     return nodes
 
 
+async def _kb_name_map(db: AsyncSession, kb_ids: Sequence[int]) -> dict[int, str]:
+    """资料库 id → 名称。
+
+    为什么要它：个人库和项目库各自有一份同名的预设文件夹树（「项目文件夹/验收记录」
+    在几个库里都叫这个名字），只按路径展示会出现多条一模一样的行，用户会以为重复。
+    带上库名后前端可以在多库场景下区分「这是哪个库里的」。
+    """
+    if not kb_ids:
+        return {}
+    from app.models.knowledge_base import KnowledgeBase
+
+    rows = await db.execute(
+        select(KnowledgeBase.id, KnowledgeBase.name).where(
+            KnowledgeBase.id.in_(list(kb_ids))
+        )
+    )
+    return {int(kb_id): (name or "") for kb_id, name in rows.all()}
+
+
 async def _folder_doc_counts(db: AsyncSession, kb_ids: Sequence[int]) -> dict[int, int]:
     """每个文件夹直属的文档数（子树计数在内存里往上累加，避免递归 SQL）。"""
     if not kb_ids:
@@ -264,6 +283,7 @@ async def search(
     nodes = await _folder_path_map(db, allowed)
     direct_counts = await _folder_doc_counts(db, allowed)
     subtree_counts = _subtree_counts(nodes, direct_counts)
+    kb_names = await _kb_name_map(db, allowed)
 
     # ---- 文件夹召回与打分 -------------------------------------------------
     folder_where = _prefilter(KbFolder.name, tokens)
@@ -289,6 +309,7 @@ async def search(
             {
                 "id": int(folder_id),
                 "kb_id": int(kb_id),
+                "kb_name": kb_names.get(int(kb_id), ""),
                 "name": name or "",
                 "path": node["path"],
                 "count": int(subtree_counts.get(int(folder_id), 0)),
@@ -332,6 +353,7 @@ async def search(
                     {
                         "id": int(doc_id),
                         "kb_id": int(kb_id),
+                        "kb_name": kb_names.get(int(kb_id), ""),
                         "name": name or "",
                         "folder_id": int(folder_id) if folder_id is not None else None,
                         "folder_path": folder_path,

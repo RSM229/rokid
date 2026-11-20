@@ -698,7 +698,7 @@
           <view class="at-item-icon">{{item.kind === 'folder' ? '📁' : (item.kind === 'doc' ? '📄' : '🔍')}}</view>
           <view class="at-item-body">
             <text class="at-item-label">{{item.kind === 'query' ? '按「' + item.name + '」检索资料库' : (item.kind === 'folder' ? item.path : item.name)}}</text>
-            <text class="at-item-desc">{{item.kind === 'query' ? '不挑具体文件，让智能体在这个关键词上找依据' : (item.kind === 'folder' ? (item.count ? item.count + ' 份资料·含子文件夹' : '空文件夹') : (item.path || '未分类'))}}</text>
+            <text class="at-item-desc">{{item.kind === 'query' ? '不挑具体文件，让智能体在这个关键词上找依据' : (item.kind === 'folder' ? (item.count ? item.count + ' 份资料·含子文件夹' : '空文件夹') : (item.path || '未分类'))}}{{item.kbName ? ' · ' + item.kbName : ''}}</text>
           </view>
           <text class="at-item-check" wx:if="{{item.picked}}">✓</text>
         </view>

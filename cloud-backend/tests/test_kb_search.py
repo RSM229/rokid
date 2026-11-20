@@ -103,11 +103,14 @@ class SearchTests(unittest.IsolatedAsyncioTestCase):
         session = _QueuedSession(folder_rows, doc_rows)
         with patch.object(kb_search, "accessible_kb_ids", return_value=[3]), \
              patch.object(kb_search, "_folder_path_map", return_value=nodes), \
-             patch.object(kb_search, "_folder_doc_counts", return_value={11: 2}):
+             patch.object(kb_search, "_folder_doc_counts", return_value={11: 2}), \
+             patch.object(kb_search, "_kb_name_map", return_value={3: "测试库"}):
             result = await kb_search.search(session, 1, "钢筋")
 
         self.assertEqual([f["path"] for f in result["folders"]], ["施工规范/钢筋工程"])
         self.assertEqual(result["folders"][0]["count"], 2)
+        # 个人库/项目库各有一份同名预设树，必须带库名让前端区分
+        self.assertEqual(result["folders"][0]["kb_name"], "测试库")
         # 文档按分数降序：名字命中（90）在前，仅路径命中（70）在后。
         # 路径命中保留是刻意的——用户打「钢筋」时，钢筋工程文件夹下的资料
         # 本就该出现；但不能压过名字直接命中的结果。
@@ -131,7 +134,8 @@ class SearchTests(unittest.IsolatedAsyncioTestCase):
         session = _QueuedSession(folder_rows, doc_rows)
         with patch.object(kb_search, "accessible_kb_ids", return_value=[3]), \
              patch.object(kb_search, "_folder_path_map", return_value=nodes), \
-             patch.object(kb_search, "_folder_doc_counts", return_value={12: 1}):
+             patch.object(kb_search, "_folder_doc_counts", return_value={12: 1}), \
+             patch.object(kb_search, "_kb_name_map", return_value={3: "测试库"}):
             result = await kb_search.search(session, 1, "钢筋")
         self.assertEqual(result["documents"], [])
 
