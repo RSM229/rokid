@@ -120,3 +120,37 @@ test('引用档案条：双行信息 + 超量折叠 + 范围语义提示', () =>
   assert.match(styles, /\.at-selected-sub \{/)
   assert.match(styles, /\.at-scope-hint \{/)
 })
+test('空查询有内容可看：browse 分三段渲染，不再给空面板', () => {
+  assert.match(page, /if \(result\.mode === 'browse' && offset === 0\)/)
+  assert.match(page, /pushSection\('最近用过'/)
+  assert.match(page, /pushSection\('常用'/)
+  assert.match(page, /pushSection\('全部文件夹'/)
+  // 分组标题不可点选，否则点一下会生成"引用标题"这种脏数据
+  assert.match(page, /if \(item\.kind === 'header'\) return/)
+  assert.match(styles, /\.at-section \{/)
+  assert.match(template, /class="at-section">\{\{item\.name\}\}/)
+})
+
+test('本地联想：打字先本地出结果，服务端结果到达后覆盖', () => {
+  assert.match(page, /atLocalIndex: new Map<string, AtKbItem>\(\)/)
+  assert.match(page, /rememberLocalItems\(items: AtKbItem\[\]\)/)
+  assert.match(page, /filterLocalItems\(query: string\): AtKbItem\[\]/)
+  // onAtSearch 必须先本地立刻渲染（0ms 手感），再走防抖网络
+  assert.match(page, /const local = this\.filterLocalItems\(raw\)/)
+  assert.match(page, /if \(local\.length\) \{[\s\S]{0,120}atItems: this\.markPicked\(local\)/)
+  // 缓存要落 storage，进页面就能恢复
+  assert.match(page, /wx\.setStorageSync\('gdjl_kb_local_index'/)
+  assert.match(page, /const cached = wx\.getStorageSync\('gdjl_kb_local_index'\)/)
+  // 上限保护：无限增长会拖慢匹配并吃内存
+  assert.match(page, /if \(index\.size > 300\)/)
+})
+
+test('个性化埋点：发送时上报「真的用进对话」的引用', () => {
+  assert.match(page, /reportMentionUsage\(\)/)
+  assert.match(page, /request\('\/kb\/mention-stats', \{/)
+  assert.match(page, /data: \{ items \},/)
+  // 只在发送路径上报，不在点选时上报（点选可能只是浏览）
+  assert.match(page, /this\.reportMentionUsage\(\)\s*\n\s*\/\/ 发送时收掉/)
+  // kb_query 不进埋点（关键词不是稳定目标，后端 target_type 只收 folder/doc）
+  assert.match(page, /filter\(m => m\.type === 'kb_folder' \|\| m\.type === 'kb_doc'\)/)
+})

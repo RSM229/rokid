@@ -710,14 +710,19 @@
       <view wx:if="{{atLoading && !atItems.length}}" class="at-empty">搜索中…</view>
       <block wx:else>
         <view wx:if="{{!atItems.length}}" class="at-empty">{{atQuery ? '没有匹配的资料' : '输入关键字搜索资料库'}}</view>
-        <view class="at-item {{item.picked ? 'picked' : ''}}" wx:for="{{atItems}}" wx:key="key" data-key="{{item.key}}" catchtap="pickAtItem">
-          <view class="at-item-icon">{{item.kind === 'folder' ? '📁' : (item.kind === 'doc' ? '📄' : '🔍')}}</view>
-          <view class="at-item-body">
-            <text class="at-item-label">{{item.kind === 'query' ? '按「' + item.name + '」检索资料库' : (item.kind === 'folder' ? item.path : item.name)}}</text>
-            <text class="at-item-desc">{{item.kind === 'query' ? '不挑具体文件，让智能体在这个关键词上找依据' : (item.kind === 'folder' ? (item.count ? item.count + ' 份资料·含子文件夹' : '空文件夹') : (item.path || '未分类'))}}{{item.kbName ? ' · ' + item.kbName : ''}}</text>
+        <!-- 列表项：分组标题（最近用过/常用/全部文件夹）只做视觉分隔，不可点选。
+             wx:if/wx:else 必须成对且同层相邻，所以放在 block 内部按 item.kind 分支。 -->
+        <block wx:for="{{atItems}}" wx:key="key">
+          <view wx:if="{{item.kind === 'header'}}" class="at-section">{{item.name}}</view>
+          <view wx:else class="at-item {{item.picked ? 'picked' : ''}}" data-key="{{item.key}}" catchtap="pickAtItem">
+            <view class="at-item-icon">{{item.kind === 'folder' ? '📁' : (item.kind === 'doc' ? '📄' : '🔍')}}</view>
+            <view class="at-item-body">
+              <text class="at-item-label">{{item.kind === 'query' ? '按「' + item.name + '」检索资料库' : (item.kind === 'folder' ? item.path : item.name)}}</text>
+              <text class="at-item-desc">{{item.kind === 'query' ? '不挑具体文件，让智能体在这个关键词上找依据' : (item.kind === 'folder' ? (item.count ? item.count + ' 份资料·含子文件夹' : '空文件夹') : (item.path || '未分类'))}}{{item.kbName ? ' · ' + item.kbName : ''}}</text>
+            </view>
+            <text class="at-item-check" wx:if="{{item.picked}}">✓</text>
           </view>
-          <text class="at-item-check" wx:if="{{item.picked}}">✓</text>
-        </view>
+        </block>
         <view wx:if="{{atHasMore}}" class="at-more" catchtap="loadMoreAt">{{atLoading ? '加载中…' : '加载更多'}}</view>
       </block>
     </scroll-view>

@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import os
+from datetime import datetime, timedelta
 from typing import Iterable, Optional, Sequence
 
 from sqlalchemy import func, or_, select
@@ -191,6 +192,119 @@ async def _folder_path_map(db: AsyncSession, kb_ids: Sequence[int]) -> dict[int,
     return nodes
 
 
+# ---------------------------------------------------------------- 个性化
+
+# 加分上限的设计意图：个性化只做「微调排序」，不能压过文本相关性。
+# 精确命中 100 分，最多 +15 也就到 115，不会让一个「用户常点但名字不相关」的
+# 文件夹盖过真正精确命中的结果——这是避免「越用越窄」的关键约束。
+BOOST_HITS_CAP = 15
+BOOST_HITS_PER_USE = 2
+BOOST_RECENT = 8          # 7 天内用过
+BOOST_PROJECT = 5         # 与当前项目同库
+RECENT_WINDOW_DAYS = 7
+
+
+async def _stat_map(
+    db: AsyncSession, user_id: int, kb_ids: Sequence[int]
+) -> dict[tuple[str, int], dict]:
+    """取当前用户在给定资料库里的选择埋点：(target_type, target_id) → {hits, last}。"""
+    if not kb_ids:
+        return {}
+    from app.models.knowledge_base import KbMentionStat
+
+    rows = await db.execute(
+        select(
+            KbMentionStat.target_type,
+            KbMentionStat.target_id,
+            KbMentionStat.hits,
+            KbMentionStat.last_used_at,
+        ).where(
+            KbMentionStat.user_id == int(user_id),
+            KbMentionStat.kb_id.in_(list(kb_ids)),
+        )
+    )
+    return {
+        (str(target_type), int(target_id)): {
+            "hits": int(hits or 0),
+            "last": last_used_at,
+        }
+        for target_type, target_id, hits, last_used_at in rows.all()
+    }
+
+
+def _personal_boost(
+    stats: dict[tuple[str, int], dict],
+    target_type: str,
+    target_id: int,
+    *,
+    now: datetime | None = None,
+) -> int:
+    """个性化加分：用得越多、越近用过的越靠前（有上限，不改变相关性主导地位）。"""
+    stat = stats.get((target_type, int(target_id)))
+    if not stat:
+        return 0
+    boost = min(BOOST_HITS_CAP, stat["hits"] * BOOST_HITS_PER_USE)
+    last = stat.get("last")
+    if last is not None:
+        try:
+            age = (now or datetime.now()) - last
+            if age.days < RECENT_WINDOW_DAYS:
+                boost += BOOST_RECENT
+        except TypeError:
+            # 时区感知与朴素 datetime 混用时不因加分逻辑炸掉搜索
+            pass
+    return boost
+
+
+async def record_mentions(
+    db: AsyncSession, user_id: int, items: Iterable[dict]
+) -> int:
+    """批量记录「用户把哪些引用真的用进了对话」。
+
+    幂等：同一 (user, kb, type, id) 只累加 hits 并刷新 last_used_at。
+    逐条 upsert（先查后改）而不是依赖方言级 ON DUPLICATE KEY，
+    是为了让这段逻辑在 MySQL/SQLite 下都能跑（测试用假 session 也能覆盖）。
+    """
+    from app.models.knowledge_base import KbMentionStat
+
+    allowed = set(await accessible_kb_ids(db, user_id))
+    now = datetime.now()
+    written = 0
+    for raw in items or []:
+        if not isinstance(raw, dict):
+            continue
+        try:
+            kb_id = int(raw.get("kb_id"))
+            target_id = int(raw.get("target_id"))
+        except (TypeError, ValueError):
+            continue
+        target_type = str(raw.get("target_type") or "")
+        if target_type not in {"folder", "doc"} or kb_id not in allowed:
+            continue
+        existing = (
+            await db.execute(
+                select(KbMentionStat).where(
+                    KbMentionStat.user_id == int(user_id),
+                    KbMentionStat.kb_id == kb_id,
+                    KbMentionStat.target_type == target_type,
+                    KbMentionStat.target_id == target_id,
+                )
+            )
+        ).scalars().first()
+        if existing is None:
+            db.add(KbMentionStat(
+                user_id=int(user_id), kb_id=kb_id, target_type=target_type,
+                target_id=target_id, hits=1, last_used_at=now,
+            ))
+        else:
+            existing.hits = int(existing.hits or 0) + 1
+            existing.last_used_at = now
+        written += 1
+    if written:
+        await db.commit()
+    return written
+
+
 async def _kb_name_map(db: AsyncSession, kb_ids: Sequence[int]) -> dict[int, str]:
     """资料库 id → 名称。
 
@@ -284,6 +398,7 @@ async def search(
     direct_counts = await _folder_doc_counts(db, allowed)
     subtree_counts = _subtree_counts(nodes, direct_counts)
     kb_names = await _kb_name_map(db, allowed)
+    stats = await _stat_map(db, user_id, allowed)
 
     # ---- 文件夹召回与打分 -------------------------------------------------
     folder_where = _prefilter(KbFolder.name, tokens)
@@ -313,7 +428,8 @@ async def search(
                 "name": name or "",
                 "path": node["path"],
                 "count": int(subtree_counts.get(int(folder_id), 0)),
-                "score": folder_score,
+                # 个性化加分只叠加在文本分之上（有上限），相关性仍是主导
+                "score": folder_score + _personal_boost(stats, "folder", int(folder_id)),
             }
         )
     folders.sort(key=lambda item: (-item["score"], item["path"]))
@@ -359,7 +475,7 @@ async def search(
                         "folder_path": folder_path,
                         "size_bytes": int(size_bytes or 0),
                         "created_at": created_at.isoformat() if created_at else None,
-                        "score": doc_score,
+                        "score": doc_score + _personal_boost(stats, "doc", int(doc_id)),
                     }
                 )
             documents.sort(key=lambda item: (-item["score"], item["name"]))
@@ -383,6 +499,166 @@ async def search(
         "total_folders": total_folders,
         "total_documents": total_documents,
     }
+
+
+async def browse(
+    db: AsyncSession,
+    user_id: int,
+    *,
+    kb_ids: Optional[Sequence[int]] = None,
+    limit: int = 12,
+) -> dict:
+    """空查询时的「有东西可看」：最近用过 / 最常用 / 全部文件夹。
+
+    为什么需要它：用户打出 @ 时脑子里还没有关键词——给一个空列表等于让人
+    猜该输入什么。专业做法（Linear 命令面板、Notion @ 菜单、Slack 频道选择）
+    都是先给出有意义的默认项，再让用户缩小范围。
+
+    三段的取法有讲究：
+    * ``recent``  取埋点里最近用过的（last_used_at desc），最多 5 条——「我刚才用的」
+    * ``popular`` 取埋点里用得最多的（hits desc），最多 5 条——「我常用的」
+    * ``folders`` 兜底给有文档的文件夹（按整棵子树文档数 desc）+ 预设根目录，
+      保证新用户（埋点为空）也不会看到空面板
+    """
+    from app.models.knowledge_base import KbMentionStat
+
+    allowed = await accessible_kb_ids(db, user_id)
+    if kb_ids:
+        wanted = {int(x) for x in kb_ids}
+        allowed = [kb_id for kb_id in allowed if kb_id in wanted]
+
+    result = {"mode": "browse", "kb_ids": allowed, "recent": [], "popular": [], "folders": []}
+    if not allowed:
+        return result
+
+    nodes = await _folder_path_map(db, allowed)
+    direct_counts = await _folder_doc_counts(db, allowed)
+    subtree_counts = _subtree_counts(nodes, direct_counts)
+    kb_names = await _kb_name_map(db, allowed)
+
+    # 文档行（只在埋点里出现时才查，避免全库扫描）
+    doc_stats = (
+        await db.execute(
+            select(
+                KbMentionStat.target_id,
+                KbMentionStat.kb_id,
+                KbMentionStat.hits,
+                KbMentionStat.last_used_at,
+            ).where(
+                KbMentionStat.user_id == int(user_id),
+                KbMentionStat.kb_id.in_(allowed),
+                KbMentionStat.target_type == "doc",
+            )
+        )
+    ).all()
+    doc_ids = {int(row[0]) for row in doc_stats}
+    doc_rows: dict[int, dict] = {}
+    if doc_ids:
+        rows = await db.execute(
+            select(
+                KnowledgeDocument.id,
+                KnowledgeDocument.kb_id,
+                KnowledgeDocument.name,
+                KnowledgeDocument.folder_id,
+            ).where(KnowledgeDocument.id.in_(doc_ids), _DOC_ALIVE)
+        )
+        for doc_id, kb_id, name, folder_id in rows.all():
+            folder_node = nodes.get(int(folder_id)) if folder_id is not None else None
+            doc_rows[int(doc_id)] = {
+                "kind": "doc",
+                "id": int(doc_id),
+                "kb_id": int(kb_id),
+                "kb_name": kb_names.get(int(kb_id), ""),
+                "name": name or "",
+                "path": folder_node["path"] if folder_node else "",
+                "score": 0,
+            }
+
+    folder_stats = (
+        await db.execute(
+            select(
+                KbMentionStat.target_id,
+                KbMentionStat.kb_id,
+                KbMentionStat.hits,
+                KbMentionStat.last_used_at,
+            ).where(
+                KbMentionStat.user_id == int(user_id),
+                KbMentionStat.kb_id.in_(allowed),
+                KbMentionStat.target_type == "folder",
+            )
+        )
+    ).all()
+
+    def folder_item(folder_id: int, kb_id: int) -> Optional[dict]:
+        node = nodes.get(int(folder_id))
+        if node is None:
+            return None
+        return {
+            "kind": "folder",
+            "id": int(folder_id),
+            "kb_id": int(kb_id),
+            "kb_name": kb_names.get(int(kb_id), ""),
+            "name": node["name"],
+            "path": node["path"],
+            "count": int(subtree_counts.get(int(folder_id), 0)),
+            "score": 0,
+        }
+
+    # recent：文件夹与文档混排，按最近使用时间倒序
+    recent_rows: list[tuple[datetime | None, dict]] = []
+    for folder_id, kb_id, _hits, last in folder_stats:
+        item = folder_item(int(folder_id), int(kb_id))
+        if item:
+            recent_rows.append((last, item))
+    for target_id, kb_id, _hits, last in doc_stats:
+        item = doc_rows.get(int(target_id))
+        if item:
+            recent_rows.append((last, item))
+    recent_rows.sort(key=lambda pair: pair[0] or datetime.min, reverse=True)
+    result["recent"] = [item for _last, item in recent_rows[:5]]
+
+    # popular：按命中次数倒序（同次数按名字稳定排序）
+    popular_rows: list[tuple[int, dict]] = []
+    for folder_id, kb_id, hits, _last in folder_stats:
+        item = folder_item(int(folder_id), int(kb_id))
+        if item:
+            popular_rows.append((int(hits or 0), item))
+    for target_id, kb_id, hits, _last in doc_stats:
+        item = doc_rows.get(int(target_id))
+        if item:
+            popular_rows.append((int(hits or 0), item))
+    popular_rows.sort(key=lambda pair: (-pair[0], pair[1]["name"]))
+    result["popular"] = [item for _hits, item in popular_rows[:5]]
+
+    # folders：兜底——有文档的文件夹按数量倒序，再补预设根目录
+    ordered = sorted(
+        nodes.values(),
+        key=lambda n: (-int(subtree_counts.get(n["id"], 0)), n["path"]),
+    )
+    picked: list[dict] = []
+    seen: set[int] = set()
+    for node in ordered:
+        if len(picked) >= limit:
+            break
+        if node["parent_id"] is None:      # 根目录最后补，先给"有内容"的
+            continue
+        if not subtree_counts.get(node["id"]):
+            continue
+        item = folder_item(node["id"], node["kb_id"])
+        if item and item["id"] not in seen:
+            seen.add(item["id"])
+            picked.append(item)
+    for node in ordered:
+        if len(picked) >= limit:
+            break
+        if node["parent_id"] is not None:
+            continue
+        item = folder_item(node["id"], node["kb_id"])
+        if item and item["id"] not in seen:
+            seen.add(item["id"])
+            picked.append(item)
+    result["folders"] = picked
+    return result
 
 
 # ---------------------------------------------------------------- 引用解析

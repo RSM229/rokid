@@ -312,22 +312,45 @@ interface Message {
   docReviewExpanded?: boolean
 }
 
-/** /kb/search 响应：文件夹与文档混排，score 越大越靠前，has_more 控制「加载更多」 */
+/** 后端 /kb/search 的两种返回形状统一成列表项。 */
+function toKbItem(raw: KbSearchItem): AtKbItem {
+  const isFolder = raw.kind === 'folder'
+  return {
+    kind: isFolder ? 'folder' : 'doc',
+    key: `${isFolder ? 'kb-folder' : 'kb-doc'}-${raw.id}`,
+    kbId: raw.kb_id,
+    id: raw.id,
+    name: raw.name,
+    path: raw.path || '',
+    count: raw.count,
+    kbName: raw.kb_name,
+    score: raw.score || 0,
+  }
+}
+
+/** /kb/search 响应：文件夹与文档混排，score 越大越靠前，has_more 控制「加载更多」。
+ *  空查询时 mode='browse'，返回 recent/popular/folders 三段。 */
+interface KbSearchItem {
+  kind?: 'folder' | 'doc'
+  id: number
+  kb_id: number
+  kb_name?: string
+  name: string
+  path?: string
+  count?: number
+  folder_path?: string
+  score?: number
+}
 interface KbSearchResponse {
-  query: string
+  /** 'browse' = 空查询时的三段推荐（recent/popular/folders）；'search' = 关键词搜索 */
+  mode?: 'search' | 'browse'
+  query?: string
   kb_ids: number[]
-  folders: Array<{ id: number; kb_id: number; kb_name?: string; name: string; path: string; count: number; score: number }>
-  documents: Array<{
-    id: number
-    kb_id: number
-    kb_name?: string
-    name: string
-    folder_id?: number | null
-    folder_path: string
-    size_bytes?: number
-    created_at?: string | null
-    score: number
-  }>
+  folders: KbSearchItem[]
+  documents: KbSearchItem[]
+  /** browse 专用 */
+  recent?: KbSearchItem[]
+  popular?: KbSearchItem[]
   has_more: boolean
   total_folders: number
   total_documents: number
@@ -527,7 +550,8 @@ const CHAT_MODELS = MODEL_CATALOG
  *  kind='query' 是搜索框里那段关键字本身——用户不想挑具体文件、
  *  只想「按这个词查资料」时直接选它，对应后端 kb_query。 */
 interface AtKbItem {
-  kind: 'folder' | 'doc' | 'query'
+  /** header 是分组标题（最近用过/常用/全部文件夹），不可点选 */
+  kind: 'folder' | 'doc' | 'query' | 'header'
   key: string
   kbId: number
   /** folder_id 或 doc_id，取决于 kind */
@@ -623,6 +647,8 @@ Page(themed({
   currentSessionId: 0,
   /** @ 搜索的请求序号：只有最新一次请求的结果才允许落库，防止慢响应覆盖新结果 */
   atSearchSeq: 0,
+  /** @ 面板本地联想缓存：key → 条目。打字时先本地查表立刻出结果，不等网络。 */
+  atLocalIndex: new Map<string, AtKbItem>(),
   inlinePlanSaveQueues: {} as Record<string, Promise<void>>,
   /** 页面正在卸载（切 tab / 切后台 / 关闭）：此时在飞的请求会被微信中止，
    *  属预期，catch 里据此不打刺眼「调用失败」。 */
@@ -805,6 +831,15 @@ Page(themed({
       statusBarHeight: sysInfo.statusBarHeight || 20,
       navBarHeight: 44,
     })
+    // 恢复 @ 面板的本地联想缓存：上次用过的资料名，进页面就能"猜"着给建议
+    try {
+      const cached = wx.getStorageSync('gdjl_kb_local_index')
+      if (Array.isArray(cached)) {
+        for (const item of cached as AtKbItem[]) {
+          if (item && item.key) this.atLocalIndex.set(item.key, item)
+        }
+      }
+    } catch { /* 缓存坏了不影响功能 */ }
 
     const user = session.getUser()
     const savedModel = String(wx.getStorageSync(`gdjl_${config.storageScope}_agent_model`) || 'deepseek-v4.1-flash-1017')
@@ -1409,6 +1444,8 @@ Page(themed({
     }
 
     const userMsg: Message = withMentionSegments({ role: 'user', text, timeText: formatMessageTime() })
+    // 引用被真正用进对话 → 上报埋点（fire-and-forget，个性化排序的原料）
+    this.reportMentionUsage()
     // 发送时收掉可能开着的 @ 面板（打字唤起后未选直接发送的场景）
     this.setData({ input: '', canSend: false, ...(this.data.showAtPanel ? { showAtPanel: false, atQuery: '' } : {}) })
     this.atOpenedByTyping = false
@@ -5830,21 +5867,25 @@ Page(themed({
         data: { q: query, offset, limit: 20 },
       })
       if (seq !== this.atSearchSeq) return   // 已有更新的请求，丢弃这次结果
+      // 空查询 → 后端返回 browse：最近用过 / 常用 / 全部文件夹。
+      // 这是「打出 @ 之后不知道该输什么」的解法——先给有意义的默认项。
+      if (result.mode === 'browse' && offset === 0) {
+        const sections: AtKbItem[] = []
+        const pushSection = (title: string, items: AtKbItem[]) => {
+          if (!items.length) return
+          sections.push({ kind: 'header', key: `h-${title}`, kbId: 0, id: 0, name: title, path: '', score: 0 })
+          sections.push(...items)
+        }
+        pushSection('最近用过', (result.recent || []).map(toKbItem))
+        pushSection('常用', (result.popular || []).map(toKbItem))
+        pushSection('全部文件夹', (result.folders || []).map(toKbItem))
+        this.rememberLocalItems(sections)
+        this.setData({ atItems: this.markPicked(sections), atHasMore: false })
+        return
+      }
       const incoming: AtKbItem[] = []
-      for (const folder of result.folders || []) {
-        incoming.push({
-          kind: 'folder', key: `kb-folder-${folder.id}`, kbId: folder.kb_id,
-          id: folder.id, name: folder.name, path: folder.path,
-          count: folder.count, kbName: folder.kb_name, score: folder.score,
-        })
-      }
-      for (const doc of result.documents || []) {
-        incoming.push({
-          kind: 'doc', key: `kb-doc-${doc.id}`, kbId: doc.kb_id,
-          id: doc.id, name: doc.name, path: doc.folder_path,
-          kbName: doc.kb_name, score: doc.score,
-        })
-      }
+      for (const folder of result.folders || []) incoming.push(toKbItem(folder))
+      for (const doc of result.documents || []) incoming.push(toKbItem(doc))
       // 模糊词入口：用户不想挑具体文件、只想「按这个词查资料」时选它。
       // 只在首页（offset=0）插入，加载更多时不能重复出现。
       const keyword = query.trim()
@@ -5854,11 +5895,9 @@ Page(themed({
           name: keyword, path: '', score: 1000,
         })
       }
+      this.rememberLocalItems(incoming)
       const merged = offset > 0 ? this.data.atItems.concat(incoming) : incoming
-      // 已选中的条目在列表里打勾，用户能看出「这个我加过了」
-      const chosen = new Set(this.data.mentions.map(m => m.key))
-      const view = merged.map(item => ({ ...item, picked: chosen.has(item.key) }))
-      this.setData({ atItems: view as AtKbItem[], atHasMore: Boolean(result.has_more) })
+      this.setData({ atItems: this.markPicked(merged), atHasMore: Boolean(result.has_more) })
     } catch {
       // 搜索失败保持面板可用（仍能打 @词 交给后端做模糊检索），只在空结果时给提示
       if (offset === 0) this.setData({ atItems: [], atHasMore: false })
@@ -5867,9 +5906,62 @@ Page(themed({
     }
   },
 
+  /**
+   * 本地联想索引：把见过的文件夹/文档名缓存在内存（并落 storage），
+   * 打字时先本地前缀匹配立刻出结果（0ms），服务端结果到了再替换。
+   *
+   * 这就是「像 macOS 键盘预测那样按下键就有反应」的手感来源：
+   * 网络往返是几百毫秒，本地查表是零点几毫秒。
+   */
+  rememberLocalItems(items: AtKbItem[]) {
+    const index = this.atLocalIndex
+    for (const item of items) {
+      if (item.kind === 'header' || item.kind === 'query') continue
+      if (!index.has(item.key)) index.set(item.key, item)
+    }
+    // 上限保护：缓存太大既费内存也拖慢匹配
+    if (index.size > 300) {
+      const keys = Array.from(index.keys()).slice(0, index.size - 300)
+      for (const key of keys) index.delete(key)
+    }
+    try {
+      wx.setStorageSync('gdjl_kb_local_index', Array.from(index.values()).slice(0, 300))
+    } catch { /* 存储失败不影响使用 */ }
+  },
+
+  /** 本地前缀/子串匹配：命中就立刻渲染，不等网络 */
+  filterLocalItems(query: string): AtKbItem[] {
+    const q = query.trim().toLowerCase()
+    if (!q) return []
+    const hits: AtKbItem[] = []
+    for (const item of this.atLocalIndex.values()) {
+      const haystack = `${item.name} ${item.path}`.toLowerCase()
+      if (haystack.includes(q)) hits.push(item)
+      if (hits.length >= 20) break
+    }
+    // 名字前缀命中优先于路径命中
+    hits.sort((a, b) => {
+      const an = a.name.toLowerCase().startsWith(q) ? 0 : 1
+      const bn = b.name.toLowerCase().startsWith(q) ? 0 : 1
+      return an - bn || a.name.localeCompare(b.name)
+    })
+    return hits
+  },
+
+  /** 给列表项打上「已选中」标记 */
+  markPicked(items: AtKbItem[]): AtKbItem[] {
+    const chosen = new Set(this.data.mentions.map(m => m.key))
+    return items.map(item => (item.kind === 'header' ? item : { ...item, picked: chosen.has(item.key) }))
+  },
+
   onAtSearch(event: WechatMiniprogram.Input) {
     const raw = event.detail.value
     this.setData({ atQuery: raw })
+    // 立刻用本地索引出结果（不打网络），随后再用服务端结果覆盖
+    const local = this.filterLocalItems(raw)
+    if (local.length) {
+      this.setData({ atItems: this.markPicked(local), atHasMore: false })
+    }
     // 250ms 防抖：搜索走服务端，敲字节奏远快于往返，攒一攒再发
     if (this.atSearchTimer !== null) clearTimeout(this.atSearchTimer)
     this.atSearchTimer = setTimeout(() => {
@@ -5890,6 +5982,8 @@ Page(themed({
     const key = event.currentTarget.dataset.key as string
     const item = this.data.atItems.find(i => i.key === key)
     if (!item) return
+    // 分组标题只是视觉分隔，点它不产生引用
+    if (item.kind === 'header') return
     const already = this.data.mentions.some(m => m.key === item.key)
     if (already) {
       // 再点一次 = 取消：多选场景下比「再去点小 ×」更顺手
@@ -5988,6 +6082,26 @@ Page(themed({
   },
 
   /** 发给后端的结构化引用；空数组表示不限定范围 */
+  /**
+   * 上报「哪些引用被真的用进了对话」——个性化排序的原料。
+   *
+   * 为什么在发送时上报、而不是点选时：点选可能只是浏览后被删掉，
+   * 只有随消息发出去的引用才是真实偏好。失败静默（不打扰聊天）。
+   */
+  reportMentionUsage() {
+    const items = this.data.mentions
+      .filter(m => m.type === 'kb_folder' || m.type === 'kb_doc')
+      .map(m => m.type === 'kb_folder'
+        ? { kb_id: m.kb_id, target_type: 'folder', target_id: m.folder_id }
+        : { kb_id: m.kb_id, target_type: 'doc', target_id: m.doc_id })
+    if (!items.length) return
+    void request('/kb/mention-stats', {
+      method: 'POST',
+      data: { items },
+      timeout: 5000,
+    }).catch(() => undefined)
+  },
+
   buildChatMentions(): Array<Record<string, unknown>> {
     return this.data.mentions.map(m => {
       if (m.type === 'kb_query') return { type: 'kb_query', query: m.query || m.name }

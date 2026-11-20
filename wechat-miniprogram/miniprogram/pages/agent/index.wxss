@@ -122,6 +122,8 @@
 .at-item.picked { background: rgba(var(--brand-rgb, 22,119,255), 0.08); }
 .at-item-check { flex-shrink: 0; margin-left: auto; font-size: 26rpx; font-weight: 700; color: var(--brand, #1677ff); }
 .at-more { padding: 20rpx 0; text-align: center; font-size: 24rpx; color: var(--brand, #1677ff); }
+/* 分组标题：空查询时的「最近用过 / 常用 / 全部文件夹」分隔 */
+.at-section { padding: 14rpx 12rpx 6rpx; font-size: 21rpx; font-weight: 600; color: var(--ink-3, #6b7c93); letter-spacing: 0.5rpx; }
 
 /* 模型选择气泡锚点容器：absolute 气泡相对按钮定位，不随页面滚动/麦克风显隐漂移 */
 .model-anchor { position: relative; flex-shrink: 0; }

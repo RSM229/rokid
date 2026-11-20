@@ -279,6 +279,17 @@ class PublishRequest(BaseModel):
     is_public: bool
 
 
+class MentionStatItem(BaseModel):
+    """一条「引用被用进对话」的上报：文件夹或单份文档。"""
+    kb_id: int
+    target_type: str = Field(pattern="^(folder|doc)$")
+    target_id: int
+
+
+class MentionStatRequest(BaseModel):
+    items: list[MentionStatItem] = Field(default_factory=list)
+
+
 class QueryRequest(BaseModel):
     question: str = Field(min_length=1, max_length=2000)
     use_llm: bool = True
@@ -691,6 +702,10 @@ async def search_knowledge(
             if piece.isdigit():
                 parsed.append(int(piece))
         scope = parsed or None
+    # 空查询 → browse：给「最近用过 / 常用 / 全部文件夹」，否则用户打出 @ 后
+    # 面对空列表不知道该输入什么（冷启动失败）。
+    if not (q or "").strip():
+        return await kb_search.browse(db, int(user.id), kb_ids=scope, limit=min(limit, 12))
     return await kb_search.search(
         db,
         int(user.id),
@@ -700,6 +715,22 @@ async def search_knowledge(
         offset=offset,
         include_documents=include_documents,
     )
+
+
+@router.post("/mention-stats")
+async def record_mention_stats(
+    req: MentionStatRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """上报「用户把哪些引用真的用进了对话」，用于 @ 面板的个性化排序。
+
+    放在发送那一刻批量上报（而不是每次点击面板就上报）：
+    点击可能只是浏览，用进对话才是真实偏好信号。
+    上报失败不该影响聊天，所以前端调用是 fire-and-forget。
+    """
+    written = await kb_search.record_mentions(db, int(user.id), req.items or [])
+    return {"written": written}
 
 
 @router.get("/{kb_id}")
