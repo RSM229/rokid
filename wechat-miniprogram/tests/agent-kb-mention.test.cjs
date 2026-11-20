@@ -187,9 +187,16 @@ test('选择模式有明确出口：完成按钮收起面板并把焦点交回�
 
 test('面板不再常驻：高度收缩并与输入框留出间距，降低误触', () => {
   // 64vh 会贴到输入框顶边，手指点底部行时容易误触
-  assert.match(styles, /\.at-panel \{[^}]*max-height: 52vh/)
+  // 面板必须是「确定高度 + 裁切」：只给 max-height 时 scroll-view 会按内容撑开，
+  // 溢出上沿盖住底部完成条和输入框（实测遮挡过）
+  assert.match(styles, /\.at-panel \{[^}]*height: 52vh/)
+  assert.match(styles, /\.at-panel \{[^}]*overflow: hidden/)
   assert.match(styles, /\.at-panel \{[^}]*bottom: calc\(360rpx \+ env\(safe-area-inset-bottom\)\)/)
-  assert.match(styles, /\.at-list \{[^}]*max-height: 38vh/)
+  // scroll-view 靠 height:0 + flex:1 取到「剩余空间的具体高度」才会滚动
+  assert.match(styles, /\.at-list \{ height: 0; flex: 1; min-height: 0; \}/)
+  // 固定区不参与压缩，空间全让给列表
+  assert.match(styles, /\.at-panel-head \{[^}]*flex-shrink: 0/)
+  assert.match(styles, /\.at-done-bar \{[^}]*flex-shrink: 0/)
   // 标题栏直接报数，用户随时知道选了几项
   assert.match(template, /引用资料库\{\{mentions\.length \? '（已选 ' \+ mentions\.length \+ ' 项）' : ''\}\}/)
   // 旧的 × 关闭入口让位给「完成」，避免两个语义相近的出口

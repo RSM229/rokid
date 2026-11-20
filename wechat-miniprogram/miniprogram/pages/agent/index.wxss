@@ -82,19 +82,24 @@
 .at-anchor { position: relative; flex-shrink: 0; }
 .at-chip { display: flex; align-items: center; justify-content: center; width: 64rpx; height: 64rpx; border-radius: 32rpx; font-size: 36rpx; font-weight: 600; color: var(--ink, #12253d); background: linear-gradient(135deg, rgba(255,255,255,0.62), rgba(255,255,255,0.44)); border: 1rpx solid rgba(255,255,255,0.75); box-shadow: inset 0 1rpx 0 rgba(255,255,255,0.82); }
 .at-chip.active { color: #fff; background: linear-gradient(135deg, var(--brand-l, #3b8cff), var(--brand-d, #0b5fd0)); }
-/* 面板高度从 64vh 收到 52vh：给输入框上方留出安全间距，减少「点底部行误触输入框」 */
-.at-panel { position: fixed; left: 24rpx; right: 24rpx; bottom: calc(360rpx + env(safe-area-inset-bottom)); z-index: 165; width: auto; max-height: 52vh; display: flex; flex-direction: column; padding: 20rpx 20rpx 0; border-radius: 24rpx; background: rgba(255,255,255,0.99); border: 1rpx solid rgba(var(--brand-rgb, 22,119,255), 0.18); box-shadow: 0 14rpx 36rpx rgba(var(--deep-rgb, 10,46,92), 0.20); animation: modelFade 0.15s ease; box-sizing: border-box; }
-.at-panel-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14rpx; }
+/* 面板：必须给「确定高度 + 裁切」，不能只给 max-height。
+   scroll-view 在微信里需要确定高度才会滚动；只写 max-height 时它会按内容撑开，
+   溢出面板上沿盖住底部「完成」条和输入框（实测踩到过）。 */
+.at-panel { position: fixed; left: 24rpx; right: 24rpx; bottom: calc(360rpx + env(safe-area-inset-bottom)); z-index: 165; width: auto; height: 52vh; overflow: hidden; display: flex; flex-direction: column; padding: 20rpx 20rpx 0; border-radius: 24rpx; background: rgba(255,255,255,0.99); border: 1rpx solid rgba(var(--brand-rgb, 22,119,255), 0.18); box-shadow: 0 14rpx 36rpx rgba(var(--deep-rgb, 10,46,92), 0.20); animation: modelFade 0.15s ease; box-sizing: border-box; }
+/* 固定区（标题/已选/提示/搜索/最近）不参与压缩，把空间全部让给可滚动的列表 */
+.at-panel-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14rpx; flex-shrink: 0; }
 .at-panel-title { font-size: 28rpx; font-weight: 700; color: var(--ink, #12253d); }
 /* 「完成」是选择模式的唯一出口：文字按钮比 × 语义明确，也不会被误当成关闭热搜 */
 .at-panel-done { padding: 10rpx 24rpx; border-radius: 16rpx; font-size: 26rpx; font-weight: 600; color: #fff; background: var(--brand, #1677ff); }
 .at-panel-close { width: 44rpx; height: 44rpx; text-align: center; line-height: 40rpx; font-size: 36rpx; color: var(--ink-3, #6b7c93); }
-.at-search { height: 72rpx; padding: 0 20rpx; border-radius: 16rpx; background: rgba(var(--wash-rgb, 234,243,255), 0.7); font-size: 26rpx; color: var(--ink, #12253d); box-sizing: border-box; }
+.at-search { flex-shrink: 0; height: 72rpx; padding: 0 20rpx; border-radius: 16rpx; background: rgba(var(--wash-rgb, 234,243,255), 0.7); font-size: 26rpx; color: var(--ink, #12253d); box-sizing: border-box; }
 .at-search-ph { color: var(--ink-3, #6b7c93); }
 .at-tabs { display: flex; gap: 10rpx; margin: 16rpx 0 10rpx; }
 .at-tab { flex: 1; text-align: center; padding: 12rpx 0; border-radius: 14rpx; font-size: 24rpx; color: var(--ink-3, #6b7c93); background: rgba(var(--wash-rgb, 234,243,255), 0.6); }
 .at-tab.active { color: #fff; font-weight: 600; background: var(--brand, #1677ff); }
-.at-list { flex: 1; min-height: 120rpx; max-height: 38vh; }
+/* 列表：height:0 + flex:1 是让 scroll-view 拿到「剩余空间的具体高度」的标准写法；
+   不写 height:0 时 flex 项的高度不会被 scroll-view 正确识别，导致不滚动、内容溢出。 */
+.at-list { height: 0; flex: 1; min-height: 0; }
 /* 底部固定「完成」条：主操作、远离输入框。
    默认灰态（零选择时仍可点，只收起面板）；有选择时变品牌色。 */
 .at-done-bar { flex-shrink: 0; margin: 12rpx -20rpx 0; padding: 24rpx 0 calc(24rpx + env(safe-area-inset-bottom)); text-align: center; font-size: 28rpx; font-weight: 600; color: var(--ink-3, #6b7c93); background: rgba(var(--wash-rgb, 234,243,255), 0.9); border-radius: 0 0 24rpx 24rpx; }
@@ -112,7 +117,7 @@
 .at-avatar { width: 44rpx; height: 44rpx; flex-shrink: 0; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 24rpx; color: #fff; background: var(--brand, #1677ff); }
 
 /* @ 资料库：已选区（唯一表达"选了什么"）。与输入卡里的 .at-chip 按钮区分命名，避免样式串味 */
-.at-selected { display: flex; flex-wrap: wrap; gap: 10rpx; margin: 4rpx 0 8rpx; }
+.at-selected { display: flex; flex-wrap: wrap; gap: 10rpx; margin: 4rpx 0 8rpx; flex-shrink: 0; max-height: 132rpx; overflow: hidden; }
 .at-selected-head { width: 100%; font-size: 21rpx; font-weight: 600; color: var(--ink-3, #6b7c93); padding-bottom: 2rpx; }
 .at-selected-item { display: flex; align-items: center; gap: 8rpx; max-width: 100%; padding: 10rpx 16rpx; border-radius: 16rpx; color: var(--brand-d, #0b5fd0); background: rgba(var(--brand-rgb, 22,119,255), 0.12); border: 1rpx solid rgba(var(--brand-rgb, 22,119,255), 0.26); box-shadow: inset 0 1rpx 0 rgba(255,255,255,0.7); }
 .at-selected-icon { font-size: 24rpx; line-height: 1; }
@@ -123,7 +128,7 @@
 .at-selected-x { font-size: 26rpx; color: var(--ink-3, #6b7c93); padding-left: 2rpx; }
 .at-selected-more { display: flex; align-items: center; padding: 10rpx 14rpx; border-radius: 16rpx; font-size: 22rpx; color: var(--ink-3, #6b7c93); background: rgba(var(--wash-rgb, 234,243,255), 0.8); }
 /* 范围语义提示：让「文件夹=整棵子树」这件事可见，而不是只显示一行路径 */
-.at-scope-hint { margin: -6rpx 0 10rpx; font-size: 21rpx; color: var(--ink-3, #6b7c93); }
+.at-scope-hint { flex-shrink: 0; margin: -6rpx 0 10rpx; font-size: 21rpx; color: var(--ink-3, #6b7c93); }
 
 /* 气泡内的引用胶囊：@[资料库 …] 不再和普通文字混在一起 */
 .bubble-segments { white-space: pre-wrap; word-break: break-word; line-height: 1.7; }
@@ -135,7 +140,7 @@
 .at-more { padding: 20rpx 0; text-align: center; font-size: 24rpx; color: var(--brand, #1677ff); }
 /* 分组标题：空查询时的「最近用过 / 常用 / 全部文件夹」分隔 */
 /* 最近用过：横向快捷条（不占纵向空间，且不与候选列表重复） */
-.at-recent { white-space: nowrap; margin: 10rpx 0 6rpx; }
+.at-recent { flex-shrink: 0; white-space: nowrap; margin: 10rpx 0 6rpx; }
 .at-recent-item { display: inline-flex; align-items: center; gap: 6rpx; max-width: 320rpx; margin-right: 10rpx; padding: 10rpx 16rpx; border-radius: 16rpx; font-size: 22rpx; color: var(--ink, #12253d); background: rgba(var(--wash-rgb, 234,243,255), 0.9); border: 1rpx solid rgba(var(--brand-rgb, 22,119,255), 0.16); }
 .at-recent-item.picked { color: var(--ink-3, #6b7c93); background: rgba(var(--brand-rgb, 22,119,255), 0.08); }
 .at-recent-icon { font-size: 22rpx; line-height: 1; }
