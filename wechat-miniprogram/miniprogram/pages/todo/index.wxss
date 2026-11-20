@@ -90,8 +90,6 @@
   border: 1rpx solid rgba(15, 27, 45, 0.07);
   background: #ffffff;
   box-shadow: 0 2rpx 10rpx rgba(15, 27, 45, 0.04);
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
 }
 .task-row:active {
   background: #fafbfc;
@@ -233,8 +231,6 @@
   position: absolute;
   inset: 0;
   background: rgba(9, 17, 28, 0.44);
-  backdrop-filter: blur(6rpx);
-  -webkit-backdrop-filter: blur(6rpx);
 }
 .detail-panel {
   position: relative;
@@ -419,8 +415,6 @@
   position: absolute;
   inset: 0;
   background: rgba(16, 27, 39, 0.46);
-  backdrop-filter: blur(2px);
-  -webkit-backdrop-filter: blur(2px);
 }
 .completion-panel {
   position: relative;

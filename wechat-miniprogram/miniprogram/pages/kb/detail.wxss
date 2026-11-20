@@ -1,5 +1,5 @@
 /* 玻璃拟态改造（浅色版） */
-.card { padding: 24rpx; margin-bottom: 14rpx; background: rgba(255,255,255,0.34); backdrop-filter: none; -webkit-backdrop-filter: none; border: 2rpx solid rgba(var(--brand-rgb, 22,119,255), 0.14); border-radius: 16rpx; box-shadow: 0 2rpx 8rpx rgba(0,0,0,0.04); }
+.card { padding: 24rpx; margin-bottom: 14rpx; background: #ffffff; border: 2rpx solid rgba(var(--brand-rgb, 22,119,255), 0.14); border-radius: 16rpx; box-shadow: 0 2rpx 8rpx rgba(0,0,0,0.04); }
 
 .kb-head .kb-top { display: flex; justify-content: space-between; align-items: center; }
 .kb-name { flex: 1; font-size: 32rpx; font-weight: 700; color: var(--ink-2, #243b55); }
@@ -32,7 +32,7 @@
 .link-gray { color: #6b7c90; font-size: 25rpx; }
 .link-red { color: #d9534f; font-size: 25rpx; font-weight: 600; }
 
-.qa-input { width: 100%; min-height: 140rpx; padding: 18rpx; border: 2rpx solid rgba(255,255,255,0.34); border-radius: 12rpx; font-size: 26rpx; background: rgba(255,255,255,0.40); box-sizing: border-box; }
+.qa-input { width: 100%; min-height: 140rpx; padding: 18rpx; border: 2rpx solid rgba(255,255,255,0.34); border-radius: 12rpx; font-size: 26rpx; background: #ffffff; box-sizing: border-box; }
 .answer-title { font-size: 26rpx; font-weight: 700; color: var(--ink-2, #243b55); margin-bottom: 10rpx; }
 .answer-body { font-size: 27rpx; color: #334; line-height: 1.7; white-space: pre-wrap; }
 .answer-actions { margin-top: 16rpx; }
@@ -55,13 +55,13 @@
 .crumb.on { color: var(--brand-l, #3b8cff); font-weight: 600; }
 
 .folder-grid { display: flex; flex-wrap: wrap; gap: 14rpx; margin-bottom: 18rpx; }
-.folder-card { width: calc((100% - 28rpx) / 3); box-sizing: border-box; padding: 20rpx 14rpx; background: rgba(255,255,255,0.40); border: 2rpx solid rgba(var(--brand-rgb, 22,119,255), 0.14); border-radius: 16rpx; display: flex; flex-direction: column; align-items: center; }
+.folder-card { width: calc((100% - 28rpx) / 3); box-sizing: border-box; padding: 20rpx 14rpx; background: #ffffff; border: 2rpx solid rgba(var(--brand-rgb, 22,119,255), 0.14); border-radius: 16rpx; display: flex; flex-direction: column; align-items: center; }
 .folder-ico { font-size: 40rpx; line-height: 1; }
 .folder-name { margin-top: 10rpx; font-size: 24rpx; font-weight: 600; color: var(--ink-2, #243b55); text-align: center; }
 .folder-count { margin-top: 6rpx; font-size: 20rpx; color: #999; }
 /* 搜索栏：输入即搜（300ms 防抖），清空恢复文件夹视图 */
 .search-bar { position: relative; display: flex; align-items: center; margin: 16rpx 0 14rpx; }
-.search-input { flex: 1; height: 68rpx; padding: 0 64rpx 0 28rpx; background: rgba(255,255,255,0.40); border: 2rpx solid rgba(var(--brand-rgb, 22,119,255), 0.14); border-radius: 34rpx; font-size: 26rpx; color: var(--ink-2, #243b55); }
+.search-input { flex: 1; height: 68rpx; padding: 0 64rpx 0 28rpx; background: #ffffff; border: 2rpx solid rgba(var(--brand-rgb, 22,119,255), 0.14); border-radius: 34rpx; font-size: 26rpx; color: var(--ink-2, #243b55); }
 .search-clear { position: absolute; right: 20rpx; width: 44rpx; height: 44rpx; line-height: 44rpx; text-align: center; font-size: 24rpx; color: #8a9bb0; }
 .search-tip { margin-bottom: 14rpx; font-size: 22rpx; color: #8a9bb0; }
 /* 文件夹操作行：「+ ▾」下拉菜单（新建/重命名/删除），锚定在触发按钮正下方 */
@@ -70,7 +70,7 @@
 .sec-act { font-size: 24rpx; font-weight: 600; color: var(--brand-l, #3b8cff); padding: 6rpx 18rpx; border-radius: 999rpx; background: rgba(var(--brand-rgb, 22,119,255), 0.08); }
 .sec-act:active { background: rgba(var(--brand-rgb, 22,119,255), 0.16); }
 .folder-ops .ops-right { position: relative; }
-.folder-menu { position: absolute; top: 54rpx; right: 0; min-width: 230rpx; background: rgba(255,255,255,0.97); backdrop-filter: blur(40rpx) saturate(1.8); -webkit-backdrop-filter: blur(40rpx) saturate(1.8); border: 2rpx solid rgba(var(--brand-rgb, 22,119,255), 0.14); border-radius: 16rpx; box-shadow: 0 8rpx 32rpx rgba(var(--deep-rgb, 10,46,92), 0.14); z-index: 1002; overflow: hidden; }
+.folder-menu { position: absolute; top: 54rpx; right: 0; min-width: 230rpx; background: rgba(255,255,255,0.97); border: 2rpx solid rgba(var(--brand-rgb, 22,119,255), 0.14); border-radius: 16rpx; box-shadow: 0 8rpx 32rpx rgba(var(--deep-rgb, 10,46,92), 0.14); z-index: 1002; overflow: hidden; }
 .fmenu-item { padding: 22rpx 28rpx; font-size: 26rpx; color: var(--ink-2, #243b55); }
 .fmenu-item:not(:last-child) { border-bottom: 1rpx solid rgba(var(--brand-rgb, 22,119,255), 0.08); }
 .fmenu-item:active { background: rgba(var(--brand-rgb, 22,119,255), 0.06); }
@@ -82,14 +82,14 @@
    早期把 modal 嵌在 mask 里、靠 catchtap="" 阻止冒泡，实测点输入框/按钮会冒泡触发
    mask 的关闭事件，弹窗一闪就没。平级后点 modal 内部不经过 mask，与 index 页一致。 */
 .mask { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(20,40,60, 0.35); z-index: 1000; }
-.modal { position: fixed; left: 40rpx; right: 40rpx; top: 50%; transform: translateY(-50%); z-index: 1001; background: rgba(255,255,255,0.34); backdrop-filter: blur(40rpx) saturate(1.8); -webkit-backdrop-filter: blur(40rpx) saturate(1.8); border: 2rpx solid rgba(var(--brand-rgb, 22,119,255), 0.14); border-radius: 20rpx; padding: 28rpx; box-sizing: border-box; box-shadow: 0 8rpx 32rpx rgba(var(--deep-rgb, 10,46,92), 0.12); }
+.modal { position: fixed; left: 40rpx; right: 40rpx; top: 50%; transform: translateY(-50%); z-index: 1001; background: #ffffff; border: 2rpx solid rgba(var(--brand-rgb, 22,119,255), 0.14); border-radius: 20rpx; padding: 28rpx; box-sizing: border-box; box-shadow: 0 8rpx 32rpx rgba(var(--deep-rgb, 10,46,92), 0.12); }
 .content-modal { max-height: 80vh; display: flex; flex-direction: column; }
 .modal-title { font-size: 30rpx; font-weight: 700; color: var(--ink-2, #243b55); margin-bottom: 20rpx; }
 .content-scroll { max-height: 56vh; }
 .content-text { font-size: 25rpx; color: #334; line-height: 1.7; white-space: pre-wrap; }
 .field-group { margin-bottom: 22rpx; }
 .field-label { display: block; margin-bottom: 8rpx; font-size: 25rpx; color: #555; font-weight: 600; }
-.field-input { width: 100%; height: 72rpx; padding: 0 18rpx; border: 2rpx solid rgba(255,255,255,0.34); border-radius: 12rpx; font-size: 26rpx; background: rgba(255,255,255,0.40); box-sizing: border-box; }
+.field-input { width: 100%; height: 72rpx; padding: 0 18rpx; border: 2rpx solid rgba(255,255,255,0.34); border-radius: 12rpx; font-size: 26rpx; background: #ffffff; box-sizing: border-box; }
 .picker-val { line-height: 72rpx; color: var(--brand-l, var(--brand-l, #3b8cff)); }
 .modal-btns { display: flex; gap: 16rpx; margin-top: 10rpx; }
 .modal-btns button { flex: 1; height: 76rpx; line-height: 76rpx; margin: 0; font-size: 27rpx; }

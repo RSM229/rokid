@@ -68,7 +68,7 @@
 .frow-on { background: rgba(var(--brand-rgb, 22,119,255), 0.06); }
 /* 文件夹操作行：「更多 ▾」下拉菜单（选择/新建），锚定在触发按钮正下方 */
 .folder-ops .ops-right { position: relative; }
-.folder-menu { position: absolute; top: 54rpx; right: 0; min-width: 230rpx; background: rgba(255,255,255,0.97); backdrop-filter: blur(40rpx) saturate(1.8); -webkit-backdrop-filter: blur(40rpx) saturate(1.8); border: 2rpx solid rgba(var(--brand-rgb, 22,119,255), 0.14); border-radius: 16rpx; box-shadow: 0 8rpx 32rpx rgba(var(--deep-rgb, 10,46,92), 0.14); z-index: 1002; overflow: hidden; }
+.folder-menu { position: absolute; top: 54rpx; right: 0; min-width: 230rpx; background: rgba(255,255,255,0.97); border: 2rpx solid rgba(var(--brand-rgb, 22,119,255), 0.14); border-radius: 16rpx; box-shadow: 0 8rpx 32rpx rgba(var(--deep-rgb, 10,46,92), 0.14); z-index: 1002; overflow: hidden; }
 .fmenu-item { padding: 22rpx 28rpx; font-size: 26rpx; color: var(--ink-2, #243b55); }
 .fmenu-item:not(:last-child) { border-bottom: 1rpx solid rgba(var(--brand-rgb, 22,119,255), 0.08); }
 .fmenu-item:active { background: rgba(var(--brand-rgb, 22,119,255), 0.06); }
@@ -84,7 +84,7 @@
 .doc-shape::after { content: ""; position: absolute; right: -2rpx; top: -2rpx; width: 12rpx; height: 12rpx; border-radius: 0 4rpx 0 4rpx; background: rgba(var(--brand-rgb, 22,119,255), 0.30); }
 
 /* 底部操作栏：固定在 tab 栏上方，等宽分三格 */
-.action-bar { position: fixed; left: 0; right: 0; bottom: calc(112rpx + env(safe-area-inset-bottom)); z-index: 4; display: flex; gap: 16rpx; padding: 14rpx 24rpx; background: rgba(255,255,255,0.86); backdrop-filter: blur(30rpx) saturate(1.6); -webkit-backdrop-filter: blur(30rpx) saturate(1.6); border-top: 1rpx solid rgba(var(--brand-rgb, 22,119,255), 0.12); }
+.action-bar { position: fixed; left: 0; right: 0; bottom: calc(112rpx + env(safe-area-inset-bottom)); z-index: 4; display: flex; gap: 16rpx; padding: 14rpx 24rpx; background: rgba(255,255,255,0.86); border-top: 1rpx solid rgba(var(--brand-rgb, 22,119,255), 0.12); }
 .action-bar button { flex: 1; margin: 0; height: 76rpx; line-height: 76rpx; }
 
 /* 弹窗三层关系：mask=纯背板（点它关闭），modal=平级兄弟节点（自己固定定位+垂直居中）。
@@ -92,7 +92,7 @@
    mask 的关闭事件，弹窗一闪就没（表现为「无法新建」）。modal 与 mask 平级后，
    点 modal 内部任何元素都不经过 mask，从结构上杜绝误关；与 work/hazards 等页一致。 */
 .mask { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(20,40,60, 0.35); z-index: 1000; }
-.modal { position: fixed; left: 40rpx; right: 40rpx; top: 50%; transform: translateY(-50%); z-index: 1001; background: rgba(255,255,255,0.96); backdrop-filter: blur(40rpx) saturate(1.8); -webkit-backdrop-filter: blur(40rpx) saturate(1.8); border: 2rpx solid rgba(var(--brand-rgb, 22,119,255), 0.14); border-radius: 20rpx; padding: 28rpx; box-sizing: border-box; box-shadow: 0 8rpx 32rpx rgba(var(--deep-rgb, 10,46,92), 0.12); }
+.modal { position: fixed; left: 40rpx; right: 40rpx; top: 50%; transform: translateY(-50%); z-index: 1001; background: rgba(255,255,255,0.96); border: 2rpx solid rgba(var(--brand-rgb, 22,119,255), 0.14); border-radius: 20rpx; padding: 28rpx; box-sizing: border-box; box-shadow: 0 8rpx 32rpx rgba(var(--deep-rgb, 10,46,92), 0.12); }
 .modal-title { font-size: 30rpx; font-weight: 700; color: var(--ink-2, #243b55); margin-bottom: 20rpx; }
 .content-box { max-height: 56vh; }
 .content-box text { font-size: 25rpx; color: #334; line-height: 1.7; white-space: pre-wrap; }
@@ -128,7 +128,7 @@
 .tag-new-row .btn-plain { flex: none; height: 64rpx; line-height: 64rpx; margin: 0; }
 
 /* 监理日记生成入口：仅资料库「监理日记」文件夹内显示 */
-.diary-gen { margin-bottom: 26rpx; padding: 24rpx; background: rgba(255,255,255,0.40); border: 2rpx solid rgba(var(--brand-rgb, 22,119,255), 0.28); border-radius: 16rpx; box-shadow: 0 2rpx 8rpx rgba(0,0,0,0.04); }
+.diary-gen { margin-bottom: 26rpx; padding: 24rpx; background: #ffffff; border: 2rpx solid rgba(var(--brand-rgb, 22,119,255), 0.28); border-radius: 16rpx; box-shadow: 0 2rpx 8rpx rgba(0,0,0,0.04); }
 .diary-gen-title { font-size: 28rpx; font-weight: 700; color: var(--ink-2, #243b55); }
 .diary-gen-sub { margin-top: 8rpx; font-size: 22rpx; line-height: 1.5; color: #6b7c90; }
 .diary-gen-row { display: flex; align-items: center; gap: 16rpx; margin-top: 18rpx; }

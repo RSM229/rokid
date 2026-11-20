@@ -223,28 +223,18 @@ page {
    - 投影用品牌蓝而非灰黑，保持与整体调性一致。 */
 .glass, .card {
   position: relative;
-  background: linear-gradient(140deg, rgba(255, 255, 255, 0.94) 0%, rgba(var(--wash-rgb, 234,243,255), 0.80) 100%);
-  backdrop-filter: blur(36rpx) saturate(1.9);
-  -webkit-backdrop-filter: blur(36rpx) saturate(1.9);
-  border: 1rpx solid rgba(var(--brand-rgb, 22,119,255), 0.14);
+  background: #ffffff;
+  border: 1rpx solid rgba(17, 19, 26, 0.08);
   border-radius: 26rpx;
-  box-shadow:
-    inset 0 1rpx 0 rgba(255, 255, 255, 0.98),
-    inset 0 -14rpx 30rpx rgba(var(--brand-rgb, 22,119,255), 0.05),
-    0 8rpx 26rpx rgba(var(--shadow-rgb, 20,70,140), 0.10);
-  transition: background 0.25s ease, backdrop-filter 0.25s ease, -webkit-backdrop-filter 0.25s ease, box-shadow 0.25s ease, transform 0.12s ease;
+  box-shadow: 0 2rpx 12rpx rgba(22, 38, 74, 0.06);
+  transition: background 0.18s ease, box-shadow 0.18s ease, transform 0.12s ease;
 }
 
 /* 交互聚焦：轻点卡片时白度提升、模糊加深、投影扩散（8.3） */
 .glass:active, .card:active {
-  background: linear-gradient(140deg, rgba(255, 255, 255, 1) 0%, rgba(var(--wash-rgb, 234,243,255), 0.90) 100%);
-  backdrop-filter: blur(46rpx) saturate(2.3);
-  -webkit-backdrop-filter: blur(46rpx) saturate(2.3);
-  border-color: rgba(var(--brand-rgb, 22,119,255), 0.24);
-  box-shadow:
-    inset 0 1rpx 0 rgba(255, 255, 255, 1),
-    inset 0 -14rpx 30rpx rgba(var(--brand-rgb, 22,119,255), 0.07),
-    0 12rpx 34rpx rgba(var(--shadow-rgb, 20,70,140), 0.14);
+  background: #f7f9fc;
+  border-color: rgba(17, 19, 26, 0.12);
+  box-shadow: 0 4rpx 16rpx rgba(22, 38, 74, 0.10);
 }
 
 .card {
@@ -255,41 +245,20 @@ page {
 /* 品牌蓝渐变玻璃：用于头部横幅/重点面板（8.2） */
 .glass-blue, .glass-tint {
   position: relative;
-  background: linear-gradient(135deg, rgba(var(--brand-l-rgb, 59,140,255), 0.34) 0%, rgba(var(--brand-d-rgb, 11,95,208), 0.24) 100%);
-  backdrop-filter: blur(38rpx) saturate(1.9);
-  -webkit-backdrop-filter: blur(38rpx) saturate(1.9);
-  border: 1rpx solid rgba(255, 255, 255, 0.60);
+  background: rgba(var(--brand-rgb, 22,119,255), 0.06);
+  border: 1rpx solid rgba(17, 19, 26, 0.08);
   border-radius: 26rpx;
-  box-shadow: inset 0 1rpx 0 rgba(255, 255, 255, 0.60), 0 8rpx 26rpx rgba(var(--brand-rgb, 22,119,255), 0.18);
+  box-shadow: 0 8rpx 26rpx rgba(var(--brand-rgb, 22,119,255), 0.18);
   transition: background 0.25s ease, box-shadow 0.25s ease;
 }
 
 /* 多层玻璃（8.1）：在 .glass-2 上叠一层更深、更模糊的底层，营造由远及近景深 */
 .glass-2 {
   position: relative;
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.98) 0%, rgba(var(--wash-rgb, 234,243,255), 0.86) 100%);
-  backdrop-filter: blur(26rpx) saturate(1.9);
-  -webkit-backdrop-filter: blur(26rpx) saturate(1.9);
-  border: 1rpx solid rgba(var(--brand-rgb, 22,119,255), 0.16);
+  background: #ffffff;
+  border: 1rpx solid rgba(17, 19, 26, 0.08);
   border-radius: 28rpx;
-  box-shadow:
-    inset 0 1rpx 0 rgba(255, 255, 255, 1),
-    inset 0 -16rpx 34rpx rgba(var(--brand-rgb, 22,119,255), 0.05),
-    0 10rpx 34rpx rgba(var(--shadow-rgb, 20,70,140), 0.12);
-}
-.glass-2::after {
-  content: '';
-  position: absolute;
-  left: 12rpx;
-  right: 12rpx;
-  bottom: -12rpx;
-  height: 56%;
-  border-radius: inherit;
-  background: rgba(255, 255, 255, 0.34);
-  border: 1rpx solid rgba(var(--brand-rgb, 22,119,255), 0.10);
-  backdrop-filter: blur(48rpx) saturate(1.4);
-  -webkit-backdrop-filter: blur(48rpx) saturate(1.4);
-  z-index: -1;
+  box-shadow: 0 2rpx 12rpx rgba(22, 38, 74, 0.06);
 }
 
 /* 胶囊标签/筛选：轻量玻璃，可点聚焦（8.3/8.6） */
@@ -300,10 +269,8 @@ page {
   padding: 10rpx 22rpx;
   border-radius: 999rpx;
   background: rgba(255, 255, 255, 0.90);
-  border: 1rpx solid rgba(var(--brand-rgb, 22,119,255), 0.16);
-  backdrop-filter: blur(26rpx) saturate(1.8);
-  -webkit-backdrop-filter: blur(26rpx) saturate(1.8);
-  box-shadow: inset 0 1rpx 0 rgba(255, 255, 255, 0.98), 0 2rpx 10rpx rgba(var(--shadow-rgb, 20,70,140), 0.08);
+  border: 1rpx solid rgba(17, 19, 26, 0.08);
+  box-shadow: 0 2rpx 10rpx rgba(var(--shadow-rgb, 20,70,140), 0.08);
   font-size: 24rpx;
   color: var(--ink, #12253d);
   transition: all 0.2s ease;
@@ -334,7 +301,7 @@ page {
   color: #ffffff;
   background: linear-gradient(135deg, var(--brand-l, #3b8cff) 0%, var(--brand-d, #0b5fd0) 100%);
   border: 1rpx solid rgba(255, 255, 255, 0.35);
-  box-shadow: inset 0 1rpx 0 rgba(255, 255, 255, 0.35), 0 8rpx 24rpx rgba(var(--brand-rgb, 22,119,255), 0.30);
+  box-shadow: 0 8rpx 24rpx rgba(var(--brand-rgb, 22,119,255), 0.30);
   transition: filter 0.2s ease, transform 0.12s ease;
 }
 .primary:active {
@@ -346,7 +313,7 @@ page {
   color: #ffffff;
   background: linear-gradient(135deg, #c44848 0%, #a83232 100%);
   border: 1rpx solid rgba(255, 255, 255, 0.30);
-  box-shadow: inset 0 1rpx 0 rgba(255, 255, 255, 0.30), 0 8rpx 24rpx rgba(185, 56, 56, 0.25);
+  box-shadow: 0 8rpx 24rpx rgba(185, 56, 56, 0.25);
   transition: filter 0.2s ease, transform 0.12s ease;
 }
 .danger:active {
@@ -368,12 +335,10 @@ page {
   min-height: 88rpx;
   padding: 0 22rpx;
   line-height: 88rpx;
-  border: 1rpx solid rgba(var(--brand-rgb, 22,119,255), 0.16);
+  border: 1rpx solid rgba(17, 19, 26, 0.08);
   border-radius: 18rpx;
   background: rgba(255, 255, 255, 0.92);
-  backdrop-filter: blur(30rpx) saturate(1.8);
-  -webkit-backdrop-filter: blur(30rpx) saturate(1.8);
-  box-shadow: inset 0 1rpx 0 rgba(255, 255, 255, 0.98), 0 2rpx 10rpx rgba(var(--shadow-rgb, 20,70,140), 0.07);
+  box-shadow: 0 2rpx 10rpx rgba(var(--shadow-rgb, 20,70,140), 0.07);
   box-sizing: border-box;
 }
 

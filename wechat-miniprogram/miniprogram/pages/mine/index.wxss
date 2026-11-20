@@ -5,7 +5,7 @@
    本文件只留「我的」独占的部分：Hero、待上传、项目看板入口、退出登录。 */
 @import "../../styles/cell-list.wxss";
 
-.hero { display: flex; align-items: center; gap: 28rpx; padding: 40rpx 34rpx; background: linear-gradient(135deg, rgba(var(--deep-rgb, 10,46,92), 0.92), rgba(var(--brand-l-rgb, 59,140,255), 0.85)); backdrop-filter: blur(40rpx) saturate(1.8); -webkit-backdrop-filter: blur(40rpx) saturate(1.8); color: #fff; }
+.hero { display: flex; align-items: center; gap: 28rpx; padding: 40rpx 34rpx; background: linear-gradient(135deg, rgba(var(--deep-rgb, 10,46,92), 0.92), rgba(var(--brand-l-rgb, 59,140,255), 0.85)); color: #fff; }
 .avatar { width: 120rpx; height: 120rpx; border-radius: 50%; background: rgba(255,255,255,.25); text-align: center; line-height: 120rpx; font-size: 48rpx; font-weight: 700; }
 .name { font-size: 38rpx; font-weight: 700; }
 /* Hero 深底上的次要白字（卡片内的次要文字由 cell-list.wxss 的 .section .muted 覆盖成深色） */
@@ -18,7 +18,7 @@
 .upload-error { margin: 12rpx 0; color: #a33b32; }
 .upload-head { align-items: flex-start; }
 
-.logout-btn { margin: 48rpx 34rpx; color: #c0392b; border: 1rpx solid rgba(192,57,43,0.55); background: rgba(255,255,255,0.48); border-radius: 18rpx; font-size: 30rpx; }
+.logout-btn { margin: 48rpx 34rpx; color: #c0392b; border: 1rpx solid rgba(192,57,43,0.55); background: #ffffff; border-radius: 18rpx; font-size: 30rpx; }
 
 /* ============ 三个同级入口：项目看板 / 账号安全 / 设置（2026-10-12） ============
    布局基元（.entry-item/.entry-icon…）已上收 cell-list.wxss；本文件只留本页三个图标。 */
