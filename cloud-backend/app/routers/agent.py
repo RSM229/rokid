@@ -1990,7 +1990,12 @@ async def _agent_chat_impl(
     if personal_memory_block:
         messages.append({"role": "system", "content": personal_memory_block})
     if ref_context:
-        messages.append({"role": "system", "content": ref_context})
+        # 加显式抬头：这些是用户主动 @ 指定、并要求「以它为准」的材料，
+        # 与普通检索上下文区分开，否则模型会把它们当成泛泛的背景信息。
+        messages.append({
+            "role": "system",
+            "content": "【用户 @ 指定的资料（本轮请在下列材料范围内作答，超出范围要说明）】\n" + ref_context,
+        })
     if pend_for_context:
         messages.append({"role": "system", "content": render_context_summary(
             draft_for_context.get("args"), draft_for_context.get("facts"),
