@@ -1512,6 +1512,8 @@ Page(themed({
     this.reportMentionUsage()
     // 发送时收掉可能开着的 @ 面板（打字唤起后未选直接发送的场景）
     this.setData({ input: '', canSend: false, ...(this.data.showAtPanel ? { showAtPanel: false, atQuery: '' } : {}) })
+    // editor 不跟随 data.input 自动清空，必须显式清（否则发完输入框还留着旧内容）
+    this.clearEditor()
     this.atOpenedByTyping = false
 
     // 确定性本地动作：「返回主页」精确匹配 → 重置会话（其余自然语言交后端智能体）
@@ -6290,6 +6292,18 @@ Page(themed({
     const html = this.inputToEditorHtml(this.data.input)
     this.editorHtml = html
     this.editorCtx.setContents({ html })
+  },
+
+  /**
+   * 清空 editor 内容。
+   *
+   * editor 是独立于 data 的组件：把 data.input 置空不会影响它，
+   * 发送后必须显式清，否则输入框会残留上一条消息的文字与胶囊。
+   */
+  clearEditor() {
+    if (!this.data.useEditor || !this.editorCtx) return
+    this.editorHtml = ''
+    this.editorCtx.clear({})
   },
 
 

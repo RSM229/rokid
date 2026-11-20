@@ -172,4 +172,8 @@ test('输入框内 @ 引用渲染成行内胶囊：editor 为主、textarea 兜�
   assert.match(agent, /@\\\[资料库\(\?:检索\)\?\\s\[\^\\\]\]\*\\\]\/g/)
   // 追加引用后要把胶囊同步进 editor
   assert.match(agent, /void this\.syncEditorWithInput\(\)/)
+  // editor 不跟随 data.input 清空：发送后必须显式清，否则输入框残留上一条内容
+  assert.match(agent, /clearEditor\(\) \{/)
+  assert.match(agent, /this\.editorCtx\.clear\(\{\}\)/)
+  assert.match(agent, /this\.clearEditor\(\)/)
 })
