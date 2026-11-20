@@ -60,7 +60,15 @@
               <image wx:for="{{item.images}}" wx:for-item="img" wx:for-index="ii" wx:key="*this" class="msg-image-grid"
                      src="{{img}}" mode="aspectFill" data-url="{{img}}" bindtap="previewImageUrl" binderror="onMsgImgError" data-mi="{{mi}}" data-imgidx="{{ii}}" />
             </view>
-            <text wx:if="{{item.text}}" class="bubble-text" user-select="{{true}}">{{item.text}}</text>
+            <!-- 引用块：@[资料库 …] 渲染成彩色胶囊，与普通文字区分开。
+                 分段在发送时刻算好并随消息存下，所以老消息（无 segments）走下面的纯文本兜底。 -->
+            <view wx:if="{{item.segments}}" class="bubble-text bubble-segments">
+              <block wx:for="{{item.segments}}" wx:for-item="seg" wx:key="index">
+                <text wx:if="{{seg.kind === 'mention'}}" class="bubble-mention">{{seg.value}}</text>
+                <text wx:else class="bubble-plain" user-select="{{true}}">{{seg.value}}</text>
+              </block>
+            </view>
+            <text wx:else wx:if="{{item.text}}" class="bubble-text" user-select="{{true}}">{{item.text}}</text>
           </view>
           <view wx:if="{{item.text}}" class="bubble-meta">
             <text wx:if="{{item.timeText}}" class="bubble-time">{{item.timeText}}</text>
@@ -681,14 +689,20 @@
       <text class="at-panel-title">引用资料库</text>
       <view class="at-panel-close" catchtap="toggleAtPanel">×</view>
     </view>
-    <!-- 已选引用（可多选）：文件夹=整棵子树，文档=单份，关键词=按词检索；点 × 撤销并同步抹掉输入框 token -->
-    <view class="at-selected" wx:if="{{mentions.length}}">
-      <view class="at-selected-item" wx:for="{{mentions}}" wx:key="key" data-key="{{item.key}}" catchtap="removeMention">
+    <!-- 已选引用：档案条。文件夹显示「整棵子树·N 份」，文档显示所属路径，
+         超 3 条折叠成 +N；底部一行把范围语义说清楚（文件夹 ≠ 一个目录名）。 -->
+    <view class="at-selected" wx:if="{{mentionChips.length}}">
+      <view class="at-selected-item" wx:for="{{mentionChips}}" wx:key="key" data-key="{{item.key}}" catchtap="removeMention">
         <text class="at-selected-icon">{{item.type === 'kb_folder' ? '📁' : (item.type === 'kb_doc' ? '📄' : '🔍')}}</text>
-        <text class="at-selected-text">{{item.type === 'kb_query' ? '检索：' + item.name : item.name}}</text>
+        <view class="at-selected-body">
+          <text class="at-selected-name">{{item.type === 'kb_query' ? '检索：' + item.name : item.name}}</text>
+          <text class="at-selected-sub">{{item.type === 'kb_folder' ? (item.count ? '整棵子树 · ' + item.count + ' 份' : '空文件夹') : (item.type === 'kb_query' ? '按关键词检索' : (item.path || '未分类'))}}</text>
+        </view>
         <text class="at-selected-x">×</text>
       </view>
+      <view class="at-selected-more" wx:if="{{mentionOverflow}}">+{{mentionOverflow}}</view>
     </view>
+    <view class="at-scope-hint" wx:if="{{mentionsSummary}}">{{mentionsSummary}}</view>
     <input class="at-search" value="{{atQuery}}" placeholder="搜索资料库：文件夹或文件名（打 @ 号也可直接唤起）" placeholder-class="at-search-ph" bindinput="onAtSearch" confirm-type="search" />
     <scroll-view class="at-list" scroll-y>
       <view wx:if="{{atLoading && !atItems.length}}" class="at-empty">搜索中…</view>

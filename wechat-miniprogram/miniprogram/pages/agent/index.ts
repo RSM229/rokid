@@ -219,6 +219,10 @@ interface HazardCandidateView {
 interface Message {
   role: 'user' | 'assistant'
   text: string
+  /** 气泡分段：把「@[资料库 …]」切成独立片段，渲染成彩色引用块而不是普通文字。
+   *  只在发送时刻按 mentions 快照算一次并随消息存下；老消息没有这个字段时
+   *  WXML 回退到整段纯文本，不会出现「半个 token 被高亮」的幽灵样式。 */
+  segments?: Array<{ kind: 'text' | 'mention'; value: string }>
   /** 消息头展示时间（备案助手样式：名称 + 时间） */
   timeText?: string
   /** 发送失败标记（2026-11-19）：失败的用户消息显示「点击重发」，不再让文字默默丢掉 */
@@ -540,6 +544,31 @@ interface AtKbItem {
   picked?: boolean
 }
 
+/** 引用 token 的正则：与 pickAtItem 生成的格式严格对应（文件夹/文档用「资料库」，
+ *  模糊词用「资料库检索」）。只用于把文本切成展示片段，不参与引用语义判定。 */
+const MENTION_TOKEN_RE = /@\[资料库(?:检索)?\s[^\]]*\]/g
+
+/** 把消息文本切成「普通文字 / 引用」片段，供气泡渲染彩色块。 */
+function splitMentionSegments(text: string): Array<{ kind: 'text' | 'mention'; value: string }> {
+  const segments: Array<{ kind: 'text' | 'mention'; value: string }> = []
+  let cursor = 0
+  for (const match of text.matchAll(MENTION_TOKEN_RE)) {
+    const start = match.index ?? 0
+    if (start > cursor) segments.push({ kind: 'text', value: text.slice(cursor, start) })
+    segments.push({ kind: 'mention', value: match[0] })
+    cursor = start + match[0].length
+  }
+  if (cursor < text.length) segments.push({ kind: 'text', value: text.slice(cursor) })
+  return segments
+}
+
+/** 给消息补上分段快照；不含引用 token 时不写字段（保持老渲染路径）。 */
+function withMentionSegments(msg: Message): Message {
+  if (!msg.text || !msg.text.includes('@[')) return msg
+  const segments = splitMentionSegments(msg.text)
+  return segments.some(s => s.kind === 'mention') ? { ...msg, segments } : msg
+}
+
 /** @ 选中项：随 /agent/chat 结构化传给后端，后端据此限定检索范围。
  *  token 是插进输入框的可读文本，用户把它删掉就等于撤销这条引用。 */
 interface AtMention {
@@ -554,6 +583,8 @@ interface AtMention {
   path: string
   name: string
   token: string
+  /** 文件夹整棵子树的资料数（用于「共 N 份」汇总提示）；文档/关键词为 undefined */
+  count?: number
 }
 
 /** 工作记录字段候选值：语音里没说清楚的字段，先给常用项让用户点选，不合适再自己填写 */
@@ -696,6 +727,11 @@ Page(themed({
     atHasMore: false,
     /** 已选中的引用（多选）。是发请求时的唯一依据，输入框里的 token 只做回显 */
     mentions: [] as AtMention[],
+    /** 引用档案条：最多展示 3 条，其余折叠成「+N」 */
+    mentionChips: [] as AtMention[],
+    mentionOverflow: 0,
+    /** 发送前的范围语义提示，例：「将在 2 处引用（共 13 份资料）范围内检索」 */
+    mentionsSummary: '',
     /** 待发送附件：图片/文件可多选先挂在这里，补充文字后一次性发送识别 */
     attachments: [] as Attachment[],
     /**
@@ -1372,7 +1408,7 @@ Page(themed({
       return
     }
 
-    const userMsg: Message = { role: 'user', text, timeText: formatMessageTime() }
+    const userMsg: Message = withMentionSegments({ role: 'user', text, timeText: formatMessageTime() })
     // 发送时收掉可能开着的 @ 面板（打字唤起后未选直接发送的场景）
     this.setData({ input: '', canSend: false, ...(this.data.showAtPanel ? { showAtPanel: false, atQuery: '' } : {}) })
     this.atOpenedByTyping = false
@@ -4947,6 +4983,8 @@ Page(themed({
     if (msg.role === 'assistant' && msg.text) {
       msg = { ...msg, text: cleanMarkdown(msg.text) }
     }
+    // 引用 token → 气泡分段（只对带 token 的消息生效，其余走原渲染路径）
+    msg = withMentionSegments(msg)
     if (!msg.timeText) {
       msg = { ...msg, timeText: formatMessageTime() }
     }
@@ -5877,7 +5915,7 @@ Page(themed({
       ? `@[资料库 ${item.path || item.name}]`
       : `@[资料库 ${item.path ? `${item.path}/${item.name}` : item.name}]`
     const mention: AtMention = item.kind === 'folder'
-      ? { key: item.key, type: 'kb_folder', kb_id: item.kbId, folder_id: item.id, path: item.path, name: item.name, token }
+      ? { key: item.key, type: 'kb_folder', kb_id: item.kbId, folder_id: item.id, path: item.path, name: item.name, token, count: item.count }
       : { key: item.key, type: 'kb_doc', kb_id: item.kbId, doc_id: item.id, path: item.path, name: item.name, token }
     this.appendToken(token, mention)
     // 面板不关：多选是主场景，用户可能一次引用好几个文件夹
@@ -5900,13 +5938,13 @@ Page(themed({
     // 输入框里的 token 一并抹掉：token 只是回显，不能留下「已经撤销但仍显示」的假象
     const input = this.data.input.split(target.token).join('').replace(/\s{2,}/g, ' ').trim()
     this.setData({
-      mentions,
       input,
       canSend: Boolean(input) || this.data.attachments.length > 0,
       atItems: this.data.atItems.map(i =>
         i.key === key ? ({ ...i, picked: false } as AtKbItem) : i,
       ),
     })
+    this.refreshMentions(mentions)
   },
 
   /** 把 token 追加进输入框，同时登记引用；打字唤起时替换触发词而不是追加 */
@@ -5916,12 +5954,37 @@ Page(themed({
       const current = this.data.input
       const next = current.replace(/@([^\s@]*)$/, `${token} `)
       this.atOpenedByTyping = false
-      this.setData({ mentions, input: next, canSend: true })
+      this.setData({ input: next, canSend: true })
+      this.refreshMentions(mentions)
       return
     }
     const current = this.data.input
     const next = current ? `${current.replace(/\s+$/, '')} ${token} ` : `${token} `
-    this.setData({ mentions, input: next, canSend: true })
+    this.setData({ input: next, canSend: true })
+    this.refreshMentions(mentions)
+  },
+
+  /**
+   * 重算引用档案条的展示数据与范围语义。
+   *
+   * 为什么要单独算：WXML 里做不了 slice/求和，而「文件夹=整棵子树、共 N 份」
+   * 这个语义必须让用户看见——他只看到一行路径时，会以为只引用了一个目录名。
+   */
+  refreshMentions(mentions: AtMention[]) {
+    const chips = mentions.slice(0, 3)
+    const overflow = Math.max(0, mentions.length - 3)
+    const folders = mentions.filter(m => m.type === 'kb_folder')
+    const docs = mentions.filter(m => m.type === 'kb_doc')
+    const queries = mentions.filter(m => m.type === 'kb_query')
+    const total = folders.reduce((sum, m) => sum + (m.count || 0), 0) + docs.length
+    const parts: string[] = []
+    if (folders.length) parts.push(`${folders.length} 个文件夹（整棵子树）`)
+    if (docs.length) parts.push(`${docs.length} 份文档`)
+    if (queries.length) parts.push(`${queries.length} 个关键词`)
+    const summary = parts.length
+      ? `将在 ${parts.join(' + ')}${total ? `，共 ${total} 份资料` : ''}范围内检索`
+      : ''
+    this.setData({ mentions, mentionChips: chips, mentionOverflow: overflow, mentionsSummary: summary })
   },
 
   /** 发给后端的结构化引用；空数组表示不限定范围 */
@@ -5943,7 +6006,7 @@ Page(themed({
     if (!this.data.mentions.length) return
     const kept = this.data.mentions.filter(m => input.includes(m.token))
     if (kept.length !== this.data.mentions.length) {
-      this.setData({ mentions: kept })
+      this.refreshMentions(kept)
     }
   },
 

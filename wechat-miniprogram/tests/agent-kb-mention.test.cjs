@@ -83,3 +83,40 @@ test('模糊词：搜索框关键字本身可作为引用，随消息以 kb_quer
   assert.match(template, /item\.kind === 'query' \? '按「' \+ item\.name \+ '」检索资料库'/)
   assert.match(template, /item\.type === 'kb_query' \? '检索：' \+ item\.name/)
 })
+
+test('气泡里引用渲染成彩色胶囊，而不是和普通文字一样', () => {
+  // 分段在发送时刻算好并随消息存下（不靠渲染时正则解析文本）
+  assert.match(page, /segments\?: Array<\{ kind: 'text' \| 'mention'; value: string \}>/)
+  assert.match(page, /function splitMentionSegments\(text: string\)/)
+  assert.match(page, /const MENTION_TOKEN_RE = \/@\\\[资料库\(\?:检索\)\?\\s\[\^\\\]\]\*\\\]\/g/)
+  assert.match(page, /function withMentionSegments\(msg: Message\): Message/)
+  // 两条消息入口都要带上分段：addMessage（多数路径）+ 主发送路径的 userMsg
+  assert.match(page, /msg = withMentionSegments\(msg\)/)
+  assert.match(page, /const userMsg: Message = withMentionSegments\(\{ role: 'user', text/)
+  // 渲染成胶囊
+  assert.match(template, /class="bubble-mention">\{\{seg\.value\}\}<\/text>/)
+  assert.match(styles, /\.bubble-mention \{/)
+  // 老消息没有 segments 时必须回退纯文本，不能出现幽灵高亮
+  assert.match(template, /<text wx:else wx:if="\{\{item\.text\}\}" class="bubble-text"/)
+})
+
+test('引用档案条：双行信息 + 超量折叠 + 范围语义提示', () => {
+  assert.match(page, /mentionChips: \[\] as AtMention\[\]/)
+  assert.match(page, /mentionOverflow: 0/)
+  assert.match(page, /mentionsSummary: ''/)
+  assert.match(page, /const chips = mentions\.slice\(0, 3\)/)
+  assert.match(page, /const overflow = Math\.max\(0, mentions\.length - 3\)/)
+  // 文件夹必须说清「整棵子树 + N 份」，否则用户以为只引用了一个目录名
+  assert.match(page, /parts\.push\(`\$\{folders\.length\} 个文件夹（整棵子树）`\)/)
+  assert.match(page, /共 \$\{total\} 份资料/)
+  // 渲染
+  assert.match(template, /class="at-selected-name"/)
+  assert.match(template, /class="at-selected-sub">\{\{item\.type === 'kb_folder' \? \(item\.count \? '整棵子树/)
+  assert.match(template, /class="at-selected-more"[^>]*>\+\{\{mentionOverflow\}\}/)
+  assert.match(template, /class="at-scope-hint"[^>]*>\{\{mentionsSummary\}\}/)
+  // 三处变更都要重算档案条，否则 UI 与实际引用不一致
+  assert.match(page, /this\.refreshMentions\(mentions\)/)
+  assert.match(page, /this\.refreshMentions\(kept\)/)
+  assert.match(styles, /\.at-selected-sub \{/)
+  assert.match(styles, /\.at-scope-hint \{/)
+})
