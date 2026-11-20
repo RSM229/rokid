@@ -22,6 +22,7 @@ from fastapi import (
     File,
     Form,
     HTTPException,
+    Query,
     UploadFile,
 )
 from fastapi.responses import FileResponse
@@ -46,6 +47,7 @@ from app.models.project_archive import ProjectArchiveLibrary
 from app.models.project_member import ProjectMember
 from app.models.user import User
 from app.routers.auth import get_current_user, require_project_id
+from app.services import kb_search
 from app.services import model_gateway
 from app.services.ai_client import ai_client
 from app.services.knowledge_service import (
@@ -663,6 +665,41 @@ async def subscribe_knowledge_base(
     db.add(KnowledgeBaseMember(kb_id=kb.id, user_id=user.id, role="viewer"))
     await db.commit()
     return {"detail": "订阅成功", "kb_id": kb.id, "role": "viewer"}
+
+
+@router.get("/search")
+async def search_knowledge(
+    q: str = Query("", max_length=100, description="搜索词，可为空"),
+    kb_ids: Optional[str] = Query(None, description="逗号分隔的资料库 id；不传则搜全部可访问库"),
+    limit: int = Query(20, ge=1, le=60),
+    offset: int = Query(0, ge=0),
+    include_documents: bool = Query(True),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """资料库混排搜索：文件夹与文档按匹配度统一排序，供智能体 @ 面板使用。
+
+    搜索范围限定在「当前用户是成员」的资料库里（个人库 + 项目归档库）。
+    刻意做成独立接口而不是复用 ``/{kb_id}/documents``：@ 面板需要跨库、
+    需要文件夹与文档混排、还需要可解释的排序，这三点原接口都不提供。
+    """
+    scope: Optional[list[int]] = None
+    if kb_ids:
+        parsed: list[int] = []
+        for piece in str(kb_ids).split(","):
+            piece = piece.strip()
+            if piece.isdigit():
+                parsed.append(int(piece))
+        scope = parsed or None
+    return await kb_search.search(
+        db,
+        int(user.id),
+        q,
+        kb_ids=scope,
+        limit=limit,
+        offset=offset,
+        include_documents=include_documents,
+    )
 
 
 @router.get("/{kb_id}")

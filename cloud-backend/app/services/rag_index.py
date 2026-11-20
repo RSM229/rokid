@@ -319,6 +319,19 @@ def _matches(entry: dict, source_types, kb_id, project_id) -> bool:
     return True
 
 
+def _norm_rel(value: str | None) -> str:
+    """索引口径的路径归一化：统一正斜杠、去掉前导 ./ 与空白。
+
+    ``KbChunk.source_id`` 对知识库文档存的是相对 ``knowledge_base_path`` 的路径
+    （Windows 上是反斜杠），而 @ 面板传过来的白名单也按同一口径生成，
+    两边只差分隔符与前导符号，用这个函数抹平。
+    """
+    text = str(value or "").replace("\\", "/").strip()
+    while text.startswith("./"):
+        text = text[2:]
+    return text
+
+
 def _doc_key(value: str | None) -> str:
     """文档名归一化，用于「同一张表的不同副本」判定与「KG 实体 → 源文档」桥接匹配。
 
@@ -371,6 +384,7 @@ def search(
     kb_id: int | None = None,
     project_id: int | None = None,
     bridge: bool = False,
+    paths: set[str] | None = None,
 ) -> list[dict]:
     """混合检索（三路字段化召回 + 文档级 RRF 融合）。
 
@@ -400,6 +414,12 @@ def search(
         return []
 
     candidates = [e for e in entries if _matches(e, source_types, kb_id, project_id)]
+    if paths is not None:
+        # 用户在 @ 面板里显式圈定了文件夹/文件：只在白名单内检索。
+        # 语义桥是全局实体词典，它投的票可能落在范围外，scope 下必须关闭。
+        wanted = {_norm_rel(p) for p in paths}
+        candidates = [e for e in candidates if _norm_rel(e.get("source_id")) in wanted]
+        bridge = False
     if not candidates:
         return []
 

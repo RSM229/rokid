@@ -210,6 +210,11 @@ class AgentChatRequest(BaseModel):
     form_values: dict = Field(default_factory=dict)
     # /agent/request-plan 生成并校验过的候选。只作为路由候选，不能代替权限和服务端校验。
     request_plan: dict = Field(default_factory=dict)
+    # @ 面板选中的资料库引用（结构化）。每项形如
+    # {"type": "kb_folder"|"kb_doc"|"kb_query", "kb_id": 3, "folder_id": 12,
+    #  "doc_id": 88, "query": "钢筋 验收", "path": "施工规范/钢筋工程"}。
+    # 服务端据此把检索限制在白名单内；path/name 仅供回显，不参与判定。
+    mentions: list[dict] = Field(default_factory=list)
 
 
 class PurposeRecommendRequest(BaseModel):
@@ -870,12 +875,19 @@ async def _plain_answer(message: str, history: list[dict], provider: str | None,
 
 
 def _retrieve_citations(message: str, project_id: int | None,
-                        top_k: int = 5, min_score: float = 0.0) -> tuple[list[dict], str]:
-    """针对用户问题做一次混合检索，产出引用条目与资料块（失败静默降级为空）。"""
+                        top_k: int = 5, min_score: float = 0.0,
+                        paths: set[str] | None = None) -> tuple[list[dict], str]:
+    """针对用户问题做一次混合检索，产出引用条目与资料块（失败静默降级为空）。
+
+    ``paths`` 是 @ 面板选中的资料库白名单（相对 ``knowledge_base_path`` 的路径）；
+    非空时只在白名单内检索，等价于「在这几个文件夹/文件里找依据」。
+    """
     try:
         from app.services import rag_index
 
-        hits = rag_index.search(message, top_k=top_k, project_id=project_id) or []
+        hits = rag_index.search(
+            message, top_k=top_k, project_id=project_id, paths=paths,
+        ) or []
     except Exception:  # noqa: BLE001 —— 检索不可用不应阻断聊天
         logger.warning("引用检索失败", exc_info=True)
         return [], ""
@@ -998,14 +1010,19 @@ async def _plain_answer_cited(message: str, history: list[dict], provider: str |
                               project_id: int | None,
                               *, context_hint: str = "",
                               query_extra: str = "",
-                              require_context: bool = False) -> tuple[str, list[dict]]:
+                              require_context: bool = False,
+                              scope_paths: set[str] | None = None,
+                              scope_query: str = "") -> tuple[str, list[dict]]:
     if require_context:
         # 有指代但系统没有可对应的结果卡：不检索、不引用，让模型只追问
         citations: list[dict] = []
         block = ""
     else:
-        query = f"{message} {query_extra}".strip() if query_extra else message
-        citations, block = _retrieve_citations(query, project_id, min_score=0.3)
+        extra = " ".join(part for part in (query_extra, scope_query) if part).strip()
+        query = f"{message} {extra}".strip() if extra else message
+        citations, block = _retrieve_citations(
+            query, project_id, min_score=0.3, paths=scope_paths,
+        )
     messages = _plain_messages(
         message, history, mode, cite_block=block, context_hint=context_hint,
         require_context_hint=require_context,
@@ -1825,6 +1842,26 @@ async def _agent_chat_impl(
     message = (req.message or "").strip()
     if not message:
         raise HTTPException(status_code=400, detail="消息不能为空")
+
+    # @ 资料库引用 → 检索白名单。放在最前面是因为它直接影响后面所有检索路径
+    # （路由上下文、纯问答引用、流式回答）。解析失败不能挡住聊天，退化为不限范围。
+    scope_paths: set[str] | None = None
+    scope_query = ""
+    if req.mentions:
+        try:
+            from app.services import kb_search
+
+            resolved_paths, extra_queries = await kb_search.resolve_mentions(
+                db, user.id, req.mentions,
+            )
+            scope_query = " ".join(extra_queries).strip()
+            # 空集合（选中的文件夹是空的）与「没选」语义不同：
+            # 没选 → None（全局检索）；选了但没命中 → 空集（不外扩，只追问）。
+            scope_paths = resolved_paths if resolved_paths else set()
+        except Exception:  # noqa: BLE001 —— 引用解析失败不应阻断对话
+            logger.warning("@资料库引用解析失败", exc_info=True)
+            scope_paths = None
+            scope_query = ""
 
     await report_progress(
         "load_context", "running", "先看看当前项目的资料、刚才的对话，以及还没填完的草稿",
@@ -2732,6 +2769,7 @@ async def _agent_chat_impl(
                 message, req.history, req.provider, req.model, req.mode, project_id,
                 context_hint=context_hint, query_extra=query_extra,
                 require_context=require_context,
+                scope_paths=scope_paths, scope_query=scope_query,
             )
         except model_gateway.ModelGatewayError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -2739,13 +2777,16 @@ async def _agent_chat_impl(
         # 非流式：先复用路由模型的 answer（快）。若检索到高相关材料，则带材料
         # 用深度思考回答模型重生成——让回答真正基于资料（检索增强问答质量）。
         # 只保留模型真正用到的材料作为引用；无高相关材料时就维持路由 answer。
-        citations, block = _retrieve_citations(message, project_id, min_score=0.6)
+        citations, block = _retrieve_citations(
+            message, project_id, min_score=0.6, paths=scope_paths,
+        )
         if citations:
             try:
                 answer, citations = await _plain_answer_cited(
                     message, req.history, req.provider, req.model, req.mode, project_id,
                     context_hint=context_hint, query_extra=query_extra,
                     require_context=require_context,
+                    scope_paths=scope_paths, scope_query=scope_query,
                 )
             except model_gateway.ModelGatewayError as exc:
                 # 重生成失败不阻断：保留路由模型的 answer 和引用列表
