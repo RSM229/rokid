@@ -46,7 +46,9 @@ test('多选：已选引用成 chips，点选可反选，撤销同步抹掉 toke
 test('文件夹=整棵子树、文档=单份：token 与 mentions 结构对齐后端契约', () => {
   assert.match(page, /\{ key: item\.key, type: 'kb_folder', kb_id: item\.kbId, folder_id: item\.id/)
   assert.match(page, /\{ key: item\.key, type: 'kb_doc', kb_id: item\.kbId, doc_id: item\.id/)
-  assert.match(page, /token = item\.kind === 'folder'/)
+  // token 只放名字（完整路径由已选区的第二行承担；语义靠 folder_id/doc_id，不靠文本）
+  assert.match(page, /const token = `@\[资料库 \$\{item\.name\}\]`/)
+  assert.doesNotMatch(page, /token = item\.kind === 'folder'/)
   // 发送时带结构化引用
   assert.match(page, /buildChatMentions\(\): Array<Record<string, unknown>>/)
   assert.match(page, /mentions: this\.buildChatMentions\(\)/)
@@ -122,13 +124,12 @@ test('引用档案条：双行信息 + 超量折叠 + 范围语义提示', () =>
 })
 test('空查询有内容可看：browse 分三段渲染，不再给空面板', () => {
   assert.match(page, /if \(result\.mode === 'browse' && offset === 0\)/)
-  assert.match(page, /pushSection\('最近用过'/)
-  assert.match(page, /pushSection\('常用'/)
-  assert.match(page, /pushSection\('全部文件夹'/)
-  // 分组标题不可点选，否则点一下会生成"引用标题"这种脏数据
-  assert.match(page, /if \(item\.kind === 'header'\) return/)
-  assert.match(styles, /\.at-section \{/)
-  assert.match(template, /class="at-section">\{\{item\.name\}\}/)
+  // 「最近」单独存成横向快捷条，「常用」一段已移除（数据量小时与最近重叠，会造成重复勾）
+  assert.match(page, /atRecent: \[\] as AtKbItem\[\]/)
+  assert.match(page, /this\.setData\(\{ atRecent: recent, atAllItems: folders, atHasMore: false \}\)/)
+  assert.doesNotMatch(page, /result\.popular/)
+  assert.match(template, /<scroll-view class="at-recent" scroll-x/)
+  assert.match(styles, /\.at-recent-item \{/)
 })
 
 test('本地联想：打字先本地出结果，服务端结果到达后覆盖', () => {
@@ -137,7 +138,7 @@ test('本地联想：打字先本地出结果，服务端结果到达后覆盖',
   assert.match(page, /filterLocalItems\(query: string\): AtKbItem\[\]/)
   // onAtSearch 必须先本地立刻渲染（0ms 手感），再走防抖网络
   assert.match(page, /const local = this\.filterLocalItems\(raw\)/)
-  assert.match(page, /if \(local\.length\) \{[\s\S]{0,120}atItems: this\.markPicked\(local\)/)
+  assert.match(page, /if \(local\.length\) \{[\s\S]{0,160}atAllItems: local,[\s\S]{0,60}this\.applyCandidateFilter\(\)/)
   // 缓存要落 storage，进页面就能恢复
   assert.match(page, /wx\.setStorageSync\('gdjl_kb_local_index'/)
   assert.match(page, /const cached = wx\.getStorageSync\('gdjl_kb_local_index'\)/)
@@ -153,4 +154,18 @@ test('个性化埋点：发送时上报「真的用进对话」的引用', () =>
   assert.match(page, /this\.reportMentionUsage\(\)\s*\n\s*\/\/ 发送时收掉/)
   // kb_query 不进埋点（关键词不是稳定目标，后端 target_type 只收 folder/doc）
   assert.match(page, /filter\(m => m\.type === 'kb_folder' \|\| m\.type === 'kb_doc'\)/)
+})
+test('已选项从候选列表移除：同一对象不再同时出现在两处、带两个勾', () => {
+  // 核心不变量：已选的条目只在顶部「已选」区出现，候选列表把它过滤掉
+  assert.match(page, /withoutSelected\(items: AtKbItem\[\]\): AtKbItem\[\]/)
+  assert.match(page, /const chosen = new Set\(this\.data\.mentions\.map\(m => m\.key\)\)/)
+  assert.match(page, /return items\.filter\(item => item\.kind !== 'header' && !chosen\.has\(item\.key\)\)/)
+  // 候选列表 = atAllItems 过滤后的结果，撤销后能回到列表
+  assert.match(page, /applyCandidateFilter\(\) \{/)
+  assert.match(page, /atItems: this\.withoutSelected\(this\.data\.atAllItems\)/)
+  // 任何一次引用变更都要重算，否则会出现"选了却还在候选里"
+  assert.match(page, /this\.refreshMentions\(mentions\)/)
+  assert.match(page, /this\.applyCandidateFilter\(\)\s*\n\s*\},/)
+  // 候选行不再显示勾（勾只保留在「最近」快捷条上表示状态）
+  assert.doesNotMatch(template, /class="at-item-check"/)
 })

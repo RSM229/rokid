@@ -691,9 +691,9 @@
       <text class="at-panel-title">引用资料库</text>
       <view class="at-panel-close" catchtap="toggleAtPanel">×</view>
     </view>
-    <!-- 已选引用：档案条。文件夹显示「整棵子树·N 份」，文档显示所属路径，
-         超 3 条折叠成 +N；底部一行把范围语义说清楚（文件夹 ≠ 一个目录名）。 -->
+    <!-- 已选区：唯一表达"选了什么"的地方。同一对象不会在候选列表里再出现一次。 -->
     <view class="at-selected" wx:if="{{mentionChips.length}}">
+      <view class="at-selected-head">已选 {{mentions.length}} 项</view>
       <view class="at-selected-item" wx:for="{{mentionChips}}" wx:key="key" data-key="{{item.key}}" catchtap="removeMention">
         <text class="at-selected-icon">{{item.type === 'kb_folder' ? '📁' : (item.type === 'kb_doc' ? '📄' : '🔍')}}</text>
         <view class="at-selected-body">
@@ -706,23 +706,29 @@
     </view>
     <view class="at-scope-hint" wx:if="{{mentionsSummary}}">{{mentionsSummary}}</view>
     <input class="at-search" value="{{atQuery}}" placeholder="搜索资料库：文件夹或文件名（打 @ 号也可直接唤起）" placeholder-class="at-search-ph" bindinput="onAtSearch" confirm-type="search" />
+    <!-- 最近用过：一行横向快捷条，可滑动；不占纵向空间，也不与下面的候选重复 -->
+    <scroll-view class="at-recent" scroll-x wx:if="{{atRecent.length && !atQuery}}">
+      <view class="at-recent-item {{item.picked ? 'picked' : ''}}" wx:for="{{atRecent}}" wx:key="key" data-key="{{item.key}}" catchtap="pickAtItem">
+        <text class="at-recent-icon">{{item.kind === 'folder' ? '📁' : '📄'}}</text>
+        <text class="at-recent-name">{{item.name}}</text>
+      </view>
+    </scroll-view>
     <scroll-view class="at-list" scroll-y>
       <view wx:if="{{atLoading && !atItems.length}}" class="at-empty">搜索中…</view>
       <block wx:else>
-        <view wx:if="{{!atItems.length}}" class="at-empty">{{atQuery ? '没有匹配的资料' : '输入关键字搜索资料库'}}</view>
-        <!-- 列表项：分组标题（最近用过/常用/全部文件夹）只做视觉分隔，不可点选。
-             wx:if/wx:else 必须成对且同层相邻，所以放在 block 内部按 item.kind 分支。 -->
-        <block wx:for="{{atItems}}" wx:key="key">
-          <view wx:if="{{item.kind === 'header'}}" class="at-section">{{item.name}}</view>
-          <view wx:else class="at-item {{item.picked ? 'picked' : ''}}" data-key="{{item.key}}" catchtap="pickAtItem">
-            <view class="at-item-icon">{{item.kind === 'folder' ? '📁' : (item.kind === 'doc' ? '📄' : '🔍')}}</view>
-            <view class="at-item-body">
+        <view wx:if="{{!atItems.length}}" class="at-empty">{{atQuery ? '没有更多匹配的资料' : (mentions.length ? '已全部选入上方' : '输入关键字搜索资料库')}}</view>
+        <!-- 候选列表：只有还没选的条目。已选项在顶部「已选」区，不会再出现一次 -->
+        <view class="at-item" wx:for="{{atItems}}" wx:key="key" data-key="{{item.key}}" catchtap="pickAtItem">
+          <view class="at-item-icon">{{item.kind === 'folder' ? '📁' : (item.kind === 'doc' ? '📄' : '🔍')}}</view>
+          <view class="at-item-body">
+            <!-- 库名放行首：个人库与项目库各有一份同名预设树，扫视时行首标签比行尾小字更快区分 -->
+            <view class="at-item-line">
+              <text class="at-item-kb" wx:if="{{item.kbName}}">{{item.kbName}}</text>
               <text class="at-item-label">{{item.kind === 'query' ? '按「' + item.name + '」检索资料库' : (item.kind === 'folder' ? item.path : item.name)}}</text>
-              <text class="at-item-desc">{{item.kind === 'query' ? '不挑具体文件，让智能体在这个关键词上找依据' : (item.kind === 'folder' ? (item.count ? item.count + ' 份资料·含子文件夹' : '空文件夹') : (item.path || '未分类'))}}{{item.kbName ? ' · ' + item.kbName : ''}}</text>
             </view>
-            <text class="at-item-check" wx:if="{{item.picked}}">✓</text>
+            <text class="at-item-desc">{{item.kind === 'query' ? '不挑具体文件，让智能体在这个关键词上找依据' : (item.kind === 'folder' ? (item.count ? item.count + ' 份资料·含子文件夹' : '空文件夹') : (item.path || '未分类'))}}</text>
           </view>
-        </block>
+        </view>
         <view wx:if="{{atHasMore}}" class="at-more" catchtap="loadMoreAt">{{atLoading ? '加载中…' : '加载更多'}}</view>
       </block>
     </scroll-view>

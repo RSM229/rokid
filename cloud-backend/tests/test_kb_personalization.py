@@ -110,7 +110,8 @@ class BrowseTests(unittest.IsolatedAsyncioTestCase):
             result = await kb_search.browse(session, 1)
         self.assertEqual(result["mode"], "browse")
         self.assertEqual(result["recent"], [])
-        self.assertEqual(result["popular"], [])
+        # 「最常用」一段已移除：数据量小时它与 recent 重叠，会导致同一项出现两次
+        self.assertNotIn("popular", result)
         # 有内容的文件夹先出，且按子树文档数倒序（监理日志 5 > 验收记录 2）
         self.assertEqual([f["name"] for f in result["folders"]][:2], ["监理日志", "验收记录"])
         # 根目录仍会补上，保证面板不空
@@ -128,9 +129,12 @@ class BrowseTests(unittest.IsolatedAsyncioTestCase):
              patch.object(kb_search, "_kb_name_map", return_value={3: "我的库"}):
             result = await kb_search.browse(session, 1)
         self.assertEqual([x["kind"] for x in result["recent"]], ["doc", "folder"])
-        # popular 按 hits 倒序：文件夹 9 次 > 文档 4 次
-        self.assertEqual([x["kind"] for x in result["popular"]], ["folder", "doc"])
         self.assertEqual(result["recent"][0]["path"], "项目文件夹/验收记录")
+        # 已出现在 recent 的文件夹必须从候选里剔除，否则同一项会出现两次
+        recent_keys = {(x["kind"], x["id"]) for x in result["recent"]}
+        folder_keys = {(x["kind"], x["id"]) for x in result["folders"]}
+        self.assertFalse(recent_keys & folder_keys, "recent 与 folders 不能重复")
+        self.assertNotIn(11, [f["id"] for f in result["folders"]])
 
 
 class RecordMentionsTests(unittest.IsolatedAsyncioTestCase):

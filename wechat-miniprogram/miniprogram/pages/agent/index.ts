@@ -749,6 +749,10 @@ Page(themed({
     atQuery: '',
     /** 搜索结果的混排列表：文件夹与文档在同一条流里，按后端给的匹配度排序 */
     atItems: [] as AtKbItem[],
+    /** 未经「已选过滤」的完整候选集：撤销引用后要能重新出现，所以单独留一份 */
+    atAllItems: [] as AtKbItem[],
+    /** 「最近用过」横向快捷条（空查询时出现一次，不占纵向空间） */
+    atRecent: [] as AtKbItem[],
     atLoading: false,
     atHasMore: false,
     /** 已选中的引用（多选）。是发请求时的唯一依据，输入框里的 token 只做回显 */
@@ -5868,20 +5872,15 @@ Page(themed({
         data: { q: query, offset, limit: 20, project_id: this.data.currentProjectId || undefined },
       })
       if (seq !== this.atSearchSeq) return   // 已有更新的请求，丢弃这次结果
-      // 空查询 → 后端返回 browse：最近用过 / 常用 / 全部文件夹。
-      // 这是「打出 @ 之后不知道该输什么」的解法——先给有意义的默认项。
+      // 空查询 → 后端返回 browse：最近用过 + 候选文件夹。
+      // 「最近」渲染成一行横向快捷条（不占纵向空间），候选列表只放还没选的，
+      // 这样同一个文件夹永远不会同时出现在两处、带着两个勾。
       if (result.mode === 'browse' && offset === 0) {
-        const sections: AtKbItem[] = []
-        const pushSection = (title: string, items: AtKbItem[]) => {
-          if (!items.length) return
-          sections.push({ kind: 'header', key: `h-${title}`, kbId: 0, id: 0, name: title, path: '', score: 0 })
-          sections.push(...items)
-        }
-        pushSection('最近用过', (result.recent || []).map(toKbItem))
-        pushSection('常用', (result.popular || []).map(toKbItem))
-        pushSection('全部文件夹', (result.folders || []).map(toKbItem))
-        this.rememberLocalItems(sections)
-        this.setData({ atItems: this.markPicked(sections), atHasMore: false })
+        const recent = (result.recent || []).map(toKbItem)
+        const folders = (result.folders || []).map(toKbItem)
+        this.rememberLocalItems(recent.concat(folders))
+        this.setData({ atRecent: recent, atAllItems: folders, atHasMore: false })
+        this.applyCandidateFilter()
         return
       }
       const incoming: AtKbItem[] = []
@@ -5897,8 +5896,9 @@ Page(themed({
         })
       }
       this.rememberLocalItems(incoming)
-      const merged = offset > 0 ? this.data.atItems.concat(incoming) : incoming
-      this.setData({ atItems: this.markPicked(merged), atHasMore: Boolean(result.has_more) })
+      const merged = offset > 0 ? this.data.atAllItems.concat(incoming) : incoming
+      this.setData({ atAllItems: merged, atHasMore: Boolean(result.has_more) })
+      this.applyCandidateFilter()
     } catch {
       // 搜索失败保持面板可用（仍能打 @词 交给后端做模糊检索），只在空结果时给提示
       if (offset === 0) this.setData({ atItems: [], atHasMore: false })
@@ -5949,10 +5949,29 @@ Page(themed({
     return hits
   },
 
-  /** 给列表项打上「已选中」标记 */
+  /** 给列表项打上「已选中」标记（仅用于「最近」快捷条的回显） */
   markPicked(items: AtKbItem[]): AtKbItem[] {
     const chosen = new Set(this.data.mentions.map(m => m.key))
     return items.map(item => (item.kind === 'header' ? item : { ...item, picked: chosen.has(item.key) }))
+  },
+
+  /** 从 atAllItems 重算候选列表：已选的剔除，未选的打勾（勾只用于「最近」条） */
+  applyCandidateFilter() {
+    this.setData({
+      atItems: this.withoutSelected(this.data.atAllItems),
+      atRecent: this.markPicked(this.data.atRecent),
+    })
+  },
+
+  /**
+   * 候选列表去掉已选项。
+   *
+   * 这是本次重构的核心：已选的东西只在顶部「已选」区出现一次。
+   * 之前同一文件夹会在三个分组里各出现一次、各带一个勾，用户会误以为选了很多条。
+   */
+  withoutSelected(items: AtKbItem[]): AtKbItem[] {
+    const chosen = new Set(this.data.mentions.map(m => m.key))
+    return items.filter(item => item.kind !== 'header' && !chosen.has(item.key))
   },
 
   onAtSearch(event: WechatMiniprogram.Input) {
@@ -5961,7 +5980,8 @@ Page(themed({
     // 立刻用本地索引出结果（不打网络），随后再用服务端结果覆盖
     const local = this.filterLocalItems(raw)
     if (local.length) {
-      this.setData({ atItems: this.markPicked(local), atHasMore: false })
+      this.setData({ atAllItems: local, atRecent: [], atHasMore: false })
+      this.applyCandidateFilter()
     }
     // 250ms 防抖：搜索走服务端，敲字节奏远快于往返，攒一攒再发
     if (this.atSearchTimer !== null) clearTimeout(this.atSearchTimer)
@@ -5999,25 +6019,17 @@ Page(themed({
         name: item.name, query: item.name, token,
       }
       this.appendToken(token, mention)
-      this.setData({
-        atItems: this.data.atItems.map(i =>
-          i.key === item.key ? ({ ...i, picked: true } as AtKbItem) : i,
-        ),
-      })
+      // refreshMentions 里会 applyCandidateFilter，条目自动从候选列表消失
       return
     }
-    const token = item.kind === 'folder'
-      ? `@[资料库 ${item.path || item.name}]`
-      : `@[资料库 ${item.path ? `${item.path}/${item.name}` : item.name}]`
+    // token 只放名字：完整路径由顶部「已选」区的第二行承担，输入框保持清爽。
+    // 真正的语义由 mentions 里的 folder_id/doc_id 决定，不依赖这段文本。
+    const token = `@[资料库 ${item.name}]`
     const mention: AtMention = item.kind === 'folder'
       ? { key: item.key, type: 'kb_folder', kb_id: item.kbId, folder_id: item.id, path: item.path, name: item.name, token, count: item.count }
       : { key: item.key, type: 'kb_doc', kb_id: item.kbId, doc_id: item.id, path: item.path, name: item.name, token }
     this.appendToken(token, mention)
     // 面板不关：多选是主场景，用户可能一次引用好几个文件夹
-    const nextItems = this.data.atItems.map(i =>
-      i.key === item.key ? ({ ...i, picked: true } as AtKbItem) : i,
-    )
-    this.setData({ atItems: nextItems })
   },
 
   /** 已选引用上的 × */
@@ -6080,6 +6092,8 @@ Page(themed({
       ? `将在 ${parts.join(' + ')}${total ? `，共 ${total} 份资料` : ''}范围内检索`
       : ''
     this.setData({ mentions, mentionChips: chips, mentionOverflow: overflow, mentionsSummary: summary })
+    // 选中 → 从候选里消失；撤销 → 回到候选。两处必须同步刷新。
+    this.applyCandidateFilter()
   },
 
   /** 发给后端的结构化引用；空数组表示不限定范围 */

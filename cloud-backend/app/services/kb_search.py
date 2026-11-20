@@ -551,17 +551,20 @@ async def browse(
     kb_ids: Optional[Sequence[int]] = None,
     limit: int = 12,
 ) -> dict:
-    """空查询时的「有东西可看」：最近用过 / 最常用 / 全部文件夹。
+    """空查询时的「有东西可看」：最近用过 + 候选文件夹。
 
     为什么需要它：用户打出 @ 时脑子里还没有关键词——给一个空列表等于让人
-    猜该输入什么。专业做法（Linear 命令面板、Notion @ 菜单、Slack 频道选择）
-    都是先给出有意义的默认项，再让用户缩小范围。
+    猜该输入什么。专业做法（命令面板类控件）都是先给出有意义的默认项，
+    再让用户缩小范围。
 
-    三段的取法有讲究：
-    * ``recent``  取埋点里最近用过的（last_used_at desc），最多 5 条——「我刚才用的」
-    * ``popular`` 取埋点里用得最多的（hits desc），最多 5 条——「我常用的」
+    两段的取法：
+    * ``recent``  最近用过的（last_used_at desc），最多 5 条——「我刚才用的」，
+      前端渲染成一行横向快捷条，不占纵向空间
     * ``folders`` 兜底给有文档的文件夹（按整棵子树文档数 desc）+ 预设根目录，
-      保证新用户（埋点为空）也不会看到空面板
+      保证新用户（埋点为空）也不会看到空面板；**已出现在 recent 的会被剔除**
+
+    为什么去掉「最常用」一段：数据量小时它与 recent 高度重叠，同一个文件夹
+    在两段里各出现一次并各带一个勾，会让用户误以为选了很多条。
     """
     from app.models.knowledge_base import KbMentionStat
 
@@ -570,7 +573,7 @@ async def browse(
         wanted = {int(x) for x in kb_ids}
         allowed = [kb_id for kb_id in allowed if kb_id in wanted]
 
-    result = {"mode": "browse", "kb_ids": allowed, "recent": [], "popular": [], "folders": []}
+    result = {"mode": "browse", "kb_ids": allowed, "recent": [], "folders": []}
     if not allowed:
         return result
 
@@ -658,28 +661,18 @@ async def browse(
         if item:
             recent_rows.append((last, item))
     recent_rows.sort(key=lambda pair: pair[0] or datetime.min, reverse=True)
-    result["recent"] = [item for _last, item in recent_rows[:5]]
+    recent_items = [item for _last, item in recent_rows[:5]]
+    result["recent"] = recent_items
 
-    # popular：按命中次数倒序（同次数按名字稳定排序）
-    popular_rows: list[tuple[int, dict]] = []
-    for folder_id, kb_id, hits, _last in folder_stats:
-        item = folder_item(int(folder_id), int(kb_id))
-        if item:
-            popular_rows.append((int(hits or 0), item))
-    for target_id, kb_id, hits, _last in doc_stats:
-        item = doc_rows.get(int(target_id))
-        if item:
-            popular_rows.append((int(hits or 0), item))
-    popular_rows.sort(key=lambda pair: (-pair[0], pair[1]["name"]))
-    result["popular"] = [item for _hits, item in popular_rows[:5]]
-
-    # folders：兜底——有文档的文件夹按数量倒序，再补预设根目录
+    # folders：兜底——有文档的文件夹按数量倒序，再补预设根目录。
+    # 关键：已经出现在 recent 里的条目在这里**必须剔除**，否则同一个文件夹会在
+    # 「最近」和「候选」里各出现一次，用户看到多个勾会以为选了很多东西。
+    seen_keys = {_item_key(item) for item in recent_items}
     ordered = sorted(
         nodes.values(),
         key=lambda n: (-int(subtree_counts.get(n["id"], 0)), n["path"]),
     )
     picked: list[dict] = []
-    seen: set[int] = set()
     for node in ordered:
         if len(picked) >= limit:
             break
@@ -688,20 +681,37 @@ async def browse(
         if not subtree_counts.get(node["id"]):
             continue
         item = folder_item(node["id"], node["kb_id"])
-        if item and item["id"] not in seen:
-            seen.add(item["id"])
-            picked.append(item)
+        if item is None:
+            continue
+        key = _item_key(item)
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        picked.append(item)
     for node in ordered:
         if len(picked) >= limit:
             break
         if node["parent_id"] is not None:
             continue
         item = folder_item(node["id"], node["kb_id"])
-        if item and item["id"] not in seen:
-            seen.add(item["id"])
-            picked.append(item)
+        if item is None:
+            continue
+        key = _item_key(item)
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        picked.append(item)
     result["folders"] = picked
     return result
+
+
+def _item_key(item: dict) -> tuple[str, int]:
+    """browse 结果项的唯一键：类型 + id。
+
+    不用「路径」做键：个人库与项目库各有一份同名预设树（路径完全一样），
+    按路径去重会把两个不同库里的文件夹误合并成一个。
+    """
+    return (str(item.get("kind") or ""), int(item.get("id") or 0))
 
 
 # ---------------------------------------------------------------- 引用解析
