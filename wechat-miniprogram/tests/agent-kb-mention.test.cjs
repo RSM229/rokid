@@ -97,7 +97,7 @@ test('气泡里引用渲染成彩色胶囊，而不是和普通文字一样', ()
   assert.match(template, /class="bubble-mention">\{\{seg\.value\}\}<\/text>/)
   assert.match(styles, /\.bubble-mention \{/)
   // 老消息没有 segments 时必须回退纯文本，不能出现幽灵高亮
-  assert.match(template, /<text wx:else wx:if="\{\{item\.text\}\}" class="bubble-text"/)
+  assert.match(template, /<block wx:else>\s*<text wx:if="\{\{item\.text\}\}" class="bubble-text"/)
 })
 
 test('引用档案条：双行信息 + 超量折叠 + 范围语义提示', () => {

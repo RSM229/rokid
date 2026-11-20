@@ -68,7 +68,9 @@
                 <text wx:else class="bubble-plain" user-select="{{true}}">{{seg.value}}</text>
               </block>
             </view>
-            <text wx:else wx:if="{{item.text}}" class="bubble-text" user-select="{{true}}">{{item.text}}</text>
+            <block wx:else>
+              <text wx:if="{{item.text}}" class="bubble-text" user-select="{{true}}">{{item.text}}</text>
+            </block>
           </view>
           <view wx:if="{{item.text}}" class="bubble-meta">
             <text wx:if="{{item.timeText}}" class="bubble-time">{{item.timeText}}</text>
