@@ -293,8 +293,6 @@ interface Message {
   reviewResult?: string
   reviewIssues?: string[]
   reviewSummary?: string
-  /** 工作记录草稿详情默认收起，点按钮再展开 */
-  reviewDetailsExpanded?: boolean
   progressRequestId?: string
   progressEvents?: AgentProgressEventView[]
   progressExpanded?: boolean
@@ -308,6 +306,26 @@ interface Message {
   /** 独立会话的文书复核意见，并进同一条回执、默认收起 */
   docReview?: { items: Array<{ id: string; level: string; text: string }>; status: string }
   docReviewExpanded?: boolean
+}
+
+/** /kb/search 响应：文件夹与文档混排，score 越大越靠前，has_more 控制「加载更多」 */
+interface KbSearchResponse {
+  query: string
+  kb_ids: number[]
+  folders: Array<{ id: number; kb_id: number; name: string; path: string; count: number; score: number }>
+  documents: Array<{
+    id: number
+    kb_id: number
+    name: string
+    folder_id?: number | null
+    folder_path: string
+    size_bytes?: number
+    created_at?: string | null
+    score: number
+  }>
+  has_more: boolean
+  total_folders: number
+  total_documents: number
 }
 
 /** /agent/chat 响应：kind=action 表示服务端已执行动作，chat 表示纯问答 */
@@ -500,17 +518,36 @@ function sessionIdFromConversationId(conversationId: string): number {
  *  - provider='huagong' 走华南理工独立供应商（未配置则后端自动回退默认模型）。 */
 const CHAT_MODELS = MODEL_CATALOG
 
-/** @ 提及面板：快捷指令项（点选后把提示词填进输入框，用户可继续补充） */
-interface AtQuickItem { key: string; icon: string; label: string; desc: string; prompt: string }
-const AT_QUICK_ITEMS: AtQuickItem[] = [
-  { key: 'write-record', icon: '📝', label: '写工作记录', desc: '口述现场情况，带你逐项补齐', prompt: '帮我写一条工作记录：' },
-  { key: 'hazard', icon: '🔍', label: '隐患识别', desc: '拍照识别现场安全隐患', prompt: '帮我识别这张照片里的安全隐患' },
-  { key: 'query-spec', icon: '📚', label: '查规范', desc: '查规范条文与验收要点', prompt: '帮我查一下这条规范的要求：' },
-  { key: 'daily-log', icon: '📋', label: '生成监理日志', desc: '按当日记录汇总日志', prompt: '帮我生成今天的监理日志' },
-  { key: 'acceptance', icon: '✅', label: '验收要点', desc: '列出某工序必查项', prompt: '帮我列出这个工序的验收必查项：' },
-]
-interface AtMember { id: number; real_name: string }
-interface AtBizItem { key: string; icon: string; label: string; desc: string; ref: string }
+/** @ 资料库搜索结果项：文件夹与文档混排（kind 区分渲染与选中语义）。 */
+interface AtKbItem {
+  kind: 'folder' | 'doc'
+  key: string
+  kbId: number
+  /** folder_id 或 doc_id，取决于 kind */
+  id: number
+  name: string
+  /** 文件夹自身的路径，或文档所在文件夹的路径 */
+  path: string
+  /** 文件夹整棵子树下的文档数；文档为 undefined */
+  count?: number
+  score: number
+  /** 是否已被选中（列表里打勾，避免重复添加） */
+  picked?: boolean
+}
+
+/** @ 选中项：随 /agent/chat 结构化传给后端，后端据此限定检索范围。
+ *  token 是插进输入框的可读文本，用户把它删掉就等于撤销这条引用。 */
+interface AtMention {
+  /** 与搜索结果项同源的稳定 key（kb-folder-12 / kb-doc-88），用于打勾与撤销 */
+  key: string
+  type: 'kb_folder' | 'kb_doc'
+  kb_id: number
+  folder_id?: number
+  doc_id?: number
+  path: string
+  name: string
+  token: string
+}
 
 /** 工作记录字段候选值：语音里没说清楚的字段，先给常用项让用户点选，不合适再自己填写 */
 const FIELD_SUGGESTIONS: Record<string, string[]> = {
@@ -546,6 +583,8 @@ Page(themed({
   pendingRecordCancel: false,
   /** 当前会话在本地历史里的 id（稳定不变，重复保存=覆盖同一条，避免产生重复历史） */
   currentSessionId: 0,
+  /** @ 搜索的请求序号：只有最新一次请求的结果才允许落库，防止慢响应覆盖新结果 */
+  atSearchSeq: 0,
   inlinePlanSaveQueues: {} as Record<string, Promise<void>>,
   /** 页面正在卸载（切 tab / 切后台 / 关闭）：此时在飞的请求会被微信中止，
    *  属预期，catch 里据此不打刺眼「调用失败」。 */
@@ -641,15 +680,15 @@ Page(themed({
     modelShortName: 'DeepSeek V4.1',
     showModelMenu: false,
     showPlusPanel: false,
-    /** @ 提及面板：输入卡里的统一引用选择器（快捷指令 / 成员 / 业务引用） */
+    /** @ 引用面板：只保留「资料库」一个入口（文件夹 / 文档 / 模糊词） */
     showAtPanel: false,
-    atTab: 'quick' as 'quick' | 'member' | 'biz',
     atQuery: '',
-    atQuickItems: AT_QUICK_ITEMS,
-    atMembers: [] as AtMember[],
-    atBiz: [] as AtBizItem[],
-    atVisibleItems: AT_QUICK_ITEMS as AtQuickItem[] | AtMember[] | AtBizItem[],
+    /** 搜索结果的混排列表：文件夹与文档在同一条流里，按后端给的匹配度排序 */
+    atItems: [] as AtKbItem[],
     atLoading: false,
+    atHasMore: false,
+    /** 已选中的引用（多选）。是发请求时的唯一依据，输入框里的 token 只做回显 */
+    mentions: [] as AtMention[],
     /** 待发送附件：图片/文件可多选先挂在这里，补充文字后一次性发送识别 */
     attachments: [] as Attachment[],
     /**
@@ -844,14 +883,6 @@ Page(themed({
   toggleAgentForm(event: WechatMiniprogram.TouchEvent) {
     const messageIndex = Number(event.currentTarget.dataset.message)
     this.updateAgentForm(messageIndex, form => ({ ...form, expanded: !form.expanded }))
-  },
-
-  toggleInlineReviewDetails(event: WechatMiniprogram.TouchEvent) {
-    const index = Number(event.currentTarget.dataset.index)
-    const messages = [...this.data.messages]
-    if (!messages[index]?.reviewPlan) return
-    messages[index] = { ...messages[index], reviewDetailsExpanded: !messages[index].reviewDetailsExpanded }
-    this.setData({ messages })
   },
 
   /** 分组建单一次回多张记录卡：默认收起，避免刷屏；点开才展示，单条仍直接显示 */
@@ -3118,6 +3149,7 @@ Page(themed({
           images: images.map(i => i.remoteUrl).filter(Boolean),
           mode: this.data.mode,
           request_plan: requestPlan,
+          mentions: this.buildChatMentions(),
           provider: selModel?.provider || undefined,
           model: selModel?.model || undefined,
         },
@@ -3270,7 +3302,6 @@ Page(themed({
       role: 'assistant',
       text: result.reply || '智能体未返回内容',
       timeText: formatMessageTime(),
-      reviewDetailsExpanded: false,
       cards,
       actions,
       chips: chips.length ? chips : undefined,
@@ -3559,6 +3590,7 @@ Page(themed({
           conversation_id: conversationIdFor(this.currentSessionId),
           history,
           mode: this.data.mode,
+          mentions: this.buildChatMentions(),
           provider: selectedModel?.provider,
           model: selectedModel?.model,
         },
@@ -3701,6 +3733,8 @@ Page(themed({
         conversation_id: conversationIdFor(this.currentSessionId),
         history,
         mode: this.data.mode,
+        // @ 资料库引用：后端据此把检索限定在选中范围内（文件夹=整棵子树）
+        mentions: this.buildChatMentions(),
         provider: selModel?.provider || undefined,
         model: selModel?.model || undefined,
       },
@@ -5726,202 +5760,175 @@ Page(themed({
   // 两个气泡互斥：开 @ 面板时关模型菜单，反之亦然
   toggleAtPanel() {
     const opening = !this.data.showAtPanel
-    this.setData({ showAtPanel: opening, showModelMenu: false, atQuery: '', atTab: 'quick', atVisibleItems: AT_QUICK_ITEMS })
+    this.setData({
+      showAtPanel: opening, showModelMenu: false,
+      atQuery: '', atItems: [], atHasMore: false,
+    })
     // 按钮唤起：清掉打字标记（此路径点选走追加插入，不替换触发词）
     this.atOpenedByTyping = false
-    if (opening) void this.loadAtData()
+    if (opening) void this.searchAtKb('')
   },
 
-  switchAtTab(event: WechatMiniprogram.TouchEvent) {
-    const tab = event.currentTarget.dataset.tab as 'quick' | 'member' | 'biz'
-    const items = tab === 'quick' ? this.data.atQuickItems : tab === 'member' ? this.data.atMembers : this.data.atBiz
-    this.setData({ atTab: tab, atQuery: '', atVisibleItems: items })
-    void this.loadAtData()
+  /**
+   * 资料库搜索（服务端混排：文件夹 + 文档）。
+   *
+   * 为什么不在前端过滤：资料库是「个人库 + 项目库」，上万份文档是常态，
+   * 一次性拉全量既慢又费内存。检索交给 /kb/search，前端只管分页与竞态。
+   * 竞态靠单调递增的请求序号丢弃过期响应——快速连续输入时先发的请求
+   * 可能后到，不能让旧结果覆盖新结果。
+   */
+  async searchAtKb(query: string, offset = 0) {
+    const seq = ++this.atSearchSeq
+    this.setData({ atLoading: true })
+    try {
+      const result = await request<KbSearchResponse>('/kb/search', {
+        data: { q: query, offset, limit: 20 },
+      })
+      if (seq !== this.atSearchSeq) return   // 已有更新的请求，丢弃这次结果
+      const incoming: AtKbItem[] = []
+      for (const folder of result.folders || []) {
+        incoming.push({
+          kind: 'folder', key: `kb-folder-${folder.id}`, kbId: folder.kb_id,
+          id: folder.id, name: folder.name, path: folder.path,
+          count: folder.count, score: folder.score,
+        })
+      }
+      for (const doc of result.documents || []) {
+        incoming.push({
+          kind: 'doc', key: `kb-doc-${doc.id}`, kbId: doc.kb_id,
+          id: doc.id, name: doc.name, path: doc.folder_path,
+          score: doc.score,
+        })
+      }
+      const merged = offset > 0 ? this.data.atItems.concat(incoming) : incoming
+      // 已选中的条目在列表里打勾，用户能看出「这个我加过了」
+      const chosen = new Set(this.data.mentions.map(m => m.key))
+      const view = merged.map(item => ({ ...item, picked: chosen.has(item.key) }))
+      this.setData({ atItems: view as AtKbItem[], atHasMore: Boolean(result.has_more) })
+    } catch {
+      // 搜索失败保持面板可用（仍能打 @词 交给后端做模糊检索），只在空结果时给提示
+      if (offset === 0) this.setData({ atItems: [], atHasMore: false })
+    } finally {
+      if (seq === this.atSearchSeq) this.setData({ atLoading: false })
+    }
   },
 
   onAtSearch(event: WechatMiniprogram.Input) {
-    // 防抖（2026-11-19）：@ 面板数据量可达数百条（成员/业务引用），
-    // 每敲一个字符都全量过滤 + setData 会掉帧。先回显输入，过滤延迟合并。
     const raw = event.detail.value
     this.setData({ atQuery: raw })
-    if (this.atSearchTimer !== null) {
-      clearTimeout(this.atSearchTimer)
-    }
+    // 250ms 防抖：搜索走服务端，敲字节奏远快于往返，攒一攒再发
+    if (this.atSearchTimer !== null) clearTimeout(this.atSearchTimer)
     this.atSearchTimer = setTimeout(() => {
       this.atSearchTimer = null
-      const q = raw.trim().toLowerCase()
-      const source = this.data.atTab === 'quick' ? this.data.atQuickItems
-        : this.data.atTab === 'member' ? this.data.atMembers : this.data.atBiz
-      const match = (s: string) => !q || s.toLowerCase().includes(q)
-      const visible = source.filter((i: AtQuickItem | AtMember | AtBizItem) => {
-        if (this.data.atTab === 'quick') { const x = i as AtQuickItem; return match(x.label) || match(x.desc) }
-        if (this.data.atTab === 'member') { const x = i as AtMember; return match(x.real_name) }
-        const x = i as AtBizItem; return match(x.label) || match(x.desc)
-      })
-      this.setData({ atVisibleItems: visible as AtQuickItem[] | AtMember[] | AtBizItem[] })
-    }, 120)
+      void this.searchAtKb(raw)
+    }, 250)
   },
 
-  // 打开面板 / 切到对应 tab 时按需加载；失败静默（面板仍可用快捷指令）
-  async loadAtData() {
-    const tab = this.data.atTab
-    if (tab === 'quick') return
-    if (tab === 'member') {
-      if (this.data.atMembers.length) return
-      this.setData({ atLoading: true })
-      try {
-        const users = await request<AtMember[]>('/task/assignable-users')
-        this.setData({ atMembers: users || [], atVisibleItems: users || [] })
-      } catch { /* ignore */ } finally { this.setData({ atLoading: false }) }
+  loadMoreAt() {
+    if (!this.data.atHasMore || this.data.atLoading) return
+    void this.searchAtKb(this.data.atQuery, this.data.atItems.length)
+  },
+
+  // ============ 选中与撤销 ============
+
+  /** 点选一条搜索结果：文件夹=整棵子树，文档=单份；支持连续多选 */
+  pickAtItem(event: WechatMiniprogram.TouchEvent) {
+    const key = event.currentTarget.dataset.key as string
+    const item = this.data.atItems.find(i => i.key === key)
+    if (!item) return
+    const already = this.data.mentions.some(m => m.key === item.key)
+    if (already) {
+      // 再点一次 = 取消：多选场景下比「再去点小 ×」更顺手
+      this.removeMentionByKey(item.key)
       return
     }
-    // biz：一次拉记录 / 隐患 / 规范 / 资料库文件夹，各自失败不影响其它
-    if (this.data.atBiz.length) return
-    this.setData({ atLoading: true })
-    const results = await Promise.allSettled([
-      request<{ records?: Array<Record<string, unknown>> }>('/work-record/list'),
-      request<Array<Record<string, unknown>>>('/hazard/list'),
-      request<{ results?: Array<Record<string, unknown>> }>('/knowledge/regulations/list'),
-      // 资料库文件夹：两步（/kb/mine 拿 kbId → /kb/{id}/folders 拿树），失败降级为空
-      (async () => {
-        const kb = await request<{ id: number }>('/kb/mine')
-        if (!kb || !kb.id) return []
-        return await request<{ items: Array<Record<string, unknown>> }>(`/kb/${kb.id}/folders`)
-      })(),
-    ])
-    const items: AtBizItem[] = []
-    const ok = (i: number) => results[i].status === 'fulfilled'
-      ? (results[i] as PromiseFulfilledResult<unknown>).value : []
-    // 后端返回结构不统一：work-record/list={records:[]}、regulations/list={results:[]}、folders={items:[]}、hazard/list=[]，这里统一摊平成数组
-    const asArray = (v: unknown): Array<Record<string, unknown>> => {
-      if (Array.isArray(v)) return v as Array<Record<string, unknown>>
-      if (v && typeof v === 'object') {
-        const o = v as Record<string, unknown>
-        if (Array.isArray(o.records)) return o.records as Array<Record<string, unknown>>
-        if (Array.isArray(o.results)) return o.results as Array<Record<string, unknown>>
-        if (Array.isArray(o.items)) return o.items as Array<Record<string, unknown>>
-      }
-      return []
-    }
-    const label = (r: Record<string, unknown>, keys: string[]) => {
-      for (const k of keys) if (r[k]) return String(r[k])
-      return ''
-    }
-    // 工作记录
-    for (const r of asArray(ok(0))) {
-      const id = r.id as number | string
-      const title = label(r, ['content', 'title', 'work_content', 'business_content']).slice(0, 24) || '工作记录'
-      items.push({ key: `record-${id}`, icon: '📝', label: label(r, ['record_type_name', 'record_type']) || '工作记录',
-        desc: `${title}${r.project_name ? ' · ' + String(r.project_name) : ''}`, ref: `@[记录#${id} ${title}]` })
-    }
-    // 隐患
-    for (const r of asArray(ok(1))) {
-      const id = r.id as number | string
-      const title = label(r, ['hazard_name', 'risk_category', 'description', 'title']).slice(0, 24) || '隐患'
-      items.push({ key: `hazard-${id}`, icon: '⚠️', label: '隐患', desc: title, ref: `@[隐患#${id} ${title}]` })
-    }
-    // 规范资料
-    for (const r of asArray(ok(2))) {
-      const name = label(r, ['name', 'title', 'filename', 'file_name']).slice(0, 30)
-      if (!name) continue
-      const id = r.id ?? r.filename ?? r.file_name ?? name
-      items.push({ key: `reg-${id}`, icon: '📚', label: '规范', desc: name, ref: `@[规范 ${name}]` })
-    }
-    // 资料库文件夹：树形拍平，带层级路径 + 文档数，插到业务引用最前（用户最常按文件夹找资料）
-    const folderItems: AtBizItem[] = []
-    const flattenFolder = (nodes: Array<Record<string, unknown>>, prefix: string) => {
-      for (const f of nodes) {
-        const name = String(f.name || '').trim()
-        if (!name) continue
-        const path = prefix ? `${prefix}/${name}` : name
-        const count = Number(f.count || 0)
-        folderItems.push({ key: `kb-${f.id}`, icon: '📁', label: path,
-          desc: count ? `${count} 份资料` : '空文件夹', ref: `@[资料库 ${path}]` })
-        const children = Array.isArray(f.children) ? f.children as Array<Record<string, unknown>> : []
-        if (children.length) flattenFolder(children, path)
-      }
-    }
-    flattenFolder(asArray(ok(3)), '')
-    items.unshift(...folderItems)
-    const finalItems = items.slice(0, 60)
-    this.setData({ atBiz: finalItems, atVisibleItems: this.data.atTab === 'biz' ? finalItems : this.data.atVisibleItems, atLoading: false })
+    const token = item.kind === 'folder'
+      ? `@[资料库 ${item.path || item.name}]`
+      : `@[资料库 ${item.path ? `${item.path}/${item.name}` : item.name}]`
+    const mention: AtMention = item.kind === 'folder'
+      ? { key: item.key, type: 'kb_folder', kb_id: item.kbId, folder_id: item.id, path: item.path, name: item.name, token }
+      : { key: item.key, type: 'kb_doc', kb_id: item.kbId, doc_id: item.id, path: item.path, name: item.name, token }
+    this.appendToken(token, mention)
+    // 面板不关：多选是主场景，用户可能一次引用好几个文件夹
+    const nextItems = this.data.atItems.map(i =>
+      i.key === item.key ? ({ ...i, picked: true } as AtKbItem) : i,
+    )
+    this.setData({ atItems: nextItems })
   },
 
-  // 点选：把引用/提示词插进输入框，关闭面板并聚焦
-  pickAtQuick(event: WechatMiniprogram.TouchEvent) {
+  /** 已选引用上的 × */
+  removeMention(event: WechatMiniprogram.TouchEvent) {
     const key = event.currentTarget.dataset.key as string
-    const item = this.data.atQuickItems.find(i => i.key === key)
-    if (!item) return
-    // 隐患识别需要拍照/选图，直接跳采集页，与模型下拉里的同名入口一致
-    if (key === 'hazard') {
-      this.setData({ showAtPanel: false })
+    this.removeMentionByKey(key)
+  },
+
+  removeMentionByKey(key: string) {
+    const target = this.data.mentions.find(m => m.key === key)
+    if (!target) return
+    const mentions = this.data.mentions.filter(m => m !== target)
+    // 输入框里的 token 一并抹掉：token 只是回显，不能留下「已经撤销但仍显示」的假象
+    const input = this.data.input.split(target.token).join('').replace(/\s{2,}/g, ' ').trim()
+    this.setData({
+      mentions,
+      input,
+      canSend: Boolean(input) || this.data.attachments.length > 0,
+      atItems: this.data.atItems.map(i =>
+        i.key === key ? ({ ...i, picked: false } as AtKbItem) : i,
+      ),
+    })
+  },
+
+  /** 把 token 追加进输入框，同时登记引用；打字唤起时替换触发词而不是追加 */
+  appendToken(token: string, mention: AtMention) {
+    const mentions = this.data.mentions.concat([mention])
+    if (this.atOpenedByTyping) {
+      const current = this.data.input
+      const next = current.replace(/@([^\s@]*)$/, `${token} `)
       this.atOpenedByTyping = false
-      wx.navigateTo({ url: '/pages/capture/index?mode=hazard' })
+      this.setData({ mentions, input: next, canSend: true })
       return
     }
-    this.insertAtText(item.prompt, false)
-  },
-
-  pickAtMember(event: WechatMiniprogram.TouchEvent) {
-    const id = Number(event.currentTarget.dataset.id)
-    const user = this.data.atMembers.find(m => m.id === id)
-    if (!user) return
-    // 打字唤起：替换「@关键词」原文，避免 @zh@张三 双份（2026-11-19）
-    if (this.atOpenedByTyping) {
-      this.replaceAtTrigger(`@${user.real_name} `)
-      return
-    }
-    this.insertAtText(`@${user.real_name} `, false)
-  },
-
-  pickAtBiz(event: WechatMiniprogram.TouchEvent) {
-    const key = event.currentTarget.dataset.key as string
-    const item = this.data.atBiz.find(i => i.key === key)
-    if (!item) return
-    if (this.atOpenedByTyping) {
-      this.replaceAtTrigger(`${item.ref} `)
-      return
-    }
-    this.insertAtText(`${item.ref} `, false)
-  },
-
-  /** 打字唤起面板后的点选：把输入串末尾的「@关键词」整段替换为选中项 */
-  replaceAtTrigger(text: string) {
     const current = this.data.input
-    const next = current.replace(/@([^\s@]*)$/, text)
-    this.setData({ input: next, canSend: true, showAtPanel: false, atQuery: '', draftFocus: false })
-    this.atOpenedByTyping = false
-    setTimeout(() => this.setData({ draftFocus: true }), 60)
+    const next = current ? `${current.replace(/\s+$/, '')} ${token} ` : `${token} `
+    this.setData({ mentions, input: next, canSend: true })
   },
 
-  // 统一插入：追加到现有输入末尾（已有的话留一个空格），重算 canSend
-  insertAtText(text: string, _closePanel: boolean) {
-    const current = this.data.input
-    const next = current ? `${current.replace(/\s+$/, '')} ${text}` : text
-    // focus 先 false 再 true：若本来就是 true，直接 setData true 不会触发 textarea 重新聚焦
-    this.setData({ input: next, canSend: true, showAtPanel: false, draftFocus: false })
-    setTimeout(() => this.setData({ draftFocus: true }), 60)
+  /** 发给后端的结构化引用；空数组表示不限定范围 */
+  buildChatMentions(): Array<Record<string, unknown>> {
+    return this.data.mentions.map(m => m.type === 'kb_folder'
+      ? { type: 'kb_folder', kb_id: m.kb_id, folder_id: m.folder_id, path: m.path, name: m.name }
+      : { type: 'kb_doc', kb_id: m.kb_id, doc_id: m.doc_id, path: m.path, name: m.name })
+  },
+
+  /**
+   * 用户手工删掉输入框里的 token 时，同步撤销对应引用。
+   * 不做这一步会出现「界面上看不到引用、但模型仍按旧范围检索」的错位。
+   */
+  syncMentionsWithInput(input: string) {
+    if (!this.data.mentions.length) return
+    const kept = this.data.mentions.filter(m => input.includes(m.token))
+    if (kept.length !== this.data.mentions.length) {
+      this.setData({ mentions: kept })
+    }
   },
 
   onInput(event: WechatMiniprogram.Input) {
     const input = event.detail.value
     this.setData({ input, canSend: Boolean(input.trim()) || this.data.attachments.length > 0 })
+    // 用户手工删掉 token → 撤销对应引用，避免「界面没引用但模型仍在限定范围内搜」
+    this.syncMentionsWithInput(input)
     this.detectAtTrigger(input)
   },
 
   /**
-   * 打字打出 @ 自动唤起引用面板（2026-11-19）。
-   * 触发口径：输入串以「@」结尾，或末段存在「空白+@关键词」且光标（=输入串末尾）就在
-   * 关键词后 —— 即用户正在打一个新的 @。已通过面板点选插入的引用（@张三 ）后面
-   * 跟了空格，不满足「无空格的 @词在末尾」，不会重复弹。
-   * 面板已开时，把 @ 后的关键词同步进面板搜索；删掉 @ 则收起。
+   * 打字打出 @ 自动唤起资料库面板。
+   * 触发口径：输入串以「@」结尾，或末段是「空白 + @关键词」（光标在末尾）。
+   * 已点选插入的引用形如「@[资料库 路径] 」，结尾是空格或「]」，不会误触发。
    */
   detectAtTrigger(input: string) {
-    // 光标位置 = 输入串末尾（textarea 无 selectionStart 事件详情时按此近似；
-    // 我们只关心「正在末尾打字」的场景，中间编辑不触发也合理）
-    const m = /(^|\s)@([^\s@]*)$/.exec(input)
+    const m = /(^|\s)@([^\s@\[\]]*)$/.exec(input)
     if (!m) {
-      // 没有 @ 在打：已开的面板收起（用户删掉了触发词）
+      // 没有正在输入的 @：收起由打字唤起的面板
       if (this.data.showAtPanel && this.atOpenedByTyping) {
         this.setData({ showAtPanel: false, atQuery: '' })
         this.atOpenedByTyping = false
@@ -5929,44 +5936,21 @@ Page(themed({
       return
     }
     const keyword = m[2]
-    const opening = !this.data.showAtPanel
-    if (opening) {
-      // 打字唤起：默认进「成员」tab（@ 最常用来提及人），可再切
+    if (!this.data.showAtPanel) {
       this.atOpenedByTyping = true
-      this.setData({
-        showAtPanel: true,
-        showModelMenu: false,
-        atQuery: keyword,
-        atTab: 'member',
-        atVisibleItems: this.data.atMembers.length ? this.data.atMembers : this.data.atQuickItems,
-      })
-      void this.loadAtData()
-      if (keyword) this.runAtFilter(keyword)
-    } else if (this.atOpenedByTyping) {
-      // 面板已开（打字开的）：关键词实时同步进搜索并过滤
+      this.setData({ showAtPanel: true, showModelMenu: false, atQuery: keyword, atItems: [] })
+      void this.searchAtKb(keyword)
+      return
+    }
+    if (this.atOpenedByTyping) {
+      // 面板已开（打字开的）：关键词同步进搜索框，防抖后再查
       this.setData({ atQuery: keyword })
-      if (this.atSearchTimer !== null) {
-        clearTimeout(this.atSearchTimer)
-      }
+      if (this.atSearchTimer !== null) clearTimeout(this.atSearchTimer)
       this.atSearchTimer = setTimeout(() => {
         this.atSearchTimer = null
-        this.runAtFilter(this.data.atQuery)
-      }, 120)
+        void this.searchAtKb(this.data.atQuery)
+      }, 250)
     }
-  },
-
-  /** @ 触发词过滤：与 onAtSearch 同一套匹配逻辑（打字唤起路径复用） */
-  runAtFilter(rawQuery: string) {
-    const q = (rawQuery || '').trim().toLowerCase()
-    const source = this.data.atTab === 'quick' ? this.data.atQuickItems
-      : this.data.atTab === 'member' ? this.data.atMembers : this.data.atBiz
-    const match = (s: string) => !q || s.toLowerCase().includes(q)
-    const visible = source.filter((i: AtQuickItem | AtMember | AtBizItem) => {
-      if (this.data.atTab === 'quick') { const x = i as AtQuickItem; return match(x.label) || match(x.desc) }
-      if (this.data.atTab === 'member') { const x = i as AtMember; return match(x.real_name) }
-      const x = i as AtBizItem; return match(x.label) || match(x.desc)
-    })
-    this.setData({ atVisibleItems: visible as AtQuickItem[] | AtMember[] | AtBizItem[] })
   },
 
   onLogDateChange(event: WechatMiniprogram.PickerChange) {

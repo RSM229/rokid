@@ -362,7 +362,7 @@
       <view class="input-card-row">
         <view class="round-btn round-btn-lg ic-plus-g" bindtap="togglePlusPanel"></view>
         <view class="flex-spacer"></view>
-        <!-- @ 提及：统一引用选择器（快捷指令 / 成员 / 业务引用） -->
+        <!-- @ 提及：资料库引用入口（文件夹 / 文档，可多选）；其他类候选已随 2026-11-20 重构移除 -->
         <view class="at-anchor">
           <view class="at-chip {{showAtPanel ? 'active' : ''}}" catchtap="toggleAtPanel">@</view>
         </view>
@@ -678,38 +678,31 @@
   <!-- @ 提及面板：放页面根层（脱离 input-card 的 backdrop-filter 包含块），fixed 相对视口横向铺满，避免宽面板向左溢出屏幕被裁切 -->
   <view class="at-panel" wx:if="{{showAtPanel}}" catchtap="noop">
     <view class="at-panel-head">
-      <text class="at-panel-title">引用或指令</text>
+      <text class="at-panel-title">引用资料库</text>
       <view class="at-panel-close" catchtap="toggleAtPanel">×</view>
     </view>
-    <input class="at-search" value="{{atQuery}}" placeholder="搜索快捷指令、成员、记录…（打 @ 号也可直接唤起）" placeholder-class="at-search-ph" bindinput="onAtSearch" confirm-type="search" />
-    <view class="at-tabs">
-      <view class="at-tab {{atTab === 'quick' ? 'active' : ''}}" data-tab="quick" catchtap="switchAtTab">快捷指令</view>
-      <view class="at-tab {{atTab === 'member' ? 'active' : ''}}" data-tab="member" catchtap="switchAtTab">成员</view>
-      <view class="at-tab {{atTab === 'biz' ? 'active' : ''}}" data-tab="biz" catchtap="switchAtTab">业务引用</view>
+    <!-- 已选引用（可多选）：文件夹=整棵子树，文档=单份；点 × 撤销并同步抹掉输入框 token -->
+    <view class="at-selected" wx:if="{{mentions.length}}">
+      <view class="at-selected-item" wx:for="{{mentions}}" wx:key="key" data-key="{{item.key}}" catchtap="removeMention">
+        <text class="at-selected-icon">{{item.type === 'kb_folder' ? '📁' : '📄'}}</text>
+        <text class="at-selected-text">{{item.name}}</text>
+        <text class="at-selected-x">×</text>
+      </view>
     </view>
+    <input class="at-search" value="{{atQuery}}" placeholder="搜索资料库：文件夹或文件名（打 @ 号也可直接唤起）" placeholder-class="at-search-ph" bindinput="onAtSearch" confirm-type="search" />
     <scroll-view class="at-list" scroll-y>
-      <view wx:if="{{atLoading}}" class="at-empty">加载中…</view>
+      <view wx:if="{{atLoading && !atItems.length}}" class="at-empty">搜索中…</view>
       <block wx:else>
-        <view wx:if="{{!atVisibleItems.length}}" class="at-empty">没有匹配的内容</view>
-        <!-- 列表项：wx:if/elif/else 用 block 承载且必须紧邻（中间不能插注释）；view 单独 wx:for -->
-        <block wx:if="{{atTab === 'quick'}}">
-          <view class="at-item" wx:for="{{atVisibleItems}}" wx:key="key" data-key="{{item.key}}" catchtap="pickAtQuick">
-            <view class="at-item-icon">{{item.icon}}</view>
-            <view class="at-item-body"><text class="at-item-label">{{item.label}}</text><text class="at-item-desc">{{item.desc}}</text></view>
+        <view wx:if="{{!atItems.length}}" class="at-empty">{{atQuery ? '没有匹配的资料' : '输入关键字搜索资料库'}}</view>
+        <view class="at-item {{item.picked ? 'picked' : ''}}" wx:for="{{atItems}}" wx:key="key" data-key="{{item.key}}" catchtap="pickAtItem">
+          <view class="at-item-icon">{{item.kind === 'folder' ? '📁' : '📄'}}</view>
+          <view class="at-item-body">
+            <text class="at-item-label">{{item.kind === 'folder' ? item.path : item.name}}</text>
+            <text class="at-item-desc">{{item.kind === 'folder' ? (item.count ? item.count + ' 份资料·含子文件夹' : '空文件夹') : (item.path || '未分类')}}</text>
           </view>
-        </block>
-        <block wx:elif="{{atTab === 'member'}}">
-          <view class="at-item" wx:for="{{atVisibleItems}}" wx:key="id" data-id="{{item.id}}" catchtap="pickAtMember">
-            <view class="at-avatar">{{item.real_name[0]}}</view>
-            <view class="at-item-body"><text class="at-item-label">{{item.real_name}}</text></view>
-          </view>
-        </block>
-        <block wx:else>
-          <view class="at-item" wx:for="{{atVisibleItems}}" wx:key="key" data-key="{{item.key}}" catchtap="pickAtBiz">
-            <view class="at-item-icon">{{item.icon}}</view>
-            <view class="at-item-body"><text class="at-item-label">{{item.label}}</text><text class="at-item-desc">{{item.desc}}</text></view>
-          </view>
-        </block>
+          <text class="at-item-check" wx:if="{{item.picked}}">✓</text>
+        </view>
+        <view wx:if="{{atHasMore}}" class="at-more" catchtap="loadMoreAt">{{atLoading ? '加载中…' : '加载更多'}}</view>
       </block>
     </scroll-view>
   </view>
