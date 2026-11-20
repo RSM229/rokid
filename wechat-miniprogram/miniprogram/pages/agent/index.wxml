@@ -722,7 +722,9 @@
     <scroll-view class="at-list" scroll-y>
       <view wx:if="{{atLoading && !atItems.length}}" class="at-empty">搜索中…</view>
       <block wx:else>
-        <view wx:if="{{!atItems.length}}" class="at-empty">{{atQuery ? '没有更多匹配的资料' : (mentions.length ? '已全部选入上方' : '输入关键字搜索资料库')}}</view>
+        <!-- 失败/超时要明确告知，而不是只留一片空白 -->
+        <view wx:if="{{atError && !atItems.length}}" class="at-empty at-empty-error">{{atError}}</view>
+        <view wx:elif="{{!atItems.length}}" class="at-empty">{{atQuery ? '没有更多匹配的资料' : (mentions.length ? '已全部选入上方' : '输入关键字搜索资料库')}}</view>
         <!-- 候选列表：只有还没选的条目。已选项在顶部「已选」区，不会再出现一次 -->
         <view class="at-item" wx:for="{{atItems}}" wx:key="key" data-key="{{item.key}}" catchtap="pickAtItem">
           <view class="at-item-icon">{{item.kind === 'folder' ? '📁' : (item.kind === 'doc' ? '📄' : '🔍')}}</view>

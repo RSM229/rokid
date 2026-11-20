@@ -130,3 +130,22 @@ test('模型目录不重复：同一个模型不能在选择器里出现两次',
   assert.match(agent, /const CHAT_MODELS = MODEL_CATALOG_UNIQUE/)
   assert.doesNotMatch(agent, /const CHAT_MODELS = MODEL_CATALOG\b/)
 })
+test('@ 面板搜索不会永久卡在「搜索中」：loading 由在飞计数结算 + 看门狗兜底', () => {
+  const agent = fs.readFileSync(path.join(root, 'pages/agent/index.ts'), 'utf8')
+  const wxml = fs.readFileSync(path.join(root, 'pages/agent/index.wxml'), 'utf8')
+
+  // 旧实现：finally 里 if (seq === atSearchSeq) 才复位 —— 一旦有更新的请求插入、
+  // 而最后一次回调丢失，loading 会永久停在 true，面板永远显示「搜索中…」
+  assert.doesNotMatch(agent, /if \(seq === this\.atSearchSeq\) this\.setData\(\{ atLoading: false \}\)/)
+  // 新实现：按在飞请求计数结算
+  assert.match(agent, /this\.atInFlight \+= 1/)
+  assert.match(agent, /this\.atInFlight = Math\.max\(0, this\.atInFlight - 1\)/)
+  assert.match(agent, /if \(this\.atInFlight === 0\) \{/)
+  // 看门狗：请求回调丢失也要把 loading 放下来
+  assert.match(agent, /atLoadingTimer/)
+  assert.match(agent, /搜索超时，请重试/)
+  // 失败不再被空 catch 吞掉：要打日志 + 界面上给提示
+  assert.doesNotMatch(agent, /\} catch \{\s*\n\s*\/\/ 搜索失败保持面板可用/)
+  assert.match(agent, /console\.warn\('\[kb\/search\] 失败:',/)
+  assert.match(wxml, /class="at-empty at-empty-error">\{\{atError\}\}/)
+})

@@ -174,7 +174,7 @@ test('选择模式有明确出口：完成按钮收起面板并把焦点交回�
   // 用户的操作是「先选资料，再写需求」，选完必须能直接打字，
   // 而不是「关面板 → 点输入框 → 才开始打字」三步。
   assert.match(page, /finishAtPanel\(\) \{/)
-  assert.match(page, /this\.setData\(\{ showAtPanel: false, atQuery: '', atAllItems: \[\], atRecent: \[\] \}\)/)
+  assert.match(page, /this\.setData\(\{ showAtPanel: false, atQuery: '', atAllItems: \[\], atRecent: \[\], atError: '' \}\)/)
   // 复用已有的「先失焦再聚焦」写法：textarea 本来就是 true 时直接 setData true 不会重新聚焦
   assert.match(page, /this\.focusDraftInput\(\)/)
   assert.match(page, /focusDraftInput\(\) \{\s*\n\s*this\.setData\(\{ draftFocus: false \}\)/)

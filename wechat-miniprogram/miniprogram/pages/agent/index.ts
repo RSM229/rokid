@@ -661,6 +661,10 @@ Page(themed({
   activeChatAbort: null as (() => void) | null,
   /** @ 面板搜索防抖计时器（2026-11-19） */
   atSearchTimer: null as number | null,
+  /** 在飞请求计数：loading 由它结算，不用请求序号判断（序号只用于丢弃过期结果） */
+  atInFlight: 0,
+  /** loading 看门狗：防止请求回调丢失导致面板永久停在「搜索中」 */
+  atLoadingTimer: null as number | null,
   /** @ 面板本次是否由「打字打出 @」唤起（2026-11-19）：决定打字同步/删词收起行为 */
   atOpenedByTyping: false,
   /** 历史搜索防抖计时器（2026-11-19） */
@@ -765,6 +769,8 @@ Page(themed({
     /** 「最近用过」横向快捷条（空查询时出现一次，不占纵向空间） */
     atRecent: [] as AtKbItem[],
     atLoading: false,
+    /** 搜索失败/超时的提示（空字符串=无错误）。以前失败被空 catch 吞掉，界面只留空白 */
+    atError: '',
     atHasMore: false,
     /** 已选中的引用（多选）。是发请求时的唯一依据，输入框里的 token 只做回显 */
     mentions: [] as AtMention[],
@@ -1216,7 +1222,7 @@ Page(themed({
    */
   finishAtPanel() {
     this.atOpenedByTyping = false
-    this.setData({ showAtPanel: false, atQuery: '', atAllItems: [], atRecent: [] })
+    this.setData({ showAtPanel: false, atQuery: '', atAllItems: [], atRecent: [], atError: '' })
     this.focusDraftInput()
   },
 
@@ -5891,7 +5897,7 @@ Page(themed({
     const opening = !this.data.showAtPanel
     this.setData({
       showAtPanel: opening, showModelMenu: false,
-      atQuery: '', atItems: [], atHasMore: false,
+      atQuery: '', atItems: [], atHasMore: false, atError: '',
     })
     // 按钮唤起：清掉打字标记（此路径点选走追加插入，不替换触发词）
     this.atOpenedByTyping = false
@@ -5908,13 +5914,24 @@ Page(themed({
    */
   async searchAtKb(query: string, offset = 0) {
     const seq = ++this.atSearchSeq
-    this.setData({ atLoading: true })
+    this.atInFlight += 1
+    this.setData({ atLoading: true, atError: '' })
+    // 看门狗：wx.request 的回调在弱网/DNS/代理抖动时可能根本不触发，
+    // 那样 loading 会永久停在 true、面板永远显示「搜索中」。这里强制兜底。
+    if (this.atLoadingTimer !== null) clearTimeout(this.atLoadingTimer)
+    this.atLoadingTimer = setTimeout(() => {
+      this.atLoadingTimer = null
+      if (seq === this.atSearchSeq && this.data.atLoading) {
+        this.atInFlight = 0
+        this.setData({ atLoading: false, atError: '⚠︎ 搜索超时，请重试' })
+      }
+    }, 8000)
     try {
       const result = await request<KbSearchResponse>('/kb/search', {
         // project_id：同项目的资料库在排序里略微靠前（后端 +5 分，翻不过相关性档位）
         data: { q: query, offset, limit: 20, project_id: this.data.currentProjectId || undefined },
       })
-      if (seq !== this.atSearchSeq) return   // 已有更新的请求，丢弃这次结果
+      if (seq !== this.atSearchSeq) return   // 已有更新的请求，丢弃这次结果（loading 由 finally 统一结算）
       // 空查询 → 后端返回 browse：最近用过 + 候选文件夹。
       // 「最近」渲染成一行横向快捷条（不占纵向空间），候选列表只放还没选的，
       // 这样同一个文件夹永远不会同时出现在两处、带着两个勾。
@@ -5942,11 +5959,22 @@ Page(themed({
       const merged = offset > 0 ? this.data.atAllItems.concat(incoming) : incoming
       this.setData({ atAllItems: merged, atHasMore: Boolean(result.has_more) })
       this.applyCandidateFilter()
-    } catch {
-      // 搜索失败保持面板可用（仍能打 @词 交给后端做模糊检索），只在空结果时给提示
-      if (offset === 0) this.setData({ atItems: [], atHasMore: false })
+    } catch (error) {
+      // 以前这里是空 catch：失败被静默吞掉，界面只留空白，控制台也没有业务线索。
+      // 现在打日志并把失败原因展示到面板上。
+      console.warn('[kb/search] 失败:', (error as Error)?.message || error)
+      if (seq === this.atSearchSeq && offset === 0) {
+        this.setData({ atItems: [], atHasMore: false, atError: '⚠︎ 资料库搜索失败，请重试' })
+      }
     } finally {
-      if (seq === this.atSearchSeq) this.setData({ atLoading: false })
+      // 关键修复：loading 表示「当前是否还有请求在飞」，而不是「是否是最新请求」。
+      // 以前用 seq === atSearchSeq 判断，一旦有更新的请求插入、而最后一次回调丢失，
+      // loading 就永久卡在 true（面板一直「搜索中…」）。改成按在飞计数结算。
+      this.atInFlight = Math.max(0, this.atInFlight - 1)
+      if (this.atInFlight === 0) {
+        if (this.atLoadingTimer !== null) { clearTimeout(this.atLoadingTimer); this.atLoadingTimer = null }
+        this.setData({ atLoading: false })
+      }
     }
   },
 

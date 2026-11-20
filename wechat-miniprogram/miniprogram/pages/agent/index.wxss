@@ -111,6 +111,7 @@
 .at-done-bar.active { color: #fff; background: var(--brand, #1677ff); box-shadow: 0 6rpx 18rpx rgba(var(--brand-rgb, 22,119,255), 0.26); }
 .at-done-bar:active { opacity: 0.86; }
 .at-empty { padding: 40rpx 0; text-align: center; font-size: var(--fs-sub, 24rpx); color: var(--ink-3, #6b7c93); }
+.at-empty-error { color: #b93838; }
 /* 列表行：96rpx 高度贴近 iOS 列表 44pt，点按目标更大、也不显拥挤 */
 .at-item { display: flex; align-items: center; gap: var(--gap-3, 16rpx); padding: 20rpx 12rpx; border-radius: var(--r-item, 16rpx); }
 .at-item:active { background: rgba(var(--wash-rgb, 234,243,255), 0.92); }
