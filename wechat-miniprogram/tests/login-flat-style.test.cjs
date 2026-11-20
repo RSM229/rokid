@@ -91,3 +91,24 @@ test('工作台 agent 页已去掉玻璃叠层：核心元素全部平面化', (
   // 页面底色对齐 jl 的 #f7f9fc（原来是纯白，平面卡片没有层次）
   assert.match(agentWxss, /^\.page \{[^}]*background: #f7f9fc;/m)
 })
+test('思考进度卡改平面：去掉左侧绿色竖条，改用脉冲状态点', () => {
+  const agentWxss = fs.readFileSync(path.join(root, 'pages/agent/index.wxss'), 'utf8')
+  const agentWxml = fs.readFileSync(path.join(root, 'pages/agent/index.wxml'), 'utf8')
+
+  // 原来的 border-left: 6rpx solid 绿色竖条是"丑"的直接来源，必须消失
+  const progressRule = agentWxss.match(/^\.agent-progress \{[^}]*\}/m)[0]
+  assert.doesNotMatch(progressRule, /border-left:/)
+  assert.match(progressRule, /border: 1rpx solid rgba\(17,19,26,0\.08\)/)
+  assert.match(progressRule, /background: #ffffff/)
+  // 旧配色体系（医疗绿）整体退出
+  assert.doesNotMatch(agentWxss, /#13795b/)
+  assert.doesNotMatch(agentWxss, /rgba\(19,121,91/)
+
+  // "正在思考"的信号改由圆点承担：thinking 时呼吸、完成后静止
+  assert.match(agentWxss, /\.agent-progress-dot\.live \{[^}]*animation: progressPulse/)
+  assert.match(agentWxss, /\.agent-progress-dot\.settled \{/)
+  // 右侧用状态文字 + 折叠箭头，不再有「收起/展开」两行文案
+  assert.match(agentWxml, /class="agent-progress-chevron \{\{item\.progressExpanded \? 'up' : ''\}\}"/)
+  assert.match(agentWxss, /\.agent-progress-chevron\.up \{ transform: rotate\(-90deg\); \}/)
+  assert.doesNotMatch(agentWxml, /agent-progress-toggle/)
+})

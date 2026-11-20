@@ -80,19 +80,22 @@
               <view class="bubble-copy-ic"></view>
             </view>
           </view>
+          <!-- 思考进度：平面卡片（2026-11-21 重设计）
+               原实现是 border-left: 6rpx 绿色竖条 + 绿底，读起来像告警条、太重。
+               改为：白底 + 一根细线 + 左侧脉冲小圆点（"正在思考"的信号用点表达，不用竖条），
+               右侧只留状态文字与折叠箭头，去掉「收起/展开」这类冗余文案。 -->
           <view wx:if="{{item.progressRequestId && (item.progressEvents.length || !item.progressTerminal)}}" class="agent-progress {{item.progressTerminal ? 'done' : 'thinking'}}">
             <view class="agent-progress-head" data-index="{{mi}}" bindtap="toggleAgentProgress">
               <view class="agent-progress-title-wrap">
                 <view class="agent-progress-title-row">
+                  <view class="agent-progress-dot {{item.progressTerminal ? 'settled' : 'live'}}"></view>
                   <text class="agent-progress-title">{{item.progressTerminal ? '思考完成' : '思考中'}}</text>
-                  <view wx:if="{{!item.progressTerminal}}" class="thinking-dots"><view class="tdot"></view><view class="tdot"></view><view class="tdot"></view></view>
                 </view>
                 <text class="agent-progress-current">{{item.progressHeadline || (item.progressTerminal ? '已完成本轮思考' : '正在理解你的需求')}}</text>
               </view>
               <view class="agent-progress-meta">
-                <text wx:if="{{item.progressExpanded}}">{{item.progressEvents.length}} 步 · {{item.progressElapsedSeconds || 0}} 秒</text>
-                <text wx:else>{{item.progressTerminal ? '已处理' : '整理中'}}</text>
-                <text class="agent-progress-toggle">{{item.progressExpanded ? '收起' : '展开'}}</text>
+                <text class="agent-progress-status">{{item.progressExpanded ? (item.progressEvents.length + ' 步 · ' + (item.progressElapsedSeconds || 0) + ' 秒') : (item.progressTerminal ? '已处理' : '整理中')}}</text>
+                <text class="agent-progress-chevron {{item.progressExpanded ? 'up' : ''}}">›</text>
               </view>
             </view>
             <view wx:if="{{item.progressExpanded}}" class="agent-progress-list">

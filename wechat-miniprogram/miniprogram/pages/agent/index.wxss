@@ -609,20 +609,23 @@
 .inline-review-preview-arrow { color: #5d7a70; font-size: 28rpx; line-height: 1; transition: transform .18s ease; }
 .inline-review-preview-arrow.expanded { transform: rotate(90deg); }
 
-.agent-progress { width: 100%; box-sizing: border-box; margin: 4rpx 0 12rpx; padding: 14rpx 18rpx; border: 0; border-left: 6rpx solid #13795b; border-radius: 14rpx; background: rgba(19,121,91,0.06); overflow: visible; }
-.agent-progress.done { border-left-color: #9aa6ac; background: rgba(19,121,91,0.04); }
-.agent-progress-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12rpx; min-height: 0; padding: 2rpx 0; }
-.agent-progress-title-wrap { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 4rpx; }
-.agent-progress-title-row { display: flex; align-items: center; gap: 10rpx; }
-.agent-progress-title { flex: none; color: #13795b; font-size: 21rpx; font-weight: 600; letter-spacing: .5rpx; }
-.agent-progress.done .agent-progress-title { color: #6b7780; }
-.agent-progress-current { color: #2b3d49; font-size: 23rpx; font-weight: 500; line-height: 1.5; word-break: break-word; }
-.agent-progress-meta { display: flex; flex: none; flex-direction: column; align-items: flex-end; gap: 4rpx; color: #95a0a8; font-size: 18rpx; white-space: nowrap; }
-.agent-progress-toggle { color: #5c7480; }
-.agent-progress-list { max-height: 560rpx; overflow-y: auto; padding: 8rpx 0 2rpx; border-top: 1rpx solid rgba(19,121,91,0.12); margin-top: 6rpx; }
+/* 思考进度卡：平面风格 —— 白底 + 一根细线，去掉原来的 6rpx 绿色竖条与绿底（视觉过重、像告警条） */
+.agent-progress { width: 100%; box-sizing: border-box; margin: 6rpx 0 14rpx; padding: 16rpx 20rpx; border: 1rpx solid rgba(17,19,26,0.08); border-radius: 20rpx; background: #ffffff; box-shadow: 0 2rpx 10rpx rgba(22,38,74,0.04); }
+.agent-progress.done { background: #fbfcfd; border-color: rgba(17,19,26,0.06); box-shadow: none; }
+/* 头部：左「状态点 + 标题 + 当前动作」，右「状态文字 + 折叠箭头」 */
+.agent-progress-head { display: flex; align-items: center; justify-content: space-between; gap: 16rpx; padding: 2rpx 0; }
+.agent-progress-title-wrap { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 6rpx; }
+.agent-progress-title-row { display: flex; align-items: center; gap: 12rpx; }
+.agent-progress-title { flex: none; color: #11131a; font-size: 24rpx; font-weight: 600; }
+.agent-progress.done .agent-progress-title { color: #8a94a6; font-weight: 500; }
+.agent-progress-current { color: #8a94a6; font-size: 22rpx; line-height: 1.5; word-break: break-word; }
+.agent-progress-meta { display: flex; flex: none; align-items: center; gap: 8rpx; color: #a8b2c1; font-size: 20rpx; white-space: nowrap; }
+.agent-progress-chevron { color: #a8b2c1; font-size: 26rpx; line-height: 1; transition: transform 0.18s ease; }
+.agent-progress-chevron.up { transform: rotate(-90deg); }
+.agent-progress-list { max-height: 560rpx; overflow-y: auto; padding: 10rpx 0 2rpx; border-top: 1rpx solid rgba(17,19,26,0.06); margin-top: 10rpx; }
 .agent-progress-event { position: relative; display: flex; gap: 10rpx; padding: 6rpx 0; border-bottom: 0; }
 .agent-progress-mark { flex: none; width: 10rpx; height: 10rpx; margin-top: 12rpx; border-radius: 50%; background: #c6cdd3; }
-.agent-progress-event.completed .agent-progress-mark { background: #2d8a70; }
+.agent-progress-event.completed .agent-progress-mark { background: #1f8a63; }
 .agent-progress-event.failed .agent-progress-mark { background: #c54d4d; }
 .agent-progress-event.waiting .agent-progress-mark { background: #c58a35; }
 .agent-progress-body { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 2rpx; }
@@ -630,11 +633,11 @@
 .agent-progress-event.completed .agent-progress-event-title { color: #65737d; }
 .agent-progress-detail { color: #7d8992; font-size: 20rpx; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
 .agent-progress-time { align-self: flex-start; color: #a1aab1; font-size: 18rpx; }
-.thinking-dots { display: inline-flex; align-items: center; gap: 5rpx; }
-.thinking-dots .tdot { width: 7rpx; height: 7rpx; border-radius: 50%; background: #13795b; opacity: .4; animation: thinkingPulse 1.2s infinite ease-in-out; }
-.thinking-dots .tdot:nth-child(2) { animation-delay: .2s; }
-.thinking-dots .tdot:nth-child(3) { animation-delay: .4s; }
-@keyframes thinkingPulse { 0%, 80%, 100% { transform: scale(0.6); opacity: 0.3; } 40% { transform: scale(1); opacity: 0.9; } }
+/* 进度状态点：思考中会呼吸，「思考完成」后静止为灰点 */
+.agent-progress-dot { flex: none; width: 12rpx; height: 12rpx; border-radius: 50%; background: #0a6dff; box-shadow: 0 0 0 4rpx rgba(10,109,255,0.12); }
+.agent-progress-dot.live { animation: progressPulse 1.4s infinite ease-in-out; }
+.agent-progress-dot.settled { background: #b6bfc9; box-shadow: none; }
+@keyframes progressPulse { 0%, 100% { transform: scale(0.82); opacity: 0.55; } 50% { transform: scale(1); opacity: 1; } }
 
 /* 气泡下方 meta 行：时间戳在左 + 复制图标（双框剪贴板），模仿类 Discord 消息格式（2026-11-03） */
 .bubble-meta { display: flex; align-items: center; gap: 14rpx; margin-top: 10rpx; }
@@ -642,8 +645,8 @@
 .bubble-time { font-size: 19rpx; color: #98a2ab; line-height: 1; }
 .bubble-copy { display: flex; justify-content: flex-end; align-items: center; padding: 8rpx 4rpx; }
 .bubble-copy:active { opacity: .55; }
-.bubble-copy-ic { width: 30rpx; height: 30rpx; background-color: #0f6e52; -webkit-mask: url("data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2024%2024%22%20fill=%22%23000000%22%3E%3Crect%20x=%226.5%22%20y=%226.5%22%20width=%2211%22%20height=%2211%22%20rx=%222%22%20fill=%22none%22%20stroke=%22%23000000%22%20stroke-width=%222%22/%3E%3Crect%20x=%2210.5%22%20y=%2210.5%22%20width=%2211%22%20height=%2211%22%20rx=%222%22%20fill=%22none%22%20stroke=%22%23000000%22%20stroke-width=%222%22/%3E%3C/svg%3E") center / 100% 100% no-repeat; mask: url("data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2024%2024%22%20fill=%22%23000000%22%3E%3Crect%20x=%226.5%22%20y=%226.5%22%20width=%2211%22%20height=%2211%22%20rx=%222%22%20fill=%22none%22%20stroke=%22%23000000%22%20stroke-width=%222%22/%3E%3Crect%20x=%2210.5%22%20y=%2210.5%22%20width=%2211%22%20height=%2211%22%20rx=%222%22%20fill=%22none%22%20stroke=%22%23000000%22%20stroke-width=%222%22/%3E%3C/svg%3E") center / 100% 100% no-repeat; }
-.message.user .bubble-copy-ic { background-color: #13795b; }
+.bubble-copy-ic { width: 30rpx; height: 30rpx; background-color: #a8b2c1; -webkit-mask: url("data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2024%2024%22%20fill=%22%23000000%22%3E%3Crect%20x=%226.5%22%20y=%226.5%22%20width=%2211%22%20height=%2211%22%20rx=%222%22%20fill=%22none%22%20stroke=%22%23000000%22%20stroke-width=%222%22/%3E%3Crect%20x=%2210.5%22%20y=%2210.5%22%20width=%2211%22%20height=%2211%22%20rx=%222%22%20fill=%22none%22%20stroke=%22%23000000%22%20stroke-width=%222%22/%3E%3C/svg%3E") center / 100% 100% no-repeat; mask: url("data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2024%2024%22%20fill=%22%23000000%22%3E%3Crect%20x=%226.5%22%20y=%226.5%22%20width=%2211%22%20height=%2211%22%20rx=%222%22%20fill=%22none%22%20stroke=%22%23000000%22%20stroke-width=%222%22/%3E%3Crect%20x=%2210.5%22%20y=%2210.5%22%20width=%2211%22%20height=%2211%22%20rx=%222%22%20fill=%22none%22%20stroke=%22%23000000%22%20stroke-width=%222%22/%3E%3C/svg%3E") center / 100% 100% no-repeat; }
+.message.user .bubble-copy-ic { background-color: #8a94a6; }
 
 /* ============ 长期偏好沉淀建议卡（2026-11-06） ============
    气泡下方的轻量确认条：Agent 判定「这句话像是一条以后都要遵守的规矩」时出现，
@@ -670,15 +673,15 @@
 .doc-missing-tag { padding: 5rpx 12rpx; border-radius: 9rpx; background: rgba(255,255,255,.82); color: #8b5427; font-size: 20rpx; }
 .doc-missing-tag.required { background: rgba(200,120,51,.16); font-weight: 600; }
 /* 独立复核意见：并进同一条回执，默认收起 */
-.doc-review { margin-top: 12rpx; border-radius: 14rpx; background: rgba(19,121,91,.05); box-shadow: inset 0 0 0 1rpx rgba(19,121,91,.14); }
+.doc-review { margin-top: 12rpx; border-radius: 18rpx; background: #ffffff; border: 1rpx solid rgba(17,19,26,0.08); box-shadow: 0 2rpx 10rpx rgba(22,38,74,0.04); }
 .doc-review-head { display: flex; align-items: center; justify-content: space-between; padding: 14rpx 18rpx; }
 .doc-review-head:active { opacity: .7; }
-.doc-review-title { font-size: 23rpx; font-weight: 600; color: #13795b; }
-.doc-review-arrow { font-size: 28rpx; color: #13795b; transition: transform .2s ease; }
+.doc-review-title { font-size: 24rpx; font-weight: 600; color: #11131a; }
+.doc-review-arrow { font-size: 26rpx; color: #a8b2c1; transition: transform .2s ease; }
 .doc-review-arrow.expanded { transform: rotate(90deg); }
 .doc-review-list { padding: 0 18rpx 14rpx; }
 .doc-review-item { display: flex; align-items: flex-start; gap: 10rpx; margin-top: 10rpx; }
-.doc-review-tag { flex: none; padding: 3rpx 10rpx; border-radius: 8rpx; background: rgba(19,121,91,.1); color: #13795b; font-size: 19rpx; }
+.doc-review-tag { flex: none; padding: 3rpx 12rpx; border-radius: 999rpx; background: rgba(10,109,255,0.10); color: #0a6dff; font-size: 19rpx; }
 .doc-review-tag.must { background: rgba(200,90,51,.12); color: #a44a24; }
 .doc-review-text { flex: 1; font-size: 22rpx; line-height: 1.5; color: var(--ink-2, #2f4157); }
 
