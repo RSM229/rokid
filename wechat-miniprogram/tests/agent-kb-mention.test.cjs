@@ -7,6 +7,7 @@ const root = path.join(__dirname, '../miniprogram/pages/agent')
 const page = fs.readFileSync(path.join(root, 'index.ts'), 'utf8')
 const template = fs.readFileSync(path.join(root, 'index.wxml'), 'utf8')
 const styles = fs.readFileSync(path.join(root, 'index.wxss'), 'utf8')
+const globalStyles = fs.readFileSync(path.join(__dirname, '../miniprogram/app.wxss'), 'utf8')
 
 test('@ 面板只保留资料库一个入口，三类旧候选已移除', () => {
   // 旧实现有三个 tab（快捷指令/成员/业务引用），重构后单一入口
@@ -201,4 +202,37 @@ test('面板不再常驻：高度收缩并与输入框留出间距，降低误�
   assert.match(template, /引用资料库\{\{mentions\.length \? '（已选 ' \+ mentions\.length \+ ' 项）' : ''\}\}/)
   // 旧的 × 关闭入口让位给「完成」，避免两个语义相近的出口
   assert.doesNotMatch(template, /class="at-panel-close"/)
+})
+test('设计令牌层：骨架数值集中定义，页面按语义引用', () => {
+  // 背景：agent 页 528 条规则里出现过 7 种圆角、8 种字号，视觉上"没有规律"。
+  // 令牌层把圆角/间距/字号/阴影收敛成语义档位，页面按角色引用。
+  assert.match(globalStyles, /--r-card: 24rpx;/)
+  assert.match(globalStyles, /--r-bubble: 22rpx;/)
+  assert.match(globalStyles, /--r-item: 16rpx;/)
+  assert.match(globalStyles, /--r-pill: 999rpx;/)
+  assert.match(globalStyles, /--gap-1: 8rpx;/)
+  assert.match(globalStyles, /--fs-body: 28rpx;/)
+  assert.match(globalStyles, /--fs-sub: 24rpx;/)
+  assert.match(globalStyles, /--fs-mini: 21rpx;/)
+  // 页面侧必须真的在用，而不是只定义
+  assert.match(styles, /border-radius: var\(--r-bubble, 22rpx\)/)
+  assert.match(styles, /font-size: var\(--fs-body, 28rpx\)/)
+  assert.match(styles, /\.at-done-bar \{[^}]*border-radius: var\(--r-card, 24rpx\)/)
+})
+
+test('气泡在白底上要有边界：不透明度提高、模糊半径收敛', () => {
+  // 原 0.54→0.30 太透，纯白背景下气泡轮廓几乎看不见，观感"发灰"
+  assert.match(styles, /rgba\(255,255,255,0\.78\) 0%, rgba\(255,255,255,0\.46\) 100%/)
+  assert.match(styles, /blur\(26rpx\)/)
+  // 只断言「气泡那一条」，不要求全文件没有 34rpx（其它元素可能合法使用）
+  const bubbleRule = styles.match(/^\.bubble \{[^}]*\}/m)[0]
+  assert.match(bubbleRule, /blur\(26rpx\)/)
+  assert.doesNotMatch(bubbleRule, /blur\(34rpx\)/)
+  assert.doesNotMatch(bubbleRule, /0\.54\) 0%, rgba\(255,255,255,0\.30\)/)
+})
+
+test('完成按钮是胶囊而非整条填满，且保留大点击区', () => {
+  assert.match(styles, /\.at-panel-done \{[^}]*border-radius: var\(--r-pill, 999rpx\)/)
+  assert.match(styles, /\.at-done-bar \{[^}]*height: 96rpx/)
+  assert.match(styles, /\.at-done-bar\.active \{[^}]*box-shadow/)
 })
