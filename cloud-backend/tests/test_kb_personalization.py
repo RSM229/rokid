@@ -74,6 +74,24 @@ class BoostTests(unittest.TestCase):
         self.assertEqual(kb_search._personal_boost(stats, "doc", 88), 2)
 
 
+class ProjectBoostTests(unittest.TestCase):
+    def test_same_project_kb_gets_boost(self) -> None:
+        project_map = {3: 7, 4: None}
+        self.assertEqual(kb_search._project_boost(project_map, 3, 7), kb_search.BOOST_PROJECT)
+
+    def test_other_project_and_personal_kb_get_nothing(self) -> None:
+        project_map = {3: 7, 4: None, 5: 8}
+        self.assertEqual(kb_search._project_boost(project_map, 5, 7), 0)   # 别的项目
+        self.assertEqual(kb_search._project_boost(project_map, 4, 7), 0)   # 个人库
+
+    def test_no_current_project_means_no_boost(self) -> None:
+        self.assertEqual(kb_search._project_boost({3: 7}, 3, None), 0)
+
+    def test_project_boost_alone_cannot_overtake_next_tier(self) -> None:
+        # 路径命中 70 +5 仍低于包含 90；子序列 55 +5 仍低于 65
+        self.assertLess(kb_search.S_PATH_CONTAINS + kb_search.BOOST_PROJECT, kb_search.S_CONTAINS)
+        self.assertLess(kb_search.S_SUBSEQ + kb_search.BOOST_PROJECT, kb_search.S_PATH_TOKENS)
+
 class BrowseTests(unittest.IsolatedAsyncioTestCase):
     def _nodes(self):
         return {

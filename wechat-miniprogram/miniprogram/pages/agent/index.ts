@@ -5864,7 +5864,8 @@ Page(themed({
     this.setData({ atLoading: true })
     try {
       const result = await request<KbSearchResponse>('/kb/search', {
-        data: { q: query, offset, limit: 20 },
+        // project_id：同项目的资料库在排序里略微靠前（后端 +5 分，翻不过相关性档位）
+        data: { q: query, offset, limit: 20, project_id: this.data.currentProjectId || undefined },
       })
       if (seq !== this.atSearchSeq) return   // 已有更新的请求，丢弃这次结果
       // 空查询 → 后端返回 browse：最近用过 / 常用 / 全部文件夹。

@@ -685,6 +685,7 @@ async def search_knowledge(
     limit: int = Query(20, ge=1, le=60),
     offset: int = Query(0, ge=0),
     include_documents: bool = Query(True),
+    project_id: Optional[int] = Query(None, description="当前项目 id：同项目资料库略微靠前"),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -714,6 +715,7 @@ async def search_knowledge(
         limit=limit,
         offset=offset,
         include_documents=include_documents,
+        project_id=project_id,
     )
 
 

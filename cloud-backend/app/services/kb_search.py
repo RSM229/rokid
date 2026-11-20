@@ -309,6 +309,41 @@ async def record_mentions(
     return written
 
 
+async def _kb_project_map(db: AsyncSession, kb_ids: Sequence[int]) -> dict[int, Optional[int]]:
+    """资料库 id → 绑定的项目 id（个人库/公共库为 None）。"""
+    if not kb_ids:
+        return {}
+    from app.models.knowledge_base import KnowledgeBase
+
+    rows = await db.execute(
+        select(KnowledgeBase.id, KnowledgeBase.project_id).where(
+            KnowledgeBase.id.in_(list(kb_ids))
+        )
+    )
+    return {
+        int(kb_id): (int(project_id) if project_id is not None else None)
+        for kb_id, project_id in rows.all()
+    }
+
+
+def _project_boost(
+    project_map: dict[int, Optional[int]],
+    kb_id: int,
+    project_id: Optional[int],
+) -> int:
+    """同项目加分：当前项目的资料库略微靠前。
+
+    为什么用「同库优先」而不是给项目库单独排序：用户在同一项目里连续作业时，
+    项目库里的资料才是他此刻真正要引的；但个人库里也可能有更好的命中，
+    所以只加 5 分——足以在同分段内拉开次序，不足以翻越相关性档位。
+    """
+    if project_id is None:
+        return 0
+    if project_map.get(int(kb_id)) != int(project_id):
+        return 0
+    return BOOST_PROJECT
+
+
 async def _kb_name_map(db: AsyncSession, kb_ids: Sequence[int]) -> dict[int, str]:
     """资料库 id → 名称。
 
@@ -369,6 +404,7 @@ async def search(
     limit: int = 20,
     offset: int = 0,
     include_documents: bool = True,
+    project_id: Optional[int] = None,
 ) -> dict:
     """混排搜索：文件夹与文档在同一个列表里按分数排序，越靠前越可信。
 
@@ -403,6 +439,7 @@ async def search(
     subtree_counts = _subtree_counts(nodes, direct_counts)
     kb_names = await _kb_name_map(db, allowed)
     stats = await _stat_map(db, user_id, allowed)
+    project_map = await _kb_project_map(db, allowed) if project_id is not None else {}
 
     # ---- 文件夹召回与打分 -------------------------------------------------
     folder_where = _prefilter(KbFolder.name, tokens)
@@ -432,8 +469,9 @@ async def search(
                 "name": name or "",
                 "path": node["path"],
                 "count": int(subtree_counts.get(int(folder_id), 0)),
-                # 个性化加分只叠加在文本分之上（有上限），相关性仍是主导
-                "score": folder_score + _personal_boost(stats, "folder", int(folder_id)),
+                # 个性化加分 + 同项目加分，都只叠加在文本分之上（各有上限），相关性仍是主导
+                "score": folder_score + _personal_boost(stats, "folder", int(folder_id))
+                         + _project_boost(project_map, int(kb_id), project_id),
             }
         )
     folders.sort(key=lambda item: (-item["score"], item["path"]))
@@ -479,7 +517,8 @@ async def search(
                         "folder_path": folder_path,
                         "size_bytes": int(size_bytes or 0),
                         "created_at": created_at.isoformat() if created_at else None,
-                        "score": doc_score + _personal_boost(stats, "doc", int(doc_id)),
+                        "score": doc_score + _personal_boost(stats, "doc", int(doc_id))
+                                 + _project_boost(project_map, int(kb_id), project_id),
                     }
                 )
             documents.sort(key=lambda item: (-item["score"], item["name"]))

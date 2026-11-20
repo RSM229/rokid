@@ -24,7 +24,7 @@ test('@ 面板只保留资料库一个入口，三类旧候选已移除', () => 
 
 test('搜索走服务端 /kb/search，带分页与竞态丢弃', () => {
   assert.match(page, /request<KbSearchResponse>\('\/kb\/search'/)
-  assert.match(page, /data: \{ q: query, offset, limit: 20 \}/)
+  assert.match(page, /data: \{ q: query, offset, limit: 20, project_id: this\.data\.currentProjectId \|\| undefined \}/)
   // 竞态：过期响应必须丢弃，否则慢请求会覆盖新结果
   assert.match(page, /const seq = \+\+this\.atSearchSeq/)
   assert.match(page, /if \(seq !== this\.atSearchSeq\) return/)

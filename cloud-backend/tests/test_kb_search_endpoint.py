@@ -82,6 +82,19 @@ class KbSearchEndpointTests(unittest.TestCase):
             self.assertEqual(client.get(SEARCH_URL, params={"q": "x", "limit": 61}).status_code, 422)
             self.assertEqual(client.get(SEARCH_URL, params={"q": "x", "offset": -1}).status_code, 422)
 
+    def test_project_id_is_forwarded(self) -> None:
+        captured: dict = {}
+
+        async def fake_search(db, user_id, q, **kwargs):
+            captured.update(kwargs)
+            return {"query": q, "kb_ids": [], "folders": [], "documents": [],
+                    "has_more": False, "total_folders": 0, "total_documents": 0}
+
+        with patch.object(knowledge_base.kb_search, "search", side_effect=fake_search):
+            response = _build_client().get(SEARCH_URL, params={"q": "钢筋", "project_id": 7})
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(captured["project_id"], 7)
     def test_payload_is_passed_through_unchanged(self) -> None:
         payload = {
             "query": "钢筋", "kb_ids": [3],
