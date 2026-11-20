@@ -518,9 +518,11 @@ function sessionIdFromConversationId(conversationId: string): number {
  *  - provider='huagong' 走华南理工独立供应商（未配置则后端自动回退默认模型）。 */
 const CHAT_MODELS = MODEL_CATALOG
 
-/** @ 资料库搜索结果项：文件夹与文档混排（kind 区分渲染与选中语义）。 */
+/** @ 资料库搜索结果项：文件夹与文档混排（kind 区分渲染与选中语义）。
+ *  kind='query' 是搜索框里那段关键字本身——用户不想挑具体文件、
+ *  只想「按这个词查资料」时直接选它，对应后端 kb_query。 */
 interface AtKbItem {
-  kind: 'folder' | 'doc'
+  kind: 'folder' | 'doc' | 'query'
   key: string
   kbId: number
   /** folder_id 或 doc_id，取决于 kind */
@@ -538,9 +540,11 @@ interface AtKbItem {
 /** @ 选中项：随 /agent/chat 结构化传给后端，后端据此限定检索范围。
  *  token 是插进输入框的可读文本，用户把它删掉就等于撤销这条引用。 */
 interface AtMention {
-  /** 与搜索结果项同源的稳定 key（kb-folder-12 / kb-doc-88），用于打勾与撤销 */
+  /** 与搜索结果项同源的稳定 key（kb-folder-12 / kb-doc-88 / kb-query-钢筋），用于打勾与撤销 */
   key: string
-  type: 'kb_folder' | 'kb_doc'
+  type: 'kb_folder' | 'kb_doc' | 'kb_query'
+  /** kb_query 专用：要拿去检索的关键词 */
+  query?: string
   kb_id: number
   folder_id?: number
   doc_id?: number
@@ -5800,6 +5804,15 @@ Page(themed({
           score: doc.score,
         })
       }
+      // 模糊词入口：用户不想挑具体文件、只想「按这个词查资料」时选它。
+      // 只在首页（offset=0）插入，加载更多时不能重复出现。
+      const keyword = query.trim()
+      if (offset === 0 && keyword) {
+        incoming.unshift({
+          kind: 'query', key: `kb-query-${keyword}`, kbId: 0, id: 0,
+          name: keyword, path: '', score: 1000,
+        })
+      }
       const merged = offset > 0 ? this.data.atItems.concat(incoming) : incoming
       // 已选中的条目在列表里打勾，用户能看出「这个我加过了」
       const chosen = new Set(this.data.mentions.map(m => m.key))
@@ -5840,6 +5853,21 @@ Page(themed({
     if (already) {
       // 再点一次 = 取消：多选场景下比「再去点小 ×」更顺手
       this.removeMentionByKey(item.key)
+      return
+    }
+    // 模糊词：不限定到某个文件夹/文档，只把关键词交给后端做检索范围内的模糊召回
+    if (item.kind === 'query') {
+      const token = `@[资料库检索 ${item.name}]`
+      const mention: AtMention = {
+        key: item.key, type: 'kb_query', kb_id: 0, path: '',
+        name: item.name, query: item.name, token,
+      }
+      this.appendToken(token, mention)
+      this.setData({
+        atItems: this.data.atItems.map(i =>
+          i.key === item.key ? ({ ...i, picked: true } as AtKbItem) : i,
+        ),
+      })
       return
     }
     const token = item.kind === 'folder'
@@ -5895,9 +5923,13 @@ Page(themed({
 
   /** 发给后端的结构化引用；空数组表示不限定范围 */
   buildChatMentions(): Array<Record<string, unknown>> {
-    return this.data.mentions.map(m => m.type === 'kb_folder'
-      ? { type: 'kb_folder', kb_id: m.kb_id, folder_id: m.folder_id, path: m.path, name: m.name }
-      : { type: 'kb_doc', kb_id: m.kb_id, doc_id: m.doc_id, path: m.path, name: m.name })
+    return this.data.mentions.map(m => {
+      if (m.type === 'kb_query') return { type: 'kb_query', query: m.query || m.name }
+      if (m.type === 'kb_folder') {
+        return { type: 'kb_folder', kb_id: m.kb_id, folder_id: m.folder_id, path: m.path, name: m.name }
+      }
+      return { type: 'kb_doc', kb_id: m.kb_id, doc_id: m.doc_id, path: m.path, name: m.name }
+    })
   },
 
   /**

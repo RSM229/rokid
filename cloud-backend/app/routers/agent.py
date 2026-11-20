@@ -874,6 +874,26 @@ async def _plain_answer(message: str, history: list[dict], provider: str | None,
     return await _generate_plain(_plain_messages(message, history, mode), provider, model)
 
 
+def _mention_scope(mentions: list[dict], resolved_paths: set[str]) -> set[str] | None:
+    """把 mentions 归纳成 rag 检索的路径白名单语义。
+
+    三种情况必须区分开，否则用户会在「选了东西反而查不到」上栽跟头：
+
+    * 只选了模糊词（kb_query）→ ``None``：不限定范围，模糊词只作为检索查询词生效；
+    * 选了文件夹/文档且有命中 → 命中路径集合：只在这些资料里检索；
+    * 选了文件夹/文档但一篇文档都没解析出来（空文件夹）→ **空集合**：
+      刻意不外扩。此时宁可让检索空转、由模型追问，也不要偷偷搜全库并冒充"依据"。
+    """
+    has_scope_item = any(
+        str(item.get("type") or "") in {"kb_folder", "kb_doc"}
+        for item in mentions or []
+        if isinstance(item, dict)
+    )
+    if not has_scope_item:
+        return None
+    return set(resolved_paths)
+
+
 def _retrieve_citations(message: str, project_id: int | None,
                         top_k: int = 5, min_score: float = 0.0,
                         paths: set[str] | None = None) -> tuple[list[dict], str]:
@@ -1855,9 +1875,8 @@ async def _agent_chat_impl(
                 db, user.id, req.mentions,
             )
             scope_query = " ".join(extra_queries).strip()
-            # 空集合（选中的文件夹是空的）与「没选」语义不同：
-            # 没选 → None（全局检索）；选了但没命中 → 空集（不外扩，只追问）。
-            scope_paths = resolved_paths if resolved_paths else set()
+            # 语义见 _mention_scope：模糊词不限定范围，空文件夹则保持空集
+            scope_paths = _mention_scope(req.mentions, resolved_paths)
         except Exception:  # noqa: BLE001 —— 引用解析失败不应阻断对话
             logger.warning("@资料库引用解析失败", exc_info=True)
             scope_paths = None

@@ -69,3 +69,17 @@ test('选中态有对应样式（已选 chip、打勾、加载更多）', () => 
   assert.match(styles, /\.at-item\.picked \{/)
   assert.match(styles, /\.at-more \{/)
 })
+
+test('模糊词：搜索框关键字本身可作为引用，随消息以 kb_query 发送', () => {
+  // 列表首位插入「按这个关键词检索」的合成项，只在首页插入（加载更多不重复）
+  assert.match(page, /kind: 'query', key: `kb-query-\$\{keyword\}`/)
+  assert.match(page, /if \(offset === 0 && keyword\)/)
+  // 选中它 → kb_query mention + 可读 token（token 里必须带「资料库检索」标识，避免与文件夹 token 混淆）
+  assert.match(page, /type: 'kb_query'[\s\S]{0,80}query: item\.name, token/)
+  assert.match(page, /const token = `@\[资料库检索 \$\{item\.name\}\]`/)
+  // 发给后端时 kb_query 只带 query 字段（没有 kb_id/folder_id，后端据此不限范围）
+  assert.match(page, /if \(m\.type === 'kb_query'\) return \{ type: 'kb_query', query: m\.query \|\| m\.name \}/)
+  // 渲染：🔍 而不是 📁/📄
+  assert.match(template, /item\.kind === 'query' \? '按「' \+ item\.name \+ '」检索资料库'/)
+  assert.match(template, /item\.type === 'kb_query' \? '检索：' \+ item\.name/)
+})

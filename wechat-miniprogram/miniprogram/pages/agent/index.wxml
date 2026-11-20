@@ -681,11 +681,11 @@
       <text class="at-panel-title">引用资料库</text>
       <view class="at-panel-close" catchtap="toggleAtPanel">×</view>
     </view>
-    <!-- 已选引用（可多选）：文件夹=整棵子树，文档=单份；点 × 撤销并同步抹掉输入框 token -->
+    <!-- 已选引用（可多选）：文件夹=整棵子树，文档=单份，关键词=按词检索；点 × 撤销并同步抹掉输入框 token -->
     <view class="at-selected" wx:if="{{mentions.length}}">
       <view class="at-selected-item" wx:for="{{mentions}}" wx:key="key" data-key="{{item.key}}" catchtap="removeMention">
-        <text class="at-selected-icon">{{item.type === 'kb_folder' ? '📁' : '📄'}}</text>
-        <text class="at-selected-text">{{item.name}}</text>
+        <text class="at-selected-icon">{{item.type === 'kb_folder' ? '📁' : (item.type === 'kb_doc' ? '📄' : '🔍')}}</text>
+        <text class="at-selected-text">{{item.type === 'kb_query' ? '检索：' + item.name : item.name}}</text>
         <text class="at-selected-x">×</text>
       </view>
     </view>
@@ -695,10 +695,10 @@
       <block wx:else>
         <view wx:if="{{!atItems.length}}" class="at-empty">{{atQuery ? '没有匹配的资料' : '输入关键字搜索资料库'}}</view>
         <view class="at-item {{item.picked ? 'picked' : ''}}" wx:for="{{atItems}}" wx:key="key" data-key="{{item.key}}" catchtap="pickAtItem">
-          <view class="at-item-icon">{{item.kind === 'folder' ? '📁' : '📄'}}</view>
+          <view class="at-item-icon">{{item.kind === 'folder' ? '📁' : (item.kind === 'doc' ? '📄' : '🔍')}}</view>
           <view class="at-item-body">
-            <text class="at-item-label">{{item.kind === 'folder' ? item.path : item.name}}</text>
-            <text class="at-item-desc">{{item.kind === 'folder' ? (item.count ? item.count + ' 份资料·含子文件夹' : '空文件夹') : (item.path || '未分类')}}</text>
+            <text class="at-item-label">{{item.kind === 'query' ? '按「' + item.name + '」检索资料库' : (item.kind === 'folder' ? item.path : item.name)}}</text>
+            <text class="at-item-desc">{{item.kind === 'query' ? '不挑具体文件，让智能体在这个关键词上找依据' : (item.kind === 'folder' ? (item.count ? item.count + ' 份资料·含子文件夹' : '空文件夹') : (item.path || '未分类'))}}</text>
           </view>
           <text class="at-item-check" wx:if="{{item.picked}}">✓</text>
         </view>
