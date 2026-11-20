@@ -104,7 +104,8 @@ class SearchTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(kb_search, "accessible_kb_ids", return_value=[3]), \
              patch.object(kb_search, "_folder_path_map", return_value=nodes), \
              patch.object(kb_search, "_folder_doc_counts", return_value={11: 2}), \
-             patch.object(kb_search, "_kb_name_map", return_value={3: "测试库"}):
+             patch.object(kb_search, "_kb_name_map", return_value={3: "测试库"}), \
+             patch.object(kb_search, "_stat_map", return_value={}):
             result = await kb_search.search(session, 1, "钢筋")
 
         self.assertEqual([f["path"] for f in result["folders"]], ["施工规范/钢筋工程"])
@@ -135,7 +136,8 @@ class SearchTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(kb_search, "accessible_kb_ids", return_value=[3]), \
              patch.object(kb_search, "_folder_path_map", return_value=nodes), \
              patch.object(kb_search, "_folder_doc_counts", return_value={12: 1}), \
-             patch.object(kb_search, "_kb_name_map", return_value={3: "测试库"}):
+             patch.object(kb_search, "_kb_name_map", return_value={3: "测试库"}), \
+             patch.object(kb_search, "_stat_map", return_value={}):
             result = await kb_search.search(session, 1, "钢筋")
         self.assertEqual(result["documents"], [])
 
