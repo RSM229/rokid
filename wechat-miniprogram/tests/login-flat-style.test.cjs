@@ -112,3 +112,19 @@ test('思考进度卡改平面：去掉左侧绿色竖条，改用脉冲状态�
   assert.match(agentWxss, /\.agent-progress-chevron\.up \{ transform: rotate\(-90deg\); \}/)
   assert.doesNotMatch(agentWxml, /agent-progress-toggle/)
 })
+test('模型目录不重复：同一个模型不能在选择器里出现两次', () => {
+  const catalog = fs.readFileSync(path.join(root, 'services/modelCatalog.ts'), 'utf8')
+  const ids = [...catalog.matchAll(/^\s{2}\{\s*$[\s\S]*?id: '([^']+)'/gm)].map(x => x[1])
+  // 更稳妥：直接抓所有 id 字段
+  const allIds = [...catalog.matchAll(/id:\s*'([^']+)'/g)].map(x => x[1])
+  assert.ok(allIds.length >= 3, `目录只有 ${allIds.length} 条`)
+  const dupes = allIds.filter((id, i) => allIds.indexOf(id) !== i)
+  assert.deepEqual(dupes, [], `目录存在重复 id：${dupes.join(', ')}`)
+
+  // 选择器一律用去重后的目录（防止以后重复维护又漏进来）
+  assert.match(catalog, /export const MODEL_CATALOG_UNIQUE/)
+  const agent = fs.readFileSync(path.join(root, 'pages/agent/index.ts'), 'utf8')
+  assert.match(agent, /import \{ MODEL_CATALOG_UNIQUE \}/)
+  assert.match(agent, /const CHAT_MODELS = MODEL_CATALOG_UNIQUE/)
+  assert.doesNotMatch(agent, /const CHAT_MODELS = MODEL_CATALOG\b/)
+})

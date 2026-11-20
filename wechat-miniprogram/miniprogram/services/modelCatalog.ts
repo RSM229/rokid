@@ -70,19 +70,18 @@ export const MODEL_CATALOG: ModelItem[] = [
     badges: [],
     capabilities: ['文本生成', '推理模型', '视觉理解'],
   },
-  {
-    id: 'deepseek-v4.1-flash-1017',
-    provider: '',
-    providerName: 'DeepSeek',
-    model: 'deepseek-v4.1-flash-1017',
-    name: 'DeepSeek V4.1 Flash',
-    shortName: 'DeepSeek V4.1',
-    desc: '高速推理，文本/视觉全能',
-    temperature: 0.7,
-    badges: ['⚡ 限时夜间 5 折'],
-    capabilities: ['文本生成', '推理模型', '视觉理解'],
-  },
 ]
+
+/**
+ * 按 id 去重后的目录（选择器一律用这份）。
+ *
+ * 背景：目录里曾出现两条 id 完全相同的 DeepSeek 记录（只有 desc 差一个后缀），
+ * 选择器把两条都渲染出来，用户看到"同一个模型出现两次、都打勾"，像是选错了。
+ * 数据已修正；这里再加一层运行时兜底，避免以后重复维护时又漏进来。
+ */
+export const MODEL_CATALOG_UNIQUE: ModelItem[] = MODEL_CATALOG.filter(
+  (item, index, list) => list.findIndex(m => m.id === item.id) === index,
+)
 
 export function findModel(id: string): ModelItem {
   return MODEL_CATALOG.find(m => m.id === id) || MODEL_CATALOG[0]

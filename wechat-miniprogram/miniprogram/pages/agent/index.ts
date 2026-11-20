@@ -9,7 +9,7 @@ import { ensurePrivacy } from '../../utils/privacy'
 import { themed } from '../../utils/theme'
 import { cleanMarkdown } from '../../utils/markdown'
 import { normalizeDateTimeInput, resolveDateTimeRange } from '../../utils/date-time-picker'
-import { MODEL_CATALOG } from '../../services/modelCatalog'
+import { MODEL_CATALOG_UNIQUE } from '../../services/modelCatalog'
 import { FORM_CODE_BY_LABEL, createReviewPlan, saveReviewPlan, listReviewPlans, confirmReviewPlan, executeReviewPlan, editEvent, editFormField, editEvidenceWatermark, addEvidenceWatermark, confirmPlan, reviewIssues, evidenceTargetConflicts, reviewPlanFromItemPlan, mergeEvents, splitEvidence, releaseEvidence, assignEvidence, addEvent, removeEvent, type ReviewPlan, type RequestPlanItemPlan } from '../../services/work-review'
 
 const INLINE_RECORD_TYPES = ['巡视', '验收', '见证', '旁站', '平行检验', '起重机械安拆检查', '待定']
@@ -544,7 +544,7 @@ function sessionIdFromConversationId(conversationId: string): number {
  * 统一从 services/modelCatalog 引入（与"智能助手"页共用同一份目录与选择器组件）：
  *  - provider='' 走默认文本大模型端点（阿里云 token-plan），用 model 字段覆盖具体模型名；
  *  - provider='huagong' 走华南理工独立供应商（未配置则后端自动回退默认模型）。 */
-const CHAT_MODELS = MODEL_CATALOG
+const CHAT_MODELS = MODEL_CATALOG_UNIQUE
 
 /** @ 资料库搜索结果项：文件夹与文档混排（kind 区分渲染与选中语义）。
  *  kind='query' 是搜索框里那段关键字本身——用户不想挑具体文件、
