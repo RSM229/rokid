@@ -73,3 +73,21 @@ test('图标资产已搬入：横版 logo 与功能图标目录', () => {
   }
   assert.ok(fs.existsSync(path.join(root, 'assets/icons/trace/trace-doc.png')), 'trace 图标缺失')
 })
+
+test('工作台 agent 页已去掉玻璃叠层：核心元素全部平面化', () => {
+  const agentWxss = fs.readFileSync(path.join(root, 'pages/agent/index.wxss'), 'utf8')
+  // 改造前：13 个选择器带 backdrop-filter、27 处 inset 内高光 —— 这正是"层层叠叠"
+  const blurCount = (agentWxss.match(/backdrop-filter: blur/g) || []).length
+  assert.equal(blurCount, 0, `仍有 ${blurCount} 处 backdrop-filter: blur`)
+
+  for (const sel of ['nav-bar', 'input-card', 'input-bar', 'hero-pill', 'bubble']) {
+    const rule = agentWxss.match(new RegExp(`^\\.${sel} \\{[^}]*\\}`, 'm'))
+    assert.ok(rule, `${sel} 规则缺失`)
+    assert.doesNotMatch(rule[0], /backdrop-filter: blur/, `${sel} 仍是玻璃`)
+  }
+  // 输入卡/气泡/hero 改为「一层白 + 一根线」
+  assert.match(agentWxss, /^\.input-card \{[^}]*background: #ffffff;[^}]*border: 1rpx solid rgba\(17,19,26,0\.08\)/m)
+  assert.match(agentWxss, /^\.input-bar \{[^}]*background: #f7f9fc;/m)
+  // 页面底色对齐 jl 的 #f7f9fc（原来是纯白，平面卡片没有层次）
+  assert.match(agentWxss, /^\.page \{[^}]*background: #f7f9fc;/m)
+})

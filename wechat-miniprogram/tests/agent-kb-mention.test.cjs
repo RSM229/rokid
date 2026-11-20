@@ -220,15 +220,15 @@ test('设计令牌层：骨架数值集中定义，页面按语义引用', () =>
   assert.match(styles, /\.at-done-bar \{[^}]*border-radius: var\(--r-card, 24rpx\)/)
 })
 
-test('气泡在白底上要有边界：不透明度提高、模糊半径收敛', () => {
-  // 原 0.54→0.30 太透，纯白背景下气泡轮廓几乎看不见，观感"发灰"
-  assert.match(styles, /rgba\(255,255,255,0\.78\) 0%, rgba\(255,255,255,0\.46\) 100%/)
-  assert.match(styles, /blur\(26rpx\)/)
-  // 只断言「气泡那一条」，不要求全文件没有 34rpx（其它元素可能合法使用）
+test('气泡改为平面：纯白底 + 一根线，不再用玻璃渐变', () => {
+  // 演进：0.54→0.30（轮廓看不见）→ 0.78→0.46（有边界但仍玻璃）→ 纯白平面（对齐 jl）
   const bubbleRule = styles.match(/^\.bubble \{[^}]*\}/m)[0]
-  assert.match(bubbleRule, /blur\(26rpx\)/)
-  assert.doesNotMatch(bubbleRule, /blur\(34rpx\)/)
-  assert.doesNotMatch(bubbleRule, /0\.54\) 0%, rgba\(255,255,255,0\.30\)/)
+  assert.match(bubbleRule, /background: #ffffff;/)
+  assert.match(bubbleRule, /border: 1rpx solid rgba\(17,19,26,0\.08\)/)
+  assert.match(bubbleRule, /box-shadow: 0 2rpx 10rpx rgba\(22,38,74,0\.05\)/)
+  // 不得再出现 blur / inset 内高光：这正是"层层叠叠"的来源
+  assert.doesNotMatch(bubbleRule, /backdrop-filter: blur/)
+  assert.doesNotMatch(bubbleRule, /inset 0/)
 })
 
 test('完成按钮是胶囊而非整条填满，且保留大点击区', () => {
