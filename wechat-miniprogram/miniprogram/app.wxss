@@ -60,6 +60,150 @@ page {
   --shadow-float: 0 14rpx 36rpx rgba(var(--deep-rgb, 10,46,92), 0.20);
 }
 
+/* ============================================================
+   平面极简体系（2026-11-21）
+   来源：对标同业务的 jl 小程序（C:\Users\NJHTR\WeChatProjects\jl）。
+   那套页面的观感来自「一层色 + 一根线」，而不是玻璃的多重光影：
+     - app.wxss 只有 671 字节，只做字体/box-sizing/button 重置
+     - 登录页无卡片包裹：背景光晕 + 横版 logo + 大圆角按钮
+     - 按钮 104rpx 高、52rpx 圆角、单层渐变 + 单层投影
+   而我们现有的 .glass/.card 是「渐变 + blur + 内高光 + 外阴影 + 描边」五重装饰，
+   叠三层就是十几重光影 —— 这就是"层层叠叠"的来源。
+
+   这里并存一套平面类：新页面优先用它们，旧页面按批次迁移，
+   不一次性删除 .glass/.card（避免波及 30+ 页面引发回归）。
+   ============================================================ */
+
+:root,
+page {
+  /* jl 的取值：底色 #f7f9fc、正文 #11131a、次要 #8a94a6、主色 #0a6dff */
+  --flat-bg: #f7f9fc;
+  --flat-ink: #11131a;
+  --flat-ink-2: #33405a;
+  --flat-ink-3: #8a94a6;
+  --flat-line: rgba(17, 19, 26, 0.08);      /* 唯一的一根线 */
+  --flat-surface: #ffffff;                   /* 唯一的一层白 */
+  --flat-brand: #0a6dff;
+  --flat-brand-deep: #0053d8;
+  --flat-shadow: 0 2rpx 12rpx rgba(22, 38, 74, 0.06);
+  --flat-shadow-btn: 0 18rpx 36rpx -18rpx rgba(0, 86, 216, 0.90);
+}
+
+/* 平面页容器：柔和底色，代替纯白 + 玻璃层 */
+.page-flat {
+  min-height: 100%;
+  background: var(--flat-bg, #f7f9fc);
+  color: var(--flat-ink, #11131a);
+}
+
+/* 背景光晕：jl 的登录页/主页面都靠这个造氛围，两个径向渐变即可，成本极低 */
+.flat-glow {
+  position: absolute;
+  border-radius: 50%;
+  pointer-events: none;
+}
+.flat-glow-a {
+  width: 560rpx;
+  height: 560rpx;
+  left: -160rpx;
+  top: -180rpx;
+  background: radial-gradient(circle, rgba(96, 148, 255, 0.28), rgba(96, 148, 255, 0));
+}
+.flat-glow-b {
+  width: 520rpx;
+  height: 520rpx;
+  right: -180rpx;
+  bottom: -140rpx;
+  background: radial-gradient(circle, rgba(70, 224, 171, 0.22), rgba(70, 224, 171, 0));
+}
+
+/* 平面卡片：一层白 + 一根线 + 单层微阴影（对照 .card 的五重装饰） */
+.card-flat {
+  background: var(--flat-surface, #ffffff);
+  border: 1rpx solid var(--flat-line, rgba(17, 19, 26, 0.08));
+  border-radius: 28rpx;
+  box-shadow: var(--flat-shadow, 0 2rpx 12rpx rgba(22, 38, 74, 0.06));
+}
+.card-flat:active {
+  background: rgba(247, 249, 252, 0.9);
+}
+
+/* 平面主按钮：104rpx 高、大圆角、单层渐变 + 单层投影（jl 的 .wxbtn） */
+.btn-flat {
+  width: 100%;
+  height: 104rpx;
+  line-height: 104rpx;
+  border-radius: 52rpx;
+  border: none;
+  background: linear-gradient(160deg, #2b96ff, #0a6dff 55%, #0053d8);
+  box-shadow: var(--flat-shadow-btn, 0 18rpx 36rpx -18rpx rgba(0, 86, 216, 0.9));
+  color: #ffffff;
+  font-size: 32rpx;
+  font-weight: 600;
+  letter-spacing: 2rpx;
+  padding: 0;
+  margin: 0;
+}
+.btn-flat::after {
+  border: none;
+}
+.btn-flat:active {
+  opacity: 0.88;
+}
+
+/* 平面次要按钮：白底 + 一根线 */
+.btn-flat-ghost {
+  width: 100%;
+  height: 96rpx;
+  line-height: 96rpx;
+  border-radius: 48rpx;
+  border: 1rpx solid var(--flat-line, rgba(17, 19, 26, 0.08));
+  background: var(--flat-surface, #ffffff);
+  color: var(--flat-ink-2, #33405a);
+  font-size: 30rpx;
+  font-weight: 500;
+  padding: 0;
+  margin: 0;
+}
+.btn-flat-ghost::after {
+  border: none;
+}
+
+/* 平面输入框：白底 + 一根线，聚焦时才用品牌色描边 */
+.field-flat {
+  width: 100%;
+  height: 96rpx;
+  padding: 0 28rpx;
+  box-sizing: border-box;
+  border-radius: 20rpx;
+  border: 1rpx solid var(--flat-line, rgba(17, 19, 26, 0.08));
+  background: var(--flat-surface, #ffffff);
+  color: var(--flat-ink, #11131a);
+  font-size: 30rpx;
+}
+
+/* 平面列表行：靠一根分隔线分隔，不用卡片包裹 */
+.row-flat {
+  display: flex;
+  align-items: center;
+  gap: 20rpx;
+  padding: 24rpx 4rpx;
+  border-bottom: 1rpx solid var(--flat-line, rgba(17, 19, 26, 0.08));
+}
+.row-flat:last-child {
+  border-bottom: 0;
+}
+.row-flat:active {
+  background: rgba(247, 249, 252, 0.9);
+}
+
+/* 平面图标：统一尺寸，四色变体由文件名后缀决定 */
+.ic-flat {
+  width: 44rpx;
+  height: 44rpx;
+  flex: none;
+}
+
 /* 页面根容器：纯白，不铺任何渐变/光晕
    历史：2026-09-20 曾三次尝试铺品牌蓝环境光晕（给 backdrop-filter 制造可模糊内容），
    但那与用户"背景必须纯白"的要求相悖，已全部撤除。

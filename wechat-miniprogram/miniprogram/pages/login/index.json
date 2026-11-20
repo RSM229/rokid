@@ -1,7 +1,4 @@
 {
   "navigationBarTitleText": "登录广东建设智慧监理",
-  "navigationStyle": "custom",
-  "usingComponents": {
-    "glass-nav-bar": "/components/glass-nav-bar/index"
-  }
+  "navigationStyle": "custom"
 }
