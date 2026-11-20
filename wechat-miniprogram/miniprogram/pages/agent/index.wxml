@@ -1,4 +1,6 @@
-<view class="page" style="padding-top: {{statusBarHeight}}px;; {{themeStyle}}" bindtap="onPageTap">
+<!-- --kb 注入键盘高度（px）：页面底部留白与 @ 面板位移都基于它。
+     微信只把 textarea 自己顶上去，fixed 层不受影响，所以必须显式让这些层跟着抬。 -->
+<view class="page" style="padding-top: {{statusBarHeight}}px;; --kb: {{keyboardHeight}}px; {{themeStyle}}" bindtap="onPageTap">
   <tab-bar active="agent" bind:doubletap="onTabDoubleTap" />
   <!-- Custom Nav Bar -->
   <view class="nav-bar" style="height: {{statusBarHeight + navBarHeight}}px;">
@@ -354,6 +356,8 @@
             maxlength="-1"
             auto-height
             show-confirm-bar="{{false}}"
+            adjust-position="{{false}}"
+            cursor-spacing="{{20}}"
           />
           <view wx:else class="recording-hint">
             <view class="rec-dot"></view>

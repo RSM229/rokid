@@ -649,6 +649,8 @@ Page(themed({
   atSearchSeq: 0,
   /** @ 面板本地联想缓存：key → 条目。打字时先本地查表立刻出结果，不等网络。 */
   atLocalIndex: new Map<string, AtKbItem>(),
+  /** 键盘高度监听的句柄，onUnload 里要注销，避免页面销毁后回调仍打到旧实例 */
+  keyboardHandler: null as ((res: { height: number }) => void) | null,
   inlinePlanSaveQueues: {} as Record<string, Promise<void>>,
   /** 页面正在卸载（切 tab / 切后台 / 关闭）：此时在飞的请求会被微信中止，
    *  属预期，catch 里据此不打刺眼「调用失败」。 */
@@ -732,6 +734,15 @@ Page(themed({
 
     statusBarHeight: 0,
     navBarHeight: 44,
+    /**
+     * 键盘高度（px）。0 = 键盘收起。
+     *
+     * 为什么要自己监听：页面根容器是 height:100vh 的 flex 布局，内容贴着底部。
+     * 微信 textarea 的 adjust-position 只会把「输入框」往上顶，而 @ 面板是
+     * position: fixed 相对视口定位的，不受页面位移影响——键盘一弹起来就把
+     * 面板和输入区盖住。必须拿到键盘高度，把底部偏移改成动态值。
+     */
+    keyboardHeight: 0,
 
     pendingImage: '',
     hazardMode: false,
@@ -845,6 +856,17 @@ Page(themed({
       }
     } catch { /* 缓存坏了不影响功能 */ }
 
+    // 键盘高度监听：页面是 100vh 固定布局，必须自己拿到键盘高度才能把
+    // @ 面板与输入区抬到键盘之上（微信的 adjust-position 只管输入框，不管 fixed 层）
+    this.keyboardHandler = (res: { height: number }) => {
+      const height = Math.max(0, Math.round(res.height || 0))
+      if (height === this.data.keyboardHeight) return
+      this.setData({ keyboardHeight: height })
+      // 键盘收起时，把聊天区滚回最底部（否则会停在被顶起时留下的位置）
+      if (height === 0) setTimeout(() => this.scrollChatToBottom(), 60)
+    }
+    wx.onKeyboardHeightChange(this.keyboardHandler)
+
     const user = session.getUser()
     const savedModel = String(wx.getStorageSync(`gdjl_${config.storageScope}_agent_model`) || 'deepseek-v4.1-flash-1017')
     const saved = this.data.models.find(m => m.id === savedModel) || this.data.models[0]
@@ -949,6 +971,11 @@ Page(themed({
 
   onUnload() {
     this.pageUnloading = true
+    // 注销键盘监听：否则页面销毁后回调仍会执行 setData
+    if (this.keyboardHandler) {
+      wx.offKeyboardHeightChange(this.keyboardHandler)
+      this.keyboardHandler = null
+    }
     this.stopAgentProgressTimers()
     this.saveCurrentSession()
     player.stop()

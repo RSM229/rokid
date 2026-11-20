@@ -192,7 +192,7 @@ test('面板不再常驻：高度收缩并与输入框留出间距，降低误�
   // 溢出上沿盖住底部完成条和输入框（实测遮挡过）
   assert.match(styles, /\.at-panel \{[^}]*height: 52vh/)
   assert.match(styles, /\.at-panel \{[^}]*overflow: hidden/)
-  assert.match(styles, /\.at-panel \{[^}]*bottom: calc\(360rpx \+ env\(safe-area-inset-bottom\)\)/)
+  assert.match(styles, /\.at-panel \{[^}]*bottom: calc\(360rpx \+ var\(--kb, 0px\) \+ env\(safe-area-inset-bottom\)\)/)
   // scroll-view 靠 height:0 + flex:1 取到「剩余空间的具体高度」才会滚动
   assert.match(styles, /\.at-list \{ height: 0; flex: 1; min-height: 0; \}/)
   // 固定区不参与压缩，空间全让给列表
@@ -235,4 +235,21 @@ test('完成按钮是胶囊而非整条填满，且保留大点击区', () => {
   assert.match(styles, /\.at-panel-done \{[^}]*border-radius: var\(--r-pill, 999rpx\)/)
   assert.match(styles, /\.at-done-bar \{[^}]*height: 96rpx/)
   assert.match(styles, /\.at-done-bar\.active \{[^}]*box-shadow/)
+})
+test('键盘弹起不遮挡输入区：监听高度 + 布局跟着抬 + 防二次顶起', () => {
+  // 页面是 height:100vh 的固定布局，微信的 adjust-position 只顶输入框，
+  // @ 面板是 fixed 相对视口定位，不受影响 → 键盘一弹就盖住，必须自己算。
+  assert.match(page, /keyboardHeight: 0,/)
+  assert.match(page, /wx\.onKeyboardHeightChange\(this\.keyboardHandler\)/)
+  // 页面销毁要注销，否则回调打到已销毁实例
+  assert.match(page, /wx\.offKeyboardHeightChange\(this\.keyboardHandler\)/)
+  // 键盘高度以 CSS 变量注入页面根，供 .page 与 .at-panel 共用
+  assert.match(template, /--kb: \{\{keyboardHeight\}\}px;/)
+  assert.match(styles, /\.page \{[^}]*padding: 0 0 calc\(126rpx \+ var\(--kb, 0px\) \+ env\(safe-area-inset-bottom\)\)/)
+  assert.match(styles, /\.at-panel \{[^}]*bottom: calc\(360rpx \+ var\(--kb, 0px\) \+ env\(safe-area-inset-bottom\)\)/)
+  // 键盘很高时面板不能顶出屏幕
+  assert.match(styles, /\.at-panel \{[^}]*max-height: calc\(100vh - 360rpx - var\(--kb, 0px\) - 100rpx\)/)
+  // 关掉微信自动顶起，避免和我们算的 --kb 叠加；cursor-spacing 保证光标不被压住
+  assert.match(template, /adjust-position="\{\{false\}\}"/)
+  assert.match(template, /cursor-spacing="\{\{20\}\}"/)
 })

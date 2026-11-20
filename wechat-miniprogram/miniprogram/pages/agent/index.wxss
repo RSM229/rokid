@@ -2,7 +2,10 @@
 
 /* 背景不再由本页写死：环境光晕由 app.wxss 的 .page 承载（三调 2026-09-20），
    本页若写 background 会覆盖掉光晕，玻璃感归零。这里只管布局。 */
-.page { display: flex; flex-direction: column; height: 100vh; padding: 0 0 calc(126rpx + env(safe-area-inset-bottom)); }
+/* height:100vh + 底部留白 = 输入区固定在屏幕底部。
+   --kb 是键盘高度（px，由页面根节点注入）：键盘弹起时把留白加大，
+   内容和输入区一起上抬，避免被键盘盖住。 */
+.page { display: flex; flex-direction: column; height: 100vh; padding: 0 0 calc(126rpx + var(--kb, 0px) + env(safe-area-inset-bottom)); }
 
 /* Nav Bar */
 .nav-bar { position: fixed; top: 0; left: 0; right: 0; z-index: 100; background: linear-gradient(135deg, rgba(var(--deep-rgb, 10,46,92), 0.86) 0%, rgba(var(--deep-rgb, 10,46,92), 0.76) 100%); backdrop-filter: blur(44rpx) saturate(1.9); -webkit-backdrop-filter: blur(44rpx) saturate(1.9); border-bottom: 1rpx solid rgba(255,255,255,0.16); box-shadow: inset 0 1rpx 0 rgba(255,255,255,0.16), 0 2rpx 14rpx rgba(var(--deep-rgb, 10,46,92), 0.20); }
@@ -85,7 +88,7 @@
 /* 面板：必须给「确定高度 + 裁切」，不能只给 max-height。
    scroll-view 在微信里需要确定高度才会滚动；只写 max-height 时它会按内容撑开，
    溢出面板上沿盖住底部「完成」条和输入框（实测踩到过）。 */
-.at-panel { position: fixed; left: 24rpx; right: 24rpx; bottom: calc(360rpx + env(safe-area-inset-bottom)); z-index: 165; width: auto; height: 52vh; overflow: hidden; display: flex; flex-direction: column; padding: 20rpx 20rpx 0; border-radius: var(--r-card, 24rpx); background: rgba(255,255,255,0.99); border: 1rpx solid rgba(var(--brand-rgb, 22,119,255), 0.18); box-shadow: var(--shadow-float, 0 14rpx 36rpx rgba(10,46,92,0.20)); animation: modelFade 0.15s ease; box-sizing: border-box; }
+.at-panel { position: fixed; left: 24rpx; right: 24rpx; bottom: calc(360rpx + var(--kb, 0px) + env(safe-area-inset-bottom)); z-index: 165; width: auto; height: 52vh; max-height: calc(100vh - 360rpx - var(--kb, 0px) - 100rpx); overflow: hidden; display: flex; flex-direction: column; padding: 20rpx 20rpx 0; border-radius: var(--r-card, 24rpx); background: rgba(255,255,255,0.99); border: 1rpx solid rgba(var(--brand-rgb, 22,119,255), 0.18); box-shadow: var(--shadow-float, 0 14rpx 36rpx rgba(10,46,92,0.20)); animation: modelFade 0.15s ease; box-sizing: border-box; }
 /* 固定区（标题/已选/提示/搜索/最近）不参与压缩，把空间全部让给可滚动的列表 */
 .at-panel-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--gap-3, 16rpx); flex-shrink: 0; }
 .at-panel-title { font-size: var(--fs-body, 28rpx); font-weight: 700; color: var(--ink, #12253d); }
