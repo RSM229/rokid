@@ -249,11 +249,11 @@ test('键盘弹起不遮挡输入区：监听高度 + 布局跟着抬 + 防二�
   // 只让输入条自己 margin-bottom 抬起 —— 对齐 jl 的做法。
   assert.match(styles, /\.page \{[^}]*padding: 0 0 calc\(126rpx \+ env\(safe-area-inset-bottom\)\)/)
   assert.doesNotMatch(styles, /\.page \{[^}]*var\(--kb/)
-  assert.match(styles, /\.input-bar \{[^}]*margin-bottom: var\(--kb, 0px\)/)
+  assert.doesNotMatch(styles, /\.input-bar \{[^}]*margin-bottom: var\(--kb/)
   assert.match(styles, /\.at-panel \{[^}]*bottom: calc\(360rpx \+ var\(--kb, 0px\) \+ env\(safe-area-inset-bottom\)\)/)
   // 键盘很高时面板不能顶出屏幕
   assert.match(styles, /\.at-panel \{[^}]*max-height: calc\(100vh - 360rpx - var\(--kb, 0px\) - 100rpx\)/)
   // 关掉微信自动顶起，避免和我们算的 --kb 叠加；cursor-spacing 保证光标不被压住
-  assert.match(template, /adjust-position="\{\{false\}\}"/)
+  assert.match(template, /adjust-position="\{\{true\}\}"/)
   assert.match(template, /cursor-spacing="\{\{20\}\}"/)
 })
