@@ -77,10 +77,19 @@ test('图标资产已搬入：横版 logo 与功能图标目录', () => {
 test('工作台 agent 页已去掉玻璃叠层：核心元素全部平面化', () => {
   const agentWxss = fs.readFileSync(path.join(root, 'pages/agent/index.wxss'), 'utf8')
   // 改造前：13 个选择器带 backdrop-filter、27 处 inset 内高光 —— 这正是"层层叠叠"
-  const blurCount = (agentWxss.match(/backdrop-filter: blur/g) || []).length
-  assert.equal(blurCount, 0, `仍有 ${blurCount} 处 backdrop-filter: blur`)
+  // 例外：.nav-bar 的材质模糊是 iOS 路线有意保留的（导航栏是"材料"不是色块）。
+  // 其它元素一律平面 —— 先把 nav-bar 规则剔除再计数。
+  const navRule = (agentWxss.match(/^\.nav-bar \{[^}]*\}/m) || [''])[0]
+  const withoutNav = agentWxss.replace(navRule, '')
+  const blurCount = (withoutNav.match(/(?<!-webkit-)backdrop-filter: blur/g) || []).length
+  assert.equal(blurCount, 0, `除导航栏外仍有 ${blurCount} 处 backdrop-filter: blur`)
+  // 导航栏按 iOS 材质实现：半透明底 + 细线，不再整条铺深色
+  assert.match(navRule, /rgba\(255, 255, 255, 0\.94\)/)
+  assert.match(navRule, /border-bottom: 1rpx solid rgba\(17, 19, 26, 0\.08\)/)
+  assert.doesNotMatch(navRule, /--deep-rgb/)
 
-  for (const sel of ['nav-bar', 'input-card', 'input-bar', 'hero-pill', 'bubble']) {
+  // nav-bar 不在此列：iOS 路线下它是「材质」（半透明 + 模糊 + 细线），不是平面卡片
+for (const sel of ['input-card', 'input-bar', 'hero-pill', 'bubble']) {
     const rule = agentWxss.match(new RegExp(`^\\.${sel} \\{[^}]*\\}`, 'm'))
     assert.ok(rule, `${sel} 规则缺失`)
     assert.doesNotMatch(rule[0], /backdrop-filter: blur/, `${sel} 仍是玻璃`)

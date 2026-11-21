@@ -1,13 +1,17 @@
-/* 蓝玻璃导航栏（与工作台 agent 页一致） */
+/* iOS 材料式导航栏（2026-11-21）
+   原来是一整条深蓝实心块，25 个页面共用，视觉重心全跑到最上面。
+   按 iOS 的做法：导航栏是「材质」不是色块 —— 浅色底 + 一根细线，
+   靠这条线把顶栏与内容分层；品牌色只留给图标与主操作。 */
 .gnb {
   position: fixed;
   top: 0;
   left: 0;
   right: 0;
   z-index: 1000;
-  background: var(--deep, #0a2e5c);
-  border-bottom: 1rpx solid rgba(255, 255, 255, 0.12);
-  box-shadow: 0 2rpx 12rpx rgba(10, 46, 92, 0.16);
+  background: rgba(255, 255, 255, 0.94);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border-bottom: 1rpx solid rgba(17, 19, 26, 0.08);
 }
 .gnb-inner {
   position: absolute;
@@ -27,7 +31,7 @@
 .gnb-title {
   font-size: 32rpx;
   font-weight: 600;
-  color: #fff;
+  color: #11131a;
   max-width: 380rpx;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -42,10 +46,10 @@
   width: 64rpx;
   height: 56rpx;
   border-radius: 16rpx;
-  background: rgba(255, 255, 255, 0.18);
+  background: transparent;
 }
 .gnb-left:active {
-  background: #ffffff;
+  background: rgba(17, 19, 26, 0.06);
 }
 .gnb-right {
   position: absolute;
@@ -68,7 +72,7 @@
   width: 18rpx;
   height: 18rpx;
   margin-left: 6rpx;
-  border-left: 4rpx solid #ffffff;
-  border-bottom: 4rpx solid #ffffff;
+  border-left: 4rpx solid #33405a;
+  border-bottom: 4rpx solid #33405a;
   transform: rotate(45deg);
 }

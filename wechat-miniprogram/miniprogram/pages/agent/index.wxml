@@ -15,18 +15,11 @@
     </view>
   </view>
 
-  <!-- Breadcrumb -->
-  <view class="breadcrumb" wx:if="{{breadcrumb.length > 0}}">
-    <text class="bc-item" wx:for="{{breadcrumb}}" wx:key="index">
-      <text wx:if="{{index > 0}}" class="bc-sep"> › </text>
-      {{item}}
-    </text>
-  </view>
 
   <!-- 待补全草稿卡已移入 main 顶部（见下方），避免被固定导航遮挡 -->
 
   <!-- Main Chat Area -->
-  <view class="main" style="padding-top: {{statusBarHeight + navBarHeight + (breadcrumb.length > 0 ? 70 : 10)}}px;">
+  <view class="main" style="padding-top: {{statusBarHeight + navBarHeight}}px;">
     <!-- 待补全草稿提醒卡已按用户要求移除（2026-10-15）：草稿数据仍落库，聊天内追问补全流程不变 -->
     <scroll-view class="messages" scroll-y scroll-into-view="{{scrollAnchor}}" enhanced show-scrollbar="{{false}}">
       <!-- Hero（ima 风格空状态：大问候语 + 竖排建议按钮） -->
