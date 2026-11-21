@@ -45,10 +45,10 @@
   color: #6b7c90;
 }
 
-/* 可点击入口行：主题色玻璃微染，一眼看出「这行能进去」 */
+/* 可点击入口行：不再给每一行染色。原来每行都带浅蓝底 + 内高光，七行叠起来
+   就成了"一行一个卡片"，噪音大、层级乱。现在由容器 .section 承担卡片外观，行只做排列与分隔。 */
 .cell.entry-tint {
-  background: rgba(var(--brand-rgb, 10,109,255), 0.05);
-  box-shadow: inset 0 1rpx 0 rgba(255, 255, 255, 0.60);
+  background: transparent;
 }
 
 /* ============ 带图标的目录行（2026-10-12 上收，mine 与 account-security 共用） ============
