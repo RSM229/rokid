@@ -182,12 +182,13 @@
   font-size: 22rpx;
 }
 
+/* 分组标题：与共享基元 .group-title（styles/cell-list.wxss）保持同一套数值。
+   两者是同一种角色——HIG grouped style 里的 headers，不应各自一套参数。 */
 .section-label {
-  margin: 30rpx 4rpx 14rpx;
-  color: #8a95a3;
-  font-size: 22rpx;
+  margin: 36rpx 30rpx 12rpx;
+  color: #8a94a6;
+  font-size: 25rpx;
   font-weight: 600;
-  letter-spacing: 2rpx;
 }
 .tags { display: flex; flex-wrap: wrap; gap: 12rpx; margin: 18rpx 0; }
 .tags text {

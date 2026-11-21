@@ -9,7 +9,7 @@
   line-height: 1.6;
 }
 .bind-tag.on { color: #0f7a55; background: rgba(19,121,91,0.12); }
-.bind-tag.off { color: #6b7c90; background: rgba(20,40,60,0.08); }
+.bind-tag.off { color: #8a94a6; background: rgba(20,40,60,0.08); }
 .bind-tag.unknown { color: #d97706; background: rgba(217,119,6,0.12); }
 
 /* 身份信息：主题蓝（人形） */

@@ -1,7 +1,7 @@
 /* ============ 玻璃拟态设计系统 v3.0（科技蓝 · 纯白底 · 适配监理通 B2B） ============
    主题色：**深海蓝 var(--brand, #33405a)**（2026-10-13 由电光蓝 #0f62fe 切换为欢迎页同款深蓝，并新增为预设默认）
    色板：主色 var(--brand, #33405a) / 渐变亮端 var(--brand-l, #0b3d78) / 渐变暗端 var(--brand-d, #0a3363) / 导航栏深海蓝 var(--brand-deep, #082548)
-        正文 var(--ink, #11131a) / 次要 #6b7c90 / 轮廓线 rgba(var(--brand-rgb, 15,98,254), .14) / 柔影 rgba(var(--shadow-rgb, 20,70,140), .10)
+        正文 var(--ink, #11131a) / 次要 #8a94a6 / 轮廓线 rgba(var(--brand-rgb, 15,98,254), .14) / 柔影 rgba(var(--shadow-rgb, 20,70,140), .10)
    注意：危险红灯 #b93838 与警示橙 #d97706 属语义色，**不随主题变**。
    批量切换工具：D:\rokid\.workbuddy\checks\blue_theme.js（--apply 写入）
 
@@ -357,7 +357,7 @@ page {
 .empty {
   padding: 80rpx 20rpx;
   text-align: center;
-  color: #6b7c90;
+  color: #8a94a6;
 }
 
 /* 常驻底栏宿主：为固定底栏预留安全留白（2026-09-20） */

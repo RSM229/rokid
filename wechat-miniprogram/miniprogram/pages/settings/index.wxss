@@ -45,7 +45,7 @@
 
 .ts-head { margin-bottom: 26rpx; }
 .ts-title { font-size: 34rpx; font-weight: 700; color: var(--ink, #11131a); }
-.ts-sub { display: block; margin-top: 8rpx; font-size: 24rpx; color: #6b7c90; }
+.ts-sub { display: block; margin-top: 8rpx; font-size: 24rpx; color: #8a94a6; }
 
 /* 实时预览卡
    底座先铺一层主题色的柔光（两处光斑），玻璃卡浮在上面 ——
@@ -110,7 +110,7 @@
 
 /* 调色滑块 */
 .ts-row { display: flex; align-items: center; gap: 16rpx; margin-top: 18rpx; }
-.ts-label { flex-shrink: 0; width: 72rpx; font-size: 26rpx; color: #6b7c90; }
+.ts-label { flex-shrink: 0; width: 72rpx; font-size: 26rpx; color: #8a94a6; }
 .ts-hue-wrap { position: relative; flex: 1; height: 64rpx; }
 .ts-hue-rainbow {
   position: absolute;
@@ -173,6 +173,6 @@
 .qr-box { margin-top: 30rpx; padding: 20rpx; border: 1rpx solid #e8ede9; border-radius: 16rpx; position: relative; width: 260px; height: 260px; display: flex; align-items: center; justify-content: center; }
 .qr-canvas { position: absolute; left: -9999rpx; width: 220px; height: 220px; }
 .qr-img { width: 220px; height: 220px; }
-.qr-placeholder { font-size: 26rpx; color: #b9c6d6; }
+.qr-placeholder { font-size: 26rpx; color: #a8b2c1; }
 .qr-refresh { margin-top: 28rpx !important; color: #fff; background: linear-gradient(135deg, var(--brand-l, #2b96ff), var(--brand-d, #0060df)); border-radius: 18rpx; font-size: 26rpx; }
-.qr-close { margin-top: 16rpx !important; color: #6b7c90; background: rgba(255,255,255,0.50); border-radius: 18rpx; font-size: 26rpx; }
+.qr-close { margin-top: 16rpx !important; color: #8a94a6; background: rgba(255,255,255,0.50); border-radius: 18rpx; font-size: 26rpx; }

@@ -30,16 +30,16 @@
   font-size: 29rpx;
 }
 .cell:last-child { border-bottom: none; }
-.cell-label { color: #6b7c90; }
+.cell-label { color: #8a94a6; }
 .cell-value { color: var(--ink, #11131a); }
-.cell-arrow { color: #b9c6d6; font-size: 34rpx; }
+.cell-arrow { color: #a8b2c1; font-size: 34rpx; }
 .cell-right { display: flex; align-items: center; gap: 12rpx; }
 
 /* cell 左列：主标题 + 副提示竖排。
    原先「说明」独占一个 cell，同一段里连出两三条，白占两屏高度又打断视线；
    收进对应项下方做小字副提示 —— 信息不丢，视觉退到背景。 */
 .cell-main { display: flex; flex-direction: column; gap: 6rpx; flex: 1; min-width: 0; }
-.cell-sub { font-size: 22rpx; color: #9aa9bb; line-height: 1.5; }
+.cell-sub { font-size: 22rpx; color: #8a94a6; line-height: 1.5; }
 /* 分组标题（Apple HIG grouped style 的 headers）：HIG 原文——
    "the grouped style uses headers, footers, and additional space to separate
     groups of data" —— 组标题 + 组间留白是规范要求，不是装饰。

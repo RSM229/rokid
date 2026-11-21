@@ -125,7 +125,7 @@ page {
   width: 12rpx;
   height: 12rpx;
   border-radius: 999rpx;
-  background: #c3ccda;
+  background: #c9d4e3;
   transition: width 0.2s ease, background 0.2s ease;
 }
 .dot.on {

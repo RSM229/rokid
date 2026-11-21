@@ -29,7 +29,7 @@
 .doc-meta { margin-top: 6rpx; color: #999; font-size: 23rpx; }
 .doc-btns { display: flex; gap: 30rpx; margin-top: 14rpx; }
 .link-green { color: var(--brand-l, var(--brand-l, #2b96ff)); font-size: 25rpx; font-weight: 600; }
-.link-gray { color: #6b7c90; font-size: 25rpx; }
+.link-gray { color: #8a94a6; font-size: 25rpx; }
 .link-red { color: #d9534f; font-size: 25rpx; font-weight: 600; }
 
 .qa-input { width: 100%; min-height: 140rpx; padding: 18rpx; border: 2rpx solid rgba(255,255,255,0.34); border-radius: 12rpx; font-size: 26rpx; background: #ffffff; box-sizing: border-box; }
@@ -50,8 +50,8 @@
 
 .empty { padding: 90rpx 40rpx; text-align: center; color: #999; font-size: 26rpx; }
 
-.breadcrumb { display: flex; flex-wrap: wrap; align-items: center; padding: 6rpx 4rpx 16rpx; font-size: 24rpx; color: #6b7c90; }
-.crumb { color: #6b7c90; }
+.breadcrumb { display: flex; flex-wrap: wrap; align-items: center; padding: 6rpx 4rpx 16rpx; font-size: 24rpx; color: #8a94a6; }
+.crumb { color: #8a94a6; }
 .crumb.on { color: var(--brand-l, #2b96ff); font-weight: 600; }
 
 .folder-grid { display: flex; flex-wrap: wrap; gap: 14rpx; margin-bottom: 18rpx; }
@@ -66,7 +66,7 @@
 .search-tip { margin-bottom: 14rpx; font-size: 22rpx; color: #8a94a6; }
 /* 文件夹操作行：「+ ▾」下拉菜单（新建/重命名/删除），锚定在触发按钮正下方 */
 .folder-ops { display: flex; align-items: center; justify-content: space-between; padding: 4rpx 6rpx 14rpx; }
-.ops-title { font-size: 26rpx; font-weight: 700; color: #6b7c90; letter-spacing: 2rpx; }
+.ops-title { font-size: 26rpx; font-weight: 700; color: #8a94a6; letter-spacing: 2rpx; }
 .sec-act { font-size: 24rpx; font-weight: 600; color: var(--brand-l, #2b96ff); padding: 6rpx 18rpx; border-radius: 999rpx; background: rgba(var(--brand-rgb, 15,98,254), 0.08); }
 .sec-act:active { background: rgba(var(--brand-rgb, 15,98,254), 0.16); }
 .folder-ops .ops-right { position: relative; }
@@ -125,7 +125,7 @@
 /* 监理日记生成入口：仅资料库「监理日记」文件夹内显示 */
 .diary-gen { border-color: rgba(var(--brand-rgb, 15,98,254), 0.28); }
 .diary-gen-title { font-size: 28rpx; font-weight: 700; color: var(--ink-2, #243b55); }
-.diary-gen-sub { margin-top: 8rpx; font-size: 22rpx; line-height: 1.5; color: #6b7c90; }
+.diary-gen-sub { margin-top: 8rpx; font-size: 22rpx; line-height: 1.5; color: #8a94a6; }
 .diary-gen-row { display: flex; align-items: center; gap: 16rpx; margin-top: 18rpx; }
 .diary-date { padding: 12rpx 18rpx; border-radius: 12rpx; font-size: 24rpx; color: var(--brand-d, #0060df); background: rgba(var(--wash-rgb, 234,243,255), 0.85); }
 .diary-gen-row .btn-primary { flex: none; margin: 0; }
