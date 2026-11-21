@@ -42,14 +42,28 @@ page {
 }
 
 /* 跳过：右上角裸文字，不用按钮样式 */
+/* 跳过：左上角悬浮胶囊，视觉对齐微信右上角官方胶囊（半透明白 + 模糊 + 细边）。
+   放左上是为了避开系统胶囊 —— 右上角那块位置被微信占用且不可移动。 */
 .skip-btn {
   position: absolute;
-  top: calc(20rpx + env(safe-area-inset-top));
-  right: 36rpx;
-  padding: 12rpx 20rpx;
+  top: calc(24rpx + env(safe-area-inset-top));
+  left: 24rpx;
+  height: 56rpx;
+  line-height: 56rpx;
+  padding: 0 24rpx;
+  border-radius: 999rpx;
   font-size: 24rpx;
-  color: #8a94a6;
-  z-index: 2;
+  font-weight: 500;
+  color: #33405a;
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border: 1rpx solid rgba(17, 19, 26, 0.06);
+  box-sizing: border-box;
+  z-index: 10;
+}
+.skip-btn:active {
+  background: rgba(255, 255, 255, 0.92);
 }
 
 .guide-swiper {
