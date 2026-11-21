@@ -179,3 +179,16 @@ test('config.ts 不用可选链调用，避免关掉 ES5 转译后真机解析�
   assert.doesNotMatch(code, /wx\.getExtConfigSync\?\.\(/)
   assert.match(cfg, /typeof wx\.getExtConfigSync !== 'function'/)
 })
+
+test('引用整块删除：token 被删残时残片整段清掉并撤销引用', () => {
+  const agent = fs.readFileSync(path.join(root, 'pages/agent/index.ts'), 'utf8')
+  // <editor> 没有按键事件，只能在 bindinput 之后修补
+  assert.match(agent, /stripBrokenMentionFragments\(text: string\)/)
+  // 判据：mention 的 token 不再完整出现 → 视为被打残
+  assert.match(agent, /const full = new Set\(text\.match\(MENTION_TOKEN_RE\) \|\| \[\]\)/)
+  assert.match(agent, /this\.data\.mentions\.filter\(m => !full\.has\(m\.token\)\)/)
+  // 只清「没有闭合 ]」的残片，完整 token 不会被误删
+  assert.match(agent, /@\\\[资料库\(\?:检索\)\?\[\^\\\]\]\*\?\(\?=\\s\|\$\)/)
+  // 清理后要撤销对应引用，否则界面没引用但后端仍在限定范围检索
+  assert.match(agent, /this\.refreshMentions\(this\.data\.mentions\.filter\(m => !repaired\.removed\.includes\(m\)\)\)/)
+})

@@ -6252,9 +6252,39 @@ Page(themed({
   },
 
   /** editor 内容变化：text 是纯文本（含 token），html 带胶囊样式 */
+  /**
+   * 引用整块删除：token 被打残时，把残片整段清掉。
+   *
+   * 用户期望：在 `@xxx` 里按删除，整条引用一起消失，而不是删掉一个字符留下半截。
+   * <editor> 不提供按键事件（没有 backspace 回调），拿不到"删除前"的状态，
+   * 所以只能在 bindinput 之后修补：发现某个 mention 的 token 不再完整出现，
+   * 就把文本里对应的残片去掉，并撤销这条引用。
+   */
+  stripBrokenMentionFragments(text: string): { text: string; removed: AtMention[] } {
+    const full = new Set(text.match(MENTION_TOKEN_RE) || [])
+    const removed = this.data.mentions.filter(m => !full.has(m.token))
+    if (!removed.length) return { text, removed }
+    // 只命中「没有闭合 ]」的残片：完整 token 以 ] 结尾，不会匹配
+    const cleaned = text
+      .replace(/@\[资料库(?:检索)?[^\]]*?(?=\s|$)/g, '')
+      .replace(/\s{2,}/g, ' ')
+      .replace(/^\s+/, '')
+    return { text: cleaned, removed }
+  },
+
   onEditorInput(event: { detail: { html?: string; text?: string } }) {
-    const text = event.detail.text || ""
+    let text = event.detail.text || ""
     this.editorHtml = event.detail.html || ""
+    // 引用被删残 → 整块移除（删一下就整块消失）
+    const repaired = this.stripBrokenMentionFragments(text)
+    if (repaired.removed.length) {
+      text = repaired.text
+      this.refreshMentions(this.data.mentions.filter(m => !repaired.removed.includes(m)))
+      // 同步修正编辑器内容：纯文本 HTML，不再夹 span，不会被光标带进样式节点
+      if (this.data.useEditor && this.editorCtx) {
+        this.editorCtx.setContents({ html: this.inputToEditorHtml(text) })
+      }
+    }
     // 复用 textarea 的既有处理：同步 canSend / 撤销引用 / 打 @ 唤起面板
     this.onInput({ detail: { value: text } } as unknown as WechatMiniprogram.Input)
   },
