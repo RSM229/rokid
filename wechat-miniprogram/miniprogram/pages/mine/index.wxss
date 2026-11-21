@@ -34,22 +34,22 @@
 
 /* 加入项目：暖橙（邀请/链接），区别于看板主题色 */
 .entry-icon.ic-join {
-  background: rgba(17,19,26,0.05);
-  border-color: rgba(17,19,26,0.08);
+  background: rgba(10, 109, 255, 0.10);
+  border-color: rgba(10, 109, 255, 0.20);
 }
 .entry-icon.ic-join::before {
-  background-color: #33405a;
+  background-color: #0a6dff;
   -webkit-mask-image: url("data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2024%2024%22%3E%3Cpath%20fill=%22%23e8831a%22%20d=%22M14,3v2h3.59l-9.3,9.29,1.42,1.42L19,6.41V10h2V3zM5,5h5V3H5c-1.1,0-2,.9-2,2v14c0,1.1.9,2,2,2h14c1.1,0,2-.9,2-2v-5h-2v5H5z%22/%3E%3C/svg%3E");
   mask-image: url("data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2024%2024%22%3E%3Cpath%20fill=%22%23e8831a%22%20d=%22M14,3v2h3.59l-9.3,9.29,1.42,1.42L19,6.41V10h2V3zM5,5h5V3H5c-1.1,0-2,.9-2,2v14c0,1.1.9,2,2,2h14c1.1,0,2-.9,2-2v-5h-2v5H5z%22/%3E%3C/svg%3E");
 }
 
 /* 账号安全：安全绿（盾牌） */
 .entry-icon.ic-shield {
-  background: rgba(17,19,26,0.05);
-  border-color: rgba(17,19,26,0.08);
+  background: rgba(19, 121, 91, 0.10);
+  border-color: rgba(19, 121, 91, 0.20);
 }
 .entry-icon.ic-shield::before {
-  background-color: #33405a;
+  background-color: #0f7a55;
   -webkit-mask-image: url("data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2024%2024%22%3E%3Cpath%20fill=%22%230f7a55%22%20d=%22M12,1L3,5v6c0,5.55,3.84,10.74,9,12c5.16-1.26,9-6.45,9-12V5l-9-4z%22/%3E%3C/svg%3E");
   mask-image: url("data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2024%2024%22%3E%3Cpath%20fill=%22%230f7a55%22%20d=%22M12,1L3,5v6c0,5.55,3.84,10.74,9,12c5.16-1.26,9-6.45,9-12V5l-9-4z%22/%3E%3C/svg%3E");
 }
@@ -78,11 +78,11 @@
 
 /* AI 记忆：AI 紫（星形/规则），与看板蓝、安全绿、设置灰蓝区分开 */
 .entry-icon.ic-pref {
-  background: rgba(17,19,26,0.05);
-  border-color: rgba(17,19,26,0.08);
+  background: rgba(107, 70, 193, 0.10);
+  border-color: rgba(107, 70, 193, 0.20);
 }
 .entry-icon.ic-pref::before {
-  background-color: #33405a;
+  background-color: #6b46c1;
   -webkit-mask-image: url("data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2024%2024%22%3E%3Cpath%20fill=%22%236b46c1%22%20d=%22M12 17.27 18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z%22/%3E%3C/svg%3E");
   mask-image: url("data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2024%2024%22%3E%3Cpath%20fill=%22%236b46c1%22%20d=%22M12 17.27 18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z%22/%3E%3C/svg%3E");
 }

@@ -6,6 +6,16 @@
    用法：@import "../../styles/cell-list.wxss";  置于页面 wxss 首行，
    页面自有规则写在其后即可正常覆盖（同优先级后段压前段）。 */
 
+/* 分组标题：Apple HIG 的 grouped style 明确要求用 headers + 额外留白分隔数据组
+   （原文："the grouped style uses headers, footers, and additional space to
+   separate groups of data"），这里对应「项目」「账号与配置」这类小标题。 */
+.group-title {
+  margin: 28rpx 34rpx 12rpx;
+  font-size: 22rpx;
+  color: #8a94a6;
+  letter-spacing: 1rpx;
+}
+
 /* 分组卡片：iOS inset grouped —— 靠「浅灰底 vs 白卡片」的对比分隔，不用边框和阴影 */
 .section {
   margin-top: 24rpx;
