@@ -48,7 +48,7 @@
   bottom: -1rpx;
   height: 4rpx;
   border-radius: 2rpx;
-  background: var(--brand, #0a2e5c);
+  background: var(--brand, #33405a);
 }
 .count {
   min-width: 28rpx;
@@ -193,7 +193,7 @@
 .tags text {
   padding: 6rpx 14rpx;
   border-radius: 12rpx;
-  color: var(--brand, #0a2e5c);
+  color: var(--brand, #33405a);
   background: rgba(var(--wash-rgb, 234, 243, 255), 0.8);
   font-size: 22rpx;
 }

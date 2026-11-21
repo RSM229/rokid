@@ -14,7 +14,7 @@
 
 /* ============ 待上传资料（2026-10-12 由页面最底部提到 Hero 之下） ============
    这是需要用户亲手处理的待办，埋在最后一屏等于没人看得到。 */
-.upload-item { padding: 24rpx 30rpx; color: var(--ink, #12253d); font-size: 25rpx; overflow-wrap: anywhere; }
+.upload-item { padding: 24rpx 30rpx; color: var(--ink, #11131a); font-size: 25rpx; overflow-wrap: anywhere; }
 .upload-error { margin: 12rpx 0; color: #a33b32; }
 .upload-head { align-items: flex-start; }
 
@@ -25,7 +25,7 @@
 
 /* 项目看板：主题色（沿用原 tab 级入口的图标） */
 .entry-icon.ic-board::before {
-  background-color: var(--brand, #1677ff);
+  background-color: var(--brand, #0a6dff);
   -webkit-mask-image: url("data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%201024%201024%22%3E%3Cpath%20fill=%22%231677ff%22%20d=%22M128%20128h352v224H128zm416%200h352v352H544zM128%20416h352v480H128zm416-64h352v544H544z%22/%3E%3C/svg%3E");
   mask-image: url("data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%201024%201024%22%3E%3Cpath%20fill=%22%231677ff%22%20d=%22M128%20128h352v224H128zm416%200h352v352H544zM128%20416h352v480H128zm416-64h352v544H544z%22/%3E%3C/svg%3E");
 }
@@ -65,11 +65,11 @@
 
 /* 待补全草稿：编辑蓝（铅笔），区别于看板主题色与设置灰蓝 */
 .entry-icon.ic-draft {
-  background: rgba(22,119,255,0.10);
-  border-color: rgba(22,119,255,0.20);
+  background: rgba(10,109,255,0.10);
+  border-color: rgba(10,109,255,0.20);
 }
 .entry-icon.ic-draft::before {
-  background-color: #1677ff;
+  background-color: #0a6dff;
   -webkit-mask-image: url("data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2024%2024%22%3E%3Cpath%20fill=%22%231677ff%22%20d=%22M3%2017.25V21h3.75L17.81%209.94l-3.75-3.75zM20.71%207.04a1%201%200%200%200%200-1.41l-2.34-2.34a1%201%200%200%200-1.41%200l-1.83%201.83%203.75%203.75z%22/%3E%3C/svg%3E");
   mask-image: url("data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2024%2024%22%3E%3Cpath%20fill=%22%231677ff%22%20d=%22M3%2017.25V21h3.75L17.81%209.94l-3.75-3.75zM20.71%207.04a1%201%200%200%200%200-1.41l-2.34-2.34a1%201%200%200%200-1.41%200l-1.83%201.83%203.75%203.75z%22/%3E%3C/svg%3E");
 }
@@ -87,11 +87,11 @@
 
 /* 派单：纸飞机（发送/指派），主题蓝，与 AI 记忆紫区分 */
 .entry-icon.ic-send {
-  background: rgba(22,119,255,0.10);
-  border-color: rgba(22,119,255,0.20);
+  background: rgba(10,109,255,0.10);
+  border-color: rgba(10,109,255,0.20);
 }
 .entry-icon.ic-send::before {
-  background-color: #1677ff;
+  background-color: #0a6dff;
   -webkit-mask-image: url("data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2024%2024%22%3E%3Cpath%20fill=%22%231677ff%22%20d=%22M2.01 21 23 12 2.01 3 2 10l15 2-15 2z%22/%3E%3C/svg%3E");
   mask-image: url("data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2024%2024%22%3E%3Cpath%20fill=%22%231677ff%22%20d=%22M2.01 21 23 12 2.01 3 2 10l15 2-15 2z%22/%3E%3C/svg%3E");
 }

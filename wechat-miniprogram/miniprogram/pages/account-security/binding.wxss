@@ -43,7 +43,7 @@
   gap: 28rpx;
 }
 .wxp-head { display: flex; flex-direction: column; gap: 8rpx; }
-.wxp-title { font-size: 32rpx; font-weight: 600; color: #12253d; }
+.wxp-title { font-size: 32rpx; font-weight: 600; color: #11131a; }
 .wxp-sub { font-size: 23rpx; color: #9aa9bb; line-height: 1.5; }
 .wxp-row {
   display: flex;
@@ -90,7 +90,7 @@
   border-radius: 14rpx;
   background: #f3f6fa;
   font-size: 28rpx;
-  color: #12253d;
+  color: #11131a;
   box-sizing: border-box;
 }
 .wxp-save {

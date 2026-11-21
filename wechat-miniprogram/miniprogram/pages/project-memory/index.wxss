@@ -106,7 +106,7 @@
 }
 .pref-cat {
   font-size: 22rpx;
-  color: var(--brand, #0a2e5c);
+  color: var(--brand, #33405a);
   background: var(--color-background-secondary, #eef2f7);
   border-radius: 8rpx;
   padding: 4rpx 12rpx;
@@ -280,7 +280,7 @@
   color: var(--color-text-secondary, #666);
 }
 
-/* ============ Ê¹ÓÃÍ³¼Æ / Éó¼Æ ============ */
+/* ============ Ê¹ï¿½ï¿½Í³ï¿½ï¿½ / ï¿½ï¿½ï¿½ ============ */
 .use-tag {
   display: block;
   margin-top: 8rpx;
@@ -332,7 +332,7 @@
   border-bottom: none;
 }
 .audit-action {
-  color: var(--brand, #0a2e5c);
+  color: var(--brand, #33405a);
   flex-shrink: 0;
 }
 .audit-actor {

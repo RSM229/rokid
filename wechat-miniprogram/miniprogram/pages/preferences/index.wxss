@@ -58,7 +58,7 @@
   font-size: 26rpx;
 }
 .add-btn {
-  background: var(--brand, #0a2e5c);
+  background: var(--brand, #33405a);
   color: #fff;
   border-radius: 14rpx;
   font-size: 26rpx;
@@ -94,7 +94,7 @@
 }
 .pref-cat {
   font-size: 22rpx;
-  color: var(--brand, #0a2e5c);
+  color: var(--brand, #33405a);
   background: rgba(var(--brand-rgb, 10,46,92), 0.08);
   padding: 2rpx 12rpx;
   border-radius: 8rpx;
@@ -105,7 +105,7 @@
   border-radius: 8rpx;
 }
 .pref-tag.on {
-  color: var(--brand, #0a2e5c);
+  color: var(--brand, #33405a);
   background: rgba(var(--brand-rgb, 10,46,92), 0.08);
 }
 .pref-tag.off {
@@ -136,7 +136,7 @@
 }
 .pref-edit {
   font-size: 24rpx;
-  color: var(--brand, #0a2e5c);
+  color: var(--brand, #33405a);
   padding: 4rpx 8rpx;
 }
 
@@ -193,10 +193,10 @@
   border-top: 1rpx solid rgba(0,0,0,0.05);
 }
 .cat-option.selected {
-  color: var(--brand, #0a2e5c);
+  color: var(--brand, #33405a);
 }
 .cat-check {
-  color: var(--brand, #0a2e5c);
+  color: var(--brand, #33405a);
   font-size: 30rpx;
 }
 .cat-sheet-cancel {
@@ -207,7 +207,7 @@
   color: var(--color-text-secondary, #666);
 }
 
-/* ============ ÏîÄ¿¼ÇÒäÈë¿Ú / ×÷ÓÃÓò / ·¢²¼ ============ */
+/* ============ ï¿½ï¿½Ä¿ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ / ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ / ï¿½ï¿½ï¿½ï¿½ ============ */
 .project-link {
   margin-top: 24rpx;
 }
@@ -243,7 +243,7 @@
   opacity: 0.4;
 }
 
-/* ============ ¸öÈË¼ÇÒä×÷ÓÃÓò ============ */
+/* ============ ï¿½ï¿½ï¿½Ë¼ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ============ */
 .scope-row {
   display: flex;
   gap: 14rpx;
