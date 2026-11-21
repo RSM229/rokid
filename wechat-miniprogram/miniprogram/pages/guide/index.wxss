@@ -10,6 +10,8 @@ page {
 .guide-root {
   position: relative;
   height: 100vh;
+  /* 去掉原生导航栏后，内容要自己让开状态栏 */
+  padding-top: calc(60rpx + env(safe-area-inset-top));
   display: flex;
   flex-direction: column;
   background: #f7f9fc;
@@ -25,24 +27,24 @@ page {
   pointer-events: none;
 }
 .guide-glow-a {
-  width: 560rpx;
-  height: 560rpx;
+  width: 440rpx;
+  height: 440rpx;
   left: -160rpx;
   top: -180rpx;
-  background: radial-gradient(circle, rgba(96, 148, 255, 0.28), rgba(96, 148, 255, 0));
+  background: radial-gradient(circle, rgba(96, 148, 255, 0.18), rgba(96, 148, 255, 0));
 }
 .guide-glow-b {
-  width: 520rpx;
-  height: 520rpx;
+  width: 420rpx;
+  height: 420rpx;
   right: -180rpx;
   bottom: -140rpx;
-  background: radial-gradient(circle, rgba(70, 224, 171, 0.22), rgba(70, 224, 171, 0));
+  background: radial-gradient(circle, rgba(70, 224, 171, 0.14), rgba(70, 224, 171, 0));
 }
 
 /* 跳过：右上角裸文字，不用按钮样式 */
 .skip-btn {
   position: absolute;
-  top: 40rpx;
+  top: calc(20rpx + env(safe-area-inset-top));
   right: 36rpx;
   padding: 12rpx 20rpx;
   font-size: 24rpx;
@@ -141,19 +143,22 @@ page {
   border: none;
 }
 
-/* 次要按钮：白底 + 一根线（对照登录页的 ghost 风格） */
+/* 非最后一页的「下一步」：用和登录页一致的品牌蓝胶囊。
+   原来白底白边，在浅底上几乎没有轮廓（截图里看着像一条空白条）。 */
 .ghost-btn {
   width: 100%;
-  height: 96rpx;
-  line-height: 96rpx;
+  height: 104rpx;
+  line-height: 104rpx;
   margin: 0;
   padding: 0;
-  border: 1rpx solid rgba(17, 19, 26, 0.08);
-  border-radius: 48rpx;
-  font-size: 30rpx;
-  font-weight: 500;
-  color: #33405a;
-  background: #ffffff;
+  border: none;
+  border-radius: 52rpx;
+  font-size: 32rpx;
+  font-weight: 600;
+  letter-spacing: 2rpx;
+  color: #ffffff;
+  background: linear-gradient(160deg, #2b96ff, #0a6dff 55%, #0053d8);
+  box-shadow: 0 18rpx 36rpx -18rpx rgba(0, 86, 216, 0.9);
 }
 .ghost-btn::after {
   border: none;
