@@ -8,7 +8,7 @@
 .merge-fallback { display: flex; gap: 16rpx; padding: 0 32rpx; }
 .merge-fallback .queue { flex: 1; margin: 0; }
 .record-meta { text-align: center; font-size: 24rpx; color: var(--muted, #5b7290); margin-bottom: 12rpx; }
-.shot { width: 120rpx; height: 120rpx; padding: 0; border: 10rpx solid var(--wash, var(--wash, #e8f2ff)); border-radius: 60rpx; line-height: 100rpx; color: #fff; background: linear-gradient(135deg, var(--brand-l, #2b96ff), var(--brand-d, #0060df)); }
+.shot { width: 120rpx; height: 120rpx; padding: 0; border: 10rpx solid var(--wash, var(--wash, #e8f2ff)); border-radius: 60rpx; line-height: 100rpx; color: #fff; background: linear-gradient(135deg, var(--brand-l, #12766f), var(--brand-d, #0060df)); }
 .preview-card { text-align: center; }
 .preview { width: 100%; height: 420rpx; margin-bottom: 16rpx; border-radius: 16rpx; background: #0f1815; }
 .section-title { margin-bottom: 14rpx; font-size: 30rpx; font-weight: 650; }
@@ -17,7 +17,7 @@
 .location-row button { margin: 20rpx 0 0; }
 .textarea { width: 100%; min-height: 120rpx; box-sizing: border-box; }
 .switch-row { display: flex; justify-content: space-between; align-items: center; margin-top: 22rpx; }
-.work-hint { color: var(--brand, #0f62fe); background: rgba(var(--wash-rgb, 234,243,255), 0.55); font-size: 26rpx; line-height: 1.6; }
+.work-hint { color: var(--brand, #0f766e); background: rgba(var(--wash-rgb, 234,243,255), 0.55); font-size: 26rpx; line-height: 1.6; }
 .upload { margin-top: 24rpx; }
 .queue { margin-top: 14rpx; color: #8b641c; background: rgba(255,246,221,0.75); }
 .result-card { margin-top: 24rpx; line-height: 1.8; }
@@ -30,10 +30,10 @@
 .ai-camera { width: 100%; height: 100%; }
 .ai-photo { width: 100%; height: 100%; display: block; background: #0f1815; }
 .ai-shoot { display: flex; flex-direction: column; align-items: center; gap: 20rpx; margin-top: 40rpx; }
-.ai-shot { width: 140rpx; height: 140rpx; padding: 0; border: 10rpx solid var(--wash, var(--wash, #e8f2ff)); border-radius: 70rpx; line-height: 120rpx; color: #fff; font-size: 28rpx; background: linear-gradient(135deg, var(--brand-l, #2b96ff), var(--brand-d, #0060df)); }
+.ai-shot { width: 140rpx; height: 140rpx; padding: 0; border: 10rpx solid var(--wash, var(--wash, #e8f2ff)); border-radius: 70rpx; line-height: 120rpx; color: #fff; font-size: 28rpx; background: linear-gradient(135deg, var(--brand-l, #12766f), var(--brand-d, #0060df)); }
 .ai-shot[disabled] { opacity: .5; }
 .ai-shoot-tip { color: #6b7a8f; font-size: 24rpx; }
-.ai-add { position: absolute; right: 24rpx; top: 24rpx; width: 76rpx; height: 76rpx; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 44rpx; font-weight: 400; line-height: 1; background: rgba(var(--brand-rgb, 15,98,254), .92); box-shadow: 0 4rpx 12rpx rgba(0,0,0,.3); }
+.ai-add { position: absolute; right: 24rpx; top: 24rpx; width: 76rpx; height: 76rpx; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 44rpx; font-weight: 400; line-height: 1; background: rgba(var(--brand-rgb, 15,118,110), .92); box-shadow: 0 4rpx 12rpx rgba(0,0,0,.3); }
 .ai-start-row { display: flex; justify-content: center; align-items: center; gap: 20rpx; margin-top: 40rpx; }
 .ai-start-row button { margin: 0; }
 .ai-start { width: 260rpx; }
@@ -45,7 +45,7 @@
 .ai-result-actions button { margin: 0; }
 
 /* AI 隐患识别·多图批量 */
-.ai-batch-frame { background: rgba(var(--deep-rgb, 10,46,92), 0.06); border: 2rpx dashed rgba(var(--brand-rgb, 15,98,254), .35); border-radius: 24rpx; padding: 20rpx; min-height: 360rpx; }
+.ai-batch-frame { background: rgba(var(--deep-rgb, 10,46,92), 0.06); border: 2rpx dashed rgba(var(--brand-rgb, 15,118,110), .35); border-radius: 24rpx; padding: 20rpx; min-height: 360rpx; }
 .ai-batch-empty { text-align: center; color: var(--muted, #6b7a8f); font-size: 26rpx; padding: 120rpx 0; }
 .ai-batch-grid { display: flex; flex-wrap: wrap; gap: 16rpx; }
 .ai-batch-cell { position: relative; width: calc((100% - 32rpx) / 3); height: 220rpx; border-radius: 16rpx; overflow: hidden; background: #0f1815; }

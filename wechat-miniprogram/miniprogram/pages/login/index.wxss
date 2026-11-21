@@ -100,7 +100,7 @@ page {
 }
 
 .foot-link {
-  color: #0f62fe;
+  color: #0f766e;
   padding: 10rpx 4rpx;
 }
 

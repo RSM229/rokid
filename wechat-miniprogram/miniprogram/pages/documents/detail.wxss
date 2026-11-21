@@ -1,6 +1,6 @@
 /* 玻璃拟态改造（浅色版） */
 .page { padding: 24rpx; }
-.card { background: #ffffff; border: 2rpx solid rgba(var(--brand-rgb, 15,98,254), 0.14); box-shadow: inset 0 2rpx 0 rgba(255,255,255,0.40), 0 12rpx 36rpx rgba(var(--shadow-rgb, 20,70,140), 0.16); border-radius: 16rpx; padding: 28rpx; margin-bottom: 20rpx; }
+.card { background: #ffffff; border: 2rpx solid rgba(var(--brand-rgb, 15,118,110), 0.14); box-shadow: inset 0 2rpx 0 rgba(255,255,255,0.40), 0 12rpx 36rpx rgba(var(--shadow-rgb, 20,70,140), 0.16); border-radius: 16rpx; padding: 28rpx; margin-bottom: 20rpx; }
 .doc-title { font-size: 34rpx; font-weight: 700; margin-bottom: 12rpx; }
 .status { display: inline-block; font-size: 24rpx; color: var(--brand-deep, #33405a); background: rgba(var(--wash-rgb, 234,243,255), 0.85); border-radius: 8rpx; padding: 4rpx 16rpx; margin-bottom: 12rpx; }
 .card-title { font-size: 30rpx; font-weight: 600; margin-bottom: 16rpx; }
