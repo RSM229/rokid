@@ -6145,15 +6145,16 @@ Page(themed({
       this.atOpenedByTyping = false
       this.setData({ input: next, canSend: true })
       this.refreshMentions(mentions)
-      // editor 模式下把新胶囊同步进输入框（textarea 模式下是空操作）
-      void this.syncEditorWithInput()
+      // editor：只把 token 插入并上色；不再整体重灌内容
+      // （setContents 会让光标落进样式节点，导致后续输入全被染色）
+      void this.insertMentionIntoEditor(token)
       return
     }
     const current = this.data.input
     const next = current ? `${current.replace(/\s+$/, '')} ${token} ` : `${token} `
     this.setData({ input: next, canSend: true })
     this.refreshMentions(mentions)
-    void this.syncEditorWithInput()
+    void this.insertMentionIntoEditor(token)
   },
 
   /**
@@ -6261,11 +6262,20 @@ Page(themed({
   onEditorFocus() {
     this.setData({ inputFocused: true })
   },
+
+  onInput(event: WechatMiniprogram.Input) {
+    const input = event.detail.value
+    this.setData({ input, canSend: Boolean(input.trim()) || this.data.attachments.length > 0 })
+    // 用户手工删掉 token → 撤销对应引用，避免「界面没引用但模型仍在限定范围内搜」
+    this.syncMentionsWithInput(input)
+    this.detectAtTrigger(input)
+  },
+
   /**
    * 统一的键盘高度处理：组件级 bindkeyboardheightchange 与全局监听都走这里。
    *
    * keyboardHeight 会被注入成 CSS 变量 --kb，只有两个消费方：
-   *   1) .input-bar 的 margin-bottom —— 只抬输入条，不动整页布局
+   *   1) （已停用）曾用于 .input-bar 的 margin-bottom —— 实测会和缩小后的可视区叠加，已移除
    *   2) .at-panel 的 bottom —— fixed 层要自己让位，否则会被键盘盖住
    */
   applyKeyboardHeight(raw: number) {
@@ -6298,25 +6308,46 @@ Page(themed({
    * 只有文本里还有 token，mentions 才能在每次输入后从文本可靠恢复；
    * 样式只是让它「看起来不一样」，结构不依赖 HTML 属性（属性可能被运行时清洗）。
    */
+  /**
+   * 纯文本 → editor HTML。
+   *
+   * 只做转义，不再包 <span> 胶囊：实测 setContents 写入 span 后光标会落在 span 内部，
+   * 之后输入的文字全部继承胶囊样式（用户反馈"@ 后面打什么都变蓝"）。
+   * 现在改用 editor 原生的 format() 上色 —— 不给文字加外框，只改颜色。
+   */
   inputToEditorHtml(text: string): string {
-    const pill = (raw: string, mention?: AtMention) => {
-      // 结构化属性：type/key/kbId 让胶囊在 HTML 里可被识别（供将来做短名展示或自愈）
-      // 但 mentions 的权威来源仍是纯文本 token —— 属性可能被运行时清洗，文本不会。
-      const attrs = mention
-        ? ` data-type="${mention.type}" data-key="${mention.key}" data-kb-id="${mention.kb_id}"`
-        : ''
-      return `<span${attrs} style="color:#0a6dff;background:rgba(10,109,255,0.12);border-radius:999px;padding:2px 8px;font-size:inherit">${raw}</span>`
-    }
     const escaped = text
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
-    const byToken = new Map(this.data.mentions.map(m => [m.token, m]))
-    // 与 MENTION_TOKEN_RE 同口径：把每个 token 包成胶囊，其余文本原样
-    return escaped.replace(/@\[资料库(?:检索)?\s[^\]]*\]/g, m => pill(m, byToken.get(m))) + '<br/>'
+    return escaped + '<br/>'
   },
 
-  /** 把「当前 editor 内容 + 新胶囊」写回 editor（追加到末尾，与 token 追加一致） */
+  /**
+   * 插入一条引用：先给插入点上色，再插入 token 文本。
+   *
+   * editor 没有 setSelection，无法"插入后再选中"改色，
+   * 但 format() 设置的是「当前输入位置之后要输入的样式」，
+   * 所以「先 format 再 insertText」正好让 token 带上颜色。
+   * 插入完立刻把颜色复位成正文色，避免后续输入继续被染色。
+   */
+  async insertMentionIntoEditor(token: string) {
+    if (!this.data.useEditor || !this.editorCtx) return
+    const ctx = this.editorCtx
+    await new Promise<void>(resolve => {
+      ctx.format('color', '#0a6dff')
+      ctx.insertText({
+        text: token + ' ',
+        success: () => resolve(),
+        fail: () => resolve(),
+      })
+    })
+    // 复位：不然后面打的字也会是蓝色
+    ctx.format('color', '#11131a')
+    this.editorHtml = ''
+  },
+
+  /** 兼容旧调用点：把 data.input 整体重灌进 editor（仅在恢复草稿时使用） */
   async syncEditorWithInput() {
     if (!this.data.useEditor || !this.editorCtx) return
     const html = this.inputToEditorHtml(this.data.input)
@@ -6328,21 +6359,14 @@ Page(themed({
    * 清空 editor 内容。
    *
    * editor 是独立于 data 的组件：把 data.input 置空不会影响它，
-   * 发送后必须显式清，否则输入框会残留上一条消息的文字与胶囊。
+   * 发送后必须显式清，否则输入框会残留上一条消息的文字。
    */
   clearEditor() {
     if (!this.data.useEditor || !this.editorCtx) return
     this.editorHtml = ''
     this.editorCtx.clear({})
-  },
-
-
-  onInput(event: WechatMiniprogram.Input) {
-    const input = event.detail.value
-    this.setData({ input, canSend: Boolean(input.trim()) || this.data.attachments.length > 0 })
-    // 用户手工删掉 token → 撤销对应引用，避免「界面没引用但模型仍在限定范围内搜」
-    this.syncMentionsWithInput(input)
-    this.detectAtTrigger(input)
+    // 清空后把颜色复位，避免下一次输入继承上一条引用的蓝色
+    this.editorCtx.format('color', '#11131a')
   },
 
   /**

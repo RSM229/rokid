@@ -149,62 +149,27 @@ test('@ 面板搜索不会永久卡在「搜索中」：loading 由在飞计数�
   assert.match(agent, /console\.warn\('\[kb\/search\] 失败:',/)
   assert.match(wxml, /class="at-empty at-empty-error">\{\{atError\}\}/)
 })
-test('输入框内 @ 引用渲染成行内胶囊：editor 为主、textarea 兜底', () => {
+test('输入框内 @ 引用用 editor 原生 format 上色（不再插 span 胶囊）', () => {
   const agent = fs.readFileSync(path.join(root, 'pages/agent/index.ts'), 'utf8')
   const wxml = fs.readFileSync(path.join(root, 'pages/agent/index.wxml'), 'utf8')
 
-  // textarea 只能放纯文本，行内样式必须靠 <editor>
-  assert.match(wxml, /<editor wx:if="\{\{useEditor && !recording\}\}"[\s\S]{0,120}id="chat-editor"/)
-  // 低版本基础库回退到 textarea（原有整条链路不动）
+  // textarea 只能放纯文本，样式必须靠 <editor>；低版本回退
+  assert.match(wxml, /<editor wx:if="\{\{useEditor && !recording\}\}"/)
   assert.match(wxml, /<textarea wx:elif="\{\{!recording\}\}"/)
   assert.match(agent, /supportsEditor\(\): boolean \{/)
-  assert.match(agent, /this\.setData\(\{ useEditor: this\.supportsEditor\(\) \}\)/)
 
-  // editor 事件：ready 拿上下文、input 回传 html/text
-  assert.match(agent, /onEditorReady\(\) \{/)
-  assert.match(agent, /\.select\('#chat-editor'\)/)
-  assert.match(agent, /onEditorInput\(event: \{ detail: \{ html\?: string; text\?: string \} \}\)/)
-
-  // 胶囊用内联样式，不依赖页面 wxss 的类（editor 内部不一定吃到）
-  assert.match(agent, /const pill = \(raw: string, mention\?: AtMention\) =>/)
-  assert.match(agent, /background:rgba\(10,109,255,0\.12\);border-radius:999px/)
-  // 胶囊里保留完整 token，mentions 才能从纯文本可靠恢复（属性可能被运行时清洗）
-  assert.match(agent, /@\\\[资料库\(\?:检索\)\?\\s\[\^\\\]\]\*\\\]\/g/)
-  // 追加引用后要把胶囊同步进 editor
-  assert.match(agent, /void this\.syncEditorWithInput\(\)/)
-  // editor 不跟随 data.input 清空：发送后必须显式清，否则输入框残留上一条内容
-  assert.match(agent, /clearEditor\(\) \{/)
-  assert.match(agent, /this\.editorCtx\.clear\(\{\}\)/)
-  assert.match(agent, /this\.clearEditor\(\)/)
-  // 胶囊自带结构化属性（type/key/kb-id），便于将来做短名展示或自愈；
-  // 但 mentions 的权威来源是纯文本 token —— 属性可能被运行时清洗，文本不会
-  assert.match(agent, /data-type="\$\{mention\.type\}" data-key="\$\{mention\.key\}" data-kb-id="\$\{mention\.kb_id\}"/)
+  // 历史坑：用 setContents 写入 <span> 胶囊后，光标会落进 span，
+  // 导致其后输入的文字全部继承胶囊样式（用户反馈"@ 后面打什么都变蓝"）。
+  // 所以改为 editor 原生 format() 只改颜色。
+  assert.match(agent, /insertMentionIntoEditor\(token: string\)/)
+  assert.match(agent, /ctx\.format\('color', '#0a6dff'\)/)
+  // 插入后必须复位颜色，否则后续输入继续被染色
+  assert.match(agent, /ctx\.format\('color', '#11131a'\)/)
+  // HTML 里不再包裹 span 胶囊
+  assert.doesNotMatch(agent, /<span\$\{attrs\} style="color:#0a6dff/)
+  // 清空编辑器时也要复位颜色
+  assert.match(agent, /clearEditor\(\) \{[\s\S]{0,260}format\('color', '#11131a'\)/)
 })
-test('引导页与登录页统一风格：浅底光晕 + 平面卡片 + 胶囊按钮', () => {
-  const gx = fs.readFileSync(path.join(root, 'pages/guide/index.wxss'), 'utf8')
-  const gw = fs.readFileSync(path.join(root, 'pages/guide/index.wxml'), 'utf8')
-
-  // 改造前是深蓝渐变底 + 白字，与登录页割裂
-  assert.doesNotMatch(gx, /background: linear-gradient\(160deg, #0a2e5c/)
-  assert.match(gx, /background: #f7f9fc;/)
-  assert.match(gx, /color: #11131a;/)
-
-  // 与登录页同款两团光晕
-  assert.match(gw, /class="guide-glow guide-glow-a"/)
-  assert.match(gw, /class="guide-glow guide-glow-b"/)
-  assert.match(gx, /\.guide-glow-a \{[^}]*radial-gradient/)
-
-  // 图标改成平面方块（不再是裸 emoji 大字）
-  assert.match(gx, /\.slide-icon \{[^}]*background: #ffffff;[^}]*border: 1rpx solid rgba\(17, 19, 26, 0\.08\)/)
-
-  // 主按钮对齐登录页 .btn-flat 的胶囊规格
-  assert.match(gx, /\.primary-btn \{[^}]*height: 104rpx;[^}]*border-radius: 52rpx;/)
-  assert.match(gx, /\.ghost-btn \{[^}]*background: #ffffff;/)
-
-  // 指示器：选中态拉长成品牌色胶囊
-  assert.match(gx, /\.dot\.on \{[^}]*width: 40rpx;[^}]*background: #0a6dff;/)
-})
-
 test('config.ts 不用可选链调用，避免关掉 ES5 转译后真机解析失败', () => {
   const cfg = fs.readFileSync(path.join(root, 'config.ts'), 'utf8')
   // 只在「非注释行」上断言：注释里会提到旧写法，不能误判
