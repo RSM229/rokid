@@ -1,4 +1,8 @@
 <view class="guide-root" wx:if="{{mode === 'intro'}}">
+  <!-- 背景光晕：与登录页同款，营造氛围而不叠玻璃层 -->
+  <view class="guide-glow guide-glow-a"></view>
+  <view class="guide-glow guide-glow-b"></view>
+
   <view class="skip-btn" bindtap="finish" wx:if="{{current < slides.length - 1}}">跳过</view>
 
   <swiper class="guide-swiper" current="{{current}}" bindchange="onSlideChange">

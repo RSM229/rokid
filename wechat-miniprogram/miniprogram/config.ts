@@ -8,7 +8,11 @@ interface ExtRuntimeConfig {
 
 function externalConfig(): ExtRuntimeConfig {
   try {
-    return (wx.getExtConfigSync?.() || {}) as ExtRuntimeConfig
+    // 不用 wx.getExtConfigSync?.()：可选链是 ES2020 语法，项目关掉了「将 JS 编译成
+    // ES5」（es6/enhance 均为 false），真机预览时不会转译，直接 SyntaxError。
+    // 这里改成显式类型判断，语义相同且老运行时也能解析。
+    if (typeof wx.getExtConfigSync !== 'function') return {}
+    return (wx.getExtConfigSync() || {}) as ExtRuntimeConfig
   } catch {
     return {}
   }

@@ -180,3 +180,37 @@ test('输入框内 @ 引用渲染成行内胶囊：editor 为主、textarea 兜�
   // 但 mentions 的权威来源是纯文本 token —— 属性可能被运行时清洗，文本不会
   assert.match(agent, /data-type="\$\{mention\.type\}" data-key="\$\{mention\.key\}" data-kb-id="\$\{mention\.kb_id\}"/)
 })
+test('引导页与登录页统一风格：浅底光晕 + 平面卡片 + 胶囊按钮', () => {
+  const gx = fs.readFileSync(path.join(root, 'pages/guide/index.wxss'), 'utf8')
+  const gw = fs.readFileSync(path.join(root, 'pages/guide/index.wxml'), 'utf8')
+
+  // 改造前是深蓝渐变底 + 白字，与登录页割裂
+  assert.doesNotMatch(gx, /background: linear-gradient\(160deg, #0a2e5c/)
+  assert.match(gx, /background: #f7f9fc;/)
+  assert.match(gx, /color: #11131a;/)
+
+  // 与登录页同款两团光晕
+  assert.match(gw, /class="guide-glow guide-glow-a"/)
+  assert.match(gw, /class="guide-glow guide-glow-b"/)
+  assert.match(gx, /\.guide-glow-a \{[^}]*radial-gradient/)
+
+  // 图标改成平面方块（不再是裸 emoji 大字）
+  assert.match(gx, /\.slide-icon \{[^}]*background: #ffffff;[^}]*border: 1rpx solid rgba\(17, 19, 26, 0\.08\)/)
+
+  // 主按钮对齐登录页 .btn-flat 的胶囊规格
+  assert.match(gx, /\.primary-btn \{[^}]*height: 104rpx;[^}]*border-radius: 52rpx;/)
+  assert.match(gx, /\.ghost-btn \{[^}]*background: #ffffff;/)
+
+  // 指示器：选中态拉长成品牌色胶囊
+  assert.match(gx, /\.dot\.on \{[^}]*width: 40rpx;[^}]*background: #0a6dff;/)
+})
+
+test('config.ts 不用可选链调用，避免关掉 ES5 转译后真机解析失败', () => {
+  const cfg = fs.readFileSync(path.join(root, 'config.ts'), 'utf8')
+  // 只在「非注释行」上断言：注释里会提到旧写法，不能误判
+  const code = cfg.split('\n').filter(l => !/^\s*\/\//.test(l)).join('\n')
+  // 之前是 wx.getExtConfigSync?.()：可选链是 ES2020，
+  // 项目 es6/enhance 均为 false 时不会转译，真机预览直接 SyntaxError
+  assert.doesNotMatch(code, /wx\.getExtConfigSync\?\.\(/)
+  assert.match(cfg, /typeof wx\.getExtConfigSync !== 'function'/)
+})
