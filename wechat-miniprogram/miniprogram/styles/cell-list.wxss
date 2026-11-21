@@ -6,12 +6,10 @@
    用法：@import "../../styles/cell-list.wxss";  置于页面 wxss 首行，
    页面自有规则写在其后即可正常覆盖（同优先级后段压前段）。 */
 
-/* 玻璃卡片外壳 */
+/* 分组卡片：iOS inset grouped —— 靠「浅灰底 vs 白卡片」的对比分隔，不用边框和阴影 */
 .section {
   margin-top: 24rpx;
   background: #ffffff;
-  border: 1rpx solid rgba(17, 19, 26, 0.08);
-  box-shadow: 0 2rpx 12rpx rgba(22, 38, 74, 0.06);
   border-radius: 18rpx;
   overflow: hidden;
 }
@@ -22,7 +20,9 @@
   justify-content: space-between;
   align-items: center;
   padding: 28rpx 30rpx;
-  border-bottom: 1rpx solid rgba(var(--deep-rgb, 10,46,92), 0.08);
+  /* 分隔线缩进：对齐文字起点，不通栏（iOS inset grouped 的细节） */
+  border-bottom: 1rpx solid rgba(17, 19, 26, 0.08);
+  margin-left: 30rpx;
   font-size: 29rpx;
 }
 .cell:last-child { border-bottom: none; }
@@ -64,7 +64,6 @@
   flex-shrink: 0;
   width: 64rpx;
   height: 64rpx;
-  border-radius: 18rpx;
   background: rgba(var(--brand-rgb, 10,109,255), 0.10);
   border: 2rpx solid rgba(var(--brand-rgb, 10,109,255), 0.18);
 }
