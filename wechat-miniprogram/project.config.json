@@ -29,8 +29,8 @@
       "disablePlugins": [],
       "outputPath": ""
     },
-    "swc": false,
-    "disableSWC": true
+    "swc": true,
+    "disableSWC": false
   },
   "condition": {},
   "simulatorPluginLibVersion": {},
