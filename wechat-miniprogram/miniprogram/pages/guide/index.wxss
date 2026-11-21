@@ -46,7 +46,9 @@ page {
    放左上是为了避开系统胶囊 —— 右上角那块位置被微信占用且不可移动。 */
 .skip-btn {
   position: absolute;
-  top: calc(24rpx + env(safe-area-inset-top));
+  /* 与右上角微信官方胶囊同高：胶囊中心约在状态栏下方 30rpx 处，
+     这里用 88rpx 让两者的视觉基线对齐（截图对比：原 24rpx 偏高约 70rpx）。 */
+  top: calc(88rpx + env(safe-area-inset-top));
   left: 24rpx;
   height: 56rpx;
   line-height: 56rpx;
