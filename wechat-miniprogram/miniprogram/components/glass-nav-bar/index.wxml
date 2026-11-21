@@ -1,12 +1,33 @@
+<wxs src="../../utils/large-title.wxs" module="lt" />
+
+<!-- 导航栏
+     材质只铺标题那一条（.gnb-fill），状态栏区域透明。
+     large-title 模式下：大标题独立在导航栏下方，随页面滚动收起进栏内，
+     依据 Apple HIG《toolbars》"Reduce the use of toolbar backgrounds..."。 -->
 <view class="gnb" style="height: {{totalHeight}}px;">
+  <view class="gnb-fill" style="top: {{statusBarHeight}}px; height: {{navBarHeight}}px;"></view>
+
   <view class="gnb-inner" style="height: {{navBarHeight}}px; top: {{statusBarHeight}}px;">
     <view wx:if="{{left !== 'none'}}" class="gnb-left" bindtap="onLeftTap">
       <view class="gnb-icon {{left === 'menu' ? 'gnb-ic-menu' : 'gnb-ic-back'}}"></view>
     </view>
     <view class="gnb-title-wrap">
-      <text class="gnb-title">{{title}}</text>
+      <!-- 默认小标题；large-title 模式下它只在大标题收起后才浮现 -->
+      <text wx:if="{{!largeTitle}}" class="gnb-title">{{title}}</text>
+      <text wx:else class="gnb-title" style="{{lt.inlineTitleStyle(scrollTop)}}">{{title}}</text>
     </view>
     <view class="gnb-right"><slot name="right"></slot></view>
   </view>
+
+  <!-- 滚动后才出现的底部分隔线（ScrollEdgeEffect 的简化实现） -->
+  <view wx:if="{{largeTitle}}" class="gnb-divider" style="{{lt.navDividerStyle(scrollTop)}}"></view>
 </view>
-<view wx:if="{{spacer}}" style="height: {{totalHeight}}px;"></view>
+
+<!-- 大标题区：占位以推开内容，同时承担视觉重量 -->
+<view wx:if="{{largeTitle}}" class="gnb-large-wrap" style="{{lt.largeTitleStyle(scrollTop, statusBarHeight, navBarHeight)}}">
+  <text class="gnb-large-title">{{title}}</text>
+  <slot name="large"></slot>
+</view>
+
+<!-- spacer：占位高度要含大标题区，否则内容会被固定的大标题盖住 -->
+<view wx:if="{{spacer}}" style="height: {{largeTitle ? totalHeight + 96 : totalHeight}}px;"></view>

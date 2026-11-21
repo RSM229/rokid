@@ -2,12 +2,22 @@
    原来是一整条深蓝实心块，25 个页面共用，视觉重心全跑到最上面。
    按 iOS 的做法：导航栏是「材质」不是色块 —— 浅色底 + 一根细线，
    靠这条线把顶栏与内容分层；品牌色只留给图标与主操作。 */
+/* 导航栏容器：只负责定位与层级，不铺材质。
+   依据 Apple HIG《toolbars》"Reduce the use of toolbar backgrounds and tinted
+   controls"——顶栏不应自己刷一层装饰，材质只出现在真正需要区分的那一条上。 */
 .gnb {
   position: fixed;
   top: 0;
   left: 0;
   right: 0;
   z-index: 1000;
+}
+
+/* 材质条：只覆盖状态栏下方那一条（top/height 由 WXML 按 statusBarHeight/navBarHeight 指定） */
+.gnb-fill {
+  position: absolute;
+  left: 0;
+  right: 0;
   background: rgba(255, 255, 255, 0.94);
   backdrop-filter: blur(20px) saturate(180%);
   -webkit-backdrop-filter: blur(20px) saturate(180%);
@@ -75,4 +85,36 @@
   border-left: 4rpx solid #33405a;
   border-bottom: 4rpx solid #33405a;
   transform: rotate(45deg);
+}
+
+/* 大标题区（Apple HIG large title）：
+   标题独立在导航栏下方、靠左、字号更大，随页面滚动收起进栏内。
+   与「材质只铺标题条」配合，让顶栏在滚动前几乎没有装饰。 */
+.gnb-large-wrap {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 999;
+  padding: calc(48rpx + env(safe-area-inset-top)) 34rpx 0;
+  pointer-events: none;
+  transition: none;
+}
+.gnb-large-title {
+  display: block;
+  font-size: 60rpx;
+  font-weight: 700;
+  letter-spacing: 0;
+  color: #11131a;
+}
+
+/* 滚动后才浮现的底部分隔线：ScrollEdgeEffect 的简化实现，
+   滚动前 opacity 为 0，不会给顶栏增加装饰。 */
+.gnb-divider {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 1rpx;
+  background: rgba(17, 19, 26, 0.10);
 }

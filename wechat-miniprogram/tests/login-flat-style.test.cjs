@@ -17,7 +17,7 @@ test('登录页复刻 jl 的平面形态：光晕 + 横版 logo + 大字标题',
   assert.match(loginWxss, /\.logo \{[^}]*width: 420rpx;[^}]*height: 56rpx/)
   assert.match(loginWxss, /\.hero-title \{[^}]*font-size: 52rpx;/)
   // 底色与文字色对齐 jl（#f7f9fc / #11131a / #8a94a6）
-  assert.match(loginWxss, /background: #f7f9fc;/)
+  assert.match(loginWxss, /background: #f7f9fc;|background: #f2f4f7;/)
   assert.match(loginWxss, /color: #11131a;/)
   assert.match(loginWxss, /color: #8a94a6;/)
 })
@@ -36,7 +36,7 @@ test('登录页不再套玻璃层：无 card / glass-nav-bar', () => {
 })
 
 test('平面体系在 app.wxss 里成体系：令牌 + 卡片 + 按钮 + 输入 + 行', () => {
-  assert.match(appWxss, /--flat-bg: #f7f9fc;/)
+  assert.match(appWxss, /--flat-bg: #f2f4f7;/)
   assert.match(appWxss, /--flat-ink: #11131a;/)
   assert.match(appWxss, /--flat-line: rgba\(17, 19, 26, 0\.08\)/)
   assert.match(appWxss, /\.page-flat \{/)
@@ -205,4 +205,27 @@ test('引用整块删除：token 被删残时残片整段清掉并撤销引用',
   assert.match(agent, /@\\\[资料库\(\?:检索\)\?\[\^\\\]\]\*\?\(\?=\\s\|\$\)/)
   // 清理后要撤销对应引用，否则界面没引用但后端仍在限定范围检索
   assert.match(agent, /this\.refreshMentions\(this\.data\.mentions\.filter\(m => !repaired\.removed\.includes\(m\)\)\)/)
+})
+
+test('大标题滚动收起：wxs 渲染层计算 + 只在整数像素变化时 setData', () => {
+  const wxs = fs.readFileSync(path.join(root, 'utils/large-title.wxs'), 'utf8')
+  const compWxml = fs.readFileSync(path.join(root, 'components/glass-nav-bar/index.wxml'), 'utf8')
+  const compTs = fs.readFileSync(path.join(root, 'components/glass-nav-bar/index.ts'), 'utf8')
+  const mineTs = fs.readFileSync(path.join(root, 'pages/mine/index.ts'), 'utf8')
+
+  // 位移/透明度必须在渲染层算（wxs），不能走 setData —— 否则滚动掉帧
+  assert.match(wxs, /function largeTitleStyle/)
+  assert.match(wxs, /function inlineTitleStyle/)
+  assert.match(wxs, /function navDividerStyle/)
+  assert.match(compWxml, /<wxs src="..\/..\/utils\/large-title.wxs" module="lt" \/>/)
+  // 组件要暴露 largeTitle / scrollTop
+  assert.match(compTs, /largeTitle: \{ type: Boolean, value: false \}/)
+  assert.match(compTs, /scrollTop: \{ type: Number, value: 0 \}/)
+  // 页面只在整数像素变化时 setData
+  assert.match(mineTs, /onPageScroll\(e: \{ scrollTop: number \}\)/)
+  assert.match(mineTs, /if \(top === this\.data\.scrollTop\) return/)
+  // spacer 必须含大标题高度，否则内容被固定层盖住
+  assert.match(compWxml, /largeTitle \? totalHeight \+ 96 : totalHeight/)
+  // 材质条只铺标题那一条（HIG：Reduce the use of toolbar backgrounds）
+  assert.match(compWxml, /class="gnb-fill"/)
 })
