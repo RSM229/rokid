@@ -23,7 +23,10 @@
   <!-- 待补全草稿卡已移入 main 顶部（见下方），避免被固定导航遮挡 -->
 
   <!-- Main Chat Area -->
-  <view class="main" style="padding-top: {{statusBarHeight + navBarHeight}}px;">
+  <!-- 只让开导航栏那一条：状态栏已经由 .page 的 padding-top 让过了。
+         原来写 statusBarHeight + navBarHeight = 把状态栏算了两次，
+         导航栏下方就多出一条没有任何内容的空白带（用户圈出来的位置）。 -->
+    <view class="main" style="padding-top: {{navBarHeight}}px;">
     <!-- 待补全草稿提醒卡已按用户要求移除（2026-10-15）：草稿数据仍落库，聊天内追问补全流程不变 -->
     <scroll-view class="messages" scroll-y scroll-into-view="{{scrollAnchor}}" enhanced show-scrollbar="{{false}}">
       <!-- Hero（ima 风格空状态：大问候语 + 竖排建议按钮） -->
