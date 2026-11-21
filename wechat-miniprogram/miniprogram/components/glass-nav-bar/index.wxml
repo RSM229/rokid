@@ -1,11 +1,11 @@
 <wxs src="../../utils/large-title.wxs" module="lt" />
 
 <!-- 导航栏
-     材质只铺标题那一条（.gnb-fill），状态栏区域透明。
+     材质覆盖整条（含状态栏），不透明 —— 状态栏透出内容会让标题与之重叠。
      large-title 模式下：大标题独立在导航栏下方，随页面滚动收起进栏内，
      依据 Apple HIG《toolbars》"Reduce the use of toolbar backgrounds..."。 -->
 <view class="gnb" style="height: {{totalHeight}}px;">
-  <view class="gnb-fill" style="top: {{statusBarHeight}}px; height: {{navBarHeight}}px;"></view>
+  <view class="gnb-fill" style="top: 0; height: {{totalHeight}}px;"></view>
 
   <view class="gnb-inner" style="height: {{navBarHeight}}px; top: {{statusBarHeight}}px;">
     <view wx:if="{{left !== 'none'}}" class="gnb-left" bindtap="onLeftTap">

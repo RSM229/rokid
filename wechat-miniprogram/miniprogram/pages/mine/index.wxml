@@ -1,5 +1,5 @@
 <view class="page tab-host" style="{{themeStyle}}">
-  <glass-nav-bar title="我的" left="back" large-title="{{true}}" scroll-top="{{scrollTop}}" />
+  <glass-nav-bar title="我的" left="back" />
   <tab-bar active="mine" />
 
   <view class="hero">
