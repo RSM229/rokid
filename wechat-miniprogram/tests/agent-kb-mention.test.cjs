@@ -245,7 +245,11 @@ test('键盘弹起不遮挡输入区：监听高度 + 布局跟着抬 + 防二�
   assert.match(page, /wx\.offKeyboardHeightChange\(this\.keyboardHandler\)/)
   // 键盘高度以 CSS 变量注入页面根，供 .page 与 .at-panel 共用
   assert.match(template, /--kb: \{\{keyboardHeight\}\}px;/)
-  assert.match(styles, /\.page \{[^}]*padding: 0 0 calc\(126rpx \+ var\(--kb, 0px\) \+ env\(safe-area-inset-bottom\)\)/)
+  // 整页不能吃 --kb：整页加 padding 会把消息区压缩、输入卡被顶到导航栏下方（真机踩过）。
+  // 只让输入条自己 margin-bottom 抬起 —— 对齐 jl 的做法。
+  assert.match(styles, /\.page \{[^}]*padding: 0 0 calc\(126rpx \+ env\(safe-area-inset-bottom\)\)/)
+  assert.doesNotMatch(styles, /\.page \{[^}]*var\(--kb/)
+  assert.match(styles, /\.input-bar \{[^}]*margin-bottom: var\(--kb, 0px\)/)
   assert.match(styles, /\.at-panel \{[^}]*bottom: calc\(360rpx \+ var\(--kb, 0px\) \+ env\(safe-area-inset-bottom\)\)/)
   // 键盘很高时面板不能顶出屏幕
   assert.match(styles, /\.at-panel \{[^}]*max-height: calc\(100vh - 360rpx - var\(--kb, 0px\) - 100rpx\)/)

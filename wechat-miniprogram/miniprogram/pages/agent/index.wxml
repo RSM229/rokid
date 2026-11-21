@@ -360,6 +360,7 @@
             bindinput="onEditorInput"
             bindfocus="onEditorFocus"
             bindblur="onEditorBlur"
+            bindkeyboardheightchange="onEditorKeyboard"
             show-confirm-bar="{{false}}"
             adjust-position="{{false}}"
             cursor-spacing="{{20}}"
@@ -371,6 +372,7 @@
             placeholder="{{attachments.length ? '可补充说明，再点发送' : (noProject ? '问我规范、工艺、天气都行；记录现场工作需先加入项目' : '发消息或按住说话')}}"
             placeholder-class="input-placeholder"
             bindinput="onInput"
+            bindkeyboardheightchange="onTextareaKeyboard"
             maxlength="-1"
             auto-height
             show-confirm-bar="{{false}}"

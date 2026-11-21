@@ -873,14 +873,12 @@ Page(themed({
     // 富文本输入：基础库够新就用 <editor>，@ 引用可以渲染成行内胶囊；
     // 老版本自动回退到 textarea（纯文本 token）。
     this.setData({ useEditor: this.supportsEditor() })
-    // 键盘高度监听：页面是 100vh 固定布局，必须自己拿到键盘高度才能把
-    // @ 面板与输入区抬到键盘之上（微信的 adjust-position 只管输入框，不管 fixed 层）
+    // 键盘高度：优先用输入组件的 bindkeyboardheightchange（对齐 jl 的做法）。
+    // 全局 onKeyboardHeightChange 在真机上会和 100vh 视口变化叠加计数，
+    // 导致输入卡被推到屏幕上方；组件级事件只报「这个输入框被键盘顶起多少」，
+    // 语义更准。这里保留全局监听作为兜底（某些基础库只触发全局事件）。
     this.keyboardHandler = (res: { height: number }) => {
-      const height = Math.max(0, Math.round(res.height || 0))
-      if (height === this.data.keyboardHeight) return
-      this.setData({ keyboardHeight: height })
-      // 键盘收起时，把聊天区滚回最底部（否则会停在被顶起时留下的位置）
-      if (height === 0) setTimeout(() => this.scrollChatToBottom(), 60)
+      this.applyKeyboardHeight(res.height)
     }
     wx.onKeyboardHeightChange(this.keyboardHandler)
 
@@ -6263,6 +6261,31 @@ Page(themed({
   onEditorFocus() {
     this.setData({ inputFocused: true })
   },
+  /**
+   * 统一的键盘高度处理：组件级 bindkeyboardheightchange 与全局监听都走这里。
+   *
+   * keyboardHeight 会被注入成 CSS 变量 --kb，只有两个消费方：
+   *   1) .input-bar 的 margin-bottom —— 只抬输入条，不动整页布局
+   *   2) .at-panel 的 bottom —— fixed 层要自己让位，否则会被键盘盖住
+   */
+  applyKeyboardHeight(raw: number) {
+    const height = Math.max(0, Math.round(raw || 0))
+    if (height === this.data.keyboardHeight) return
+    this.setData({ keyboardHeight: height })
+    // 键盘收起时把聊天区滚回底部（否则会停在被顶起时留下的位置）
+    if (height === 0) setTimeout(() => this.scrollChatToBottom(), 60)
+  },
+
+  /** textarea 组件的键盘高度事件（比全局监听更准，jl 用这个） */
+  onTextareaKeyboard(event: { detail: { height?: number } }) {
+    this.applyKeyboardHeight(event.detail?.height || 0)
+  },
+
+  /** editor 组件的键盘高度事件 */
+  onEditorKeyboard(event: { detail: { height?: number } }) {
+    this.applyKeyboardHeight(event.detail?.height || 0)
+  },
+
 
   onEditorBlur() {
     this.setData({ inputFocused: false })

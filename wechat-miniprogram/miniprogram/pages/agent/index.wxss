@@ -5,7 +5,7 @@
 /* height:100vh + 底部留白 = 输入区固定在屏幕底部。
    --kb 是键盘高度（px，由页面根节点注入）：键盘弹起时把留白加大，
    内容和输入区一起上抬，避免被键盘盖住。 */
-.page { display: flex; flex-direction: column; height: 100vh; background: #f7f9fc; padding: 0 0 calc(126rpx + var(--kb, 0px) + env(safe-area-inset-bottom)); }
+.page { display: flex; flex-direction: column; height: 100vh; background: #f7f9fc; padding: 0 0 calc(126rpx + env(safe-area-inset-bottom)); }
 
 /* Nav Bar */
 .nav-bar { position: fixed; top: 0; left: 0; right: 0; z-index: 100; background: linear-gradient(135deg, rgba(var(--deep-rgb, 10,46,92), 0.96) 0%, rgba(var(--deep-rgb, 10,46,92), 0.90) 100%); border-bottom: 1rpx solid rgba(255,255,255,0.14); box-shadow: 0 2rpx 12rpx rgba(var(--deep-rgb, 10,46,92), 0.18); }
@@ -316,7 +316,9 @@
 /* 待补全草稿横幅（聊天即操作的半成品提醒，顶部常驻，flex-shrink:0 不挤压聊天区） */
 .pv-btn { margin: 0; font-size: 22rpx; line-height: 1.6; }
 
-.input-bar { display: flex; align-items: center; padding: 12rpx 16rpx; gap: 8rpx; background: #f7f9fc; border-top: 1rpx solid rgba(17,19,26,0.08); box-shadow: 0 -2rpx 10rpx rgba(22,38,74,0.04); position: relative; z-index: 155; }
+/* 键盘避让：只把输入条自身抬起，不动整页布局。整页加 padding 会把消息区压缩、
+   输入卡被顶到导航栏下方（真机上踩过）。jl 的做法就是给底部容器 margin-bottom。 */
+.input-bar { display: flex; align-items: center; padding: 12rpx 16rpx; gap: 8rpx; background: #f7f9fc; border-top: 1rpx solid rgba(17,19,26,0.08); box-shadow: 0 -2rpx 10rpx rgba(22,38,74,0.04); position: relative; z-index: 155; margin-bottom: var(--kb, 0px); }
 .model-btn { display: flex; align-items: center; gap: 6rpx; padding: 0 18rpx; height: 64rpx; border-radius: 32rpx; background: linear-gradient(135deg, rgba(var(--wash-rgb, 234,243,255), 0.8) 0%, rgba(var(--wash-rgb, 234,243,255), 0.8) 100%); flex-shrink: 0; }
 .model-btn.hazard-active { background: linear-gradient(135deg, rgba(253,232,232,0.8) 0%, rgba(255,221,221,0.8) 100%); }
 .model-btn-label { font-size: 24rpx; font-weight: 700; color: var(--brand, #1677ff); }
