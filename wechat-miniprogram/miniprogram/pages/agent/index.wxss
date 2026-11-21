@@ -8,7 +8,10 @@
 .page { display: flex; flex-direction: column; height: 100vh; background: #f7f9fc; padding: 0 0 calc(126rpx + env(safe-area-inset-bottom)); }
 
 /* Nav Bar */
-.nav-bar { position: fixed; top: 0; left: 0; right: 0; z-index: 100; background: rgba(255, 255, 255, 0.94); backdrop-filter: blur(20px) saturate(180%); -webkit-backdrop-filter: blur(20px) saturate(180%); border-bottom: 1rpx solid rgba(17, 19, 26, 0.08); }
+.nav-bar { position: fixed; top: 0; left: 0; right: 0; z-index: 100; }
+/* 导航栏材质只铺在标题那一条上：状态栏区域保持透明，透出页面底色。
+   否则状态栏会被铺成一条没有任何内容的白带（用户反馈的"没作用的色块"）。 */
+.nav-bar-fill { position: absolute; left: 0; right: 0; background: rgba(255, 255, 255, 0.94); backdrop-filter: blur(20px) saturate(180%); -webkit-backdrop-filter: blur(20px) saturate(180%); border-bottom: 1rpx solid rgba(17, 19, 26, 0.08); }
 .nav-bar-inner { position: absolute; left: 0; right: 0; display: flex; align-items: center; justify-content: center; padding: 0 28rpx; }
 .nav-title { font-size: 32rpx; font-weight: 600; color: #11131a; max-width: 380rpx; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .nav-title-wrap { display: flex; align-items: center; gap: 8rpx; max-width: 70%; }

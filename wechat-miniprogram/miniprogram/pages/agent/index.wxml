@@ -3,7 +3,11 @@
 <view class="page" style="padding-top: {{statusBarHeight}}px;; --kb: {{keyboardHeight}}px; {{themeStyle}}" bindtap="onPageTap">
   <tab-bar active="agent" bind:doubletap="onTabDoubleTap" />
   <!-- Custom Nav Bar -->
-  <view class="nav-bar" style="height: {{statusBarHeight + navBarHeight}}px;">
+  <!-- 导航栏只覆盖标题那一条（navBarHeight），状态栏区域留空透出页面底色。
+       原来 height 写成 statusBarHeight + navBarHeight，等于把状态栏也铺成白底 ——
+       那块没有任何内容的白色横带就是用户说的"没作用的色块"。 -->
+    <view class="nav-bar" style="height: {{statusBarHeight + navBarHeight}}px; background: transparent;">
+      <view class="nav-bar-fill" style="top: {{statusBarHeight}}px; height: {{navBarHeight}}px;"></view>
     <view class="nav-bar-inner" style="height: {{navBarHeight}}px; top: {{statusBarHeight}}px;">
       <view class="nav-left" bindtap="openHistory">
         <view class="nav-menu-icon"></view>
