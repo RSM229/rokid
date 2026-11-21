@@ -6,17 +6,6 @@
    用法：@import "../../styles/cell-list.wxss";  置于页面 wxss 首行，
    页面自有规则写在其后即可正常覆盖（同优先级后段压前段）。 */
 
-/* 分组标题：Apple HIG 的 grouped style 明确要求用 headers + 额外留白分隔数据组
-   （原文："the grouped style uses headers, footers, and additional space to
-   separate groups of data"），这里对应「项目」「账号与配置」这类小标题。 */
-.group-title {
-  margin: 28rpx 34rpx 12rpx;
-  font-size: 22rpx;
-  color: #8a94a6;
-  letter-spacing: 1rpx;
-}
-
-/* 分组卡片：iOS inset grouped —— 靠「浅灰底 vs 白卡片」的对比分隔，不用边框和阴影 */
 .section {
   margin-top: 24rpx;
   background: #ffffff;
@@ -51,13 +40,15 @@
    收进对应项下方做小字副提示 —— 信息不丢，视觉退到背景。 */
 .cell-main { display: flex; flex-direction: column; gap: 6rpx; flex: 1; min-width: 0; }
 .cell-sub { font-size: 22rpx; color: #9aa9bb; line-height: 1.5; }
-
-/* 分组标题：缩进 = 页边距 28rpx + cell 内边距 30rpx，与卡片内文字左对齐 */
+/* 分组标题（Apple HIG grouped style 的 headers）：HIG 原文——
+   "the grouped style uses headers, footers, and additional space to separate
+    groups of data" —— 组标题 + 组间留白是规范要求，不是装饰。
+   缩进 = 页边距 28rpx + cell 内边距 30rpx，与卡片内文字左对齐 */
 .group-title {
   margin: 36rpx 30rpx 12rpx;
   font-size: 25rpx;
   font-weight: 600;
-  color: #6b7c90;
+  color: #8a94a6;
 }
 
 /* 可点击入口行：不再给每一行染色。原来每行都带浅蓝底 + 内高光，七行叠起来
