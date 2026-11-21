@@ -212,7 +212,9 @@ page {
   min-height: 100vh;
   padding: 28rpx;
   box-sizing: border-box;
-  background-color: #ffffff;
+  /* 浅灰底：白色分组卡片才有对比。
+     原来是纯白，卡片和背景同色，整页发「素」（只在一条细线上体现分隔）。 */
+  background-color: #f7f9fc;
 }
 
 /* 基础玻璃卡（8.6 极简克制）

@@ -5,6 +5,13 @@
    本文件只留「我的」独占的部分：Hero、待上传、项目看板入口、退出登录。 */
 @import "../../styles/cell-list.wxss";
 
+/* 本页底部是固定 tab-bar，必须留出它的高度，
+   否则最后一行（派单）会被压住半截——截图里可以看到被切掉。 */
+.tab-host {
+  padding-bottom: calc(140rpx + env(safe-area-inset-bottom));
+  background: #f7f9fc;
+}
+
 /* 头部信息块：白底 + 一根细线（原来是从深蓝到亮蓝的斜向渐变）。
    渐变刷在内容块上是"装饰"，会和内容抢注意力；品牌感改由头像的环形描边承担。 */
 .hero { display: flex; align-items: center; gap: 28rpx; padding: 28rpx 34rpx 32rpx; background: transparent; border-bottom: 1rpx solid rgba(17, 19, 26, 0.08); }
