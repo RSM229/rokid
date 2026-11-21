@@ -224,8 +224,13 @@ test('大标题滚动收起：wxs 渲染层计算 + 只在整数像素变化时 
   // 页面只在整数像素变化时 setData
   assert.match(mineTs, /onPageScroll\(e: \{ scrollTop: number \}\)/)
   assert.match(mineTs, /if \(top === this\.data\.scrollTop\) return/)
-  // spacer 必须含大标题高度，否则内容被固定层盖住
-  assert.match(compWxml, /largeTitle \? totalHeight \+ 96 : totalHeight/)
+  // spacer 只占导航栏高度；大标题在正常流里自己占位（之前写 +96 导致中间一大块空白）
+  assert.match(compWxml, /style="height: \{\{totalHeight\}\}px;"/)
+  assert.doesNotMatch(compWxml, /totalHeight \+ 96/)
+  // spacer 必须排在导航栏之后、大标题之前，否则大标题会顶到页面顶部
+  const spacerIdx = compWxml.indexOf('height: {{totalHeight}}px;"></view>')
+  const largeIdx = compWxml.indexOf('class="gnb-large-wrap"')
+  assert.ok(spacerIdx > 0 && largeIdx > spacerIdx, 'spacer 应排在大标题之前')
   // 材质条只铺标题那一条（HIG：Reduce the use of toolbar backgrounds）
   assert.match(compWxml, /class="gnb-fill"/)
 })

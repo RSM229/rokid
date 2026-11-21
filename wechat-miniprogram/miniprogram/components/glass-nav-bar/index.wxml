@@ -23,11 +23,12 @@
   <view wx:if="{{largeTitle}}" class="gnb-divider" style="{{lt.navDividerStyle(scrollTop)}}"></view>
 </view>
 
-<!-- 大标题区：占位以推开内容，同时承担视觉重量 -->
+<!-- spacer 必须紧跟导航栏：导航栏是 fixed 不占流，缺了它内容会顶到状态栏下面。
+     这里只占导航栏高度（大标题区在正常流里，自己占位）。 -->
+<view wx:if="{{spacer}}" style="height: {{totalHeight}}px;"></view>
+
+<!-- 大标题区：正常布局流，排在 spacer 之后，因此天然落在导航栏下方 -->
 <view wx:if="{{largeTitle}}" class="gnb-large-wrap" style="{{lt.largeTitleStyle(scrollTop, statusBarHeight, navBarHeight)}}">
   <text class="gnb-large-title">{{title}}</text>
   <slot name="large"></slot>
 </view>
-
-<!-- spacer：占位高度要含大标题区，否则内容会被固定的大标题盖住 -->
-<view wx:if="{{spacer}}" style="height: {{largeTitle ? totalHeight + 96 : totalHeight}}px;"></view>

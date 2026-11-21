@@ -90,15 +90,13 @@
 /* 大标题区（Apple HIG large title）：
    标题独立在导航栏下方、靠左、字号更大，随页面滚动收起进栏内。
    与「材质只铺标题条」配合，让顶栏在滚动前几乎没有装饰。 */
+/* 大标题区：走正常布局流（不 fixed）。
+   之前用 fixed + z-index:999，而导航栏是 z-index:1000 且占了状态栏+标题条的高度，
+   结果大标题被压在导航栏下面、只露出一部分，看起来被切掉且与状态栏重叠；
+   同时 spacer 又额外加了它的高度，导致中间留出一大块空白。 */
 .gnb-large-wrap {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  z-index: 999;
-  padding: calc(48rpx + env(safe-area-inset-top)) 34rpx 0;
+  margin: 8rpx 34rpx 24rpx;
   pointer-events: none;
-  transition: none;
 }
 .gnb-large-title {
   display: block;
