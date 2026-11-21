@@ -162,5 +162,5 @@
 }
 
 .link {
-  color: var(--brand, #0a6dff);
+  color: var(--brand, #0f62fe);
 }

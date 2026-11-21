@@ -79,8 +79,8 @@
   flex-shrink: 0;
   width: 64rpx;
   height: 64rpx;
-  background: rgba(var(--brand-rgb, 10,109,255), 0.10);
-  border: 2rpx solid rgba(var(--brand-rgb, 10,109,255), 0.18);
+  background: rgba(var(--brand-rgb, 15,98,254), 0.10);
+  border: 2rpx solid rgba(var(--brand-rgb, 15,98,254), 0.18);
 }
 /* mask 只落在 ::before（裸类规则会误伤同名的组合类）；具体图形由页面 .ic-* 提供 */
 .entry-icon::before {
