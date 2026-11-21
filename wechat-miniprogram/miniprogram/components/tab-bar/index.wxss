@@ -1,4 +1,8 @@
 /* 常驻玻璃底栏（与 glass-nav-bar 同设计语言） */
+/* 功能层：与导航栏同一套材质（半透明 + blur + 一根细线）。
+   之前这里是实心 #ffffff + 阴影，和导航栏的材质不一致 —— 同为功能层应共用一套观感。
+   依据 Apple HIG《Materials》：材质用于在内容之上建立层次，
+   且 iOS 的标准材质分 ultra-thin / thin / regular / thick 四档，这里取 regular 附近的值。 */
 .tabbar {
   position: fixed;
   left: 0;
@@ -6,9 +10,10 @@
   bottom: 0;
   z-index: 5;
   display: flex;
-  background: #ffffff;
+  background: rgba(255, 255, 255, 0.94);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
   border-top: 1rpx solid rgba(17, 19, 26, 0.08);
-  box-shadow: 0 -2rpx 12rpx rgba(22, 38, 74, 0.05);
   padding: 12rpx 0 calc(12rpx + env(safe-area-inset-bottom));
 }
 .tab-item {
