@@ -22,7 +22,7 @@
 .nav-icon { width: 30rpx; height: 30rpx; background-repeat: no-repeat; background-position: center; background-size: contain; }
 .nav-icon.ic-clock { background-image: url("data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%201024%201024%22%3E%3Cpath%20fill=%22%2333405a%22%20d=%22M512%20896a384%20384%200%201%200%200-768%20384%20384%200%200%200%200%20768m0%2064a448%20448%200%201%201%200-896%20448%20448%200%200%201%200%20896%22/%3E%3Cpath%20fill=%22%2333405a%22%20d=%22M480%20256a32%2032%200%200%201%2032%2032v256a32%2032%200%200%201-64%200V288a32%2032%200%200%201%2032-32%22/%3E%3Cpath%20fill=%22%2333405a%22%20d=%22M480%20512h256q32%200%2032%2032t-32%2032H480q-32%200-32-32t32-32%22/%3E%3C/svg%3E"); }
 .nav-project { position: absolute; right: 28rpx; bottom: 4rpx; background: rgba(10, 109, 255, 0.10); padding: 2rpx 14rpx; border-radius: 999rpx; }
-.nav-project-name { font-size: 20rpx; color: #0f62fe; }
+.nav-project-name { font-size: 20rpx; color: #33405a; }
 
 /* Breadcrumb */
 
@@ -321,7 +321,7 @@
 .input-bar { display: flex; align-items: center; padding: 12rpx 16rpx; gap: 8rpx; background: #f7f9fc; border-top: 1rpx solid rgba(17,19,26,0.08); box-shadow: 0 -2rpx 10rpx rgba(22,38,74,0.04); position: relative; z-index: 155; }
 .model-btn { display: flex; align-items: center; gap: 6rpx; padding: 0 18rpx; height: 64rpx; border-radius: 32rpx; background: linear-gradient(135deg, rgba(var(--wash-rgb, 234,243,255), 0.8) 0%, rgba(var(--wash-rgb, 234,243,255), 0.8) 100%); flex-shrink: 0; }
 .model-btn.hazard-active { background: linear-gradient(135deg, rgba(253,232,232,0.8) 0%, rgba(255,221,221,0.8) 100%); }
-.model-btn-label { font-size: 24rpx; font-weight: 700; color: var(--brand, #0f62fe); }
+.model-btn-label { font-size: 24rpx; font-weight: 700; color: #11131a; }
 .hazard-active .model-btn-label { color: #b93838; }
 .model-arrow { font-size: 20rpx; color: var(--brand, #0f62fe); }
 .hazard-active .model-arrow { color: #b93838; }
@@ -369,7 +369,7 @@
 .work-form-panel { max-height: 90vh; }
 @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
 .panel-header { text-align: center; margin-bottom: 36rpx; }
-.panel-title { display: block; font-size: 36rpx; font-weight: 700; color: var(--brand-deep, #33405a); }
+.panel-title { display: block; font-size: 36rpx; font-weight: 700; color: #11131a; }
 .panel-subtitle { display: block; font-size: 26rpx; color: #6b7c90; margin-top: 8rpx; }
 .form-group { margin-bottom: 24rpx; }
 .form-label { display: block; font-size: 26rpx; font-weight: 600; color: var(--ink, #11131a); margin-bottom: 10rpx; }
@@ -388,7 +388,7 @@
 .drawer-scroll { flex: 1; min-height: 0; }
 /* 分组全部收起时抽屉很短，组间距略收一点 */
 .drawer-group { margin-bottom: 20rpx; }
-.drawer-title { font-size: 24rpx; font-weight: 600; color: var(--brand-l, #2b96ff); letter-spacing: 2rpx; margin-bottom: 12rpx; }
+.drawer-title { font-size: 24rpx; font-weight: 600; color: #8a94a6; letter-spacing: 2rpx; margin-bottom: 12rpx; }
 /* 分组标题行＝折叠开关（整行可点）：标题 + 右侧折角箭头 */
 .drawer-head { display: flex; align-items: center; padding: 12rpx; margin-bottom: 4rpx; border-radius: 12rpx; }
 .drawer-head:active { background: rgba(255,255,255,0.50); }
@@ -411,7 +411,7 @@
 .project-card-head { display: flex; align-items: center; margin-bottom: 10rpx; }
 .project-card-title { flex: 1; margin-bottom: 0; }
 .project-card-edit { display: flex; align-items: center; gap: 2rpx; flex-shrink: 0; }
-.project-card-edit-text { font-size: 22rpx; color: var(--brand, #0f62fe); }
+.project-card-edit-text { font-size: 22rpx; color: #8a94a6; }
 /* 右侧折角箭头指向右（复用 .drawer-arrow 的折角，不改共享规则） */
 .edit-arrow { width: 30rpx; height: 30rpx; }
 .edit-arrow::before { width: 9rpx; height: 9rpx; border-right: 2rpx solid var(--brand, #0f62fe); border-bottom: 2rpx solid var(--brand, #0f62fe); transform: rotate(-45deg); border-radius: 1rpx; }
@@ -432,7 +432,7 @@
 .project-picker-foot { flex-shrink: 0; padding: 20rpx 12rpx 4rpx; margin-top: 16rpx; border-top: 1rpx solid rgba(var(--brand-rgb, 15,98,254), 0.14); }
 .picker-add-btn { display: flex; align-items: center; justify-content: center; height: 84rpx; border-radius: 16rpx; background: rgba(var(--brand-rgb, 15,98,254), 0.07); border: 1rpx dashed rgba(var(--brand-rgb, 15,98,254), 0.45); }
 .picker-add-plus { font-size: 36rpx; line-height: 1; color: var(--brand, #0f62fe); margin-right: 10rpx; }
-.picker-add-text { font-size: 30rpx; color: var(--brand, #0f62fe); }
+.picker-add-text { font-size: 30rpx; color: #33405a; }
 .history-new { display: flex; align-items: center; gap: 12rpx; padding: 14rpx 24rpx; border-radius: 20rpx; background: rgba(var(--brand-rgb, 15,98,254), 0.85); }
 .history-new:active { background: rgba(var(--brand-l-rgb, 59,140,255), 0.9); }
 .history-new-text { font-size: 26rpx; font-weight: 600; color: #fff; }
