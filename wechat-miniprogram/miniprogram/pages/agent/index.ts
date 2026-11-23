@@ -787,7 +787,8 @@ Page(themed({
   /** @ 搜索的请求序号：只有最新一次请求的结果才允许落库，防止慢响应覆盖新结果 */
   atSearchSeq: 0,
   /** @ 面板本地联想缓存：key → 条目。打字时先本地查表立刻出结果，不等网络。 */
-  atLocalIndex: new Map<string, AtKbItem>(),
+  /** @ 面板本地联想缓存：key → 条目。Map 不是可深拷贝的值，不能在 data 里初始化（小程序会告警），改为 onLoad 里赋值 */
+  atLocalIndex: null as Map<string, AtKbItem> | null,
   /** 键盘高度监听的句柄，onUnload 里要注销，避免页面销毁后回调仍打到旧实例 */
   keyboardHandler: null as ((res: { height: number }) => void) | null,
   inlinePlanSaveQueues: {} as Record<string, Promise<void>>,
@@ -1002,6 +1003,12 @@ Page(themed({
   voiceAutoTimer: null as number | null,
 
   onLoad(options: Record<string, string>) {
+    // 未登录直接去登录页：否则 onLoad 里恢复会话会打 /agent/conversations 拿 401
+    // （控制台那条 401 就是 token 失效/缺失时仍发请求造成的）。
+    if (!session.getToken()) {
+      wx.redirectTo({ url: '/pages/login/index' })
+      return
+    }
     // ===== 统一在 setData 入口给消息补「分段」 =====
     // 气泡要按片段渲染（引用名蓝色可点、AI 来源角标 [[n]] 变成小方块），
     // 但直接 setData({ messages: [...] }) 的写入点有十几处，逐个加必然漏 ——
@@ -1029,7 +1036,7 @@ Page(themed({
       const cached = wx.getStorageSync('gdjl_kb_local_index')
       if (Array.isArray(cached)) {
         for (const item of cached as AtKbItem[]) {
-          if (item && item.key) this.atLocalIndex.set(item.key, item)
+          if (item && item.key) this.localIndex().set(item.key, item)
         }
       }
     } catch { /* 缓存坏了不影响功能 */ }
@@ -1284,16 +1291,22 @@ Page(themed({
       const statusCode = (error as { statusCode?: number })?.statusCode
       // 404=服务端无此请求追踪；403=追踪不属于当前用户。两者都意味着这条进度轮次
       // 永远轮询不到（典型：本地/远端遗留的未终态轮次，其追踪未落库到当前后端，或已被清理）。
-      // 若不停下，会每 1.2s 打一次 404 刷屏且空耗请求。
-      if ((statusCode === 404 || statusCode === 403) && activeProgressRequestId === requestId) {
+      //
+      // 关键：必须**无条件**停下。之前只在 activeProgressRequestId === requestId 时才停，
+      // 而恢复历史会话时轮询的往往不是「当前活跃轮次」，于是条件不成立、定时器继续跑，
+      // 控制台就每 1.2s 刷一条 404。现在只要拿到 404/403 就停，并标记该轮次已结束。
+      if (statusCode === 404 || statusCode === 403) {
         const startedAt = this.data.messages.find(m => m.progressRequestId === requestId)?.progressStartedAt || 0
         const elapsed = startedAt ? Date.now() - startedAt : Number.MAX_SAFE_INTEGER
-        if (elapsed >= PROGRESS_404_GRACE_MS) {
+        const isActive = activeProgressRequestId === requestId
+        // 活跃轮次给一个宽限期（服务端可能刚落库），非活跃轮次立刻收手
+        if (!isActive || elapsed >= PROGRESS_404_GRACE_MS) {
           this.stopAgentProgressTimers()
           this.updateAgentProgressMessage(requestId, message => ({
             ...message,
             progressTerminal: true,
-            progressHeadline: message.progressHeadline || (statusCode === 403 ? '该轮次无权查看' : '该轮次进度记录已失效'),
+            progressHeadline:
+              message.progressHeadline || (statusCode === 403 ? '该轮次无权查看' : '该轮次进度记录已失效'),
           }))
           return
         }
@@ -1358,15 +1371,32 @@ Page(themed({
     this.saveCurrentSession()
   },
 
+  /**
+   * 恢复未完成的进度轮询。
+   *
+   * 只有「确实是刚刚在跑」的轮次才值得轮询：历史会话里遗留的未终态消息，
+   * 其请求追踪早已不存在，轮询只会拿到 404 并刷屏。
+   * 用 progressStartedAt 做新鲜度判断，超过 3 分钟的直接标记结束、不发起轮询。
+   */
   async resumeAgentProgress() {
-    if (this.data.loading) {
-      const active = [...this.data.messages].reverse().find(message => message.progressRequestId && !message.progressTerminal)
-      if (active?.progressRequestId) this.startAgentProgressPolling(active.progressRequestId)
+    const FRESH_MS = 3 * 60 * 1000
+    const pick = (message: Message) =>
+      message.progressRequestId && !message.progressTerminal ? message : null
+    const candidate = this.data.loading
+      ? [...this.data.messages].reverse().map(pick).find(Boolean)
+      : [...this.data.messages].reverse().map(pick).find(Boolean)
+    if (!candidate?.progressRequestId) return
+    const startedAt = candidate.progressStartedAt || 0
+    if (startedAt && Date.now() - startedAt > FRESH_MS) {
+      // 过期的轮次：不再轮询，直接把这块进度标记为已结束（UI 不再显示"整理中"）
+      this.updateAgentProgressMessage(candidate.progressRequestId, message => ({
+        ...message,
+        progressTerminal: true,
+        progressHeadline: message.progressHeadline || '该轮次进度记录已失效',
+      }))
       return
     }
-    const pending = [...this.data.messages].reverse().find(message => message.progressRequestId && !message.progressTerminal)
-    if (!pending?.progressRequestId) return
-    this.startAgentProgressPolling(pending.progressRequestId)
+    this.startAgentProgressPolling(candidate.progressRequestId)
   },
 
   /** 拉取当前用户的待补全草稿，用于在聊天页顶部挂「待补全」提示横幅 */
@@ -6187,8 +6217,18 @@ Page(themed({
    * 这就是「像 macOS 键盘预测那样按下键就有反应」的手感来源：
    * 网络往返是几百毫秒，本地查表是零点几毫秒。
    */
+  /**
+   * 取 @ 面板的本地联想缓存（懒初始化）。
+   * Map 不是可深拷贝的简单值，若直接写在 data 里，小程序会在页面实例化时告警
+   * （"atLocalIndex ... seems not a simple value"），所以改成首次使用时创建。
+   */
+  localIndex(): Map<string, AtKbItem> {
+    if (!this.atLocalIndex) this.atLocalIndex = new Map<string, AtKbItem>()
+    return this.atLocalIndex
+  },
+
   rememberLocalItems(items: AtKbItem[]) {
-    const index = this.atLocalIndex
+    const index = this.localIndex()
     for (const item of items) {
       if (item.kind === 'header' || item.kind === 'query') continue
       if (!index.has(item.key)) index.set(item.key, item)
@@ -6208,7 +6248,7 @@ Page(themed({
     const q = query.trim().toLowerCase()
     if (!q) return []
     const hits: AtKbItem[] = []
-    for (const item of this.atLocalIndex.values()) {
+    for (const item of this.localIndex().values()) {
       const haystack = `${item.name} ${item.path}`.toLowerCase()
       if (haystack.includes(q)) hits.push(item)
       if (hits.length >= 20) break

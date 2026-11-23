@@ -141,7 +141,11 @@ test('空查询有内容可看：browse 分三段渲染，不再给空面板', (
 })
 
 test('本地联想：打字先本地出结果，服务端结果到达后覆盖', () => {
-  assert.match(page, /atLocalIndex: new Map<string, AtKbItem>\(\)/)
+  // Map 不是可深拷贝的简单值，不能直接放在 data 里初始化
+  // （小程序会告警 "atLocalIndex ... seems not a simple value"），改为懒初始化
+  assert.match(page, /atLocalIndex: null as Map<string, AtKbItem> \| null/)
+  assert.match(page, /localIndex\(\): Map<string, AtKbItem> \{/)
+  assert.match(page, /if \(!this\.atLocalIndex\) this\.atLocalIndex = new Map<string, AtKbItem>\(\)/)
   assert.match(page, /rememberLocalItems\(items: AtKbItem\[\]\)/)
   assert.match(page, /filterLocalItems\(query: string\): AtKbItem\[\]/)
   // onAtSearch 必须先本地立刻渲染（0ms 手感），再走防抖网络
@@ -386,4 +390,14 @@ test('角标上标化后必须同时改写 text，否则兜底渲染会露出 [[
   // 气泡回退到原始 text，[[1]] 就原样露出来了（用户截图复现）。
   assert.match(page, /if \(msg\.role === 'assistant' && hasCite\)/)
   assert.match(page, /out\.text = normalizeCiteArtifacts\(msg\.text\)\.replace\(\/\\\[\\\[\(\\d\{1,3\}\)\\\]\\\]\/g,/)
+})
+test('控制台噪音治理：401 预检、404 无条件停轮询、Map 不进 data', () => {
+  // 1) onLoad 未登录直接去登录页，避免恢复会话时打 /agent/conversations 拿 401
+  assert.match(page, /onLoad\(options: Record<string, string>\) \{[\s\S]{0,200}if \(!session\.getToken\(\)\) \{\s*wx\.redirectTo/)
+  // 2) 404/403 不再受 activeProgressRequestId 限制，一律停止轮询（否则恢复历史会话后每 1.2s 刷屏）
+  assert.match(page, /if \(statusCode === 404 \|\| statusCode === 403\) \{/)
+  assert.match(page, /if \(!isActive \|\| elapsed >= PROGRESS_404_GRACE_MS\)/)
+  // 3) 恢复轮询前先判断轮次是否新鲜，过期轮次直接标记结束
+  assert.match(page, /const FRESH_MS = 3 \* 60 \* 1000/)
+  assert.match(page, /Date\.now\(\) - startedAt > FRESH_MS/)
 })
