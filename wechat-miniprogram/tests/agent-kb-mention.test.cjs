@@ -334,16 +334,33 @@ test('气泡分段标签之间不能有模板空白（pre-wrap 会把缩进渲�
   assert.match(template, /<\/text><text wx:else class="bubble-plain"/)
   assert.doesNotMatch(template, /<\/text>\s*\r?\n\s*<text wx:elif/)
 })
-test('角标要贴住前一句：去掉它前面的换行，保留后面的', () => {
-  // 模型常把 [[n]] 单独放一行（前后都带换行），直接渲染就是
-  // 「角标独占一行 + 下面空一行」。切分后要把前一段的尾部空白收成单个空格，
-  // 后面的换行要保留（列表项仍需分行）。
-  assert.match(page, /if \(prev && prev\.kind === 'text'\) prev\.value = prev\.value\.replace\(\/\\s\+\$\/, ' '\)/)
-  assert.match(page, /segments\.filter\(s => !\(s\.kind === 'text' && s\.value === ''\)\)/)
+test('分段不得改动原文空白：不能用修剪换行的方式修排版', () => {
+  // 踩过的坑：为了让角标贴住句末去修剪前后的换行，
+  // 结果把模型原本的列表排版挤乱（角标与下一行的「5. …」并到同一行）。
+  // 用改文本的方式修显示是本末倒置，前端只做「标记 → 角标」的替换。
+  assert.doesNotMatch(page, /prev\.value = prev\.value\.replace\(\/\\s\+\$\/, ' '\)/)
+  assert.doesNotMatch(page, /seg\.value = seg\.value\.replace\(\/\^\[ \\t\]\*\\n/)
 })
-test('角标后面的空行要压成一个换行（列表项仍换行）', () => {
-  // 现象：角标独占一行之后，下面还空一行。
-  // 成因：原文是 [[1]]\n[[5]]\n\n2. …，角标后跟了两个换行。
-  assert.match(page, /seg\.value = seg\.value\.replace\(\/\^\[ \\t\]\*\\n\[ \\t\]\*\\n\+\/, '\\n'\)/)
-  assert.match(page, /while \(j >= 0 && segments\[j\]\.kind === 'text' && segments\[j\]\.value\.trim\(\) === ''\) j--/)
+
+test('角标是内联上标，不能是占位方块', () => {
+  // inline-block 有自己的高度/行高，会参与行盒计算，角标一多就把整行撑开；
+  // 改成 display: inline + vertical-align: super 后与纯文本排版一致。
+  const rule = (styles.match(/^\.bubble-cite \{[^}]*\}/m) || [''])[0]
+  assert.ok(rule, '.bubble-cite 规则缺失')
+  assert.match(rule, /display: inline;/)
+  assert.match(rule, /vertical-align: super;/)
+  assert.doesNotMatch(rule, /inline-block/)
+  assert.doesNotMatch(rule, /height:/)
+  assert.doesNotMatch(rule, /line-height:/)
+})
+test('只把「整行只有角标」贴到上一行，其余排版一律不动', () => {
+  // 用户反馈：修角标把列表格式弄乱了（角标和下一行并到一起）。
+  // 现在只识别「整行都是 [[n]]」的行，把它贴到最近非空行末尾；
+  // 空行、缩进、段落一律保持原样，不做任何 \n 压缩。
+  assert.match(page, /function hoistCiteOnlyLines\(text: string\): string \{/)
+  assert.match(page, /\^\(\?:\\\[\\\[\\d\{1,3\}\\\]\\\]\[ \\t\]\*\)\+\$/)
+  // 往前找最近的非空行（跳过空行但不删空行）
+  assert.match(page, /while \(prev >= 0 && out\[prev\]\.trim\(\) === ''\) prev--/)
+  // 明确不再出现「压缩连续换行」那类改动
+  assert.doesNotMatch(page, /replace\(\/\^\[ \\t\]\*\\n\[ \\t\]\*\\n\+\//)
 })

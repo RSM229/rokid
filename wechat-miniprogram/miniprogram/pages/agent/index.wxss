@@ -705,21 +705,20 @@
 .chat-generate-blocked-hint { display: block; margin-top: 8rpx; color: #8a7568; font-size: 20rpx; line-height: 1.35; }
 
 /* AI 回答里的来源角标（后端用 [[编号]] 标注引用）：
-   黑白主题下不用彩色，做成脚注编号的样子——浅灰底、中灰字、上抬一点。
-   行高用 px 与高度对齐（契约测试只限制相对行高，px 属控件尺寸）。 */
+   黑白主题下不用彩色，做成脚注编号的样子。
+
+   必须是**内联**（display: inline）而不是 inline-block 方块：
+   方块有自己的高度/行高，会参与行盒计算，角标一多就把整行撑开、
+   甚至把后面的文字挤到下一行 —— 用户反馈"引用破坏了原有格式"。
+   内联 + vertical-align: super 只抬基线、不改行盒，排版与纯文本一致。 */
 .bubble-cite {
-  display: inline-block;
-  box-sizing: border-box;
-  min-width: 30rpx;
-  height: 30rpx;
-  padding: 0 8rpx;
-  margin: 0 4rpx;
-  border-radius: 8rpx;
-  background: #eef1f4;
+  display: inline;
+  padding: 0 3rpx;
+  margin: 0 1rpx;
+  border-radius: 6rpx;
+  background: rgba(17, 19, 26, 0.06);
   color: #5b6472;
   font-size: 20rpx;
   font-weight: 600;
-  line-height: 30rpx;
-  text-align: center;
-  vertical-align: 4rpx;
+  vertical-align: super;
 }

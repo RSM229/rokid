@@ -593,6 +593,35 @@ function escapeRe(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
+/**
+ * 只处理「整行只有角标」的情况：把该行的角标贴到上一行末尾，并去掉这一行。
+ *
+ * 为什么这么收敛：之前用「修剪前后空白」的办法修排版，
+ * 结果把模型原本的列表结构挤乱了（角标和下一行的「5. …」并到同一行）。
+ * 现在只动「整行都是 [[n]]」的行，其余字符一个都不改，
+ * 列表缩进、空行、段落全部保持原样。
+ */
+function hoistCiteOnlyLines(text: string): string {
+  const lines = text.split('\n')
+  const out: string[] = []
+  for (const line of lines) {
+    const trimmed = line.trim()
+    // 整行由若干 [[n]] 组成（允许中间有空格）
+    if (trimmed && /^(?:\[\[\d{1,3}\]\][ \t]*)+$/.test(trimmed)) {
+      // 往前找最近的非空行（中间的空行原样保留，不改动段落结构）
+      let prev = out.length - 1
+      while (prev >= 0 && out[prev].trim() === '') prev--
+      if (prev >= 0) {
+        // 贴到那一行末尾；本行连同它的换行一起消失
+        out[prev] = out[prev].replace(/[ \t]+$/, '') + ' ' + trimmed.replace(/[ \t]+/g, '')
+        continue
+      }
+    }
+    out.push(line)
+  }
+  return out.join('\n')
+}
+
 /** 把消息文本切成「普通文字 / 引用 / 来源角标」片段，供气泡渲染。
  *  mention 片段只保留显示名（value），原始 token 另存一份供点击定位。
  *
@@ -601,9 +630,11 @@ function escapeRe(s: string): string {
  *  否则用户消息里的引用名只能当普通文字显示（用户反馈"气泡也是纯文本"）。
  */
 function splitMentionSegments(
-  text: string,
+  rawText: string,
   mentions?: AtMention[],
 ): Array<{ kind: 'text' | 'mention' | 'cite'; value: string; token?: string }> {
+  // 把「整行只有角标」的行贴到上一行末尾（只动这种行，其余字符一个都不改）
+  const text = hoistCiteOnlyLines(rawText)
   const segments: Array<{ kind: 'text' | 'mention' | 'cite'; value: string; token?: string }> = []
   const names = (mentions || [])
     .map(m => m.name)
@@ -631,28 +662,12 @@ function splitMentionSegments(
   }
   if (cursor < text.length) segments.push({ kind: 'text', value: text.slice(cursor) })
 
-  // 角标贴到前一句末尾：模型常把 [[n]] 单独放一行（前后都带换行），
-  // 直接渲染出来就是「角标独占一行 + 下面空一行」。
-  // 前：去掉角标**前面**的空白（收成单个空格），让它贴住前一句。
-  // 后：角标后面紧跟的「两个以上换行」压成一个 —— 否则角标自己占一行之后
-  //     还会多出一个空行；单个换行保留，列表项照常分行。
-  for (let i = 0; i < segments.length; i++) {
-    if (segments[i].kind !== 'cite') continue
-    const prev = segments[i - 1]
-    if (prev && prev.kind === 'text') prev.value = prev.value.replace(/\s+$/, ' ')
-  }
-  for (let i = 0; i < segments.length; i++) {
-    const seg = segments[i]
-    if (seg.kind !== 'text') continue
-    // 找到前一个非空片段：连续多个角标（[[1]][[5]]）时也要判为「跟在角标后」
-    let j = i - 1
-    while (j >= 0 && segments[j].kind === 'text' && segments[j].value.trim() === '') j--
-    const prevMark = j >= 0 ? segments[j] : null
-    if (prevMark && prevMark.kind === 'cite') {
-      seg.value = seg.value.replace(/^[ \t]*\n[ \t]*\n+/, '\n')
-    }
-  }
-  return segments.filter(s => !(s.kind === 'text' && s.value === ''))
+  // 重要：这里**不对文本做任何增删**。
+  // 曾经为了让角标贴到句末去修剪换行，结果把模型原本的列表排版挤乱了
+  // （角标和下一行的「5. …」并到同一行）—— 用改文本的方式修显示，是本末倒置。
+  // 角标位置上移/独占一行属于原文本排版，由后端提示词约束模型（标注跟在句末），
+  // 前端只负责把 [[n]] 换成不占位的内联角标。
+  return segments
 }
 
 /** 给消息补上分段快照；既不含引用也不含来源角标时不写字段（保持老渲染路径）。 */
