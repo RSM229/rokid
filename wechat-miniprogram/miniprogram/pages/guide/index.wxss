@@ -9,6 +9,9 @@ page {
 
 .guide-root {
   position: relative;
+  /* border-box 必须显式声明：height:100vh 再加 padding-top 会让整页溢出 60rpx，
+     底部按钮被推出视口 / 压到系统手势区，表现就是「点了没反应」。 */
+  box-sizing: border-box;
   height: 100vh;
   /* 去掉原生导航栏后，内容要自己让开状态栏 */
   padding-top: calc(60rpx + env(safe-area-inset-top));

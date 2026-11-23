@@ -77,7 +77,7 @@ page {
   --fs-display: 48rpx;   /* 大标题、空状态问候 */
   --fs-display-lg: 56rpx;/* 品牌级大标题 */
   /* 兼容旧语义名（部分页面仍引用） */
-  --fs-sub: var(--fs-body-sm);
+  --fs-sub: 24rpx;
 
   /* 字重：4 档（清理 550/620/650/680/720 等非标准值） */
   --fw-normal: 400;
