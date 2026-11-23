@@ -6175,9 +6175,10 @@ Page(themed({
       this.atOpenedByTyping = false
       this.setData({ input: next, canSend: true })
       this.refreshMentions(mentions)
-      // editor：只把名字插入并上色；不再整体重灌内容
-      // （setContents 会让光标落进样式节点，导致后续输入全被染色）
-      void this.insertMentionIntoEditor(display)
+      // 打字唤起：编辑器里还留着用户敲的「@关键词」，必须先删掉再放名字，
+      // 否则「追加插入」会和残留的 @关键词 并存 —— 表现就是"闪一下变蓝又复原成 @xxx"。
+      // editor 没有 setSelection / deleteText 的可靠语义，这里整体重建内容（名字包蓝）。
+      void this.replaceEditorWithMention(next, display)
       return
     }
     const current = this.data.input
@@ -6395,13 +6396,44 @@ Page(themed({
    * 只做转义，不再包 <span> 胶囊：实测 setContents 写入 span 后光标会落在 span 内部，
    * 之后输入的文字全部继承胶囊样式（用户反馈"@ 后面打什么都变蓝"）。
    * 现在改用 editor 原生的 format() 上色 —— 不给文字加外框，只改颜色。
+   *
+   * highlightTailName：打字唤起路径要整体重建内容，此时把末尾那个引用名包成蓝色
+   * （名字后面紧跟一个空格，光标会落在 span 之外，不会重现"后续输入全变蓝"的老问题）。
    */
-  inputToEditorHtml(text: string): string {
-    const escaped = text
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-    return escaped + '<br/>'
+  inputToEditorHtml(text: string, highlightTailName?: string): string {
+    const escape = (s: string) =>
+      s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    const escaped = escape(text)
+    if (!highlightTailName) return escaped + '<br/>'
+    const needle = escape(highlightTailName)
+    const idx = escaped.lastIndexOf(needle)
+    if (idx < 0) return escaped + '<br/>'
+    return (
+      escaped.slice(0, idx) +
+      `<span style="color:#0a84ff">${needle}</span>` +
+      escaped.slice(idx + needle.length) +
+      '<br/>'
+    )
+  },
+
+  /**
+   * 打字唤起路径专用：用完整文本重建编辑器内容，把末尾那个引用名标蓝。
+   *
+   * 为什么不能只 insertText：用户敲的「@关键词」已经在编辑器里了，
+   * 单纯追加会让「@关键词」和名字并存，下一次 onEditorInput 回写 data.input 后
+   * 看起来就是"蓝名字闪一下又变回 @xxx"。
+   */
+  async replaceEditorWithMention(text: string, display: string) {
+    if (!this.data.useEditor || !this.editorCtx) return
+    const ctx = this.editorCtx
+    const html = this.inputToEditorHtml(text, display)
+    this.editorHtml = html
+    await new Promise<void>(resolve => {
+      ctx.setContents({ html, success: () => resolve(), fail: () => resolve() })
+    })
+    // 重建后把输入样式复位成正文，避免后续输入继续是蓝色
+    ctx.format('backgroundColor', '#ffffff')
+    ctx.format('color', '#11131a')
   },
 
   /**
@@ -6434,8 +6466,7 @@ Page(themed({
   },
 
   /** 兼容旧调用点：把 data.input 整体重灌进 editor（仅在恢复草稿时使用） */
-  async syncEditorWithInput() {
-    if (!this.data.useEditor || !this.editorCtx) return
+  async syncEditorWithInput() {    if (!this.data.useEditor || !this.editorCtx) return
     const html = this.inputToEditorHtml(this.data.input)
     this.editorHtml = html
     this.editorCtx.setContents({ html })
