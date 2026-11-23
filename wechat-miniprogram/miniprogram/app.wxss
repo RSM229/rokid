@@ -219,7 +219,7 @@ page {
   border: 1rpx solid var(--flat-line, rgba(17, 19, 26, 0.08));
   background: var(--flat-surface, #ffffff);
   color: var(--flat-ink-2, #33405a);
-  font-size: 30rpx;
+  font-size: 32rpx;
   font-weight: 500;
   padding: 0;
   margin: 0;
@@ -238,7 +238,7 @@ page {
   border: 1rpx solid var(--flat-line, rgba(17, 19, 26, 0.08));
   background: var(--flat-surface, #ffffff);
   color: var(--flat-ink, #11131a);
-  font-size: 30rpx;
+  font-size: 32rpx;
 }
 
 /* 平面列表行：靠一根分隔线分隔，不用卡片包裹 */
@@ -348,7 +348,7 @@ page {
 }
 
 .title {
-  font-size: 38rpx;
+  font-size: 40rpx;
   font-weight: 700;
 }
 
@@ -410,7 +410,7 @@ page {
   height: 300rpx;
   min-height: 300rpx;
   padding: 18rpx 22rpx;
-  line-height: 1.6;
+  line-height: 1.65;
 }
 
 .empty {
@@ -434,9 +434,9 @@ page {
   border-radius: 16rpx;
   background: linear-gradient(135deg, var(--brand-l, #3a4046), var(--brand-d, #0060df));
   color: #ffffff;
-  font-size: 27rpx;
+  font-size: 26rpx;
   font-weight: 600;
-  line-height: 1.4;
+  line-height: 1.35;
   border: none;
 }
 .doc-btn::after { border: none; }

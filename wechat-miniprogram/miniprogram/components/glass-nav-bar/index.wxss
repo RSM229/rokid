@@ -98,7 +98,7 @@
 }
 .gnb-large-title {
   display: block;
-  font-size: 60rpx;
+  font-size: 56rpx;
   font-weight: 700;
   letter-spacing: 0;
   color: #11131a;

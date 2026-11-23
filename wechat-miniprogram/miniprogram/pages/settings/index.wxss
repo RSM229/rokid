@@ -98,8 +98,8 @@
 }
 .tsp-btn {
   margin-top: 22rpx;
-  height: 76rpx;
-  line-height: 76rpx;
+  height: 88rpx;
+  line-height: 88rpx;
   text-align: center;
   border-radius: 22rpx;
   font-size: 26rpx;
@@ -146,7 +146,7 @@
 }
 
 .ts-actions { display: flex; gap: 20rpx; margin-top: 36rpx; }
-.ts-btn { flex: 1; height: 86rpx; line-height: 86rpx; text-align: center; border-radius: 22rpx; font-size: 28rpx; }
+.ts-btn { flex: 1; height: 88rpx; line-height: 88rpx; text-align: center; border-radius: 22rpx; font-size: 28rpx; }
 /* 次级按钮也走玻璃（与全站 .glass 一套语言） */
 .ts-btn.ghost {
   color: var(--ink, #11131a);

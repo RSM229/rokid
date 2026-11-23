@@ -4,5 +4,5 @@
 .disabled-value { color: #65747e; background: #f2f5f5; }
 .picker-caret { color: #7d8b93; font-size: 32rpx; line-height: 1; }
 .picker-hint-row { display: flex; align-items: center; justify-content: space-between; gap: 12rpx; margin-top: 5rpx; }
-.picker-hint { color: #8a6a2e; font-size: 19rpx; }
-.picker-adopt { flex: none; color: #28645b; font-size: 19rpx; }
+.picker-hint { color: #8a6a2e; font-size: 20rpx; }
+.picker-adopt { flex: none; color: #28645b; font-size: 20rpx; }
