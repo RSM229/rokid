@@ -160,11 +160,14 @@ wechat-miniprogram/project.private.config.json.*
 *.orig
 *.tmp
 **/*.rootcopy.*
-# 根级 tmp/：保留开发脚本（dev_local.py / seed_local_users.py 等），
-# 只忽略部署载荷与本地运行产物
-/tmp/deploy_*/
-/tmp/*.b64
-/tmp/*.log
-/tmp/*.env
-/tmp/merge-work/
-/tmp/feature-backup-*/
+# 根级 tmp/：默认全部忽略（截图、一次性脚本、db 快照、部署载荷都是本地产物），
+# 只白名单保留确定要入库的开发脚本 —— 以后 tmp/ 里新增任何东西都不会误提交。
+/tmp/*
+!/tmp/dev_local.py
+!/tmp/iv_check.js
+!/tmp/launch_backend.py
+!/tmp/md2html_doc.py
+!/tmp/seed_local_users.py
+!/tmp/setup_local_backend.bat
+!/tmp/setup_local_backend.ps1
+!/tmp/verify_pz_rag.py
