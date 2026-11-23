@@ -306,3 +306,14 @@ test('打字选完引用后必须还能继续输入：用 deleteText 而不是 s
   // 这条路径不能再出现 setContents 重建
   assert.doesNotMatch(page, /replaceEditorWithMention/)
 })
+test('引用插入只保留一个数据源，插入期间屏蔽中间态', () => {
+  // 闪一下又复原的根因：先乐观改 data.input，再动编辑器，两个真相互相覆盖。
+  // 现在 editor 模式下先改编辑器，编辑完成后再对齐 data.input。
+  assert.match(page, /mentionEditing: false/)
+  assert.match(page, /this\.mentionEditing = true/)
+  assert.match(page, /this\.mentionEditing = false/)
+  // onInput 在插入期间必须直接返回，不参与同步与 @ 唤起
+  assert.match(page, /if \(this\.mentionEditing\) return/)
+  // 编辑完成后再显式对齐文本（防止部分基础库程序化改动不派发 bindinput）
+  assert.match(page, /this\.setData\(\{ input: expected, canSend: true \}\)/)
+})

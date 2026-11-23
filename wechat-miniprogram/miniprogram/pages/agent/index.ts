@@ -697,6 +697,14 @@ Page(themed({
   editorHtml: '',
   /** @ 面板本次是否由「打字打出 @」唤起（2026-11-19）：决定打字同步/删词收起行为 */
   atOpenedByTyping: false,
+  /**
+   * 正在程序化插入引用（2026-11-23）。
+   * 插入过程会产生中间的 onEditorInput（先删触发词、再插名字），
+   * 这期间必须屏蔽 syncMentionsWithInput / detectAtTrigger：
+   *  - 中途文本里还没有名字，同步会把刚登记的引用删掉；
+   *  - 中途文本以 @ 结尾的话又会重新唤起面板。
+   */
+  mentionEditing: false,
   /** 历史搜索防抖计时器（2026-11-19） */
   historySearchTimer: null as number | null,
 
@@ -6165,29 +6173,63 @@ Page(themed({
   /** 把引用追加进输入框，同时登记引用；打字唤起时替换触发词而不是追加。
    *  2026-11-23：输入框与气泡都只显示名字（去掉 @[ ] 外壳），
    *  引用语义仍由 mentions 数组结构化承载，不依赖这段文本。 */
-  appendToken(token: string, mention: AtMention) {
+  /**
+   * 把引用追加进输入框，同时登记引用；打字唤起时替换触发词而不是追加。
+   *
+   * 2026-11-23：输入框与气泡都只显示名字（去掉 @[ ] 外壳），
+   *  引用语义仍由 mentions 数组结构化承载，不依赖这段文本。
+   *
+   * 2026-11-23 修复"闪一下又复原"：
+   *  之前这里先乐观改 data.input、再去动编辑器，导致两套数据源打架 ——
+   *  data.input 已是"名字"，编辑器里还是"@关键词"，只要编辑器再触发一次
+   *  onEditorInput 就会把旧文本回写、界面退回 @xxx（中间那一下就是"闪"）。
+   *  现在 editor 模式下**不预写 data.input**，一切以编辑器为准，
+   *  由 onEditorInput 单向同步；插入期间用 mentionEditing 屏蔽中间态。
+   */
+  async appendToken(token: string, mention: AtMention) {
     const mentions = this.data.mentions.concat([mention])
     const display = mention.name || mentionDisplayName(token)
-    if (this.atOpenedByTyping) {
+    const typed = this.atOpenedByTyping
+    this.atOpenedByTyping = false
+
+    // editor 模式：只动编辑器；data.input 在编辑完成后再对齐
+    if (this.data.useEditor && this.editorCtx) {
       const current = this.data.input
-      // 与 detectAtTrigger 口径一致：兼容全角 ＠ 与末尾空白
-      const trigger = /[@＠]([^\s@＠]*)\s*$/.exec(current)
-      const triggerLen = trigger ? trigger[0].trimEnd().length : 0
-      const next = current.replace(/[@＠]([^\s@＠]*)\s*$/, `${display} `)
-      this.atOpenedByTyping = false
-      this.setData({ input: next, canSend: true })
-      this.refreshMentions(mentions)
-      // 打字唤起：编辑器里还留着用户敲的「@关键词」，必须删掉再放名字。
-      // 用 deleteText 精确删除（保留焦点与光标），不能用 setContents 重建 ——
-      // 实测重建后编辑器失去输入能力，用户没法在名字前后继续打字/再 @。
-      void this.replaceTriggerWithMention(current.length - triggerLen, triggerLen, display)
+      const triggerRe = /[@＠]([^\s@＠]*)\s*$/
+      // 预期的最终文本：与下面真正执行的编辑一一对应
+      const expected = typed
+        ? current.replace(triggerRe, `${display} `)
+        : current
+          ? `${current.replace(/\s+$/, '')} ${display} `
+          : `${display} `
+      this.mentionEditing = true
+      try {
+        if (typed) {
+          const trigger = triggerRe.exec(current)
+          const triggerLen = trigger ? trigger[0].trimEnd().length : 0
+          await this.replaceTriggerWithMention(current.length - triggerLen, triggerLen, display)
+        } else {
+          await this.insertMentionIntoEditor(display)
+        }
+        this.refreshMentions(mentions)
+        // 部分基础库对程序化改动不派发 bindinput，这里显式对齐一次。
+        // 此时编辑器内容已等于 expected，不属于"乐观写入"，不会造成两套数据源打架。
+        this.setData({ input: expected, canSend: true })
+      } finally {
+        this.mentionEditing = false
+      }
       return
     }
+
+    // textarea 回退路径：没有富文本能力，直接改文本
     const current = this.data.input
-    const next = current ? `${current.replace(/\s+$/, '')} ${display} ` : `${display} `
+    const next = typed
+      ? current.replace(/[@＠]([^\s@＠]*)\s*$/, `${display} `)
+      : current
+        ? `${current.replace(/\s+$/, '')} ${display} `
+        : `${display} `
     this.setData({ input: next, canSend: true })
     this.refreshMentions(mentions)
-    void this.insertMentionIntoEditor(display)
   },
 
   /**
@@ -6350,7 +6392,10 @@ Page(themed({
   onInput(event: WechatMiniprogram.Input) {
     const input = event.detail.value
     this.setData({ input, canSend: Boolean(input.trim()) || this.data.attachments.length > 0 })
-    // 用户手工删掉 token → 撤销对应引用，避免「界面没引用但模型仍在限定范围内搜」
+    // 程序化插入引用期间的中间态：先删触发词、再插名字，这中间的文本不能参与
+    // 「引用同步」（会误删刚登记的引用）和「@ 唤起」（会重新弹面板）
+    if (this.mentionEditing) return
+    // 用户手工删掉引用名 → 撤销对应引用，避免「界面没引用但模型仍在限定范围内搜」
     this.syncMentionsWithInput(input)
     this.detectAtTrigger(input)
   },
