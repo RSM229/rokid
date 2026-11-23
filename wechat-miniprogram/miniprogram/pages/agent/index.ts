@@ -4084,7 +4084,10 @@ Page(themed({
     const { promise, abort } = abortableRequest<AgentChatResponse>('/agent/chat', {
       method: 'POST',
       data: {
-        message: text,
+        // 发 token 文本（userMsg.text）而不是输入框里的「@名字」：
+        // 后端按这里的 message 原文持久化会话（agent_tools.py 的 content_json.text），
+        // 只发名字的话历史回看时没有任何引用标记可识别，蓝色名字就退化成 @xxx。
+        message: userMsg.text,
         request_id: requestId,
         conversation_id: conversationIdFor(this.currentSessionId),
         history,
@@ -6446,7 +6449,9 @@ Page(themed({
       const name = (m.name || '').trim()
       if (!name || !m.token) continue
       // 只在名字后面是分隔符时替换，避免把更长的名字截断
-      const re = new RegExp(`@${escapeRe(name)}(?![^\\s，。、；：！？）】」』])`, 'g')
+      // 不加「后面必须是分隔符」的限制：名字后面紧跟汉字（如「@监理日志的填写要求」）也要能还原。
+      // 名字按长度倒序处理，长名先替换成长 token，短名不会再误匹配到 token 内部。
+      const re = new RegExp(`@${escapeRe(name)}`, 'g')
       out = out.replace(re, m.token)
     }
     return out

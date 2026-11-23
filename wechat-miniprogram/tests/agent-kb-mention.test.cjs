@@ -378,11 +378,14 @@ test('复制的是渲染后的形态：优先用分段拼，回退时合并拆�
 
 test('发送时把「@名字」还原成 token 存档，历史回看才能认出引用', () => {
   // 用户反馈：第二次回到会话，原本蓝色的引用名又变回 @xxx。
-  // 因为历史消息只有文本、没有 mentions 快照；文本里必须留 token 才认得出。
+  // 两个原因都要堵：
+  //   1) 必须把 token 文本发给后端（后端按 message 原文持久化），否则服务端只存了名字；
+  //   2) 还原时不能要求「名字后面是分隔符」，否则「@监理日志的…」这种紧跟汉字的写法会漏掉。
   assert.match(page, /inlineMentionTokens\(text: string\): string \{/)
   assert.match(page, /text: this\.inlineMentionTokens\(text\)/)
-  // 只在名字后面是分隔符时替换，避免截断更长的名字
-  assert.match(page, /const re = new RegExp\(`@\$\{escapeRe\(name\)\}\(\?!\[\^\\\\s/)
+  assert.match(page, /message: userMsg\.text/)
+  assert.match(page, /const re = new RegExp\(`@\$\{escapeRe\(name\)\}`, 'g'\)/)
+  assert.doesNotMatch(page, /escapeRe\(name\)\}\)\(\?!\[\^\\\\s/)
 })
 test('角标上标化后必须同时改写 text，否则兜底渲染会露出 [[1]]', () => {
   // 角标改成上标字符后不再产生非文本片段 ——
