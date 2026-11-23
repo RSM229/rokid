@@ -7,7 +7,7 @@
        原来 height 写成 statusBarHeight + navBarHeight，等于把状态栏也铺成白底 ——
        那块没有任何内容的白色横带就是用户说的"没作用的色块"。 -->
     <view class="nav-bar" style="height: {{statusBarHeight + navBarHeight}}px; background: transparent;">
-      <view class="nav-bar-fill" style="top: {{statusBarHeight}}px; height: {{navBarHeight}}px;"></view>
+      <view class="nav-bar-fill" style="top: 0; height: {{statusBarHeight + navBarHeight}}px;"></view>
     <view class="nav-bar-inner" style="height: {{navBarHeight}}px; top: {{statusBarHeight}}px;">
       <view class="nav-left" bindtap="openHistory">
         <view class="nav-menu-icon"></view>

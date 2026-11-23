@@ -76,7 +76,7 @@ page {
 
 :root,
 page {
-  /* jl 的取值：底色 #f7f9fc、正文 #11131a、次要 #8a94a6、主色 #2f3237 */
+  /* jl 的取值：底色 #f2f4f7、正文 #11131a、次要 #8a94a6、主色 #2f3237 */
   --flat-bg: #f2f4f7;
   --flat-ink: #11131a;
   --flat-ink-2: #33405a;
@@ -234,7 +234,7 @@ page {
 
 /* 交互聚焦：轻点卡片时白度提升、模糊加深、投影扩散（8.3） */
 .glass:active, .card:active {
-  background: #f7f9fc;
+  background: #f2f4f7;
   border-color: rgba(17, 19, 26, 0.12);
   box-shadow: 0 4rpx 16rpx rgba(22, 38, 74, 0.10);
 }

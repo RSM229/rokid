@@ -86,10 +86,12 @@ test('工作台 agent 页已去掉玻璃叠层：核心元素全部平面化', (
   const totalBlur = (agentWxss.match(/(?<!-webkit-)backdrop-filter: blur/g) || []).length
   const navBlur = (fillRule.match(/(?<!-webkit-)backdrop-filter: blur/g) || []).length + (navRule.match(/(?<!-webkit-)backdrop-filter: blur/g) || []).length
   assert.equal(totalBlur - navBlur, 0, `除导航栏外仍有 ${totalBlur - navBlur} 处 backdrop-filter: blur`)
-  // 材质在 fill 上：半透明白 + 细线
-  assert.match(fillRule, /rgba\(255, 255, 255, 0\.94\)/)
+  // 材质在 fill 上：不透明纯白 + 一根细线（用户要求顶部统一白色，不要灰白条）
+  assert.match(fillRule, /background: #ffffff/)
   assert.match(fillRule, /border-bottom: 1rpx solid rgba\(17, 19, 26, 0\.08\)/)
   assert.doesNotMatch(fillRule, /--deep-rgb/)
+  // 不透明之后 blur 已无意义，不应再出现
+  assert.doesNotMatch(fillRule, /backdrop-filter/)
   // 外层容器不能再有背景，否则状态栏又被铺成白带
   assert.doesNotMatch(navRule, /background:/)
 
@@ -101,9 +103,9 @@ test('工作台 agent 页已去掉玻璃叠层：核心元素全部平面化', (
   }
   // 输入卡/气泡/hero 改为「一层白 + 一根线」
   assert.match(agentWxss, /^\.input-card \{[^}]*background: #ffffff;[^}]*border: 1rpx solid rgba\(17,19,26,0\.08\)/m)
-  assert.match(agentWxss, /^\.input-bar \{[^}]*background: #f7f9fc;/m)
-  // 页面底色对齐 jl 的 #f7f9fc（原来是纯白，平面卡片没有层次）
-  assert.match(agentWxss, /^\.page \{[^}]*background: #f7f9fc;/m)
+  assert.match(agentWxss, /^\.input-bar \{[^}]*background: #f2f4f7;/m)
+  // 页面底色统一为 #f2f4f7（原来是纯白，平面卡片没有层次）
+  assert.match(agentWxss, /^\.page \{[^}]*background: #f2f4f7;/m)
 })
 test('思考进度卡改平面：去掉左侧绿色竖条，改用脉冲状态点', () => {
   const agentWxss = fs.readFileSync(path.join(root, 'pages/agent/index.wxss'), 'utf8')
