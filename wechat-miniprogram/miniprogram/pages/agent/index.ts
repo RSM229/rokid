@@ -1665,8 +1665,10 @@ Page(themed({
 
     const userMsg: Message = withMentionSegments({
       role: 'user',
-      text,
-      // 输入框只写名字，气泡要靠 mentions 快照按名字切出引用片段
+      // 发送/存档用「带 token 的文本」：历史消息只剩文本、没有 mentions 快照，
+      // 只有文本里保留 @[资料库 …] 才能在重新进入会话时识别出引用并渲染成蓝色名字。
+      // 气泡显示时 token 会被分段器换成名字，用户看不到方括号。
+      text: this.inlineMentionTokens(text),
       mentions: [...this.data.mentions],
       timeText: formatMessageTime(),
     })
@@ -4967,10 +4969,16 @@ Page(themed({
   copyMessage(event: WechatMiniprogram.TouchEvent) {
     const idx = Number(event.currentTarget.dataset.index)
     const msg = this.data.messages[idx]
-    // 复制「渲染后的形态」：先合上角标/标点被拆出的行，再把 [[n]] 换成 [n]。
-    // 否则复制出来是「…我不编造 / [[1]] / 。」三行，与界面看到的对不上。
+    // 复制「渲染后的形态」：
+    //  · 有分段时按分段拼（引用名/角标都已是显示形态，不带 @[ ] 方括号）
+    //  · 没有再退回原文，并合上角标/标点被拆出的行、把 [[n]] 换成 [n]
+    // 否则复制出来是「…我不编造 / [[1]] / 。」或带 token，与界面看到的对不上。
     const raw = msg && msg.text ? String(msg.text) : ''
-    const text = normalizeCiteArtifacts(raw).replace(/\[\[(\d{1,3})\]\]/g, '[$1]').trim()
+    const segText =
+      msg && Array.isArray(msg.segments) && msg.segments.length
+        ? msg.segments.map(s => (s.kind === 'cite' ? `[${s.value}]` : s.value)).join('')
+        : ''
+    const text = normalizeCiteArtifacts(segText || raw).replace(/\[\[(\d{1,3})\]\]/g, '[$1]').trim()
     if (!text) {
       wx.showToast({ title: '没有可复制的文字', icon: 'none' })
       return
@@ -6366,6 +6374,26 @@ Page(themed({
     this.refreshMentions(mentions)
     // 选完引用要让用户能直接接着打字：把焦点交回输入框（textarea 支持 focus）
     this.focusDraftInput()
+  },
+
+  /**
+   * 把输入框里的「@名字」还原成 token（`@[资料库 名字]`）。
+   *
+   * 为什么需要：历史消息重新进入会话时只剩文本、没有 mentions 快照，
+   * 只有文本里保留 token，分段器才能识别出引用、渲染成蓝色名字。
+   * 之前发送时只存了「@名字」，所以"第二次回到会话，蓝色又变回 @xxx"。
+   * 气泡显示时 token 会被分段器换成名字，用户看不到方括号。
+   */
+  inlineMentionTokens(text: string): string {
+    let out = text || ''
+    for (const m of this.data.mentions) {
+      const name = (m.name || '').trim()
+      if (!name || !m.token) continue
+      // 只在名字后面是分隔符时替换，避免把更长的名字截断
+      const re = new RegExp(`@${escapeRe(name)}(?![^\\s，。、；：！？）】」』])`, 'g')
+      out = out.replace(re, m.token)
+    }
+    return out
   },
 
   /**

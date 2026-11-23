@@ -375,8 +375,18 @@ test('角标/标点拆行统一兜底：行首不许有角标、行内不许只�
   assert.doesNotMatch(page, /replace\(\/\^\[ \\t\]\*\\n\[ \\t\]\*\\n\+\//)
 })
 
-test('复制的是渲染后的形态：合并拆行并把 [[n]] 变成 [n]', () => {
+test('复制的是渲染后的形态：优先用分段拼，回退时合并拆行并把 [[n]] 变成 [n]', () => {
   // 用户复制出来是「…我不编造 / [[1]] / 。」三行，与界面不一致。
-  assert.match(page, /normalizeCiteArtifacts\(raw\)\.replace\(\/\\\[\\\[\(\\d\{1,3\}\)\\\]\\\]\/g, '\[\$1\]'\)/)
-  assert.match(page, /const raw = msg && msg\.text \? String\(msg\.text\) : ''/)
+  assert.match(page, /const segText =/)
+  assert.match(page, /s\.kind === 'cite' \? `\[\$\{s\.value\}\]` : s\.value/)
+  assert.match(page, /normalizeCiteArtifacts\(segText \|\| raw\)\.replace\(\/\\\[\\\[\(\\d\{1,3\}\)\\\]\\\]\/g, '\[\$1\]'\)/)
+})
+
+test('发送时把「@名字」还原成 token 存档，历史回看才能认出引用', () => {
+  // 用户反馈：第二次回到会话，原本蓝色的引用名又变回 @xxx。
+  // 因为历史消息只有文本、没有 mentions 快照；文本里必须留 token 才认得出。
+  assert.match(page, /inlineMentionTokens\(text: string\): string \{/)
+  assert.match(page, /text: this\.inlineMentionTokens\(text\)/)
+  // 只在名字后面是分隔符时替换，避免截断更长的名字
+  assert.match(page, /const re = new RegExp\(`@\$\{escapeRe\(name\)\}\(\?!\[\^\\\\s/)
 })
