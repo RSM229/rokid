@@ -22,8 +22,12 @@ test('agent replies follow the filing-assistant single-column layout', () => {
   // 38bc5c8 起新追问默认收起，展开态只保留用户主动点开的；旧断言「沿用 sourceForm.expanded」已反转
   assert.match(page, /sourceForm \? \{[\s\S]{0,400}?expanded: false,/)
   assert.doesNotMatch(page, /expanded: sourceForm\.expanded === true/)
-  assert.match(template, /class="inline-review-preview"[^>]*bindtap="toggleInlineReviewDetails"/)
-  assert.match(page, /toggleInlineReviewDetails\(event: WechatMiniprogram\.TouchEvent\)/)
+  // f645e17 起「复核详情」整块被「多卡收起」取代：绑定从 toggleInlineReviewDetails
+  // 换成 toggleAgentCards（旧方法与 reviewDetailsExpanded 已删除，别再断言它们）
+  assert.match(template, /class="inline-review-preview agent-cards-toggle"[^>]*bindtap="toggleAgentCards"/)
+  assert.match(page, /toggleAgentCards\(event: WechatMiniprogram\.TouchEvent\)/)
+  assert.doesNotMatch(template, /bindtap="toggleInlineReviewDetails"/)
+  assert.doesNotMatch(page, /toggleInlineReviewDetails\(/)
   assert.match(page, /function mergeAgentProgress\(target: Message, progress: Message\): Message/)
   assert.match(page, /messages\.splice\(progressIndex, 0, \{ role: 'assistant', text: '', timeText: formatMessageTime\(\) \}\)/)
   assert.match(page, /messages\[index\] = \{\s*\.\.\.messages\[index\], progressRequestId: requestId/)

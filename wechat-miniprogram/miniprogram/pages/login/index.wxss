@@ -1,13 +1,122 @@
-/* 玻璃拟态改造（浅色版） */
-.login-page { padding-top: 120rpx; }
-.brand { text-align: center; margin-bottom: 56rpx; }
-.brand-mark { width: 108rpx; height: 108rpx; display: block; margin: 0 auto 24rpx; border-radius: 30rpx; background: #fff; box-shadow: 0 8rpx 24rpx rgba(var(--brand-rgb, 22,119,255), 0.28); }
-.brand .title { margin-bottom: 12rpx; font-size: 48rpx; }
-.section-title { font-size: 34rpx; font-weight: 650; }
-.note { margin: 16rpx 0 28rpx; }
-.action { margin-top: 32rpx; border-radius: 16rpx; }
-.picker { color: #314a66; }
-.error { margin: 20rpx 10rpx; color: #b93838; text-align: center; }
-.privacy { margin-top: 46rpx; color: #7b8b9f; font-size: 24rpx; text-align: center; }
-.footer-links { text-align: center; margin-top: 32rpx; }
-.link-item { display: inline-block; color: var(--brand, #1677ff); font-size: 28rpx; padding: 16rpx 24rpx; }
+/* 登录页：复刻 jl 小程序的平面极简形态（取值直接对齐 jl/pages/login/login.wxss）
+   核心差异：不套 .card 玻璃层，改用「一层白 + 一根线 + 单层微阴影」 */
+
+page {
+  height: 100%;
+  background: #f7f9fc;
+}
+
+.login-page {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  height: 100%;
+  padding: 200rpx 56rpx 110rpx;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+/* 品牌区：横版 logo + 标题 + 副标题（jl 的 .hero/.logo/.title/.sub） */
+.hero {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.logo {
+  width: 420rpx;
+  height: 56rpx;
+  margin-bottom: 64rpx;
+}
+
+.hero-title {
+  font-size: 52rpx;
+  font-weight: 700;
+  letter-spacing: 2rpx;
+  color: #11131a;
+}
+
+.hero-sub {
+  margin-top: 18rpx;
+  font-size: 26rpx;
+  letter-spacing: 1rpx;
+  color: #8a94a6;
+}
+
+/* 操作区 */
+.act {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.bind-title {
+  margin-bottom: 20rpx;
+  font-size: 30rpx;
+  font-weight: 600;
+  color: #11131a;
+}
+
+.bind-field {
+  margin-bottom: 18rpx;
+}
+
+.picker {
+  line-height: 96rpx;
+  color: #33405a;
+}
+
+/* 说明文字：小字、次要色，不加背景块 */
+.hint-flat {
+  margin-top: 20rpx;
+  font-size: 22rpx;
+  line-height: 1.6;
+  color: #8a94a6;
+}
+
+.error-flat {
+  margin-top: 18rpx;
+  font-size: 24rpx;
+  line-height: 1.5;
+  color: #b93838;
+}
+
+/* 底部链接：裸文字 + 分隔点，不用卡片 */
+.foot {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.foot-links {
+  display: flex;
+  align-items: center;
+  gap: 14rpx;
+  font-size: 24rpx;
+}
+
+.foot-link {
+  color: #2f3237;
+  padding: 10rpx 4rpx;
+}
+
+.foot-sep {
+  color: #c9d4e3;
+}
+
+.foot-note {
+  margin-top: 24rpx;
+  font-size: 21rpx;
+  letter-spacing: 1rpx;
+  color: #a8b2c1;
+  text-align: center;
+}
+
+/* 绑定态字段多，底部留白收一点，避免内容被挤到屏幕上沿之外 */
+.login-page.bind-mode {
+  padding-bottom: 90rpx;
+}

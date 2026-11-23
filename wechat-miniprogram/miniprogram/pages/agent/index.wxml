@@ -1,7 +1,13 @@
-<view class="page" style="padding-top: {{statusBarHeight}}px;; {{themeStyle}}" bindtap="onPageTap">
+<!-- --kb 注入键盘高度（px）：页面底部留白与 @ 面板位移都基于它。
+     微信只把 textarea 自己顶上去，fixed 层不受影响，所以必须显式让这些层跟着抬。 -->
+<view class="page" style="padding-top: {{statusBarHeight}}px;; --kb: {{keyboardHeight}}px; {{themeStyle}}" bindtap="onPageTap">
   <tab-bar active="agent" bind:doubletap="onTabDoubleTap" />
   <!-- Custom Nav Bar -->
-  <view class="nav-bar" style="height: {{statusBarHeight + navBarHeight}}px;">
+  <!-- 导航栏只覆盖标题那一条（navBarHeight），状态栏区域留空透出页面底色。
+       原来 height 写成 statusBarHeight + navBarHeight，等于把状态栏也铺成白底 ——
+       那块没有任何内容的白色横带就是用户说的"没作用的色块"。 -->
+    <view class="nav-bar" style="height: {{statusBarHeight + navBarHeight}}px; background: transparent;">
+      <view class="nav-bar-fill" style="top: {{statusBarHeight}}px; height: {{navBarHeight}}px;"></view>
     <view class="nav-bar-inner" style="height: {{navBarHeight}}px; top: {{statusBarHeight}}px;">
       <view class="nav-left" bindtap="openHistory">
         <view class="nav-menu-icon"></view>
@@ -13,18 +19,14 @@
     </view>
   </view>
 
-  <!-- Breadcrumb -->
-  <view class="breadcrumb" wx:if="{{breadcrumb.length > 0}}">
-    <text class="bc-item" wx:for="{{breadcrumb}}" wx:key="index">
-      <text wx:if="{{index > 0}}" class="bc-sep"> › </text>
-      {{item}}
-    </text>
-  </view>
 
   <!-- 待补全草稿卡已移入 main 顶部（见下方），避免被固定导航遮挡 -->
 
   <!-- Main Chat Area -->
-  <view class="main" style="padding-top: {{statusBarHeight + navBarHeight + (breadcrumb.length > 0 ? 70 : 10)}}px;">
+  <!-- 只让开导航栏那一条：状态栏已经由 .page 的 padding-top 让过了。
+         原来写 statusBarHeight + navBarHeight = 把状态栏算了两次，
+         导航栏下方就多出一条没有任何内容的空白带（用户圈出来的位置）。 -->
+    <view class="main" style="padding-top: {{navBarHeight}}px;">
     <!-- 待补全草稿提醒卡已按用户要求移除（2026-10-15）：草稿数据仍落库，聊天内追问补全流程不变 -->
     <scroll-view class="messages" scroll-y scroll-into-view="{{scrollAnchor}}" enhanced show-scrollbar="{{false}}">
       <!-- Hero（ima 风格空状态：大问候语 + 竖排建议按钮） -->
@@ -60,7 +62,17 @@
               <image wx:for="{{item.images}}" wx:for-item="img" wx:for-index="ii" wx:key="*this" class="msg-image-grid"
                      src="{{img}}" mode="aspectFill" data-url="{{img}}" bindtap="previewImageUrl" binderror="onMsgImgError" data-mi="{{mi}}" data-imgidx="{{ii}}" />
             </view>
-            <text wx:if="{{item.text}}" class="bubble-text" user-select="{{true}}">{{item.text}}</text>
+            <!-- 引用块：@[资料库 …] 渲染成彩色胶囊，与普通文字区分开。
+                 分段在发送时刻算好并随消息存下，所以老消息（无 segments）走下面的纯文本兜底。 -->
+            <view wx:if="{{item.segments}}" class="bubble-text bubble-segments">
+              <block wx:for="{{item.segments}}" wx:for-item="seg" wx:key="index">
+                <text wx:if="{{seg.kind === 'mention'}}" class="bubble-mention">{{seg.value}}</text>
+                <text wx:else class="bubble-plain" user-select="{{true}}">{{seg.value}}</text>
+              </block>
+            </view>
+            <block wx:else>
+              <text wx:if="{{item.text}}" class="bubble-text" user-select="{{true}}">{{item.text}}</text>
+            </block>
           </view>
           <view wx:if="{{item.text}}" class="bubble-meta">
             <text wx:if="{{item.timeText}}" class="bubble-time">{{item.timeText}}</text>
@@ -68,19 +80,21 @@
               <view class="bubble-copy-ic"></view>
             </view>
           </view>
+          <!-- 思考进度：平面卡片（2026-11-21 重设计）
+               原实现是 border-left: 6rpx 绿色竖条 + 绿底，读起来像告警条、太重。
+               改为：白底 + 一根细线 + 左侧脉冲小圆点（"正在思考"的信号用点表达，不用竖条），
+               右侧只留状态文字与折叠箭头，去掉「收起/展开」这类冗余文案。 -->
           <view wx:if="{{item.progressRequestId && (item.progressEvents.length || !item.progressTerminal)}}" class="agent-progress {{item.progressTerminal ? 'done' : 'thinking'}}">
             <view class="agent-progress-head" data-index="{{mi}}" bindtap="toggleAgentProgress">
               <view class="agent-progress-title-wrap">
                 <view class="agent-progress-title-row">
                   <text class="agent-progress-title">{{item.progressTerminal ? '思考完成' : '思考中'}}</text>
-                  <view wx:if="{{!item.progressTerminal}}" class="thinking-dots"><view class="tdot"></view><view class="tdot"></view><view class="tdot"></view></view>
                 </view>
                 <text class="agent-progress-current">{{item.progressHeadline || (item.progressTerminal ? '已完成本轮思考' : '正在理解你的需求')}}</text>
               </view>
               <view class="agent-progress-meta">
-                <text wx:if="{{item.progressExpanded}}">{{item.progressEvents.length}} 步 · {{item.progressElapsedSeconds || 0}} 秒</text>
-                <text wx:else>{{item.progressTerminal ? '已处理' : '整理中'}}</text>
-                <text class="agent-progress-toggle">{{item.progressExpanded ? '收起' : '展开'}}</text>
+                <text class="agent-progress-status">{{item.progressExpanded ? (item.progressEvents.length + ' 步 · ' + (item.progressElapsedSeconds || 0) + ' 秒') : (item.progressTerminal ? '已处理' : '整理中')}}</text>
+                <text class="agent-progress-chevron {{item.progressExpanded ? 'up' : ''}}">›</text>
               </view>
             </view>
             <view wx:if="{{item.progressExpanded}}" class="agent-progress-list">
@@ -334,16 +348,36 @@
               bindtouchstart="onInputTouchStart"
               bindtouchend="onInputTouchEnd"
               bindtouchcancel="onInputTouchCancel">
-          <textarea wx:if="{{!recording}}"
+          <!-- 富文本输入（基础库 ≥2.7.0）：@ 引用渲染成行内彩色胶囊，和普通文字明显区分。
+               微信 <textarea> 只能放纯文本，行内样式只有 <editor> 能做到。
+               低版本基础库 wx:if 为 false，自动回退到下面的 textarea + 纯文本 token。 -->
+          <editor wx:if="{{useEditor && !recording}}"
+            id="chat-editor"
+            class="chat-input chat-editor"
+            placeholder="{{attachments.length ? '可补充说明，再点发送' : (noProject ? '问我规范、工艺、天气都行；记录现场工作需先加入项目' : '发消息或按住说话')}}"
+            placeholder-class="input-placeholder"
+            bindready="onEditorReady"
+            bindinput="onEditorInput"
+            bindfocus="onEditorFocus"
+            bindblur="onEditorBlur"
+            bindkeyboardheightchange="onEditorKeyboard"
+            show-confirm-bar="{{false}}"
+            adjust-position="{{true}}"
+            cursor-spacing="{{20}}"
+          />
+          <textarea wx:elif="{{!recording}}"
             class="chat-input chat-textarea"
             focus="{{draftFocus}}"
             value="{{input}}"
             placeholder="{{attachments.length ? '可补充说明，再点发送' : (noProject ? '问我规范、工艺、天气都行；记录现场工作需先加入项目' : '发消息或按住说话')}}"
             placeholder-class="input-placeholder"
             bindinput="onInput"
+            bindkeyboardheightchange="onTextareaKeyboard"
             maxlength="-1"
             auto-height
             show-confirm-bar="{{false}}"
+            adjust-position="{{true}}"
+            cursor-spacing="{{20}}"
           />
           <view wx:else class="recording-hint">
             <view class="rec-dot"></view>
@@ -362,7 +396,7 @@
       <view class="input-card-row">
         <view class="round-btn round-btn-lg ic-plus-g" bindtap="togglePlusPanel"></view>
         <view class="flex-spacer"></view>
-        <!-- @ 提及：资料/记录引用选择器（含文件夹下钻到具体文件） -->
+        <!-- @ 提及：资料库引用入口（文件夹 / 文档，可多选）；其他类候选已随 2026-11-20 重构移除 -->
         <view class="at-anchor">
           <view class="at-chip {{showAtPanel ? 'active' : ''}}" catchtap="toggleAtPanel">@</view>
         </view>
@@ -677,27 +711,58 @@
 
   <!-- @ 提及面板：放页面根层（脱离 input-card 的 backdrop-filter 包含块），fixed 相对视口横向铺满，避免宽面板向左溢出屏幕被裁切 -->
   <view class="at-panel" wx:if="{{showAtPanel}}" catchtap="noop">
+    <!-- 顶部：这是「选择模式」的标题栏——左边报数、右边唯一的出口 -->
     <view class="at-panel-head">
-      <text class="at-panel-title">引用资料</text>
-      <view class="at-panel-close" catchtap="toggleAtPanel">×</view>
+      <text class="at-panel-title">引用资料库{{mentions.length ? '（已选 ' + mentions.length + ' 项）' : ''}}</text>
+      <view class="at-panel-done" catchtap="finishAtPanel">完成</view>
     </view>
-    <input class="at-search" value="{{atQuery}}" placeholder="搜索文件夹、记录、隐患、规范…（打 @ 号也可直接唤起）" placeholder-class="at-search-ph" bindinput="onAtSearch" confirm-type="search" />
-    <!-- 资料库下钻：显示当前路径 + 返回；点文件夹进入下一层选具体文件 -->
-    <view wx:if="{{atDrillPath}}" class="at-drill-bar" catchtap="atDrillBack">
-      <text class="at-drill-back">‹ 返回</text>
-      <text class="at-drill-path">{{atDrillPath}}</text>
-    </view>
-    <scroll-view class="at-list" scroll-y>
-      <view wx:if="{{atLoading || atDrillLoading}}" class="at-empty">加载中…</view>
-      <block wx:else>
-        <view wx:if="{{!atVisibleItems.length}}" class="at-empty">没有匹配的内容</view>
-        <view class="at-item" wx:for="{{atVisibleItems}}" wx:key="key" data-key="{{item.key}}" catchtap="pickAtBiz">
-          <view class="at-item-icon">{{item.icon}}</view>
-          <view class="at-item-body"><text class="at-item-label">{{item.label}}</text><text class="at-item-desc">{{item.desc}}</text></view>
-          <text wx:if="{{item.kind === 'folder'}}" class="at-item-more">›</text>
+    <!-- 已选区：唯一表达"选了什么"的地方。同一对象不会在候选列表里再出现一次。 -->
+    <view class="at-selected" wx:if="{{mentionChips.length}}">
+      <view class="at-selected-item" wx:for="{{mentionChips}}" wx:key="key" data-key="{{item.key}}" catchtap="removeMention">
+        <text class="at-selected-icon">{{item.type === 'kb_folder' ? '📁' : (item.type === 'kb_doc' ? '📄' : '🔍')}}</text>
+        <view class="at-selected-body">
+          <text class="at-selected-name">{{item.type === 'kb_query' ? '检索：' + item.name : item.name}}</text>
+          <text class="at-selected-sub">{{item.type === 'kb_folder' ? (item.count ? '整棵子树 · ' + item.count + ' 份' : '空文件夹') : (item.type === 'kb_query' ? '按关键词检索' : (item.path || '未分类'))}}</text>
         </view>
+        <text class="at-selected-x">×</text>
+      </view>
+      <view class="at-selected-more" wx:if="{{mentionOverflow}}">+{{mentionOverflow}}</view>
+    </view>
+    <view class="at-scope-hint" wx:if="{{mentionsSummary}}">{{mentionsSummary}}</view>
+    <input class="at-search" value="{{atQuery}}" placeholder="搜索资料库：文件夹或文件名（打 @ 号也可直接唤起）" placeholder-class="at-search-ph" bindinput="onAtSearch" confirm-type="search" />
+    <!-- 最近用过：一行横向快捷条，可滑动；不占纵向空间，也不与下面的候选重复 -->
+    <scroll-view class="at-recent" scroll-x wx:if="{{atRecent.length && !atQuery}}">
+      <view class="at-recent-item {{item.picked ? 'picked' : ''}}" wx:for="{{atRecent}}" wx:key="key" data-key="{{item.key}}" catchtap="pickAtItem">
+        <text class="at-recent-icon">{{item.kind === 'folder' ? '📁' : '📄'}}</text>
+        <text class="at-recent-name">{{item.name}}</text>
+      </view>
+    </scroll-view>
+    <scroll-view class="at-list" scroll-y>
+      <view wx:if="{{atLoading && !atItems.length}}" class="at-empty">搜索中…</view>
+      <block wx:else>
+        <!-- 失败/超时要明确告知，而不是只留一片空白 -->
+        <view wx:if="{{atError && !atItems.length}}" class="at-empty at-empty-error">{{atError}}</view>
+        <view wx:elif="{{!atItems.length}}" class="at-empty">{{atQuery ? '没有更多匹配的资料' : (mentions.length ? '已全部选入上方' : '输入关键字搜索资料库')}}</view>
+        <!-- 候选列表：只有还没选的条目。已选项在顶部「已选」区，不会再出现一次 -->
+        <view class="at-item" wx:for="{{atItems}}" wx:key="key" data-key="{{item.key}}" catchtap="pickAtItem">
+          <view class="at-item-icon">{{item.kind === 'folder' ? '📁' : (item.kind === 'doc' ? '📄' : '🔍')}}</view>
+          <view class="at-item-body">
+            <!-- 库名放行首：个人库与项目库各有一份同名预设树，扫视时行首标签比行尾小字更快区分 -->
+            <view class="at-item-line">
+              <text class="at-item-kb" wx:if="{{item.kbName}}">{{item.kbName}}</text>
+              <text class="at-item-label">{{item.kind === 'query' ? '按「' + item.name + '」检索资料库' : (item.kind === 'folder' ? item.path : item.name)}}</text>
+            </view>
+            <text class="at-item-desc">{{item.kind === 'query' ? '不挑具体文件，让智能体在这个关键词上找依据' : (item.kind === 'folder' ? (item.count ? item.count + ' 份资料·含子文件夹' : '空文件夹') : (item.path || '未分类'))}}</text>
+          </view>
+        </view>
+        <view wx:if="{{atHasMore}}" class="at-more" catchtap="loadMoreAt">{{atLoading ? '加载中…' : '加载更多'}}</view>
       </block>
     </scroll-view>
+    <!-- 底部固定「完成」：选择模式的唯一出口，紧贴面板底、远离输入框区域，不会被误触。
+         零选择时也显示（灰态），让用户始终知道怎么结束。 -->
+    <view class="at-done-bar {{mentions.length ? 'active' : ''}}" catchtap="finishAtPanel">
+      {{mentions.length ? '完成（已选 ' + mentions.length + ' 项）' : '完成'}}
+    </view>
   </view>
 </view>
 

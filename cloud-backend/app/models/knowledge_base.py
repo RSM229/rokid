@@ -166,6 +166,35 @@ class KbDocumentTag(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
+class KbMentionStat(Base):
+    """@ 面板的选择埋点 —— 个性化排序的原料。
+
+    只记录「用户真的把这份资料用进了对话」（发送时批量上报），
+    不是「他在面板里点过又删了」。所以 hits 反映真实使用频次。
+
+    不按项目分区：同一用户在多个项目间的资料习惯相通；
+    项目相关性在检索时用 context_boost 临时加权，不污染长期统计。
+    """
+
+    __tablename__ = "kb_mention_stats"
+    __table_args__ = (
+        UniqueConstraint("user_id", "kb_id", "target_type", "target_id",
+                         name="uq_kb_mention_stat"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    kb_id: Mapped[int] = mapped_column(ForeignKey("knowledge_bases.id"), index=True)
+    # folder=文件夹（整棵子树）、doc=单份文档
+    target_type: Mapped[str] = mapped_column(String(16), index=True)
+    target_id: Mapped[int] = mapped_column(Integer, index=True)
+    hits: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
+    last_used_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
 # 预设目录分类树（与 D:\\rokid\\预设目录 对应）。每个资料库首次访问时播种为默认骨架。
 PRESET_FOLDER_TREE: list[dict] = [
     {"name": "个人文件夹"},

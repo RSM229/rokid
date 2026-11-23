@@ -1,18 +1,18 @@
 /* 玻璃拟态改造（浅色版） */
 .page { padding: 24rpx; }
-.card { background: rgba(255,255,255,0.32); backdrop-filter: blur(40rpx) saturate(1.8); -webkit-backdrop-filter: blur(40rpx) saturate(1.8); border: 2rpx solid rgba(var(--brand-rgb, 22,119,255), 0.14); box-shadow: inset 0 2rpx 0 rgba(255,255,255,0.40), 0 12rpx 36rpx rgba(var(--shadow-rgb, 20,70,140), 0.16); border-radius: 16rpx; padding: 28rpx; margin-bottom: 20rpx; }
+.card { background: #ffffff; border: 2rpx solid rgba(var(--brand-rgb, 47,50,55), 0.14); box-shadow: inset 0 2rpx 0 rgba(255,255,255,0.40), 0 12rpx 36rpx rgba(var(--shadow-rgb, 20,70,140), 0.16); border-radius: 16rpx; padding: 28rpx; margin-bottom: 20rpx; }
 .doc-title { font-size: 34rpx; font-weight: 700; margin-bottom: 12rpx; }
-.status { display: inline-block; font-size: 24rpx; color: var(--brand-deep, #0a2e5c); background: rgba(var(--wash-rgb, 234,243,255), 0.85); border-radius: 8rpx; padding: 4rpx 16rpx; margin-bottom: 12rpx; }
+.status { display: inline-block; font-size: 24rpx; color: var(--brand-deep, #33405a); background: rgba(var(--wash-rgb, 234,243,255), 0.85); border-radius: 8rpx; padding: 4rpx 16rpx; margin-bottom: 12rpx; }
 .card-title { font-size: 30rpx; font-weight: 600; margin-bottom: 16rpx; }
 .row { display: flex; align-items: flex-start; margin-bottom: 14rpx; }
-.label { width: 160rpx; flex-shrink: 0; color: #6b7c90; font-size: 26rpx; }
+.label { width: 160rpx; flex-shrink: 0; color: #8a94a6; font-size: 26rpx; }
 .field-value { flex: 1; font-size: 26rpx; word-break: break-all; }
 .muted { color: #9aa5b5; font-size: 24rpx; margin-top: 6rpx; }
 .images { display: flex; flex-wrap: wrap; gap: 12rpx; }
 .thumb { width: 200rpx; height: 200rpx; border-radius: 8rpx; background: rgba(240, 243, 241, 0.7); }
 .actions { margin-top: 24rpx; }
 .actions button { margin-bottom: 16rpx; }
-.loading, .empty { padding: 60rpx; text-align: center; color: #6b7c90; font-size: 28rpx; }
+.loading, .empty { padding: 60rpx; text-align: center; color: #8a94a6; font-size: 28rpx; }
 
 .sign-mask { position: fixed; inset: 0; z-index: 100; display: flex; align-items: center; justify-content: center; padding: 28rpx; box-sizing: border-box; background: rgba(13, 29, 43, 0.58); }
 .sign-panel { width: 100%; max-width: 720rpx; max-height: calc(100vh - 56rpx); overflow-y: auto; box-sizing: border-box; padding: 32rpx; border: 1rpx solid #e1e7eb; border-radius: 12rpx; background: #fff; box-shadow: 0 20rpx 64rpx rgba(8, 24, 38, 0.22); }

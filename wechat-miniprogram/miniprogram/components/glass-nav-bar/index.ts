@@ -8,11 +8,16 @@ Component({
     spacer: { type: Boolean, value: true },
     /** 页面自行处理返回（如资料库先返回上一级目录），组件只抛出 lefttap。 */
     customBack: { type: Boolean, value: false },
+    /** 大标题模式：标题独立在栏下方，随页面滚动收起进栏内 */
+    largeTitle: { type: Boolean, value: false },
+    /** 当前页面滚动距离（px），页面通过 onPageScroll 传入 */
+    scrollTop: { type: Number, value: 0 },
   },
   data: {
     statusBarHeight: 20,
     navBarHeight: 44,
     totalHeight: 64,
+    largeHeight: 96,
   },
   lifetimes: {
     attached() {

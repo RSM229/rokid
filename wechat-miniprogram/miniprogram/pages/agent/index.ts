@@ -9,7 +9,7 @@ import { ensurePrivacy } from '../../utils/privacy'
 import { themed } from '../../utils/theme'
 import { cleanMarkdown } from '../../utils/markdown'
 import { normalizeDateTimeInput, resolveDateTimeRange } from '../../utils/date-time-picker'
-import { MODEL_CATALOG } from '../../services/modelCatalog'
+import { MODEL_CATALOG_UNIQUE } from '../../services/modelCatalog'
 import { FORM_CODE_BY_LABEL, createReviewPlan, saveReviewPlan, listReviewPlans, confirmReviewPlan, executeReviewPlan, editEvent, editFormField, editEvidenceWatermark, addEvidenceWatermark, confirmPlan, reviewIssues, evidenceTargetConflicts, reviewPlanFromItemPlan, mergeEvents, splitEvidence, releaseEvidence, assignEvidence, addEvent, removeEvent, type ReviewPlan, type RequestPlanItemPlan } from '../../services/work-review'
 
 const INLINE_RECORD_TYPES = ['巡视', '验收', '见证', '旁站', '平行检验', '起重机械安拆检查', '待定']
@@ -219,6 +219,10 @@ interface HazardCandidateView {
 interface Message {
   role: 'user' | 'assistant'
   text: string
+  /** 气泡分段：把「@[资料库 …]」切成独立片段，渲染成彩色引用块而不是普通文字。
+   *  只在发送时刻按 mentions 快照算一次并随消息存下；老消息没有这个字段时
+   *  WXML 回退到整段纯文本，不会出现「半个 token 被高亮」的幽灵样式。 */
+  segments?: Array<{ kind: 'text' | 'mention'; value: string }>
   /** 消息头展示时间（备案助手样式：名称 + 时间） */
   timeText?: string
   /** 发送失败标记（2026-11-19）：失败的用户消息显示「点击重发」，不再让文字默默丢掉 */
@@ -293,8 +297,6 @@ interface Message {
   reviewResult?: string
   reviewIssues?: string[]
   reviewSummary?: string
-  /** 工作记录草稿详情默认收起，点按钮再展开 */
-  reviewDetailsExpanded?: boolean
   progressRequestId?: string
   progressEvents?: AgentProgressEventView[]
   progressExpanded?: boolean
@@ -308,6 +310,50 @@ interface Message {
   /** 独立会话的文书复核意见，并进同一条回执、默认收起 */
   docReview?: { items: Array<{ id: string; level: string; text: string }>; status: string }
   docReviewExpanded?: boolean
+}
+
+/** 后端 /kb/search 的两种返回形状统一成列表项。 */
+function toKbItem(raw: KbSearchItem): AtKbItem {
+  const isFolder = raw.kind === 'folder'
+  return {
+    kind: isFolder ? 'folder' : 'doc',
+    key: `${isFolder ? 'kb-folder' : 'kb-doc'}-${raw.id}`,
+    kbId: raw.kb_id,
+    id: raw.id,
+    name: raw.name,
+    path: raw.path || '',
+    count: raw.count,
+    kbName: raw.kb_name,
+    score: raw.score || 0,
+  }
+}
+
+/** /kb/search 响应：文件夹与文档混排，score 越大越靠前，has_more 控制「加载更多」。
+ *  空查询时 mode='browse'，返回 recent/popular/folders 三段。 */
+interface KbSearchItem {
+  kind?: 'folder' | 'doc'
+  id: number
+  kb_id: number
+  kb_name?: string
+  name: string
+  path?: string
+  count?: number
+  folder_path?: string
+  score?: number
+}
+interface KbSearchResponse {
+  /** 'browse' = 空查询时的三段推荐（recent/popular/folders）；'search' = 关键词搜索 */
+  mode?: 'search' | 'browse'
+  query?: string
+  kb_ids: number[]
+  folders: KbSearchItem[]
+  documents: KbSearchItem[]
+  /** browse 专用 */
+  recent?: KbSearchItem[]
+  popular?: KbSearchItem[]
+  has_more: boolean
+  total_folders: number
+  total_documents: number
 }
 
 /** /agent/chat 响应：kind=action 表示服务端已执行动作，chat 表示纯问答 */
@@ -498,20 +544,71 @@ function sessionIdFromConversationId(conversationId: string): number {
  * 统一从 services/modelCatalog 引入（与"智能助手"页共用同一份目录与选择器组件）：
  *  - provider='' 走默认文本大模型端点（阿里云 token-plan），用 model 字段覆盖具体模型名；
  *  - provider='huagong' 走华南理工独立供应商（未配置则后端自动回退默认模型）。 */
-const CHAT_MODELS = MODEL_CATALOG
+const CHAT_MODELS = MODEL_CATALOG_UNIQUE
 
-interface AtBizItem {
+/** @ 资料库搜索结果项：文件夹与文档混排（kind 区分渲染与选中语义）。
+ *  kind='query' 是搜索框里那段关键字本身——用户不想挑具体文件、
+ *  只想「按这个词查资料」时直接选它，对应后端 kb_query。 */
+interface AtKbItem {
+  /** header 是分组标题（最近用过/常用/全部文件夹），不可点选 */
+  kind: 'folder' | 'doc' | 'query' | 'header'
   key: string
-  icon: string
-  label: string
-  desc: string
-  ref: string
-  /** ref=直接插入引用；folder=可下钻的文件夹；folder-ref=引用整个文件夹；doc=单个文件 */
-  kind?: 'ref' | 'folder' | 'folder-ref' | 'doc'
-  folderId?: number
-  docId?: number
-  path?: string
-  children?: Array<Record<string, unknown>>
+  kbId: number
+  /** folder_id 或 doc_id，取决于 kind */
+  id: number
+  name: string
+  /** 文件夹自身的路径，或文档所在文件夹的路径 */
+  path: string
+  /** 文件夹整棵子树下的文档数；文档为 undefined */
+  count?: number
+  /** 所属资料库名称：个人库与项目库各有一份同名预设树，多库时需要区分 */
+  kbName?: string
+  score: number
+  /** 是否已被选中（列表里打勾，避免重复添加） */
+  picked?: boolean
+}
+
+/** 引用 token 的正则：与 pickAtItem 生成的格式严格对应（文件夹/文档用「资料库」，
+ *  模糊词用「资料库检索」）。只用于把文本切成展示片段，不参与引用语义判定。 */
+const MENTION_TOKEN_RE = /@\[资料库(?:检索)?\s[^\]]*\]/g
+
+/** 把消息文本切成「普通文字 / 引用」片段，供气泡渲染彩色块。 */
+function splitMentionSegments(text: string): Array<{ kind: 'text' | 'mention'; value: string }> {
+  const segments: Array<{ kind: 'text' | 'mention'; value: string }> = []
+  let cursor = 0
+  for (const match of text.matchAll(MENTION_TOKEN_RE)) {
+    const start = match.index ?? 0
+    if (start > cursor) segments.push({ kind: 'text', value: text.slice(cursor, start) })
+    segments.push({ kind: 'mention', value: match[0] })
+    cursor = start + match[0].length
+  }
+  if (cursor < text.length) segments.push({ kind: 'text', value: text.slice(cursor) })
+  return segments
+}
+
+/** 给消息补上分段快照；不含引用 token 时不写字段（保持老渲染路径）。 */
+function withMentionSegments(msg: Message): Message {
+  if (!msg.text || !msg.text.includes('@[')) return msg
+  const segments = splitMentionSegments(msg.text)
+  return segments.some(s => s.kind === 'mention') ? { ...msg, segments } : msg
+}
+
+/** @ 选中项：随 /agent/chat 结构化传给后端，后端据此限定检索范围。
+ *  token 是插进输入框的可读文本，用户把它删掉就等于撤销这条引用。 */
+interface AtMention {
+  /** 与搜索结果项同源的稳定 key（kb-folder-12 / kb-doc-88 / kb-query-钢筋），用于打勾与撤销 */
+  key: string
+  type: 'kb_folder' | 'kb_doc' | 'kb_query'
+  /** kb_query 专用：要拿去检索的关键词 */
+  query?: string
+  kb_id: number
+  folder_id?: number
+  doc_id?: number
+  path: string
+  name: string
+  token: string
+  /** 文件夹整棵子树的资料数（用于「共 N 份」汇总提示）；文档/关键词为 undefined */
+  count?: number
 }
 
 /** 工作记录字段候选值：语音里没说清楚的字段，先给常用项让用户点选，不合适再自己填写 */
@@ -548,6 +645,12 @@ Page(themed({
   pendingRecordCancel: false,
   /** 当前会话在本地历史里的 id（稳定不变，重复保存=覆盖同一条，避免产生重复历史） */
   currentSessionId: 0,
+  /** @ 搜索的请求序号：只有最新一次请求的结果才允许落库，防止慢响应覆盖新结果 */
+  atSearchSeq: 0,
+  /** @ 面板本地联想缓存：key → 条目。打字时先本地查表立刻出结果，不等网络。 */
+  atLocalIndex: new Map<string, AtKbItem>(),
+  /** 键盘高度监听的句柄，onUnload 里要注销，避免页面销毁后回调仍打到旧实例 */
+  keyboardHandler: null as ((res: { height: number }) => void) | null,
   inlinePlanSaveQueues: {} as Record<string, Promise<void>>,
   /** 页面正在卸载（切 tab / 切后台 / 关闭）：此时在飞的请求会被微信中止，
    *  属预期，catch 里据此不打刺眼「调用失败」。 */
@@ -558,6 +661,14 @@ Page(themed({
   activeChatAbort: null as (() => void) | null,
   /** @ 面板搜索防抖计时器（2026-11-19） */
   atSearchTimer: null as number | null,
+  /** 在飞请求计数：loading 由它结算，不用请求序号判断（序号只用于丢弃过期结果） */
+  atInFlight: 0,
+  /** loading 看门狗：防止请求回调丢失导致面板永久停在「搜索中」 */
+  atLoadingTimer: null as number | null,
+  /** editor 上下文（基础库 ≥2.7.0 才有） */
+  editorCtx: null as WechatMiniprogram.EditorContext | null,
+  /** editor 当前 HTML：用于在追加胶囊时基于最新内容重建 */
+  editorHtml: '',
   /** @ 面板本次是否由「打字打出 @」唤起（2026-11-19）：决定打字同步/删词收起行为 */
   atOpenedByTyping: false,
   /** 历史搜索防抖计时器（2026-11-19） */
@@ -631,6 +742,15 @@ Page(themed({
 
     statusBarHeight: 0,
     navBarHeight: 44,
+    /**
+     * 键盘高度（px）。0 = 键盘收起。
+     *
+     * 为什么要自己监听：页面根容器是 height:100vh 的 flex 布局，内容贴着底部。
+     * 微信 textarea 的 adjust-position 只会把「输入框」往上顶，而 @ 面板是
+     * position: fixed 相对视口定位的，不受页面位移影响——键盘一弹起来就把
+     * 面板和输入区盖住。必须拿到键盘高度，把底部偏移改成动态值。
+     */
+    keyboardHeight: 0,
 
     pendingImage: '',
     hazardMode: false,
@@ -643,18 +763,26 @@ Page(themed({
     modelShortName: 'DeepSeek V4.1',
     showModelMenu: false,
     showPlusPanel: false,
-    /** @ 提及面板：输入卡里的资料/记录引用选择器（支持文件夹下钻到具体文件） */
+    /** @ 引用面板：只保留「资料库」一个入口（文件夹 / 文档 / 模糊词） */
     showAtPanel: false,
     atQuery: '',
-    atBiz: [] as AtBizItem[],
-    atVisibleItems: [] as AtBizItem[],
+    /** 搜索结果的混排列表：文件夹与文档在同一条流里，按后端给的匹配度排序 */
+    atItems: [] as AtKbItem[],
+    /** 未经「已选过滤」的完整候选集：撤销引用后要能重新出现，所以单独留一份 */
+    atAllItems: [] as AtKbItem[],
+    /** 「最近用过」横向快捷条（空查询时出现一次，不占纵向空间） */
+    atRecent: [] as AtKbItem[],
     atLoading: false,
-    /** @ 面板 — 资料库下钻：kbId / 层级栈 / 当前层文件列表 */
-    atKbId: 0,
-    atDrillStack: [] as Array<{ path: string; items: AtBizItem[] }>,
-    atDrillItems: [] as AtBizItem[],
-    atDrillPath: '',
-    atDrillLoading: false,
+    /** 搜索失败/超时的提示（空字符串=无错误）。以前失败被空 catch 吞掉，界面只留空白 */
+    atError: '',
+    atHasMore: false,
+    /** 已选中的引用（多选）。是发请求时的唯一依据，输入框里的 token 只做回显 */
+    mentions: [] as AtMention[],
+    /** 引用档案条：最多展示 3 条，其余折叠成「+N」 */
+    mentionChips: [] as AtMention[],
+    mentionOverflow: 0,
+    /** 发送前的范围语义提示，例：「将在 2 处引用（共 13 份资料）范围内检索」 */
+    mentionsSummary: '',
     /** 待发送附件：图片/文件可多选先挂在这里，补充文字后一次性发送识别 */
     attachments: [] as Attachment[],
     /**
@@ -717,6 +845,10 @@ Page(themed({
     // 待补全草稿（聊天即操作的半成品，落库持久化、跨会话可见）：顶部横幅用
     pendingDrafts: [] as Array<{ tool: string; label: string; missingText: string }>,
     draftFocus: false,
+    /** 是否用 <editor> 渲染行内胶囊（基础库 ≥2.7.0）；否则回退 textarea */
+    useEditor: false,
+    /** 输入框是否聚焦：胶囊样式在聚焦态更实 */
+    inputFocused: false,
   },
 
   /** 语音记录现场工作：说完自动提取的防抖定时器 */
@@ -728,6 +860,27 @@ Page(themed({
       statusBarHeight: sysInfo.statusBarHeight || 20,
       navBarHeight: 44,
     })
+    // 恢复 @ 面板的本地联想缓存：上次用过的资料名，进页面就能"猜"着给建议
+    try {
+      const cached = wx.getStorageSync('gdjl_kb_local_index')
+      if (Array.isArray(cached)) {
+        for (const item of cached as AtKbItem[]) {
+          if (item && item.key) this.atLocalIndex.set(item.key, item)
+        }
+      }
+    } catch { /* 缓存坏了不影响功能 */ }
+
+    // 富文本输入：基础库够新就用 <editor>，@ 引用可以渲染成行内胶囊；
+    // 老版本自动回退到 textarea（纯文本 token）。
+    this.setData({ useEditor: this.supportsEditor() })
+    // 键盘高度：优先用输入组件的 bindkeyboardheightchange（对齐 jl 的做法）。
+    // 全局 onKeyboardHeightChange 在真机上会和 100vh 视口变化叠加计数，
+    // 导致输入卡被推到屏幕上方；组件级事件只报「这个输入框被键盘顶起多少」，
+    // 语义更准。这里保留全局监听作为兜底（某些基础库只触发全局事件）。
+    this.keyboardHandler = (res: { height: number }) => {
+      this.applyKeyboardHeight(res.height)
+    }
+    wx.onKeyboardHeightChange(this.keyboardHandler)
 
     const user = session.getUser()
     const savedModel = String(wx.getStorageSync(`gdjl_${config.storageScope}_agent_model`) || 'deepseek-v4.1-flash-1017')
@@ -833,6 +986,11 @@ Page(themed({
 
   onUnload() {
     this.pageUnloading = true
+    // 注销键盘监听：否则页面销毁后回调仍会执行 setData
+    if (this.keyboardHandler) {
+      wx.offKeyboardHeightChange(this.keyboardHandler)
+      this.keyboardHandler = null
+    }
     this.stopAgentProgressTimers()
     this.saveCurrentSession()
     player.stop()
@@ -1059,6 +1217,22 @@ Page(themed({
   focusDraftInput() {
     this.setData({ draftFocus: false })
     setTimeout(() => this.setData({ draftFocus: true }), 60)
+  },
+
+  /**
+   * 选择模式的主出口：收起面板并把焦点交回输入框。
+   *
+   * 为什么要有这个而不是让用户点右上 ×：
+   * 用户的操作是「先选资料，再写需求」，选完就该能直接打字。之前面板常驻
+   * 且不聚焦，用户得「关面板 → 点输入框 → 才开始打字」三步，中途还容易点到
+   * 页面空白把面板误关。这里把「结束选择」和「开始输入」合成一个动作。
+   *
+   * 一项都没选时也可用：只是收起面板，不产生任何引用。
+   */
+  finishAtPanel() {
+    this.atOpenedByTyping = false
+    this.setData({ showAtPanel: false, atQuery: '', atAllItems: [], atRecent: [], atError: '' })
+    this.focusDraftInput()
   },
 
   /** 放弃当前横幅展示的那条草稿 */
@@ -1331,9 +1505,13 @@ Page(themed({
       return
     }
 
-    const userMsg: Message = { role: 'user', text, timeText: formatMessageTime() }
+    const userMsg: Message = withMentionSegments({ role: 'user', text, timeText: formatMessageTime() })
+    // 引用被真正用进对话 → 上报埋点（fire-and-forget，个性化排序的原料）
+    this.reportMentionUsage()
     // 发送时收掉可能开着的 @ 面板（打字唤起后未选直接发送的场景）
     this.setData({ input: '', canSend: false, ...(this.data.showAtPanel ? { showAtPanel: false, atQuery: '' } : {}) })
+    // editor 不跟随 data.input 自动清空，必须显式清（否则发完输入框还留着旧内容）
+    this.clearEditor()
     this.atOpenedByTyping = false
 
     // 确定性本地动作：「返回主页」精确匹配 → 重置会话（其余自然语言交后端智能体）
@@ -2324,6 +2502,254 @@ Page(themed({
     return task
   },
 
+  changeInlineReviewDate(event: WechatMiniprogram.PickerChange) {
+    const index = Number(event.currentTarget.dataset.index)
+    const id = String(event.currentTarget.dataset.id)
+    const plan = this.data.messages[index]?.reviewPlan
+    if (!plan) return
+    const candidate = editEvent(plan, id, { date: String(event.detail.value), dateConfirmed: true, dateSource: 'user' })
+    void this.updateInlineReview(index, candidate).catch(error => wx.showToast({ title: `日期保存失败：${(error as Error).message}`, icon: 'none' }))
+  },
+
+  adoptInlineReviewDate(event: WechatMiniprogram.TouchEvent) {
+    const index = Number(event.currentTarget.dataset.index)
+    const id = String(event.currentTarget.dataset.id)
+    const date = String(event.currentTarget.dataset.date)
+    const plan = this.data.messages[index]?.reviewPlan
+    if (!plan) return
+    const candidate = editEvent(plan, id, { date, dateConfirmed: true, dateSource: 'watermark' })
+    void this.updateInlineReview(index, candidate).catch(error => wx.showToast({ title: `日期保存失败：${(error as Error).message}`, icon: 'none' }))
+  },
+
+  changeInlineWatermarkField(event: WechatMiniprogram.Input) {
+    const index = Number(event.currentTarget.dataset.index)
+    const evidenceId = String(event.currentTarget.dataset.evidence)
+    const itemIndex = Number(event.currentTarget.dataset.item)
+    const key = String(event.currentTarget.dataset.key) as 'label' | 'value'
+    const plan = this.data.messages[index]?.reviewPlan
+    if (!plan) return
+    const candidate = editEvidenceWatermark(plan, evidenceId, itemIndex, key, event.detail.value)
+    void this.updateInlineReview(index, candidate).catch(error => wx.showToast({ title: `水印信息保存失败：${(error as Error).message}`, icon: 'none' }))
+  },
+
+  addInlineWatermarkField(event: WechatMiniprogram.TouchEvent) {
+    const index = Number(event.currentTarget.dataset.index)
+    const evidenceId = String(event.currentTarget.dataset.evidence)
+    const plan = this.data.messages[index]?.reviewPlan
+    if (!plan) return
+    void this.updateInlineReview(index, addEvidenceWatermark(plan, evidenceId)).catch(error => wx.showToast({ title: `字段保存失败：${(error as Error).message}`, icon: 'none' }))
+  },
+
+  changeInlineReviewType(event: WechatMiniprogram.TouchEvent) {
+    const index = Number(event.currentTarget.dataset.index)
+    const id = String(event.currentTarget.dataset.id)
+    const recordType = String(event.currentTarget.dataset.type)
+    const plan = this.data.messages[index]?.reviewPlan
+    const target = plan?.events.find(item => item.id === id)
+    if (!plan || !target) return
+    const compatibleForms = ({
+      '巡视': ['gd_b_214_xunshi', 'gdaq_30306_weida'],
+      '旁站': ['gd_b_212_pangzhan'],
+      '平行检验': ['gd_b_213_pingxing'],
+      '起重机械安拆检查': ['gdaq_30305_qizhong'],
+      '验收': ['acceptance_record'],
+      '见证': ['witness_record'],
+    } as Record<string, string[]>)[recordType] || []
+    const defaultForm = ({
+      '巡视': '巡视记录',
+      '旁站': '旁站记录',
+      '平行检验': '平行检验记录',
+      '验收': '验收记录',
+      '见证': '见证取样记录',
+      '起重机械安拆检查': '起重机械安拆检查',
+    } as Record<string, string>)[recordType]
+    const currentFormCodes = target.forms.map(form => FORM_CODE_BY_LABEL[form] || form)
+    const keepForm = target.recordType === recordType
+      && currentFormCodes.length === 1
+      && compatibleForms.includes(currentFormCodes[0])
+    const candidate = editEvent(plan, id, {
+      recordType, recordTypeConfirmed: true, recordTypeConfidence: 1, recordTypeReason: '用户在对话中确认记录类型',
+      forms: keepForm
+        ? target.forms
+        : (defaultForm ? [defaultForm] : []),
+      missingFields: (target.missingFields || []).filter(field => field !== 'record_type'),
+    })
+    void this.updateInlineReview(index, candidate).catch(error => wx.showToast({ title: `记录类型保存失败：${(error as Error).message}`, icon: 'none' }))
+  },
+
+  changeInlineReviewField(event: WechatMiniprogram.Input) {
+    const index = Number(event.currentTarget.dataset.index)
+    const id = String(event.currentTarget.dataset.id)
+    const field = String(event.currentTarget.dataset.field) as 'title' | 'location' | 'section' | 'content'
+    const value = String(event.detail.value || '')
+    const plan = this.data.messages[index]?.reviewPlan
+    const target = plan?.events.find(item => item.id === id)
+    if (!plan || !target || !['title', 'location', 'section', 'content'].includes(field)) return
+    const patch = field === 'title' ? { title: value }
+      : field === 'content' ? { content: value }
+        : field === 'location' ? { location: value } : { section: value }
+    const sourceKey = field === 'section' ? 'section' : field === 'location' ? 'location' : ''
+    const unresolvedKey = field === 'content' ? 'work_content' : sourceKey
+    const candidate = editEvent(plan, id, {
+      ...patch,
+      ...(sourceKey ? { fieldSources: { ...target.fieldSources, [sourceKey]: 'user_message' } } : {}),
+      ...(unresolvedKey ? {
+        unresolvedConflicts: (target.unresolvedConflicts || []).filter(item => item !== unresolvedKey),
+      } : {}),
+      missingFields: value.trim() ? (target.missingFields || []).filter(item => item !== field) : target.missingFields,
+    })
+    void this.updateInlineReview(index, candidate).catch(error => wx.showToast({ title: `字段保存失败：${(error as Error).message}`, icon: 'none' }))
+  },
+
+  changeInlineReviewEntityField(event: WechatMiniprogram.Input) {
+    const index = Number(event.currentTarget.dataset.index)
+    const id = String(event.currentTarget.dataset.id)
+    const field = String(event.currentTarget.dataset.field)
+    const value = String(event.currentTarget.dataset.value ?? event.detail?.value ?? '').trim()
+    const plan = this.data.messages[index]?.reviewPlan
+    const target = plan?.events.find(item => item.id === id)
+    if (!plan || !target || !field) return
+    const candidate = editEvent(plan, id, {
+      entityFields: { ...(target.entityFields || {}), [field]: value },
+      unresolvedConflicts: (target.unresolvedConflicts || []).filter(item => item !== field),
+      fieldSources: { ...(target.fieldSources || {}), [field]: 'user_message' },
+    })
+    void this.updateInlineReview(index, candidate).catch(error => wx.showToast({ title: `事项字段保存失败：${(error as Error).message}`, icon: 'none' }))
+  },
+
+  changeInlineReviewFormField(event: WechatMiniprogram.Input) {
+    const index = Number(event.currentTarget.dataset.index)
+    const id = String(event.currentTarget.dataset.id)
+    const formCode = String(event.currentTarget.dataset.formCode || '')
+    const field = String(event.currentTarget.dataset.field || '')
+    if (!formCode || !field) return
+    const plan = this.data.messages[index]?.reviewPlan
+    if (!plan) return
+    const candidate = editFormField(plan, id, formCode, field, String(event.detail.value || '').trim())
+    void this.updateInlineReview(index, candidate)
+      .catch(error => wx.showToast({ title: `表单字段保存失败：${(error as Error).message}`, icon: 'none' }))
+  },
+
+  changeInlineReviewDateTime(event: WechatMiniprogram.CustomEvent<{ value: string }>) {
+    const index = Number(event.currentTarget.dataset.index)
+    const id = String(event.currentTarget.dataset.id || '')
+    const formCode = String(event.currentTarget.dataset.formCode || '')
+    const field = String(event.currentTarget.dataset.field || '')
+    const plan = this.data.messages[index]?.reviewPlan
+    if (!plan || !formCode || !field) return
+    const candidate = editFormField(plan, id, formCode, field, event.detail.value)
+    void this.updateInlineReview(index, candidate)
+      .catch(error => wx.showToast({ title: `时间保存失败：${(error as Error).message}`, icon: 'none' }))
+  },
+
+  chooseInlineReviewFormOption(event: WechatMiniprogram.TouchEvent) {
+    const index = Number(event.currentTarget.dataset.index)
+    const id = String(event.currentTarget.dataset.id)
+    const formCode = String(event.currentTarget.dataset.formCode || '')
+    const field = String(event.currentTarget.dataset.field || '')
+    let value = String(event.currentTarget.dataset.value || '')
+    if (!formCode || !field) return
+    const plan = this.data.messages[index]?.reviewPlan
+    if (!plan) return
+    const fieldState = plan.events.find(item => item.id === id)?.formFields?.find(item => item.canonical === field)
+    if (fieldState?.control === 'datetime-local' || fieldState?.control === 'time') {
+      const normalized = normalizeDateTimeInput(value, fieldState.control === 'time' ? 'time' : 'datetime')
+      if (!normalized) {
+        wx.showToast({ title: '这个时间候选无法识别，请用时间滚轮选择', icon: 'none' })
+        return
+      }
+      value = normalized
+    }
+    const candidate = editFormField(plan, id, formCode, field, value)
+    void this.updateInlineReview(index, candidate)
+      .catch(error => wx.showToast({ title: `表单字段保存失败：${(error as Error).message}`, icon: 'none' }))
+  },
+
+  toggleInlineMerge(event: WechatMiniprogram.TouchEvent) {
+    const index = Number(event.currentTarget.dataset.index)
+    const id = String(event.currentTarget.dataset.id)
+    const messages = [...this.data.messages]
+    const message = messages[index]
+    if (!message?.reviewPlan) return
+    const current = message.reviewMergeSelection || []
+    const selected = current.includes(id) ? current.filter(value => value !== id) : [...current, id]
+    messages[index] = {
+      ...message,
+      reviewMergeSelection: selected,
+      reviewEvents: this.inlineReviewEvents(message.reviewPlan, selected),
+    }
+    this.setData({ messages })
+  },
+
+  mergeInlineReview(event: WechatMiniprogram.TouchEvent) {
+    const index = Number(event.currentTarget.dataset.index)
+    const message = this.data.messages[index]
+    const plan = message?.reviewPlan
+    const selected = message?.reviewMergeSelection || []
+    if (!plan || selected.length < 2) return
+    const id = `merged-${Date.now()}`
+    void this.updateInlineReview(index, mergeEvents(plan, selected, id))
+      .catch(error => wx.showToast({ title: `合并失败：${(error as Error).message}`, icon: 'none' }))
+  },
+
+  splitInlineEvidence(event: WechatMiniprogram.TouchEvent) {
+    const index = Number(event.currentTarget.dataset.index)
+    const evidenceId = String(event.currentTarget.dataset.evidence)
+    const plan = this.data.messages[index]?.reviewPlan
+    if (!plan) return
+    void this.updateInlineReview(index, splitEvidence(plan, evidenceId, `event-${Date.now()}`))
+      .catch(error => wx.showToast({ title: (error as Error).message, icon: 'none' }))
+  },
+
+  releaseInlineEvidence(event: WechatMiniprogram.TouchEvent) {
+    const index = Number(event.currentTarget.dataset.index)
+    const evidenceId = String(event.currentTarget.dataset.evidence)
+    const plan = this.data.messages[index]?.reviewPlan
+    if (!plan) return
+    void this.updateInlineReview(index, releaseEvidence(plan, evidenceId))
+      .catch(error => wx.showToast({ title: (error as Error).message, icon: 'none' }))
+  },
+
+  assignInlineEvidence(event: WechatMiniprogram.PickerChange) {
+    const index = Number(event.currentTarget.dataset.index)
+    const evidenceId = String(event.currentTarget.dataset.evidence)
+    const message = this.data.messages[index]
+    const plan = message?.reviewPlan
+    const target = message?.reviewEventOptions?.[Number(event.detail.value)]
+    if (!plan || !target) return
+    void this.updateInlineReview(index, assignEvidence(plan, evidenceId, target.id))
+      .catch(error => wx.showToast({ title: (error as Error).message, icon: 'none' }))
+  },
+
+  addInlineEventForEvidence(event: WechatMiniprogram.TouchEvent) {
+    const index = Number(event.currentTarget.dataset.index)
+    const evidenceId = String(event.currentTarget.dataset.evidence)
+    const plan = this.data.messages[index]?.reviewPlan
+    if (!plan) return
+    const eventId = `event-${Date.now()}`
+    const withEvent = addEvent(plan, eventId)
+    void this.updateInlineReview(index, assignEvidence(withEvent, evidenceId, eventId))
+      .catch(error => wx.showToast({ title: (error as Error).message, icon: 'none' }))
+  },
+
+  removeInlineReviewEvent(event: WechatMiniprogram.TouchEvent) {
+    const index = Number(event.currentTarget.dataset.index)
+    const id = String(event.currentTarget.dataset.id)
+    const plan = this.data.messages[index]?.reviewPlan
+    if (!plan) return
+    void this.updateInlineReview(index, removeEvent(plan, id))
+      .catch(error => wx.showToast({ title: (error as Error).message, icon: 'none' }))
+  },
+
+  chooseInlineReviewPurpose(event: WechatMiniprogram.TouchEvent) {
+    const index = Number(event.currentTarget.dataset.index)
+    const purpose = String(event.currentTarget.dataset.purpose || '')
+    if (!purpose || this.data.loading) return
+    this.setData({ loading: true })
+    void this.applyReviewPurposeReply(index, purpose, { role: 'user', text: purpose, timeText: formatMessageTime() })
+      .finally(() => this.setData({ loading: false }))
+  },
+
   confirmInlineReview(event: WechatMiniprogram.TouchEvent) {
     const index = Number(event.currentTarget.dataset.index)
     void this.confirmAndExecuteInlineReview(index)
@@ -2867,6 +3293,7 @@ Page(themed({
           images: images.map(i => i.remoteUrl).filter(Boolean),
           mode: this.data.mode,
           request_plan: requestPlan,
+          mentions: this.buildChatMentions(),
           provider: selModel?.provider || undefined,
           model: selModel?.model || undefined,
         },
@@ -3019,7 +3446,6 @@ Page(themed({
       role: 'assistant',
       text: result.reply || '智能体未返回内容',
       timeText: formatMessageTime(),
-      reviewDetailsExpanded: false,
       cards,
       actions,
       chips: chips.length ? chips : undefined,
@@ -3308,6 +3734,7 @@ Page(themed({
           conversation_id: conversationIdFor(this.currentSessionId),
           history,
           mode: this.data.mode,
+          mentions: this.buildChatMentions(),
           provider: selectedModel?.provider,
           model: selectedModel?.model,
         },
@@ -3450,6 +3877,8 @@ Page(themed({
         conversation_id: conversationIdFor(this.currentSessionId),
         history,
         mode: this.data.mode,
+        // @ 资料库引用：后端据此把检索限定在选中范围内（文件夹=整棵子树）
+        mentions: this.buildChatMentions(),
         provider: selModel?.provider || undefined,
         model: selModel?.model || undefined,
       },
@@ -4655,6 +5084,8 @@ Page(themed({
     if (msg.role === 'assistant' && msg.text) {
       msg = { ...msg, text: cleanMarkdown(msg.text) }
     }
+    // 引用 token → 气泡分段（只对带 token 的消息生效，其余走原渲染路径）
+    msg = withMentionSegments(msg)
     if (!msg.timeText) {
       msg = { ...msg, timeText: formatMessageTime() }
     }
@@ -5203,6 +5634,7 @@ Page(themed({
     }
   },
 
+  /** 拉取当前项目概况（名称/地点/描述），用于侧边栏顶部展示与「点进去修改」回填 */
   /** 历史搜索过滤：标题或消息内容命中即保留（大小写不敏感） */
   filterHistoryByQuery(list: ChatHistory[]): ChatHistory[] {
     const q = (this.data.historyQuery || '').trim().toLowerCase()
@@ -5233,7 +5665,6 @@ Page(themed({
     this.setData({ historyQuery: '', historyList: this.data.historyListAll })
   },
 
-  /** 拉取当前项目概况（名称/地点/描述），用于侧边栏顶部展示与「点进去修改」回填 */
   async loadProjectSummary() {
     if (!this.data.currentProjectId) return
     try {
@@ -5476,235 +5907,512 @@ Page(themed({
   toggleAtPanel() {
     const opening = !this.data.showAtPanel
     this.setData({
-      showAtPanel: opening, showModelMenu: false, atQuery: '',
-      atVisibleItems: this.data.atBiz,
-      // 每次打开都回到根层级，避免上次下钻的文件夹残留
-      atDrillStack: [], atDrillItems: [], atDrillPath: '',
+      showAtPanel: opening, showModelMenu: false,
+      atQuery: '', atItems: [], atHasMore: false, atError: '',
     })
     // 按钮唤起：清掉打字标记（此路径点选走追加插入，不替换触发词）
     this.atOpenedByTyping = false
-    if (opening) void this.loadAtData()
+    if (opening) void this.searchAtKb('')
+  },
+
+  /**
+   * 资料库搜索（服务端混排：文件夹 + 文档）。
+   *
+   * 为什么不在前端过滤：资料库是「个人库 + 项目库」，上万份文档是常态，
+   * 一次性拉全量既慢又费内存。检索交给 /kb/search，前端只管分页与竞态。
+   * 竞态靠单调递增的请求序号丢弃过期响应——快速连续输入时先发的请求
+   * 可能后到，不能让旧结果覆盖新结果。
+   */
+  async searchAtKb(query: string, offset = 0) {
+    const seq = ++this.atSearchSeq
+    this.atInFlight += 1
+    this.setData({ atLoading: true, atError: '' })
+    // 看门狗：wx.request 的回调在弱网/DNS/代理抖动时可能根本不触发，
+    // 那样 loading 会永久停在 true、面板永远显示「搜索中」。这里强制兜底。
+    if (this.atLoadingTimer !== null) clearTimeout(this.atLoadingTimer)
+    this.atLoadingTimer = setTimeout(() => {
+      this.atLoadingTimer = null
+      if (seq === this.atSearchSeq && this.data.atLoading) {
+        this.atInFlight = 0
+        this.setData({ atLoading: false, atError: '⚠︎ 搜索超时，请重试' })
+      }
+    }, 8000)
+    try {
+      const result = await request<KbSearchResponse>('/kb/search', {
+        // project_id：同项目的资料库在排序里略微靠前（后端 +5 分，翻不过相关性档位）
+        data: { q: query, offset, limit: 20, project_id: this.data.currentProjectId || undefined },
+      })
+      if (seq !== this.atSearchSeq) return   // 已有更新的请求，丢弃这次结果（loading 由 finally 统一结算）
+      // 空查询 → 后端返回 browse：最近用过 + 候选文件夹。
+      // 「最近」渲染成一行横向快捷条（不占纵向空间），候选列表只放还没选的，
+      // 这样同一个文件夹永远不会同时出现在两处、带着两个勾。
+      if (result.mode === 'browse' && offset === 0) {
+        const recent = (result.recent || []).map(toKbItem)
+        const folders = (result.folders || []).map(toKbItem)
+        this.rememberLocalItems(recent.concat(folders))
+        this.setData({ atRecent: recent, atAllItems: folders, atHasMore: false })
+        this.applyCandidateFilter()
+        return
+      }
+      const incoming: AtKbItem[] = []
+      for (const folder of result.folders || []) incoming.push(toKbItem(folder))
+      for (const doc of result.documents || []) incoming.push(toKbItem(doc))
+      // 模糊词入口：用户不想挑具体文件、只想「按这个词查资料」时选它。
+      // 只在首页（offset=0）插入，加载更多时不能重复出现。
+      const keyword = query.trim()
+      if (offset === 0 && keyword) {
+        incoming.unshift({
+          kind: 'query', key: `kb-query-${keyword}`, kbId: 0, id: 0,
+          name: keyword, path: '', score: 1000,
+        })
+      }
+      this.rememberLocalItems(incoming)
+      const merged = offset > 0 ? this.data.atAllItems.concat(incoming) : incoming
+      this.setData({ atAllItems: merged, atHasMore: Boolean(result.has_more) })
+      this.applyCandidateFilter()
+    } catch (error) {
+      // 以前这里是空 catch：失败被静默吞掉，界面只留空白，控制台也没有业务线索。
+      // 现在打日志并把失败原因展示到面板上。
+      console.warn('[kb/search] 失败:', (error as Error)?.message || error)
+      if (seq === this.atSearchSeq && offset === 0) {
+        this.setData({ atItems: [], atHasMore: false, atError: '⚠︎ 资料库搜索失败，请重试' })
+      }
+    } finally {
+      // 关键修复：loading 表示「当前是否还有请求在飞」，而不是「是否是最新请求」。
+      // 以前用 seq === atSearchSeq 判断，一旦有更新的请求插入、而最后一次回调丢失，
+      // loading 就永久卡在 true（面板一直「搜索中…」）。改成按在飞计数结算。
+      this.atInFlight = Math.max(0, this.atInFlight - 1)
+      if (this.atInFlight === 0) {
+        if (this.atLoadingTimer !== null) { clearTimeout(this.atLoadingTimer); this.atLoadingTimer = null }
+        this.setData({ atLoading: false })
+      }
+    }
+  },
+
+  /**
+   * 本地联想索引：把见过的文件夹/文档名缓存在内存（并落 storage），
+   * 打字时先本地前缀匹配立刻出结果（0ms），服务端结果到了再替换。
+   *
+   * 这就是「像 macOS 键盘预测那样按下键就有反应」的手感来源：
+   * 网络往返是几百毫秒，本地查表是零点几毫秒。
+   */
+  rememberLocalItems(items: AtKbItem[]) {
+    const index = this.atLocalIndex
+    for (const item of items) {
+      if (item.kind === 'header' || item.kind === 'query') continue
+      if (!index.has(item.key)) index.set(item.key, item)
+    }
+    // 上限保护：缓存太大既费内存也拖慢匹配
+    if (index.size > 300) {
+      const keys = Array.from(index.keys()).slice(0, index.size - 300)
+      for (const key of keys) index.delete(key)
+    }
+    try {
+      wx.setStorageSync('gdjl_kb_local_index', Array.from(index.values()).slice(0, 300))
+    } catch { /* 存储失败不影响使用 */ }
+  },
+
+  /** 本地前缀/子串匹配：命中就立刻渲染，不等网络 */
+  filterLocalItems(query: string): AtKbItem[] {
+    const q = query.trim().toLowerCase()
+    if (!q) return []
+    const hits: AtKbItem[] = []
+    for (const item of this.atLocalIndex.values()) {
+      const haystack = `${item.name} ${item.path}`.toLowerCase()
+      if (haystack.includes(q)) hits.push(item)
+      if (hits.length >= 20) break
+    }
+    // 名字前缀命中优先于路径命中
+    hits.sort((a, b) => {
+      const an = a.name.toLowerCase().startsWith(q) ? 0 : 1
+      const bn = b.name.toLowerCase().startsWith(q) ? 0 : 1
+      return an - bn || a.name.localeCompare(b.name)
+    })
+    return hits
+  },
+
+  /** 给列表项打上「已选中」标记（仅用于「最近」快捷条的回显） */
+  markPicked(items: AtKbItem[]): AtKbItem[] {
+    const chosen = new Set(this.data.mentions.map(m => m.key))
+    return items.map(item => (item.kind === 'header' ? item : { ...item, picked: chosen.has(item.key) }))
+  },
+
+  /** 从 atAllItems 重算候选列表：已选的剔除，未选的打勾（勾只用于「最近」条） */
+  applyCandidateFilter() {
+    this.setData({
+      atItems: this.withoutSelected(this.data.atAllItems),
+      atRecent: this.markPicked(this.data.atRecent),
+    })
+  },
+
+  /**
+   * 候选列表去掉已选项。
+   *
+   * 这是本次重构的核心：已选的东西只在顶部「已选」区出现一次。
+   * 之前同一文件夹会在三个分组里各出现一次、各带一个勾，用户会误以为选了很多条。
+   */
+  withoutSelected(items: AtKbItem[]): AtKbItem[] {
+    const chosen = new Set(this.data.mentions.map(m => m.key))
+    return items.filter(item => item.kind !== 'header' && !chosen.has(item.key))
   },
 
   onAtSearch(event: WechatMiniprogram.Input) {
-    // 防抖（2026-11-19）：@ 面板数据量可达数百条（记录/文件），
-    // 每敲一个字符都全量过滤 + setData 会掉帧。先回显输入，过滤延迟合并。
     const raw = event.detail.value
     this.setData({ atQuery: raw })
-    if (this.atSearchTimer !== null) {
-      clearTimeout(this.atSearchTimer)
+    // 立刻用本地索引出结果（不打网络），随后再用服务端结果覆盖
+    const local = this.filterLocalItems(raw)
+    if (local.length) {
+      this.setData({ atAllItems: local, atRecent: [], atHasMore: false })
+      this.applyCandidateFilter()
     }
+    // 250ms 防抖：搜索走服务端，敲字节奏远快于往返，攒一攒再发
+    if (this.atSearchTimer !== null) clearTimeout(this.atSearchTimer)
     this.atSearchTimer = setTimeout(() => {
       this.atSearchTimer = null
-      this.runAtFilter(raw)
-    }, 120)
+      void this.searchAtKb(raw)
+    }, 250)
   },
 
-  // 打开面板时按需加载；失败静默（记录/隐患/规范/资料库各自独立降级）
-  async loadAtData() {
-    if (this.data.atBiz.length) return
-    this.setData({ atLoading: true })
-    const results = await Promise.allSettled([
-      request<{ records?: Array<Record<string, unknown>> }>('/work-record/list'),
-      request<Array<Record<string, unknown>>>('/hazard/list'),
-      request<{ results?: Array<Record<string, unknown>> }>('/knowledge/regulations/list'),
-      // 资料库文件夹：两步（/kb/mine 拿 kbId → /kb/{id}/folders 拿树），失败降级为空
-      (async () => {
-        const kb = await request<{ id: number }>('/kb/mine')
-        if (!kb || !kb.id) return []
-        // 下钻文件列表要用到 kbId，先记下来
-        this.setData({ atKbId: kb.id })
-        return await request<{ items: Array<Record<string, unknown>> }>(`/kb/${kb.id}/folders`)
-      })(),
-    ])
-    const items: AtBizItem[] = []
-    const ok = (i: number) => results[i].status === 'fulfilled'
-      ? (results[i] as PromiseFulfilledResult<unknown>).value : []
-    // 后端返回结构不统一：work-record/list={records:[]}、regulations/list={results:[]}、folders={items:[]}、hazard/list=[]，这里统一摊平成数组
-    const asArray = (v: unknown): Array<Record<string, unknown>> => {
-      if (Array.isArray(v)) return v as Array<Record<string, unknown>>
-      if (v && typeof v === 'object') {
-        const o = v as Record<string, unknown>
-        if (Array.isArray(o.records)) return o.records as Array<Record<string, unknown>>
-        if (Array.isArray(o.results)) return o.results as Array<Record<string, unknown>>
-        if (Array.isArray(o.items)) return o.items as Array<Record<string, unknown>>
-      }
-      return []
-    }
-    const label = (r: Record<string, unknown>, keys: string[]) => {
-      for (const k of keys) if (r[k]) return String(r[k])
-      return ''
-    }
-    // 工作记录
-    for (const r of asArray(ok(0))) {
-      const id = r.id as number | string
-      const title = label(r, ['content', 'title', 'work_content', 'business_content']).slice(0, 24) || '工作记录'
-      items.push({ key: `record-${id}`, icon: '📝', label: label(r, ['record_type_name', 'record_type']) || '工作记录',
-        desc: `${title}${r.project_name ? ' · ' + String(r.project_name) : ''}`, ref: `@[记录#${id} ${title}]` })
-    }
-    // 隐患
-    for (const r of asArray(ok(1))) {
-      const id = r.id as number | string
-      const title = label(r, ['hazard_name', 'risk_category', 'description', 'title']).slice(0, 24) || '隐患'
-      items.push({ key: `hazard-${id}`, icon: '⚠️', label: '隐患', desc: title, ref: `@[隐患#${id} ${title}]` })
-    }
-    // 规范资料
-    for (const r of asArray(ok(2))) {
-      const name = label(r, ['name', 'title', 'filename', 'file_name']).slice(0, 30)
-      if (!name) continue
-      const id = r.id ?? r.filename ?? r.file_name ?? name
-      items.push({ key: `reg-${id}`, icon: '📚', label: '规范', desc: name, ref: `@[规范 ${name}]` })
-    }
-    // 资料库文件夹：树形拍平，带层级路径 + 文档数，插到业务引用最前（用户最常按文件夹找资料）
-    // 点文件夹不再直接插入「整个文件夹」引用，而是下钻到里面选具体文件（2026-11-19）。
-    const folderItems: AtBizItem[] = []
-    const flattenFolder = (nodes: Array<Record<string, unknown>>, prefix: string) => {
-      for (const f of nodes) {
-        const name = String(f.name || '').trim()
-        if (!name) continue
-        const path = prefix ? `${prefix}/${name}` : name
-        const count = Number(f.count || 0)
-        const children = Array.isArray(f.children) ? f.children as Array<Record<string, unknown>> : []
-        folderItems.push({ key: `kb-${f.id}`, icon: '📁', label: path,
-          desc: count ? `${count} 份资料` : (children.length ? `${children.length} 个子文件夹` : '空文件夹'),
-          ref: `@[资料库 ${path}]`, kind: 'folder', folderId: Number(f.id), path, children })
-        if (children.length) flattenFolder(children, path)
-      }
-    }
-    flattenFolder(asArray(ok(3)), '')
-    items.unshift(...folderItems)
-    const finalItems = items.slice(0, 60)
-    this.setData({ atBiz: finalItems, atVisibleItems: finalItems, atLoading: false })
-    // 打字唤起时先到了空列表，加载完成后补一次过滤
-    if (this.data.atQuery) this.runAtFilter(this.data.atQuery)
+  loadMoreAt() {
+    if (!this.data.atHasMore || this.data.atLoading) return
+    void this.searchAtKb(this.data.atQuery, this.data.atItems.length)
   },
 
-  // 点选：把引用插进输入框，关闭面板并聚焦
-  pickAtBiz(event: WechatMiniprogram.TouchEvent) {
+  // ============ 选中与撤销 ============
+
+  /** 点选一条搜索结果：文件夹=整棵子树，文档=单份；支持连续多选 */
+  pickAtItem(event: WechatMiniprogram.TouchEvent) {
     const key = event.currentTarget.dataset.key as string
-    // 下钻后列表来自 atDrillItems，未下钻时来自 atBiz
-    const pool = this.data.atDrillStack.length ? this.data.atDrillItems : this.data.atBiz
-    const item = pool.find(i => i.key === key)
+    const item = this.data.atItems.find(i => i.key === key)
     if (!item) return
-    // 文件夹：进入下一层选具体文件，而不是直接引用整层
-    if (item.kind === 'folder') {
-      void this.openAtFolder(item)
+    // 分组标题只是视觉分隔，点它不产生引用
+    if (item.kind === 'header') return
+    const already = this.data.mentions.some(m => m.key === item.key)
+    if (already) {
+      // 再点一次 = 取消：多选场景下比「再去点小 ×」更顺手
+      this.removeMentionByKey(item.key)
       return
     }
+    // 模糊词：不限定到某个文件夹/文档，只把关键词交给后端做检索范围内的模糊召回
+    if (item.kind === 'query') {
+      const token = `@[资料库检索 ${item.name}]`
+      const mention: AtMention = {
+        key: item.key, type: 'kb_query', kb_id: 0, path: '',
+        name: item.name, query: item.name, token,
+      }
+      this.appendToken(token, mention)
+      // refreshMentions 里会 applyCandidateFilter，条目自动从候选列表消失
+      return
+    }
+    // token 只放名字：完整路径由顶部「已选」区的第二行承担，输入框保持清爽。
+    // 真正的语义由 mentions 里的 folder_id/doc_id 决定，不依赖这段文本。
+    const token = `@[资料库 ${item.name}]`
+    const mention: AtMention = item.kind === 'folder'
+      ? { key: item.key, type: 'kb_folder', kb_id: item.kbId, folder_id: item.id, path: item.path, name: item.name, token, count: item.count }
+      : { key: item.key, type: 'kb_doc', kb_id: item.kbId, doc_id: item.id, path: item.path, name: item.name, token }
+    this.appendToken(token, mention)
+    // 面板不关：多选是主场景，用户可能一次引用好几个文件夹
+  },
+
+  /** 已选引用上的 × */
+  removeMention(event: WechatMiniprogram.TouchEvent) {
+    const key = event.currentTarget.dataset.key as string
+    this.removeMentionByKey(key)
+  },
+
+  removeMentionByKey(key: string) {
+    const target = this.data.mentions.find(m => m.key === key)
+    if (!target) return
+    const mentions = this.data.mentions.filter(m => m !== target)
+    // 输入框里的 token 一并抹掉：token 只是回显，不能留下「已经撤销但仍显示」的假象
+    const input = this.data.input.split(target.token).join('').replace(/\s{2,}/g, ' ').trim()
+    this.setData({
+      input,
+      canSend: Boolean(input) || this.data.attachments.length > 0,
+      atItems: this.data.atItems.map(i =>
+        i.key === key ? ({ ...i, picked: false } as AtKbItem) : i,
+      ),
+    })
+    this.refreshMentions(mentions)
+  },
+
+  /** 把 token 追加进输入框，同时登记引用；打字唤起时替换触发词而不是追加 */
+  appendToken(token: string, mention: AtMention) {
+    const mentions = this.data.mentions.concat([mention])
     if (this.atOpenedByTyping) {
-      this.replaceAtTrigger(`${item.ref} `)
+      const current = this.data.input
+      const next = current.replace(/@([^\s@]*)$/, `${token} `)
+      this.atOpenedByTyping = false
+      this.setData({ input: next, canSend: true })
+      this.refreshMentions(mentions)
+      // editor：只把 token 插入并上色；不再整体重灌内容
+      // （setContents 会让光标落进样式节点，导致后续输入全被染色）
+      void this.insertMentionIntoEditor(token)
       return
     }
-    this.insertAtText(`${item.ref} `, false)
+    const current = this.data.input
+    const next = current ? `${current.replace(/\s+$/, '')} ${token} ` : `${token} `
+    this.setData({ input: next, canSend: true })
+    this.refreshMentions(mentions)
+    void this.insertMentionIntoEditor(token)
   },
 
-  /** 进入资料库文件夹：列出子文件夹 + 该层文件（文件可单独 @ 引用） */
-  async openAtFolder(item: AtBizItem) {
-    const kbId = this.data.atKbId
-    if (!kbId || !item.folderId) return
-    const path = item.path || item.label
-    const subItems: AtBizItem[] = []
-    for (const child of item.children || []) {
-      const name = String(child.name || '').trim()
-      if (!name) continue
-      const childPath = `${path}/${name}`
-      const childChildren = Array.isArray(child.children) ? child.children as Array<Record<string, unknown>> : []
-      const count = Number(child.count || 0)
-      subItems.push({
-        key: `kb-${child.id}`, icon: '📁', label: name,
-        desc: count ? `${count} 份资料` : (childChildren.length ? `${childChildren.length} 个子文件夹` : '空文件夹'),
-        ref: `@[资料库 ${childPath}]`, kind: 'folder', folderId: Number(child.id),
-        path: childPath, children: childChildren,
-      })
-    }
+  /**
+   * 重算引用档案条的展示数据与范围语义。
+   *
+   * 为什么要单独算：WXML 里做不了 slice/求和，而「文件夹=整棵子树、共 N 份」
+   * 这个语义必须让用户看见——他只看到一行路径时，会以为只引用了一个目录名。
+   */
+  refreshMentions(mentions: AtMention[]) {
+    const chips = mentions.slice(0, 3)
+    const overflow = Math.max(0, mentions.length - 3)
+    const folders = mentions.filter(m => m.type === 'kb_folder')
+    const docs = mentions.filter(m => m.type === 'kb_doc')
+    const queries = mentions.filter(m => m.type === 'kb_query')
+    const total = folders.reduce((sum, m) => sum + (m.count || 0), 0) + docs.length
+    const parts: string[] = []
+    if (folders.length) parts.push(`${folders.length} 个文件夹（整棵子树）`)
+    if (docs.length) parts.push(`${docs.length} 份文档`)
+    if (queries.length) parts.push(`${queries.length} 个关键词`)
+    const summary = parts.length
+      ? `将在 ${parts.join(' + ')}${total ? `，共 ${total} 份资料` : ''}范围内检索`
+      : ''
+    this.setData({ mentions, mentionChips: chips, mentionOverflow: overflow, mentionsSummary: summary })
+    // 选中 → 从候选里消失；撤销 → 回到候选。两处必须同步刷新。
+    this.applyCandidateFilter()
+  },
 
-    this.setData({ atDrillLoading: true })
-    let docItems: AtBizItem[] = []
+  /** 发给后端的结构化引用；空数组表示不限定范围 */
+  /**
+   * 上报「哪些引用被真的用进了对话」——个性化排序的原料。
+   *
+   * 为什么在发送时上报、而不是点选时：点选可能只是浏览后被删掉，
+   * 只有随消息发出去的引用才是真实偏好。失败静默（不打扰聊天）。
+   */
+  reportMentionUsage() {
+    const items = this.data.mentions
+      .filter(m => m.type === 'kb_folder' || m.type === 'kb_doc')
+      .map(m => m.type === 'kb_folder'
+        ? { kb_id: m.kb_id, target_type: 'folder', target_id: m.folder_id }
+        : { kb_id: m.kb_id, target_type: 'doc', target_id: m.doc_id })
+    if (!items.length) return
+    void request('/kb/mention-stats', {
+      method: 'POST',
+      data: { items },
+      timeout: 5000,
+    }).catch(() => undefined)
+  },
+
+  buildChatMentions(): Array<Record<string, unknown>> {
+    return this.data.mentions.map(m => {
+      if (m.type === 'kb_query') return { type: 'kb_query', query: m.query || m.name }
+      if (m.type === 'kb_folder') {
+        return { type: 'kb_folder', kb_id: m.kb_id, folder_id: m.folder_id, path: m.path, name: m.name }
+      }
+      return { type: 'kb_doc', kb_id: m.kb_id, doc_id: m.doc_id, path: m.path, name: m.name }
+    })
+  },
+
+  /**
+   * 用户手工删掉输入框里的 token 时，同步撤销对应引用。
+   * 不做这一步会出现「界面上看不到引用、但模型仍按旧范围检索」的错位。
+   */
+  syncMentionsWithInput(input: string) {
+    if (!this.data.mentions.length) return
+    const kept = this.data.mentions.filter(m => input.includes(m.token))
+    if (kept.length !== this.data.mentions.length) {
+      this.refreshMentions(kept)
+    }
+  },
+
+  // ============ 富文本输入（<editor>）：@ 引用渲染成行内胶囊 ============
+
+  /** 基础库是否支持 <editor>（2.7.0+）。不支持时整条链路回退到 textarea + 纯文本 token。 */
+  supportsEditor(): boolean {
     try {
-      const res = await request<{ items?: Array<Record<string, unknown>> }>(
-        `/kb/${kbId}/documents?folder_id=${item.folderId}`,
-      )
-      const docs = Array.isArray(res?.items) ? res.items.slice(0, 100) : []
-      docItems = docs.map(d => {
-        const name = String(d.name || d.filename || '未命名文件')
-        return {
-          key: `doc-${d.id}`, icon: '📄', label: name,
-          desc: String(d.filename || ''), ref: `@[文件#${d.id} ${name}]`, kind: 'doc',
-          docId: Number(d.id),
-        } as AtBizItem
-      })
+      const v = String(wx.getSystemInfoSync().SDKVersion || "0.0.0")
+      const [a, b] = v.split(".").map(n => parseInt(n, 10) || 0)
+      return a > 2 || (a === 2 && b >= 7)
     } catch {
-      docItems = []
+      return false
     }
-
-    // 第一行固定给「引用整个文件夹」，其余是子文件夹 + 文件
-    const items: AtBizItem[] = [
-      {
-        key: `kb-ref-${item.folderId}`, icon: '📎', label: '引用整个文件夹',
-        desc: `${path}（读取其中全部资料）`, ref: `@[资料库 ${path}]`, kind: 'folder-ref',
-      },
-      ...subItems, ...docItems,
-    ]
-    const stack = this.data.atDrillStack.concat([{ path, items }])
-    this.setData({
-      atDrillStack: stack, atDrillItems: items, atVisibleItems: items,
-      atDrillPath: path, atQuery: '', atDrillLoading: false,
-    })
   },
 
-  /** 下钻返回：回到上一层，栈空时回到全部引用 */
-  atDrillBack() {
-    const stack = this.data.atDrillStack.slice(0, -1)
-    if (!stack.length) {
-      this.setData({
-        atDrillStack: [], atDrillItems: [], atDrillPath: '',
-        atVisibleItems: this.data.atBiz, atQuery: '',
+  /** editor 初始化完成：拿到 EditorContext，并把已有草稿灌进去 */
+  onEditorReady() {
+    wx.createSelectorQuery()
+      .select('#chat-editor')
+      .context((res: WechatMiniprogram.ContextCallbackResult) => {
+        this.editorCtx = (res?.context as WechatMiniprogram.EditorContext) || null
+        if (!this.editorCtx) return
+        const html = this.data.input ? this.inputToEditorHtml(this.data.input) : ""
+        if (html) this.editorCtx.setContents({ html })
       })
-      return
+      .exec()
+  },
+
+  /** editor 内容变化：text 是纯文本（含 token），html 带胶囊样式 */
+  /**
+   * 引用整块删除：token 被打残时，把残片整段清掉。
+   *
+   * 用户期望：在 `@xxx` 里按删除，整条引用一起消失，而不是删掉一个字符留下半截。
+   * <editor> 不提供按键事件（没有 backspace 回调），拿不到"删除前"的状态，
+   * 所以只能在 bindinput 之后修补：发现某个 mention 的 token 不再完整出现，
+   * 就把文本里对应的残片去掉，并撤销这条引用。
+   */
+  stripBrokenMentionFragments(text: string): { text: string; removed: AtMention[] } {
+    const full = new Set(text.match(MENTION_TOKEN_RE) || [])
+    const removed = this.data.mentions.filter(m => !full.has(m.token))
+    if (!removed.length) return { text, removed }
+    // 只命中「没有闭合 ]」的残片：完整 token 以 ] 结尾，不会匹配
+    const cleaned = text
+      .replace(/@\[资料库(?:检索)?[^\]]*?(?=\s|$)/g, '')
+      .replace(/\s{2,}/g, ' ')
+      .replace(/^\s+/, '')
+    return { text: cleaned, removed }
+  },
+
+  onEditorInput(event: { detail: { html?: string; text?: string } }) {
+    let text = event.detail.text || ""
+    this.editorHtml = event.detail.html || ""
+    // 引用被删残 → 整块移除（删一下就整块消失）
+    const repaired = this.stripBrokenMentionFragments(text)
+    if (repaired.removed.length) {
+      text = repaired.text
+      this.refreshMentions(this.data.mentions.filter(m => !repaired.removed.includes(m)))
+      // 同步修正编辑器内容：纯文本 HTML，不再夹 span，不会被光标带进样式节点
+      if (this.data.useEditor && this.editorCtx) {
+        this.editorCtx.setContents({ html: this.inputToEditorHtml(text) })
+      }
     }
-    this.setData({
-      atDrillStack: stack, atVisibleItems: stack[stack.length - 1].items,
-      atDrillPath: stack[stack.length - 1].path, atQuery: '',
-    })
+    // 复用 textarea 的既有处理：同步 canSend / 撤销引用 / 打 @ 唤起面板
+    this.onInput({ detail: { value: text } } as unknown as WechatMiniprogram.Input)
   },
 
-  /** 打字唤起面板后的点选：把输入串末尾的「@关键词」整段替换为选中项 */
-  replaceAtTrigger(text: string) {
-    const current = this.data.input
-    const next = current.replace(/@([^\s@]*)$/, text)
-    this.setData({ input: next, canSend: true, showAtPanel: false, atQuery: '', draftFocus: false })
-    this.atOpenedByTyping = false
-    setTimeout(() => this.setData({ draftFocus: true }), 60)
-  },
-
-  // 统一插入：追加到现有输入末尾（已有的话留一个空格），重算 canSend
-  insertAtText(text: string, _closePanel: boolean) {
-    const current = this.data.input
-    const next = current ? `${current.replace(/\s+$/, '')} ${text}` : text
-    // focus 先 false 再 true：若本来就是 true，直接 setData true 不会触发 textarea 重新聚焦
-    this.setData({ input: next, canSend: true, showAtPanel: false, draftFocus: false })
-    setTimeout(() => this.setData({ draftFocus: true }), 60)
+  onEditorFocus() {
+    this.setData({ inputFocused: true })
   },
 
   onInput(event: WechatMiniprogram.Input) {
     const input = event.detail.value
     this.setData({ input, canSend: Boolean(input.trim()) || this.data.attachments.length > 0 })
+    // 用户手工删掉 token → 撤销对应引用，避免「界面没引用但模型仍在限定范围内搜」
+    this.syncMentionsWithInput(input)
     this.detectAtTrigger(input)
   },
 
   /**
-   * 打字打出 @ 自动唤起引用面板（2026-11-19）。
-   * 触发口径：输入串以「@」结尾，或末段存在「空白+@关键词」且光标（=输入串末尾）就在
-   * 关键词后 —— 即用户正在打一个新的 @。已通过面板点选插入的引用（@张三 ）后面
-   * 跟了空格，不满足「无空格的 @词在末尾」，不会重复弹。
-   * 面板已开时，把 @ 后的关键词同步进面板搜索；删掉 @ 则收起。
+   * 统一的键盘高度处理：组件级 bindkeyboardheightchange 与全局监听都走这里。
+   *
+   * keyboardHeight 会被注入成 CSS 变量 --kb，只有两个消费方：
+   *   1) （已停用）曾用于 .input-bar 的 margin-bottom —— 实测会和缩小后的可视区叠加，已移除
+   *   2) .at-panel 的 bottom —— fixed 层要自己让位，否则会被键盘盖住
+   */
+  applyKeyboardHeight(raw: number) {
+    const height = Math.max(0, Math.round(raw || 0))
+    if (height === this.data.keyboardHeight) return
+    this.setData({ keyboardHeight: height })
+    // 键盘收起时把聊天区滚回底部（否则会停在被顶起时留下的位置）
+    if (height === 0) setTimeout(() => this.scrollChatToBottom(), 60)
+  },
+
+  /** textarea 组件的键盘高度事件（比全局监听更准，jl 用这个） */
+  onTextareaKeyboard(event: { detail: { height?: number } }) {
+    this.applyKeyboardHeight(event.detail?.height || 0)
+  },
+
+  /** editor 组件的键盘高度事件 */
+  onEditorKeyboard(event: { detail: { height?: number } }) {
+    this.applyKeyboardHeight(event.detail?.height || 0)
+  },
+
+
+  onEditorBlur() {
+    this.setData({ inputFocused: false })
+  },
+
+  /**
+   * 把纯文本里的 @[资料库 …] token 转成带内联样式的胶囊。
+   *
+   * 为什么胶囊里仍然保留完整 token 文本：editor 的 text 是纯文本，
+   * 只有文本里还有 token，mentions 才能在每次输入后从文本可靠恢复；
+   * 样式只是让它「看起来不一样」，结构不依赖 HTML 属性（属性可能被运行时清洗）。
+   */
+  /**
+   * 纯文本 → editor HTML。
+   *
+   * 只做转义，不再包 <span> 胶囊：实测 setContents 写入 span 后光标会落在 span 内部，
+   * 之后输入的文字全部继承胶囊样式（用户反馈"@ 后面打什么都变蓝"）。
+   * 现在改用 editor 原生的 format() 上色 —— 不给文字加外框，只改颜色。
+   */
+  inputToEditorHtml(text: string): string {
+    const escaped = text
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+    return escaped + '<br/>'
+  },
+
+  /**
+   * 插入一条引用：先给插入点设样式，再插入 token 文本。
+   *
+   * editor 没有 setSelection，无法"插入后再选中"改样式，
+   * 但 format() 设置的是「当前输入位置之后要输入的样式」，
+   * 所以「先 format 再 insertText」正好让 token 带上该样式。
+   *
+   * 黑白主题下引用不能靠颜色区分（主色是近黑，会和正文同色），
+   * 改用浅灰底把 token 衬成"标签"：正文色 + backgroundColor 浅灰。
+   */
+  async insertMentionIntoEditor(token: string) {
+    if (!this.data.useEditor || !this.editorCtx) return
+    const ctx = this.editorCtx
+    await new Promise<void>(resolve => {
+      ctx.format('color', '#11131a')
+      ctx.format('backgroundColor', '#e9edf2')
+      ctx.insertText({
+        text: token + ' ',
+        success: () => resolve(),
+        fail: () => resolve(),
+      })
+    })
+    // 复位：不然后面打的字也带浅灰底
+    ctx.format('backgroundColor', '#ffffff')
+    ctx.format('color', '#11131a')
+    this.editorHtml = ''
+  },
+
+  /** 兼容旧调用点：把 data.input 整体重灌进 editor（仅在恢复草稿时使用） */
+  async syncEditorWithInput() {
+    if (!this.data.useEditor || !this.editorCtx) return
+    const html = this.inputToEditorHtml(this.data.input)
+    this.editorHtml = html
+    this.editorCtx.setContents({ html })
+  },
+
+  /**
+   * 清空 editor 内容。
+   *
+   * editor 是独立于 data 的组件：把 data.input 置空不会影响它，
+   * 发送后必须显式清，否则输入框会残留上一条消息的文字。
+   */
+  clearEditor() {
+    if (!this.data.useEditor || !this.editorCtx) return
+    this.editorHtml = ''
+    this.editorCtx.clear({})
+    // 清空后把颜色与底色都复位，避免下一次输入继承上一条引用的样式
+    this.editorCtx.format('backgroundColor', '#ffffff')
+    this.editorCtx.format('color', '#11131a')
+  },
+
+  /**
+   * 打字打出 @ 自动唤起资料库面板。
+   * 触发口径：输入串以「@」结尾，或末段是「空白 + @关键词」（光标在末尾）。
+   * 已点选插入的引用形如「@[资料库 路径] 」，结尾是空格或「]」，不会误触发。
    */
   detectAtTrigger(input: string) {
-    // 光标位置 = 输入串末尾（textarea 无 selectionStart 事件详情时按此近似；
-    // 我们只关心「正在末尾打字」的场景，中间编辑不触发也合理）
-    const m = /(^|\s)@([^\s@]*)$/.exec(input)
+    const m = /(^|\s)@([^\s@\[\]]*)$/.exec(input)
     if (!m) {
-      // 没有 @ 在打：已开的面板收起（用户删掉了触发词）
+      // 没有正在输入的 @：收起由打字唤起的面板
       if (this.data.showAtPanel && this.atOpenedByTyping) {
         this.setData({ showAtPanel: false, atQuery: '' })
         this.atOpenedByTyping = false
@@ -5712,38 +6420,21 @@ Page(themed({
       return
     }
     const keyword = m[2]
-    const opening = !this.data.showAtPanel
-    if (opening) {
-      // 打字唤起：直接进资料/记录引用列表
+    if (!this.data.showAtPanel) {
       this.atOpenedByTyping = true
-      this.setData({
-        showAtPanel: true,
-        showModelMenu: false,
-        atQuery: keyword,
-        atVisibleItems: this.data.atBiz,
-      })
-      void this.loadAtData()
-      if (keyword) this.runAtFilter(keyword)
-    } else if (this.atOpenedByTyping) {
-      // 面板已开（打字开的）：关键词实时同步进搜索并过滤
+      this.setData({ showAtPanel: true, showModelMenu: false, atQuery: keyword, atItems: [] })
+      void this.searchAtKb(keyword)
+      return
+    }
+    if (this.atOpenedByTyping) {
+      // 面板已开（打字开的）：关键词同步进搜索框，防抖后再查
       this.setData({ atQuery: keyword })
-      if (this.atSearchTimer !== null) {
-        clearTimeout(this.atSearchTimer)
-      }
+      if (this.atSearchTimer !== null) clearTimeout(this.atSearchTimer)
       this.atSearchTimer = setTimeout(() => {
         this.atSearchTimer = null
-        this.runAtFilter(this.data.atQuery)
-      }, 120)
+        void this.searchAtKb(this.data.atQuery)
+      }, 250)
     }
-  },
-
-  /** @ 触发词过滤：与 onAtSearch 同一套匹配逻辑（打字唤起路径复用） */
-  runAtFilter(rawQuery: string) {
-    const q = (rawQuery || '').trim().toLowerCase()
-    const source = this.data.atDrillStack.length ? this.data.atDrillItems : this.data.atBiz
-    const match = (s: string) => !q || s.toLowerCase().includes(q)
-    const visible = source.filter(i => match(i.label) || match(i.desc))
-    this.setData({ atVisibleItems: visible })
   },
 
   onLogDateChange(event: WechatMiniprogram.PickerChange) {

@@ -34,20 +34,18 @@
     rgba(255, 255, 255, 0.84) 0%,
     rgba(252, 254, 255, 0.72) 46%,
     rgba(var(--wash-rgb, 234,243,255), 0.66) 100%);
-  backdrop-filter: blur(60rpx) saturate(1.8);
-  -webkit-backdrop-filter: blur(60rpx) saturate(1.8);
-  border: 1rpx solid rgba(var(--brand-rgb, 22,119,255), 0.16);
+  border: 1rpx solid rgba(var(--brand-rgb, 47,50,55), 0.16);
   border-bottom: none;
   box-shadow:
     inset 0 1rpx 0 rgba(255, 255, 255, 0.96),
-    inset 0 -26rpx 48rpx rgba(var(--brand-rgb, 22,119,255), 0.07),
+    inset 0 -26rpx 48rpx rgba(var(--brand-rgb, 47,50,55), 0.07),
     0 -8rpx 0 -2rpx rgba(255, 255, 255, 0.34),
     0 -14rpx 48rpx rgba(var(--shadow-rgb, 20,70,140), 0.24);
 }
 
 .ts-head { margin-bottom: 26rpx; }
-.ts-title { font-size: 34rpx; font-weight: 700; color: var(--ink, #12253d); }
-.ts-sub { display: block; margin-top: 8rpx; font-size: 24rpx; color: #6b7c90; }
+.ts-title { font-size: 34rpx; font-weight: 700; color: var(--ink, #11131a); }
+.ts-sub { display: block; margin-top: 8rpx; font-size: 24rpx; color: #8a94a6; }
 
 /* 实时预览卡
    底座先铺一层主题色的柔光（两处光斑），玻璃卡浮在上面 ——
@@ -60,19 +58,17 @@
   border-radius: 32rpx;
   background-color: rgba(var(--wash-rgb, 234,243,255), 0.34);
   background-image:
-    radial-gradient(62% 130% at 10% 0%, rgba(var(--brand-rgb, 22,119,255), 0.24) 0%, rgba(var(--brand-rgb, 22,119,255), 0) 70%),
+    radial-gradient(62% 130% at 10% 0%, rgba(var(--brand-rgb, 47,50,55), 0.24) 0%, rgba(var(--brand-rgb, 47,50,55), 0) 70%),
     radial-gradient(54% 130% at 94% 100%, rgba(var(--brand-l-rgb, 59,140,255), 0.24) 0%, rgba(var(--brand-l-rgb, 59,140,255), 0) 72%);
 }
 .tsp-card {
   padding: 26rpx;
   border-radius: 26rpx;
   background: linear-gradient(140deg, rgba(255, 255, 255, 0.70) 0%, rgba(var(--wash-rgb, 234,243,255), 0.44) 100%);
-  backdrop-filter: blur(34rpx) saturate(1.8);
-  -webkit-backdrop-filter: blur(34rpx) saturate(1.8);
-  border: 1rpx solid rgba(var(--brand-rgb, 22,119,255), 0.14);
+  border: 1rpx solid rgba(var(--brand-rgb, 47,50,55), 0.14);
   box-shadow:
     inset 0 1rpx 0 rgba(255, 255, 255, 0.92),
-    inset 0 -14rpx 30rpx rgba(var(--brand-rgb, 22,119,255), 0.06),
+    inset 0 -14rpx 30rpx rgba(var(--brand-rgb, 47,50,55), 0.06),
     0 8rpx 26rpx rgba(var(--shadow-rgb, 20,70,140), 0.10);
 }
 .tsp-row { display: flex; align-items: center; gap: 20rpx; }
@@ -80,8 +76,8 @@
   width: 64rpx;
   height: 64rpx;
   border-radius: 50%;
-  background: linear-gradient(135deg, var(--brand-l, #3b8cff), var(--brand-d, #0b5fd0));
-  box-shadow: 0 4rpx 14rpx rgba(var(--brand-rgb, 22,119,255), 0.30);
+  background: linear-gradient(135deg, var(--brand-l, #3a4046), var(--brand-d, #0060df));
+  box-shadow: 0 4rpx 14rpx rgba(var(--brand-rgb, 47,50,55), 0.30);
 }
 .tsp-lines { flex: 1; display: flex; flex-direction: column; gap: 12rpx; }
 .tsp-line { height: 16rpx; border-radius: 8rpx; background: rgba(var(--deep-rgb, 10,46,92), 0.14); }
@@ -92,15 +88,13 @@
   height: 44rpx;
   border-radius: 22rpx;
   background: rgba(255, 255, 255, 0.58);
-  backdrop-filter: blur(18rpx) saturate(1.6);
-  -webkit-backdrop-filter: blur(18rpx) saturate(1.6);
-  border: 1rpx solid rgba(var(--brand-rgb, 22,119,255), 0.16);
+  border: 1rpx solid rgba(var(--brand-rgb, 47,50,55), 0.16);
   box-shadow: inset 0 1rpx 0 rgba(255, 255, 255, 0.88);
 }
 .tsp-chip.active {
   background: linear-gradient(135deg, rgba(var(--brand-l-rgb, 59,140,255), 0.30), rgba(var(--brand-d-rgb, 11,95,208), 0.24));
-  border-color: rgba(var(--brand-rgb, 22,119,255), 0.45);
-  box-shadow: inset 0 1rpx 0 rgba(255, 255, 255, 0.70), 0 4rpx 14rpx rgba(var(--brand-rgb, 22,119,255), 0.20);
+  border-color: rgba(var(--brand-rgb, 47,50,55), 0.45);
+  box-shadow: inset 0 1rpx 0 rgba(255, 255, 255, 0.70), 0 4rpx 14rpx rgba(var(--brand-rgb, 47,50,55), 0.20);
 }
 .tsp-btn {
   margin-top: 22rpx;
@@ -110,13 +104,13 @@
   border-radius: 22rpx;
   font-size: 27rpx;
   color: var(--on-brand, #ffffff);
-  background: linear-gradient(135deg, var(--brand-l, #3b8cff) 0%, var(--brand-d, #0b5fd0) 100%);
-  box-shadow: inset 0 1rpx 0 rgba(255, 255, 255, 0.35), 0 8rpx 22rpx rgba(var(--brand-rgb, 22,119,255), 0.28);
+  background: linear-gradient(135deg, var(--brand-l, #3a4046) 0%, var(--brand-d, #0060df) 100%);
+  box-shadow: inset 0 1rpx 0 rgba(255, 255, 255, 0.35), 0 8rpx 22rpx rgba(var(--brand-rgb, 47,50,55), 0.28);
 }
 
 /* 调色滑块 */
 .ts-row { display: flex; align-items: center; gap: 16rpx; margin-top: 18rpx; }
-.ts-label { flex-shrink: 0; width: 72rpx; font-size: 26rpx; color: #6b7c90; }
+.ts-label { flex-shrink: 0; width: 72rpx; font-size: 26rpx; color: #8a94a6; }
 .ts-hue-wrap { position: relative; flex: 1; height: 64rpx; }
 .ts-hue-rainbow {
   position: absolute;
@@ -147,40 +141,38 @@
 .ts-preset.on {
   box-shadow:
     0 0 0 4rpx rgba(255, 255, 255, 0.94),
-    0 0 0 7rpx var(--brand, #1677ff),
-    0 6rpx 18rpx rgba(var(--brand-rgb, 22,119,255), 0.32);
+    0 0 0 7rpx var(--brand, #2f3237),
+    0 6rpx 18rpx rgba(var(--brand-rgb, 47,50,55), 0.32);
 }
 
 .ts-actions { display: flex; gap: 20rpx; margin-top: 36rpx; }
 .ts-btn { flex: 1; height: 86rpx; line-height: 86rpx; text-align: center; border-radius: 22rpx; font-size: 29rpx; }
 /* 次级按钮也走玻璃（与全站 .glass 一套语言） */
 .ts-btn.ghost {
-  color: var(--ink, #12253d);
+  color: var(--ink, #11131a);
   background: linear-gradient(140deg, rgba(255, 255, 255, 0.68) 0%, rgba(255, 255, 255, 0.44) 100%);
-  backdrop-filter: blur(26rpx) saturate(1.7);
-  -webkit-backdrop-filter: blur(26rpx) saturate(1.7);
-  border: 1rpx solid rgba(var(--brand-rgb, 22,119,255), 0.16);
+  border: 1rpx solid rgba(var(--brand-rgb, 47,50,55), 0.16);
   box-shadow: inset 0 1rpx 0 rgba(255, 255, 255, 0.90), 0 6rpx 18rpx rgba(var(--shadow-rgb, 20,70,140), 0.10);
 }
 .ts-btn.ghost:active {
   background: linear-gradient(140deg, rgba(255, 255, 255, 0.80) 0%, rgba(255, 255, 255, 0.56) 100%);
-  border-color: rgba(var(--brand-rgb, 22,119,255), 0.30);
+  border-color: rgba(var(--brand-rgb, 47,50,55), 0.30);
   box-shadow: inset 0 1rpx 0 rgba(255, 255, 255, 0.95), 0 9rpx 24rpx rgba(var(--shadow-rgb, 20,70,140), 0.15);
 }
 .ts-btn.solid {
   color: var(--on-brand, #ffffff);
-  background: linear-gradient(135deg, var(--brand-l, #3b8cff) 0%, var(--brand-d, #0b5fd0) 100%);
-  box-shadow: inset 0 1rpx 0 rgba(255, 255, 255, 0.35), 0 8rpx 22rpx rgba(var(--brand-rgb, 22,119,255), 0.28);
+  background: linear-gradient(135deg, var(--brand-l, #3a4046) 0%, var(--brand-d, #0060df) 100%);
+  box-shadow: inset 0 1rpx 0 rgba(255, 255, 255, 0.35), 0 8rpx 22rpx rgba(var(--brand-rgb, 47,50,55), 0.28);
 }
 .ts-btn.solid:active { filter: brightness(1.06); }
 
 /* ============ 眼镜端扫码登录弹层（2026-10-12 随本页迁出） ============ */
-.qr-panel { position: relative; width: 560rpx; padding: 40rpx 40rpx 30rpx; border-radius: 24rpx; background: rgba(255,255,255,0.34); backdrop-filter: blur(40rpx) saturate(1.8); -webkit-backdrop-filter: blur(40rpx) saturate(1.8); border: 2rpx solid rgba(var(--brand-rgb, 22,119,255), 0.14); box-shadow: 0 16rpx 48rpx rgba(20,40,60,0.25); display: flex; flex-direction: column; align-items: center; }
-.qr-title { font-size: 32rpx; font-weight: 650; color: var(--ink, #12253d); }
-.qr-sub { margin-top: 12rpx; font-size: 24rpx; color: #8a9bb0; }
+.qr-panel { position: relative; width: 560rpx; padding: 40rpx 40rpx 30rpx; border-radius: 24rpx; background: #ffffff; border: 2rpx solid rgba(var(--brand-rgb, 47,50,55), 0.14); box-shadow: 0 16rpx 48rpx rgba(20,40,60,0.25); display: flex; flex-direction: column; align-items: center; }
+.qr-title { font-size: 32rpx; font-weight: 650; color: var(--ink, #11131a); }
+.qr-sub { margin-top: 12rpx; font-size: 24rpx; color: #8a94a6; }
 .qr-box { margin-top: 30rpx; padding: 20rpx; border: 1rpx solid #e8ede9; border-radius: 16rpx; position: relative; width: 260px; height: 260px; display: flex; align-items: center; justify-content: center; }
 .qr-canvas { position: absolute; left: -9999rpx; width: 220px; height: 220px; }
 .qr-img { width: 220px; height: 220px; }
-.qr-placeholder { font-size: 26rpx; color: #b9c6d6; }
-.qr-refresh { margin-top: 28rpx !important; color: #fff; background: linear-gradient(135deg, var(--brand-l, #3b8cff), var(--brand-d, #0b5fd0)); border-radius: 18rpx; font-size: 26rpx; }
-.qr-close { margin-top: 16rpx !important; color: #6b7c90; background: rgba(255,255,255,0.50); border-radius: 18rpx; font-size: 26rpx; }
+.qr-placeholder { font-size: 26rpx; color: #a8b2c1; }
+.qr-refresh { margin-top: 28rpx !important; color: #fff; background: linear-gradient(135deg, var(--brand-l, #3a4046), var(--brand-d, #0060df)); border-radius: 18rpx; font-size: 26rpx; }
+.qr-close { margin-top: 16rpx !important; color: #8a94a6; background: rgba(255,255,255,0.50); border-radius: 18rpx; font-size: 26rpx; }

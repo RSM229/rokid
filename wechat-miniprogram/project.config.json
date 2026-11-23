@@ -6,7 +6,7 @@
   "miniprogramRoot": "miniprogram/",
   "setting": {
     "es6": true,
-    "enhance": true,
+    "enhance": false,
     "postcss": true,
     "minified": true,
     "coverView": true,
@@ -29,8 +29,8 @@
       "disablePlugins": [],
       "outputPath": ""
     },
-    "swc": false,
-    "disableSWC": true
+    "swc": true,
+    "disableSWC": false
   },
   "condition": {},
   "simulatorPluginLibVersion": {},

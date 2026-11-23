@@ -1,7 +1,7 @@
 /* ============ 玻璃拟态设计系统 v3.0（科技蓝 · 纯白底 · 适配监理通 B2B） ============
-   主题色：**深海蓝 var(--brand, #0a2e5c)**（2026-10-13 由电光蓝 #1677ff 切换为欢迎页同款深蓝，并新增为预设默认）
-   色板：主色 var(--brand, #0a2e5c) / 渐变亮端 var(--brand-l, #0b3d78) / 渐变暗端 var(--brand-d, #0a3363) / 导航栏深海蓝 var(--brand-deep, #082548)
-        正文 var(--ink, #12253d) / 次要 #6b7c90 / 轮廓线 rgba(var(--brand-rgb, 22,119,255), .14) / 柔影 rgba(var(--shadow-rgb, 20,70,140), .10)
+   主题色：**深海蓝 var(--brand, #33405a)**（2026-10-13 由电光蓝 #2f3237 切换为欢迎页同款深蓝，并新增为预设默认）
+   色板：主色 var(--brand, #33405a) / 渐变亮端 var(--brand-l, #0b3d78) / 渐变暗端 var(--brand-d, #0a3363) / 导航栏深海蓝 var(--brand-deep, #082548)
+        正文 var(--ink, #11131a) / 次要 #8a94a6 / 轮廓线 rgba(var(--brand-rgb, 47,50,55), .14) / 柔影 rgba(var(--shadow-rgb, 20,70,140), .10)
    注意：危险红灯 #b93838 与警示橙 #d97706 属语义色，**不随主题变**。
    批量切换工具：D:\rokid\.workbuddy\checks\blue_theme.js（--apply 写入）
 
@@ -14,7 +14,7 @@
    背景：**纯白 #FFFFFF**（用户硬性要求）。
    这意味着页面级 backdrop-filter 没有可模糊的内容（模糊纯白仍是纯白），
    所以纯白底上的玻璃质感由【元素自身】四要素表达：
-     ① 边界 —— 淡品牌蓝细线 1rpx rgba(var(--brand-rgb, 22,119,255), 0.14)
+     ① 边界 —— 淡品牌蓝细线 1rpx rgba(var(--brand-rgb, 47,50,55), 0.14)
         （白底上白边框完全不可见，必须用淡蓝线衬出卡片轮廓）
      ② 层叠 —— 顶缘内高光 + 底缘品牌蓝微染（inset box-shadow）
      ③ 浮起 —— 柔和品牌蓝投影 0 8rpx 26rpx rgba(var(--shadow-rgb, 20,70,140), 0.10)
@@ -26,8 +26,182 @@ page {
   /* 页面底色 = 纯白 #FFFFFF（用户硬性要求，2026-09-20 明确"我的要求是背景是纯白的"）
      这里同时承担越界区、下拉回弹、短内容页的兜底。 */
   background-color: #ffffff;
-  color: var(--ink, #12253d);
+  color: var(--ink, #11131a);
   font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif;
+
+  /* ===== 语义化令牌层（2026-11-20）=====
+     背景：整套 glass 设计之前只有颜色变量（--ink/--brand 等，由 utils/theme.ts 注入），
+     而圆角、间距、字号、阴影全靠各页面手写数值——agent 页 528 条规则里出现了
+     8/10/14/16/24/32rpx 七种圆角和 19/20/21/22/24/26/28/32rpx 八种字号，
+     视觉上"没有规律"就是这么来的。
+
+     这里补一层与颜色无关的骨架令牌：页面各自仍可用数值，但新增/改造时优先引用，
+     让同一类元素在所有页面上对齐。命名沿用常见的 t-shirt 尺度。 */
+
+  /* 圆角：按元素角色分四档（对应原型 r-screen/r-card/r-bubble/r-pill） */
+  --r-card: 24rpx;      /* 卡片、面板、弹层 */
+  --r-bubble: 22rpx;    /* 聊天气泡 */
+  --r-item: 16rpx;      /* 列表行、chips、按钮 */
+  --r-pill: 999rpx;     /* 胶囊：标签、状态点 */
+
+  /* 间距：统一的 4 档纵向节奏 */
+  --gap-1: 8rpx;
+  --gap-2: 12rpx;
+  --gap-3: 16rpx;
+  --gap-4: 24rpx;
+
+  /* 字号：正文/次要/最小 三档（原页面出现八种，收敛到语义三档 + 两个特例） */
+  --fs-body: 28rpx;     /* 正文 */
+  --fs-sub: 24rpx;      /* 次要信息、列表描述 */
+  --fs-mini: 21rpx;     /* 注释、标签、分组标题 */
+
+  /* 阴影：两档，避免每处手调 */
+  --shadow-row: 0 2rpx 10rpx rgba(var(--shadow-rgb, 20,70,140), 0.06);
+  --shadow-float: 0 14rpx 36rpx rgba(var(--deep-rgb, 10,46,92), 0.20);
+}
+
+/* ============================================================
+   平面极简体系（2026-11-21）
+   来源：对标同业务的 jl 小程序（C:\Users\NJHTR\WeChatProjects\jl）。
+   那套页面的观感来自「一层色 + 一根线」，而不是玻璃的多重光影：
+     - app.wxss 只有 671 字节，只做字体/box-sizing/button 重置
+     - 登录页无卡片包裹：背景光晕 + 横版 logo + 大圆角按钮
+     - 按钮 104rpx 高、52rpx 圆角、单层渐变 + 单层投影
+   而我们现有的 .glass/.card 是「渐变 + blur + 内高光 + 外阴影 + 描边」五重装饰，
+   叠三层就是十几重光影 —— 这就是"层层叠叠"的来源。
+
+   这里并存一套平面类：新页面优先用它们，旧页面按批次迁移，
+   不一次性删除 .glass/.card（避免波及 30+ 页面引发回归）。
+   ============================================================ */
+
+:root,
+page {
+  /* jl 的取值：底色 #f7f9fc、正文 #11131a、次要 #8a94a6、主色 #2f3237 */
+  --flat-bg: #f2f4f7;
+  --flat-ink: #11131a;
+  --flat-ink-2: #33405a;
+  --flat-ink-3: #8a94a6;
+  --flat-line: rgba(17, 19, 26, 0.08);      /* 唯一的一根线 */
+  --flat-surface: #ffffff;                   /* 唯一的一层白 */
+  --flat-brand: #2f3237;
+  --flat-brand-deep: #1e2229;
+  --flat-shadow: 0 2rpx 12rpx rgba(22, 38, 74, 0.06);
+  --flat-shadow-btn: 0 18rpx 36rpx -18rpx rgba(17, 19, 26, 0.28);
+}
+
+/* 平面页容器：柔和底色，代替纯白 + 玻璃层 */
+.page-flat {
+  min-height: 100%;
+  background: var(--flat-bg, #f2f4f7);
+  color: var(--flat-ink, #11131a);
+}
+
+/* 背景光晕：jl 的登录页/主页面都靠这个造氛围，两个径向渐变即可，成本极低 */
+.flat-glow {
+  position: absolute;
+  border-radius: 50%;
+  pointer-events: none;
+}
+.flat-glow-a {
+  width: 560rpx;
+  height: 560rpx;
+  left: -160rpx;
+  top: -180rpx;
+  background: radial-gradient(circle, rgba(96, 148, 255, 0.28), rgba(96, 148, 255, 0));
+}
+.flat-glow-b {
+  width: 520rpx;
+  height: 520rpx;
+  right: -180rpx;
+  bottom: -140rpx;
+  background: radial-gradient(circle, rgba(70, 224, 171, 0.22), rgba(70, 224, 171, 0));
+}
+
+/* 平面卡片：一层白 + 一根线 + 单层微阴影（对照 .card 的五重装饰） */
+.card-flat {
+  background: var(--flat-surface, #ffffff);
+  border: 1rpx solid var(--flat-line, rgba(17, 19, 26, 0.08));
+  border-radius: 28rpx;
+  box-shadow: var(--flat-shadow, 0 2rpx 12rpx rgba(22, 38, 74, 0.06));
+}
+.card-flat:active {
+  background: rgba(247, 249, 252, 0.9);
+}
+
+/* 平面主按钮：104rpx 高、大圆角、单层渐变 + 单层投影（jl 的 .wxbtn） */
+.btn-flat {
+  width: 100%;
+  height: 104rpx;
+  line-height: 104rpx;
+  border-radius: 52rpx;
+  border: none;
+  background: linear-gradient(160deg, #3a4046, #2f3237 55%, #1e2229);
+  box-shadow: var(--flat-shadow-btn, 0 18rpx 36rpx -18rpx rgba(17,19,26,0.28));
+  color: #ffffff;
+  font-size: 32rpx;
+  font-weight: 600;
+  letter-spacing: 2rpx;
+  padding: 0;
+  margin: 0;
+}
+.btn-flat::after {
+  border: none;
+}
+.btn-flat:active {
+  opacity: 0.88;
+}
+
+/* 平面次要按钮：白底 + 一根线 */
+.btn-flat-ghost {
+  width: 100%;
+  height: 96rpx;
+  line-height: 96rpx;
+  border-radius: 48rpx;
+  border: 1rpx solid var(--flat-line, rgba(17, 19, 26, 0.08));
+  background: var(--flat-surface, #ffffff);
+  color: var(--flat-ink-2, #33405a);
+  font-size: 30rpx;
+  font-weight: 500;
+  padding: 0;
+  margin: 0;
+}
+.btn-flat-ghost::after {
+  border: none;
+}
+
+/* 平面输入框：白底 + 一根线，聚焦时才用品牌色描边 */
+.field-flat {
+  width: 100%;
+  height: 96rpx;
+  padding: 0 28rpx;
+  box-sizing: border-box;
+  border-radius: 20rpx;
+  border: 1rpx solid var(--flat-line, rgba(17, 19, 26, 0.08));
+  background: var(--flat-surface, #ffffff);
+  color: var(--flat-ink, #11131a);
+  font-size: 30rpx;
+}
+
+/* 平面列表行：靠一根分隔线分隔，不用卡片包裹 */
+.row-flat {
+  display: flex;
+  align-items: center;
+  gap: 20rpx;
+  padding: 24rpx 4rpx;
+  border-bottom: 1rpx solid var(--flat-line, rgba(17, 19, 26, 0.08));
+}
+.row-flat:last-child {
+  border-bottom: 0;
+}
+.row-flat:active {
+  background: rgba(247, 249, 252, 0.9);
+}
+
+/* 平面图标：统一尺寸，四色变体由文件名后缀决定 */
+.ic-flat {
+  width: 44rpx;
+  height: 44rpx;
+  flex: none;
 }
 
 /* 页面根容器：纯白，不铺任何渐变/光晕
@@ -38,7 +212,9 @@ page {
   min-height: 100vh;
   padding: 28rpx;
   box-sizing: border-box;
-  background-color: #ffffff;
+  /* 浅灰底：白色分组卡片才有对比。
+     原来是纯白，卡片和背景同色，整页发「素」（只在一条细线上体现分隔）。 */
+  background-color: #f2f4f7;
 }
 
 /* 基础玻璃卡（8.6 极简克制）
@@ -49,28 +225,18 @@ page {
    - 投影用品牌蓝而非灰黑，保持与整体调性一致。 */
 .glass, .card {
   position: relative;
-  background: linear-gradient(140deg, rgba(255, 255, 255, 0.94) 0%, rgba(var(--wash-rgb, 234,243,255), 0.80) 100%);
-  backdrop-filter: blur(36rpx) saturate(1.9);
-  -webkit-backdrop-filter: blur(36rpx) saturate(1.9);
-  border: 1rpx solid rgba(var(--brand-rgb, 22,119,255), 0.14);
+  background: #ffffff;
+  border: 1rpx solid rgba(17, 19, 26, 0.08);
   border-radius: 26rpx;
-  box-shadow:
-    inset 0 1rpx 0 rgba(255, 255, 255, 0.98),
-    inset 0 -14rpx 30rpx rgba(var(--brand-rgb, 22,119,255), 0.05),
-    0 8rpx 26rpx rgba(var(--shadow-rgb, 20,70,140), 0.10);
-  transition: background 0.25s ease, backdrop-filter 0.25s ease, -webkit-backdrop-filter 0.25s ease, box-shadow 0.25s ease, transform 0.12s ease;
+  box-shadow: 0 2rpx 12rpx rgba(22, 38, 74, 0.06);
+  transition: background 0.18s ease, box-shadow 0.18s ease, transform 0.12s ease;
 }
 
 /* 交互聚焦：轻点卡片时白度提升、模糊加深、投影扩散（8.3） */
 .glass:active, .card:active {
-  background: linear-gradient(140deg, rgba(255, 255, 255, 1) 0%, rgba(var(--wash-rgb, 234,243,255), 0.90) 100%);
-  backdrop-filter: blur(46rpx) saturate(2.3);
-  -webkit-backdrop-filter: blur(46rpx) saturate(2.3);
-  border-color: rgba(var(--brand-rgb, 22,119,255), 0.24);
-  box-shadow:
-    inset 0 1rpx 0 rgba(255, 255, 255, 1),
-    inset 0 -14rpx 30rpx rgba(var(--brand-rgb, 22,119,255), 0.07),
-    0 12rpx 34rpx rgba(var(--shadow-rgb, 20,70,140), 0.14);
+  background: #f7f9fc;
+  border-color: rgba(17, 19, 26, 0.12);
+  box-shadow: 0 4rpx 16rpx rgba(22, 38, 74, 0.10);
 }
 
 .card {
@@ -81,41 +247,20 @@ page {
 /* 品牌蓝渐变玻璃：用于头部横幅/重点面板（8.2） */
 .glass-blue, .glass-tint {
   position: relative;
-  background: linear-gradient(135deg, rgba(var(--brand-l-rgb, 59,140,255), 0.34) 0%, rgba(var(--brand-d-rgb, 11,95,208), 0.24) 100%);
-  backdrop-filter: blur(38rpx) saturate(1.9);
-  -webkit-backdrop-filter: blur(38rpx) saturate(1.9);
-  border: 1rpx solid rgba(255, 255, 255, 0.60);
+  background: rgba(var(--brand-rgb, 47,50,55), 0.06);
+  border: 1rpx solid rgba(17, 19, 26, 0.08);
   border-radius: 26rpx;
-  box-shadow: inset 0 1rpx 0 rgba(255, 255, 255, 0.60), 0 8rpx 26rpx rgba(var(--brand-rgb, 22,119,255), 0.18);
+  box-shadow: 0 8rpx 26rpx rgba(var(--brand-rgb, 47,50,55), 0.18);
   transition: background 0.25s ease, box-shadow 0.25s ease;
 }
 
 /* 多层玻璃（8.1）：在 .glass-2 上叠一层更深、更模糊的底层，营造由远及近景深 */
 .glass-2 {
   position: relative;
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.98) 0%, rgba(var(--wash-rgb, 234,243,255), 0.86) 100%);
-  backdrop-filter: blur(26rpx) saturate(1.9);
-  -webkit-backdrop-filter: blur(26rpx) saturate(1.9);
-  border: 1rpx solid rgba(var(--brand-rgb, 22,119,255), 0.16);
+  background: #ffffff;
+  border: 1rpx solid rgba(17, 19, 26, 0.08);
   border-radius: 28rpx;
-  box-shadow:
-    inset 0 1rpx 0 rgba(255, 255, 255, 1),
-    inset 0 -16rpx 34rpx rgba(var(--brand-rgb, 22,119,255), 0.05),
-    0 10rpx 34rpx rgba(var(--shadow-rgb, 20,70,140), 0.12);
-}
-.glass-2::after {
-  content: '';
-  position: absolute;
-  left: 12rpx;
-  right: 12rpx;
-  bottom: -12rpx;
-  height: 56%;
-  border-radius: inherit;
-  background: rgba(255, 255, 255, 0.34);
-  border: 1rpx solid rgba(var(--brand-rgb, 22,119,255), 0.10);
-  backdrop-filter: blur(48rpx) saturate(1.4);
-  -webkit-backdrop-filter: blur(48rpx) saturate(1.4);
-  z-index: -1;
+  box-shadow: 0 2rpx 12rpx rgba(22, 38, 74, 0.06);
 }
 
 /* 胶囊标签/筛选：轻量玻璃，可点聚焦（8.3/8.6） */
@@ -126,22 +271,20 @@ page {
   padding: 10rpx 22rpx;
   border-radius: 999rpx;
   background: rgba(255, 255, 255, 0.90);
-  border: 1rpx solid rgba(var(--brand-rgb, 22,119,255), 0.16);
-  backdrop-filter: blur(26rpx) saturate(1.8);
-  -webkit-backdrop-filter: blur(26rpx) saturate(1.8);
-  box-shadow: inset 0 1rpx 0 rgba(255, 255, 255, 0.98), 0 2rpx 10rpx rgba(var(--shadow-rgb, 20,70,140), 0.08);
+  border: 1rpx solid rgba(17, 19, 26, 0.08);
+  box-shadow: 0 2rpx 10rpx rgba(var(--shadow-rgb, 20,70,140), 0.08);
   font-size: 24rpx;
-  color: var(--ink, #12253d);
+  color: var(--ink, #11131a);
   transition: all 0.2s ease;
 }
 .g-chip:active {
   background: rgba(255, 255, 255, 1);
-  border-color: rgba(var(--brand-rgb, 22,119,255), 0.26);
+  border-color: rgba(var(--brand-rgb, 47,50,55), 0.26);
 }
 .g-chip.active {
   background: linear-gradient(135deg, rgba(var(--brand-l-rgb, 59,140,255), 0.22), rgba(var(--brand-d-rgb, 11,95,208), 0.20));
-  border-color: rgba(var(--brand-rgb, 22,119,255), 0.45);
-  color: var(--brand, #1677ff);
+  border-color: rgba(var(--brand-rgb, 47,50,55), 0.45);
+  color: var(--brand, #2f3237);
   font-weight: 600;
 }
 
@@ -158,9 +301,9 @@ page {
 /* 主按钮：品牌蓝渐变玻璃 + 交互聚焦（8.2/8.3） */
 .primary {
   color: #ffffff;
-  background: linear-gradient(135deg, var(--brand-l, #3b8cff) 0%, var(--brand-d, #0b5fd0) 100%);
+  background: linear-gradient(135deg, var(--brand-l, #3a4046) 0%, var(--brand-d, #0060df) 100%);
   border: 1rpx solid rgba(255, 255, 255, 0.35);
-  box-shadow: inset 0 1rpx 0 rgba(255, 255, 255, 0.35), 0 8rpx 24rpx rgba(var(--brand-rgb, 22,119,255), 0.30);
+  box-shadow: 0 8rpx 24rpx rgba(var(--brand-rgb, 47,50,55), 0.30);
   transition: filter 0.2s ease, transform 0.12s ease;
 }
 .primary:active {
@@ -172,7 +315,7 @@ page {
   color: #ffffff;
   background: linear-gradient(135deg, #c44848 0%, #a83232 100%);
   border: 1rpx solid rgba(255, 255, 255, 0.30);
-  box-shadow: inset 0 1rpx 0 rgba(255, 255, 255, 0.30), 0 8rpx 24rpx rgba(185, 56, 56, 0.25);
+  box-shadow: 0 8rpx 24rpx rgba(185, 56, 56, 0.25);
   transition: filter 0.2s ease, transform 0.12s ease;
 }
 .danger:active {
@@ -194,12 +337,10 @@ page {
   min-height: 88rpx;
   padding: 0 22rpx;
   line-height: 88rpx;
-  border: 1rpx solid rgba(var(--brand-rgb, 22,119,255), 0.16);
+  border: 1rpx solid rgba(17, 19, 26, 0.08);
   border-radius: 18rpx;
   background: rgba(255, 255, 255, 0.92);
-  backdrop-filter: blur(30rpx) saturate(1.8);
-  -webkit-backdrop-filter: blur(30rpx) saturate(1.8);
-  box-shadow: inset 0 1rpx 0 rgba(255, 255, 255, 0.98), 0 2rpx 10rpx rgba(var(--shadow-rgb, 20,70,140), 0.07);
+  box-shadow: 0 2rpx 10rpx rgba(var(--shadow-rgb, 20,70,140), 0.07);
   box-sizing: border-box;
 }
 
@@ -216,7 +357,7 @@ page {
 .empty {
   padding: 80rpx 20rpx;
   text-align: center;
-  color: #6b7c90;
+  color: #8a94a6;
 }
 
 /* 常驻底栏宿主：为固定底栏预留安全留白（2026-09-20） */
@@ -232,7 +373,7 @@ page {
   margin: 0 0 20rpx;
   padding: 20rpx 0;
   border-radius: 16rpx;
-  background: linear-gradient(135deg, var(--brand-l, #3b8cff), var(--brand-d, #0b5fd0));
+  background: linear-gradient(135deg, var(--brand-l, #3a4046), var(--brand-d, #0060df));
   color: #ffffff;
   font-size: 27rpx;
   font-weight: 600;
@@ -244,8 +385,8 @@ page {
 /* 次要态：已生成文书后的「查看文书」用描边样式，与蓝色主按钮「生成文书」区分 */
 .doc-btn.ghost {
   background: transparent;
-  color: var(--brand-d, #0b5fd0);
-  border: 2rpx solid var(--brand-d, #0b5fd0);
+  color: var(--brand-d, #0060df);
+  border: 2rpx solid var(--brand-d, #0060df);
 }
 /* 横排组：工作记录详情 / 文书详情底部按钮共用（等宽并排） */
 .doc-btn-row { display: flex; gap: 16rpx; }

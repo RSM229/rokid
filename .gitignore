@@ -1,4 +1,4 @@
-﻿# ===== 敏感信息（必须）=====
+# ===== 敏感信息（必须）=====
 *key*.txt
 *Key*.txt
 *API*.md
@@ -89,3 +89,11 @@ web-admin/dist*/
 
 # ===== 保留示例 zip（如不需要可删掉这行）=====
 !rokid_glass/rokid_glass/glasses-app/cxrlsampe.zip
+
+# ===== 运行日志与测试产物（本地产出，不入库）=====
+# 说明：tmp/ 不做整目录忽略——仓库约定那里可能放需要提交的开发脚本，
+# 因此只忽略下面这些确定是运行产物的目录。
+logs/
+cloud-backend/logs/
+outputs/
+*.log

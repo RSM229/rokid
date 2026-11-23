@@ -3,16 +3,16 @@
 .card {
   padding: 24rpx; margin-bottom: 20rpx;
   background: rgba(255,255,255,0.9);
-  border: 2rpx solid rgba(var(--brand-rgb, 22,119,255), 0.14);
+  border: 2rpx solid rgba(var(--brand-rgb, 47,50,55), 0.14);
   border-radius: 16rpx; box-shadow: 0 2rpx 8rpx rgba(0,0,0,0.04);
 }
 .card.empty { text-align: center; font-size: 26rpx; color: var(--ink-2, #5b6b7f); padding: 60rpx 24rpx; }
-.lbl { font-size: 26rpx; color: var(--ink, #12253d); font-weight: 500; margin-bottom: 10rpx; }
+.lbl { font-size: 26rpx; color: var(--ink, #11131a); font-weight: 500; margin-bottom: 10rpx; }
 .title-input {
   box-sizing: border-box; width: 100%; height: 84rpx; line-height: 84rpx;
-  padding: 0 24rpx; font-size: 28rpx; color: var(--ink, #12253d);
+  padding: 0 24rpx; font-size: 28rpx; color: var(--ink, #11131a);
   background: rgba(255,255,255,0.9);
-  border: 1rpx solid rgba(var(--brand-rgb, 22,119,255), 0.25);
+  border: 1rpx solid rgba(var(--brand-rgb, 47,50,55), 0.25);
   border-radius: 16rpx;
 }
 
@@ -20,8 +20,8 @@
 .prefill-tip {
   margin-bottom: 16rpx; padding: 16rpx 24rpx;
   font-size: 24rpx; line-height: 1.5;
-  color: var(--brand-d, #0b5fd0);
-  background: rgba(var(--brand-rgb, 22,119,255), 0.08);
+  color: var(--brand-d, #0060df);
+  background: rgba(var(--brand-rgb, 47,50,55), 0.08);
   border-radius: 12rpx;
 }
 /* 本地草稿恢复提示：橙色调，区别于服务端预填的蓝色 */
@@ -42,18 +42,18 @@
   border: 1rpx solid transparent;
 }
 .step-chip.on {
-  background: rgba(var(--brand-rgb, 22,119,255), 0.12);
-  border-color: rgba(var(--brand-rgb, 22,119,255), 0.45);
+  background: rgba(var(--brand-rgb, 47,50,55), 0.12);
+  border-color: rgba(var(--brand-rgb, 47,50,55), 0.45);
 }
 .step-no {
   flex: none; width: 34rpx; height: 34rpx; line-height: 34rpx; text-align: center;
   font-size: 20rpx; border-radius: 50%;
   color: var(--ink-2, #5b6b7f); background: rgba(0,0,0,0.06);
 }
-.step-chip.on .step-no { color: #fff; background: var(--brand, #1677ff); }
-.step-chip.done .step-no { color: #fff; background: var(--brand-l, #3b8cff); }
+.step-chip.on .step-no { color: #fff; background: var(--brand, #2f3237); }
+.step-chip.done .step-no { color: #fff; background: var(--brand-l, #3a4046); }
 .step-name {
-  font-size: 24rpx; color: var(--ink, #12253d);
+  font-size: 24rpx; color: var(--ink, #11131a);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 
@@ -62,7 +62,7 @@
   display: flex; align-items: center; justify-content: space-between;
   margin-bottom: 8rpx;
 }
-.step-title { font-size: 28rpx; font-weight: 500; color: var(--ink, #12253d); }
+.step-title { font-size: 28rpx; font-weight: 500; color: var(--ink, #11131a); }
 .step-count { font-size: 24rpx; color: var(--ink-2, #5b6b7f); }
 
 /* 缺项提示 */
@@ -74,7 +74,7 @@
 }
 .miss-head { display: flex; align-items: center; justify-content: space-between; }
 .miss-t { font-size: 26rpx; font-weight: 500; color: #8a5a00; }
-.miss-go { font-size: 24rpx; color: var(--brand, #1677ff); }
+.miss-go { font-size: 24rpx; color: var(--brand, #2f3237); }
 .miss-list { display: flex; flex-wrap: wrap; gap: 10rpx; margin-top: 12rpx; }
 .miss-item {
   font-size: 22rpx; padding: 6rpx 14rpx; border-radius: 8rpx;
@@ -85,12 +85,12 @@
 .actions { display: flex; gap: 16rpx; margin-top: 8rpx; }
 .btn-ghost {
   flex: none; width: 200rpx; font-size: 28rpx; border-radius: 16rpx;
-  color: var(--ink, #12253d); background: rgba(var(--wash-rgb, 232,238,246), 0.9);
-  border: 1rpx solid rgba(var(--brand-rgb, 22,119,255), 0.2);
+  color: var(--ink, #11131a); background: rgba(var(--wash-rgb, 232,238,246), 0.9);
+  border: 1rpx solid rgba(var(--brand-rgb, 47,50,55), 0.2);
 }
 .btn-next, .btn-save {
   flex: 1; font-size: 28rpx; border-radius: 16rpx; border: none; color: #fff;
-  background: linear-gradient(135deg, var(--brand-l, #3b8cff), var(--brand-d, #0b5fd0));
+  background: linear-gradient(135deg, var(--brand-l, #3a4046), var(--brand-d, #0060df));
 }
 .btn-save[disabled] { opacity: 0.6; }
 .bottom-gap { height: 60rpx; }

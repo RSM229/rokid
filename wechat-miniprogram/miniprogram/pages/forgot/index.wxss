@@ -34,19 +34,17 @@
   color: #8a8f8c;
   padding: 12rpx 0;
   border-radius: 12rpx;
-  background: rgba(255, 255, 255, 0.32);
+  background: #ffffff;
 }
 
 .step.active {
   color: #fff;
-  background: linear-gradient(135deg, var(--brand-l, #3b8cff), var(--brand-d, #0b5fd0));
+  background: linear-gradient(135deg, var(--brand-l, #3a4046), var(--brand-d, #0060df));
 }
 
 .form {
-  background: rgba(255, 255, 255, 0.32);
-  backdrop-filter: blur(40rpx) saturate(1.8);
-  -webkit-backdrop-filter: blur(40rpx) saturate(1.8);
-  border: 2rpx solid rgba(var(--brand-rgb, 22, 119, 255), 0.14);
+  background: #ffffff;
+  border: 2rpx solid rgba(var(--brand-rgb, 47,50,55), 0.14);
   box-shadow: inset 0 2rpx 0 rgba(255, 255, 255, 0.4), 0 12rpx 36rpx rgba(var(--shadow-rgb, 20, 70, 140), 0.16);
   border-radius: 20rpx;
   padding: 8rpx 32rpx;
@@ -72,7 +70,7 @@
 .input {
   width: 100%;
   height: 72rpx;
-  background: rgba(255, 255, 255, 0.34);
+  background: #ffffff;
   border-radius: 12rpx;
   padding: 0 24rpx;
   font-size: 28rpx;
@@ -82,7 +80,7 @@
 .notice {
   margin: 8rpx 0;
   padding: 16rpx 20rpx;
-  background: rgba(22, 119, 255, 0.06);
+  background: rgba(47,50,55, 0.06);
   border-radius: 12rpx;
   font-size: 24rpx;
   line-height: 1.6;
@@ -100,7 +98,7 @@
   width: 100%;
   height: 88rpx;
   line-height: 88rpx;
-  background: linear-gradient(135deg, var(--brand-l, #3b8cff), var(--brand-d, #0b5fd0));
+  background: linear-gradient(135deg, var(--brand-l, #3a4046), var(--brand-d, #0060df));
   color: #fff;
   font-size: 32rpx;
   font-weight: 600;
@@ -142,7 +140,7 @@
   margin: 0 auto 20rpx;
   color: #fff;
   font-size: 52rpx;
-  background: linear-gradient(135deg, var(--brand-l, #3b8cff), var(--brand-d, #0b5fd0));
+  background: linear-gradient(135deg, var(--brand-l, #3a4046), var(--brand-d, #0060df));
 }
 
 .done-text {
@@ -164,5 +162,5 @@
 }
 
 .link {
-  color: var(--brand, #1677ff);
+  color: var(--brand, #2f3237);
 }

@@ -4,7 +4,7 @@
   height: 100vh;
   overflow: hidden;
   background: #fff;
-  color: var(--ink, #12253d);
+  color: var(--ink, #11131a);
   box-sizing: border-box;
 }
 
@@ -30,7 +30,7 @@
   width: 10rpx;
   height: 10rpx;
   border-radius: 50%;
-  background: var(--brand-l, #3b8cff);
+  background: var(--brand-l, #3a4046);
   box-shadow: 0 0 0 5rpx rgba(var(--brand-rgb, 10,46,92), 0.08);
 }
 
@@ -41,7 +41,7 @@
 .intro-kicker {
   display: block;
   margin-bottom: 10rpx;
-  color: var(--brand, #0a2e5c);
+  color: var(--brand, #33405a);
   font-size: 22rpx;
   font-weight: 650;
   letter-spacing: 3rpx;
@@ -112,7 +112,7 @@
 }
 
 .object-type {
-  color: var(--brand, #0a2e5c);
+  color: var(--brand, #33405a);
   font-size: 22rpx;
   font-weight: 650;
 }
@@ -219,7 +219,7 @@
 .error-copy { display: block; margin: 8rpx 0 14rpx; color: #9a6b6b; font-size: 23rpx; line-height: 1.55; }
 
 .text-link {
-  color: var(--brand, #0a2e5c);
+  color: var(--brand, #33405a);
   font-size: 24rpx;
   font-weight: 600;
 }
@@ -259,13 +259,13 @@
   flex: none;
   border-radius: 18rpx;
   background: #f2f6fa;
-  color: var(--brand, #0a2e5c);
+  color: var(--brand, #33405a);
   font-size: 25rpx;
   font-weight: 700;
 }
 
 .mode-card.selected .mode-mark {
-  background: var(--brand, #0a2e5c);
+  background: var(--brand, #33405a);
   color: #fff;
 }
 
@@ -283,7 +283,7 @@
 }
 
 .select-dot.on {
-  border: 10rpx solid var(--brand, #0a2e5c);
+  border: 10rpx solid var(--brand, #33405a);
   background: #fff;
 }
 
@@ -369,7 +369,7 @@
   flex: none;
   border-radius: 50%;
   background: linear-gradient(145deg, rgba(var(--brand-rgb, 10,46,92), 0.12), rgba(var(--brand-rgb, 10,46,92), 0.04));
-  color: var(--brand, #0a2e5c);
+  color: var(--brand, #33405a);
   font-size: 26rpx;
   font-weight: 700;
 }
@@ -448,15 +448,13 @@
   font-size: 22rpx;
 }
 
-.date-pill.set { color: var(--brand, #0a2e5c); background: rgba(var(--brand-rgb, 10,46,92), 0.07); }
+.date-pill.set { color: var(--brand, #33405a); background: rgba(var(--brand-rgb, 10,46,92), 0.07); }
 
 .compose-footer {
   flex: none;
   padding: 14rpx 28rpx calc(14rpx + env(safe-area-inset-bottom));
   border-top: 1rpx solid rgba(var(--brand-rgb, 10,46,92), 0.10);
   background: rgba(255, 255, 255, 0.97);
-  backdrop-filter: blur(30rpx) saturate(1.6);
-  -webkit-backdrop-filter: blur(30rpx) saturate(1.6);
   box-sizing: border-box;
 }
 
@@ -475,7 +473,7 @@
 }
 
 .submit-btn.ready {
-  background: linear-gradient(135deg, var(--brand-l, #3b8cff) 0%, var(--brand, #0a2e5c) 100%);
+  background: linear-gradient(135deg, var(--brand-l, #3a4046) 0%, var(--brand, #33405a) 100%);
   color: #fff;
   box-shadow: 0 10rpx 24rpx rgba(var(--brand-rgb, 10,46,92), 0.22);
 }
@@ -512,7 +510,6 @@
   position: absolute;
   inset: 0;
   background: rgba(12, 24, 36, 0.42);
-  backdrop-filter: blur(6rpx);
 }
 
 .sheet-panel {
@@ -548,7 +545,7 @@
 .sheet-heading { flex: 1; min-width: 0; }
 .sheet-title { display: block; color: #172d43; font-size: 31rpx; font-weight: 680; }
 .sheet-subtitle { display: block; margin-top: 6rpx; color: #8795a5; font-size: 22rpx; line-height: 1.45; }
-.sheet-done { flex: none; padding: 4rpx 0 4rpx 12rpx; color: var(--brand, #0a2e5c); font-size: 25rpx; font-weight: 650; }
+.sheet-done { flex: none; padding: 4rpx 0 4rpx 12rpx; color: var(--brand, #33405a); font-size: 25rpx; font-weight: 650; }
 
 .sheet-list {
   flex: 1;
@@ -586,8 +583,8 @@
 }
 
 .check.on {
-  border-color: var(--brand, #0a2e5c);
-  background: var(--brand, #0a2e5c);
+  border-color: var(--brand, #33405a);
+  background: var(--brand, #33405a);
 }
 
 .sheet-footer {

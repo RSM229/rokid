@@ -1,117 +1,243 @@
+/* 引导页：与登录页统一平面风格（2026-11-21 重做）
+   改造前是深蓝渐变底 + 白字 + emoji 大图标，和登录页的浅底光晕风格割裂。
+   现在沿用登录页的四件套：浅底 + 两团径向光晕 + 横版品牌元素 + 胶囊按钮。 */
+
+page {
+  height: 100%;
+  background: #f7f9fc;
+}
+
 .guide-root {
+  position: relative;
   height: 100vh;
+  /* 去掉原生导航栏后，内容要自己让开状态栏 */
+  padding-top: calc(60rpx + env(safe-area-inset-top));
   display: flex;
   flex-direction: column;
-  background: linear-gradient(160deg, #0a2e5c 0%, #103a73 100%);
-  color: #fff;
+  background: #f7f9fc;
+  color: #11131a;
   box-sizing: border-box;
+  overflow: hidden;
 }
+
+/* 背景光晕：与登录页同款，两团径向渐变，成本极低 */
+.guide-glow {
+  position: absolute;
+  border-radius: 50%;
+  pointer-events: none;
+}
+.guide-glow-a {
+  width: 440rpx;
+  height: 440rpx;
+  left: -160rpx;
+  top: -180rpx;
+  background: radial-gradient(circle, rgba(96, 148, 255, 0.18), rgba(96, 148, 255, 0));
+}
+.guide-glow-b {
+  width: 420rpx;
+  height: 420rpx;
+  right: -180rpx;
+  bottom: -140rpx;
+  background: radial-gradient(circle, rgba(70, 224, 171, 0.14), rgba(70, 224, 171, 0));
+}
+
+/* 跳过：右上角裸文字，不用按钮样式 */
+/* 跳过：左上角悬浮胶囊，视觉对齐微信右上角官方胶囊（半透明白 + 模糊 + 细边）。
+   放左上是为了避开系统胶囊 —— 右上角那块位置被微信占用且不可移动。 */
 .skip-btn {
   position: absolute;
-  top: 24rpx;
-  right: 32rpx;
-  font-size: 26rpx;
-  color: rgba(255, 255, 255, 0.75);
-  z-index: 2;
+  /* 与右上角微信官方胶囊同高：胶囊中心约在状态栏下方 30rpx 处，
+     这里用 88rpx 让两者的视觉基线对齐（截图对比：原 24rpx 偏高约 70rpx）。 */
+  top: calc(88rpx + env(safe-area-inset-top));
+  left: 24rpx;
+  height: 56rpx;
+  line-height: 56rpx;
+  padding: 0 24rpx;
+  border-radius: 999rpx;
+  font-size: 24rpx;
+  font-weight: 500;
+  color: #33405a;
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border: 1rpx solid rgba(17, 19, 26, 0.06);
+  box-sizing: border-box;
+  z-index: 10;
 }
+.skip-btn:active {
+  background: rgba(255, 255, 255, 0.92);
+}
+
 .guide-swiper {
   flex: 1;
+  position: relative;
+  z-index: 1;
 }
+
 .slide {
   height: 100%;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 0 64rpx;
+  padding: 0 56rpx;
   text-align: center;
 }
+
+/* 图标：白底圆角方块 + 一根细线，emoji 落在里面；不再是裸 emoji 大字 */
 .slide-icon {
-  font-size: 140rpx;
-  margin-bottom: 48rpx;
+  width: 168rpx;
+  height: 168rpx;
+  line-height: 168rpx;
+  margin-bottom: 40rpx;
+  font-size: 76rpx;
+  border-radius: 44rpx;
+  background: #ffffff;
+  border: 1rpx solid rgba(17, 19, 26, 0.08);
+  box-shadow: 0 2rpx 12rpx rgba(22, 38, 74, 0.06);
 }
+
 .slide-title {
-  font-size: 44rpx;
+  font-size: 48rpx;
   font-weight: 700;
-  margin-bottom: 28rpx;
+  letter-spacing: 1rpx;
+  color: #11131a;
+  margin-bottom: 24rpx;
 }
+
 .slide-desc {
-  font-size: 30rpx;
+  font-size: 28rpx;
   line-height: 1.7;
-  color: rgba(255, 255, 255, 0.85);
+  color: #8a94a6;
 }
+
+/* 指示器：未选中是灰点，选中拉长成品牌色胶囊（比原来纯白点更清楚） */
 .dots {
   display: flex;
   justify-content: center;
-  gap: 16rpx;
-  padding: 24rpx 0;
+  align-items: center;
+  gap: 12rpx;
+  padding: 28rpx 0;
+  position: relative;
+  z-index: 1;
 }
 .dot {
-  width: 14rpx;
-  height: 14rpx;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.35);
+  width: 12rpx;
+  height: 12rpx;
+  border-radius: 999rpx;
+  background: #c9d4e3;
+  transition: width 0.2s ease, background 0.2s ease;
 }
 .dot.on {
-  background: #fff;
-  width: 36rpx;
-  border-radius: 8rpx;
+  width: 40rpx;
+  background: #2f3237;
 }
+
+/* 底部操作区：主按钮用登录页的大圆角胶囊按钮 */
 .actions {
-  padding: 0 64rpx 80rpx;
+  padding: 0 56rpx calc(80rpx + env(safe-area-inset-bottom));
+  position: relative;
+  z-index: 1;
 }
+
 .primary-btn {
-  background: #1677ff;
-  color: #fff;
-  border-radius: 48rpx;
+  width: 100%;
+  height: 104rpx;
+  line-height: 104rpx;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 52rpx;
   font-size: 32rpx;
+  font-weight: 600;
+  letter-spacing: 2rpx;
+  color: #ffffff;
+  background: linear-gradient(160deg, #3a4046, #2f3237 55%, #1e2229);
+  box-shadow: 0 18rpx 36rpx -18rpx rgba(17,19,26,0.28);
 }
+.primary-btn::after {
+  border: none;
+}
+
+/* 非最后一页的「下一步」：用和登录页一致的品牌蓝胶囊。
+   原来白底白边，在浅底上几乎没有轮廓（截图里看着像一条空白条）。 */
 .ghost-btn {
-  background: transparent;
-  color: #fff;
-  border: 1rpx solid rgba(255, 255, 255, 0.5);
-  border-radius: 48rpx;
+  width: 100%;
+  height: 104rpx;
+  line-height: 104rpx;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 52rpx;
   font-size: 32rpx;
+  font-weight: 600;
+  letter-spacing: 2rpx;
+  color: #ffffff;
+  background: linear-gradient(160deg, #3a4046, #2f3237 55%, #1e2229);
+  box-shadow: 0 18rpx 36rpx -18rpx rgba(17,19,26,0.28);
 }
+.ghost-btn::after {
+  border: none;
+}
+
+/* ===== 帮助页（mode==='help'）：同一套平面语言 ===== */
 .help-root {
   height: 100vh;
-  background: #f5f7fa;
-  padding: 32rpx;
+  background: #f7f9fc;
+  padding: 40rpx 32rpx calc(40rpx + env(safe-area-inset-bottom));
   box-sizing: border-box;
 }
+
 .help-sec {
-  background: #fff;
-  border-radius: 16rpx;
+  background: #ffffff;
+  border: 1rpx solid rgba(17, 19, 26, 0.08);
+  border-radius: 24rpx;
+  box-shadow: 0 2rpx 12rpx rgba(22, 38, 74, 0.05);
   padding: 28rpx;
   margin-bottom: 24rpx;
 }
+
 .help-h {
-  font-size: 32rpx;
-  font-weight: 700;
-  color: #0a2e5c;
+  font-size: 30rpx;
+  font-weight: 600;
+  color: #11131a;
   margin-bottom: 16rpx;
 }
+
 .help-li {
-  font-size: 28rpx;
-  color: #4a5c74;
+  font-size: 26rpx;
+  color: #8a94a6;
   line-height: 1.7;
   margin-bottom: 8rpx;
 }
+
 .help-links {
   display: flex;
   flex-direction: column;
   gap: 20rpx;
-  margin: 8rpx 0 24rpx;
+  margin: 8rpx 0 28rpx;
 }
+
 .link-btn {
-  background: #1677ff;
-  color: #fff;
+  width: 100%;
+  height: 96rpx;
+  line-height: 96rpx;
+  margin: 0;
+  padding: 0;
+  border: none;
   border-radius: 48rpx;
   font-size: 30rpx;
+  font-weight: 500;
+  color: #ffffff;
+  background: linear-gradient(160deg, #3a4046, #2f3237 55%, #1e2229);
 }
+.link-btn::after {
+  border: none;
+}
+
 .help-foot {
-  font-size: 24rpx;
-  color: #98a4b3;
+  font-size: 22rpx;
+  color: #a8b2c1;
   text-align: center;
-  padding: 16rpx 0 40rpx;
+  padding: 16rpx 0 24rpx;
 }

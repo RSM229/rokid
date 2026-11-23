@@ -1,0 +1,70 @@
+/**
+ * 大标题滚动收起 —— 渲染层计算（wxs）。
+ *
+ * 为什么用 wxs 而不是 onPageScroll + setData：
+ *   小程序 setData 是逻辑层→渲染层的跨线程通信，滚动每帧触发会掉帧。
+ *   wxs 直接跑在渲染层，只更新 style，不触发 setData。
+ *
+ * 设计依据（Apple HIG《toolbars》）：
+ *   "Reduce the use of toolbar backgrounds and tinted controls ... use the
+ *    content layer to inform the color and appearance of the toolbar, and use
+ *    a ScrollEdgeEffect when necessary to distinguish the toolbar area from
+ *    the content area."
+ *   → 导航栏不自己铺装饰，滚动时靠"边缘效果"浮现，标题随滚动收进栏内。
+ */
+
+/** 大标题完全收起所需的滚动距离（rpx）：滚过这个距离，标题变成导航栏内的小标题 */
+var COLLAPSE_DISTANCE = 120
+
+/**
+ * @param scrollTop  当前页面滚动距离（px）
+ * @param statusBarHeight 状态栏高度（px）
+ * @param navBarHeight    导航栏高度（px）
+ * @returns 大标题区域的样式字符串
+ */
+function largeTitleStyle(scrollTop, statusBarHeight, navBarHeight) {
+  var top = scrollTop || 0
+  var progress = top / COLLAPSE_DISTANCE
+  if (progress > 1) progress = 1
+  if (progress < 0) progress = 0
+
+  // 大标题：随滚动上移并淡出（位移最多 = 大标题自身高度）
+  var shift = progress * 88
+  var opacity = 1 - progress * 1.15
+  if (opacity < 0) opacity = 0
+
+  return 'transform: translateY(-' + shift + 'rpx); opacity: ' + opacity + ';'
+}
+
+/**
+ * 导航栏内的小标题：滚动到一定程度才出现（避免两个标题同时存在）。
+ * @returns 小标题样式
+ */
+function inlineTitleStyle(scrollTop) {
+  var top = scrollTop || 0
+  var progress = top / COLLAPSE_DISTANCE
+  if (progress < 0.35) return 'opacity: 0;'
+  if (progress > 1) progress = 1
+  // 0.35 ~ 1 之间线性浮现
+  var opacity = (progress - 0.35) / 0.65
+  if (opacity < 0) opacity = 0
+  if (opacity > 1) opacity = 1
+  return 'opacity: ' + opacity + ';'
+}
+
+/**
+ * 导航栏底部分隔线：只在滚动后出现（ScrollEdgeEffect 的简化实现）。
+ */
+function navDividerStyle(scrollTop) {
+  var top = scrollTop || 0
+  if (top < 4) return 'opacity: 0;'
+  var progress = top / 60
+  if (progress > 1) progress = 1
+  return 'opacity: ' + progress + ';'
+}
+
+module.exports = {
+  largeTitleStyle: largeTitleStyle,
+  inlineTitleStyle: inlineTitleStyle,
+  navDividerStyle: navDividerStyle,
+}

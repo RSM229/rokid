@@ -9,7 +9,7 @@
   line-height: 1.6;
 }
 .bind-tag.on { color: #0f7a55; background: rgba(19,121,91,0.12); }
-.bind-tag.off { color: #6b7c90; background: rgba(20,40,60,0.08); }
+.bind-tag.off { color: #8a94a6; background: rgba(20,40,60,0.08); }
 .bind-tag.unknown { color: #d97706; background: rgba(217,119,6,0.12); }
 .danger-text { color: #b93838; }
 
@@ -43,14 +43,14 @@
   gap: 28rpx;
 }
 .wxp-head { display: flex; flex-direction: column; gap: 8rpx; }
-.wxp-title { font-size: 32rpx; font-weight: 600; color: #12253d; }
-.wxp-sub { font-size: 23rpx; color: #9aa9bb; line-height: 1.5; }
+.wxp-title { font-size: 32rpx; font-weight: 600; color: #11131a; }
+.wxp-sub { font-size: 23rpx; color: #8a94a6; line-height: 1.5; }
 .wxp-row {
   display: flex;
   align-items: center;
   gap: 24rpx;
 }
-.wxp-label { width: 100rpx; font-size: 26rpx; color: #6b7c90; }
+.wxp-label { width: 100rpx; font-size: 26rpx; color: #8a94a6; }
 .wxp-avatar-btn {
   display: flex;
   flex-direction: column;
@@ -69,7 +69,7 @@
   background: #eef2f7;
   border: 2rpx solid #e3eaf2;
 }
-.wxp-avatar-hint { font-size: 20rpx; color: #9aa9bb; }
+.wxp-avatar-hint { font-size: 20rpx; color: #8a94a6; }
 /* 头像列：微信头像按钮 + 相册兜底入口（叠加竖排，居中） */
 .wxp-avatar-col {
   display: flex;
@@ -90,7 +90,7 @@
   border-radius: 14rpx;
   background: #f3f6fa;
   font-size: 28rpx;
-  color: #12253d;
+  color: #11131a;
   box-sizing: border-box;
 }
 .wxp-save {

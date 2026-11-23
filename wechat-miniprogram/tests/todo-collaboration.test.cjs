@@ -16,17 +16,25 @@ const kbTemplate = fs.readFileSync(path.join(root, 'pages/kb/index.wxml'), 'utf8
 const workPage = fs.readFileSync(path.join(root, 'pages/work/index.ts'), 'utf8')
 const workTemplate = fs.readFileSync(path.join(root, 'pages/work/index.wxml'), 'utf8')
 
+const tabBarComponent = fs.readFileSync(
+  path.join(root, 'components/tab-bar/index.ts'), 'utf8',
+)
+
 test('todo is a registered ordinary page and not a bottom navigation tab', () => {
   assert.ok(app.pages.includes('pages/todo/index'))
   assert.equal((app.tabBar?.list || []).some(item => item.pagePath === 'pages/todo/index'), false)
 })
 
-test('drawer replaces the work-document group with todo and shares the pending badge', () => {
-  assert.match(agentTemplate, /data-url="\/pages\/todo\/index"[\s\S]{0,180}待办事项/)
-  assert.doesNotMatch(agentTemplate, /工作文书/)
-  assert.match(agentTemplate, /class="todo-badge"[\s\S]{0,120}todoPendingCount/)
-  assert.match(agentTemplate, /class="todo-drawer-badge"[\s\S]{0,120}todoPendingCount/)
+test('待办入口在底部 tab 第 1 格，智能体页只保留待办数供问候语', () => {
+  // 2026-11-16：入口从侧栏挪到底部 tab-bar，agent 页的抽屉入口与角标随之删除，
+  // 只剩下 todoPendingCount 用于空态问候语。旧断言（data-url / todo-badge）已作废。
+  assert.match(tabBarComponent, /key: 'todo', label: '待办事项'[\s\S]{0,60}'\/pages\/todo\/index'/)
+  assert.doesNotMatch(agentTemplate, /data-url="\/pages\/todo\/index"/)
+  assert.doesNotMatch(agentTemplate, /class="todo-badge"/)
+  assert.doesNotMatch(agentTemplate, /class="todo-drawer-badge"/)
+  // 待办数仍要被拉取，并真正参与问候语（否则这个字段就是死数据）
   assert.match(agentPage, /request<\{ pending_count: number \}>\('\/collaboration\/inbox\?view=action'\)/)
+  assert.match(agentPage, /你有 \$\{todo\} 项待办没处理/)
 })
 
 test('todo count refreshes on page return and when the drawer is opened', () => {

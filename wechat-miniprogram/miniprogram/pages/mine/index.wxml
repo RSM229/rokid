@@ -46,7 +46,8 @@
        项目看板 / 账号安全 / 设置 —— 原先「项目看板」单独成卡、另两个是素文字行，
        视觉上像两个层级。现合并进同一张卡，三行结构完全一致（图标 + 标题 + 副提示 + 箭头）。
        图标色只为区分功能，不表示层级：看板=主题色、账号=安全绿、设置=中性灰蓝。 -->
-  <view class="section">
+    <view class="section section-tint">
+    <view class="group-title">项目</view>
     <view class="cell entry-item entry-tint" bindtap="openJoinProject">
       <view class="entry-main">
         <view class="entry-icon ic-join"></view>
@@ -67,6 +68,11 @@
       </view>
       <text class="cell-arrow">›</text>
     </view>
+      </view>
+
+      <!-- 分组二：账号与配置（Apple HIG grouped style：组标题 + 组间留白分隔） -->
+      <view class="group-title">账号与配置</view>
+      <view class="section">
     <view class="cell entry-item entry-tint" bindtap="openAccountSecurity">
       <view class="entry-main">
         <view class="entry-icon ic-shield"></view>

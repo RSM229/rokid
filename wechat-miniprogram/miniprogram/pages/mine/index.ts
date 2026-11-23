@@ -19,6 +19,19 @@ Page(themed({
     // 派单入口门控：仅持 task_assign 权限（总监/总代等）显示。
     // permissions 来自 /auth/me（get_current_user 合成的有效权限集），缓存兜底 session.getUser()
     canDispatch: false,
+    /** 页面滚动距离（px）：驱动大标题收起。用 onPageScroll 更新，wxs 负责算样式 */
+    scrollTop: 0,
+  },
+
+  /**
+   * 大标题收起需要当前滚动距离。
+   * 这里只在整数像素变化时 setData（onPageScroll 每帧触发，全部写入会掉帧），
+   * 真正的位移/透明度计算在 utils/large-title.wxs 里完成（渲染层，不跨线程）。
+   */
+  onPageScroll(e: { scrollTop: number }) {
+    const top = Math.max(0, Math.round(e.scrollTop || 0))
+    if (top === this.data.scrollTop) return
+    this.setData({ scrollTop: top })
   },
 
   onShow() {
