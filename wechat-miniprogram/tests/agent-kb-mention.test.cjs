@@ -62,8 +62,13 @@ test('用户手工删掉 token 时同步撤销引用', () => {
   assert.match(page, /this\.syncMentionsWithInput\(input\)/)
 })
 
-test('打 @ 唤起面板后，关键词进入搜索而不是本地过滤', () => {
-  assert.match(page, /const m = \/\(\^\|\\s\)@\(\[\^\\s@\\\[\\\]\]\*\)\$\/\.exec\(input\)/)
+test('打 @ 唤起面板：句中输入也要触发（不要求 @ 前有空格）', () => {
+  // 旧实现是 /(^|\s)@…$/，只有行首或空格后的 @ 才触发；
+  // 用户在句子里打「你好@」时完全没反应（点按钮能开，因为不走这条路径）。
+  assert.match(page, /const m = \/@\(\[\^\\s@\\\[\\\]\]\*\)\$\/\.exec\(input\)/)
+  assert.doesNotMatch(page, /\(\^\|\\s\)@\(\[\^\\s@/)
+  // 仍要排除已插入的「@[资料库 …]」，否则会被当成触发词
+  assert.match(page, /\[\^\\s@\\\[\\\]\]/)
   assert.match(page, /void this\.searchAtKb\(keyword\)/)
 })
 

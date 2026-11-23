@@ -6406,11 +6406,15 @@ Page(themed({
 
   /**
    * 打字打出 @ 自动唤起资料库面板。
-   * 触发口径：输入串以「@」结尾，或末段是「空白 + @关键词」（光标在末尾）。
-   * 已点选插入的引用形如「@[资料库 路径] 」，结尾是空格或「]」，不会误触发。
+   *
+   * 触发口径：文本末尾是「@」或「@关键词」。
+   * 关键：@ 前面**不要求空格或行首** —— 之前用 /(^|\s)@…/ 前缀，
+   * 只有行首或空格后的 @ 才触发，用户句中打「你好@」完全没反应。
+   * 排除 [ 是为了不把已插入的「@[资料库 …]」再当成触发词（它以 [ 开头）。
+   * 已点选插入的引用结尾是空格或 ]，同样不会误触发。
    */
   detectAtTrigger(input: string) {
-    const m = /(^|\s)@([^\s@\[\]]*)$/.exec(input)
+    const m = /@([^\s@\[\]]*)$/.exec(input)
     if (!m) {
       // 没有正在输入的 @：收起由打字唤起的面板
       if (this.data.showAtPanel && this.atOpenedByTyping) {
@@ -6419,7 +6423,7 @@ Page(themed({
       }
       return
     }
-    const keyword = m[2]
+    const keyword = m[1]
     if (!this.data.showAtPanel) {
       this.atOpenedByTyping = true
       this.setData({ showAtPanel: true, showModelMenu: false, atQuery: keyword, atItems: [] })
