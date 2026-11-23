@@ -216,9 +216,22 @@ test('设计令牌层：骨架数值集中定义，页面按语义引用', () =>
   assert.match(globalStyles, /--r-item: 16rpx;/)
   assert.match(globalStyles, /--r-pill: 999rpx;/)
   assert.match(globalStyles, /--gap-1: 8rpx;/)
-  assert.match(globalStyles, /--fs-body: 28rpx;/)
-  assert.match(globalStyles, /--fs-sub: 24rpx;/)
-  assert.match(globalStyles, /--fs-mini: 21rpx;/)
+  // 字号阶梯（2026-11-23 由 30 种手调值收敛为 9 档）
+  assert.match(globalStyles, /--fs-mini: 20rpx;/)
+  assert.match(globalStyles, /--fs-caption: 22rpx;/)
+  assert.match(globalStyles, /--fs-body-sm: 24rpx;/)
+  assert.match(globalStyles, /--fs-body: 26rpx;/)
+  assert.match(globalStyles, /--fs-body-lg: 28rpx;/)
+  assert.match(globalStyles, /--fs-title: 32rpx;/)
+  assert.match(globalStyles, /--fs-title-lg: 40rpx;/)
+  assert.match(globalStyles, /--fs-display: 48rpx;/)
+  // 字重 / 行高 / 控件尺寸
+  assert.match(globalStyles, /--fw-semibold: 600;/)
+  assert.match(globalStyles, /--lh-body: 1\.5;/)
+  assert.match(globalStyles, /--h-control-lg: 104rpx;/)
+  // 跨平台字体栈：不能只写 iOS，否则安卓掉到默认 sans-serif
+  assert.match(globalStyles, /HarmonyOS Sans SC/)
+  assert.match(globalStyles, /MiSans/)
   // 页面侧必须真的在用，而不是只定义
   assert.match(styles, /border-radius: var\(--r-bubble, 22rpx\)/)
   assert.match(styles, /font-size: var\(--fs-body, 28rpx\)/)
