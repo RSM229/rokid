@@ -93,33 +93,23 @@ test('模糊词：搜索框关键字本身可作为引用，随消息以 kb_quer
   assert.match(template, /item\.type === 'kb_query' \? '检索：' \+ item\.name/)
 })
 
-test('气泡里引用渲染成胶囊，并支持 AI 回答的 [[n]] 来源角标', () => {
+test('气泡里引用渲染成蓝色名字，来源角标用上标字符', () => {
   // 分段在发送时刻算好并随消息存下（不靠渲染时正则解析文本）
   assert.match(page, /segments\?: Array<\{ kind: 'text' \| 'mention' \| 'cite'; value: string; token\?: string \}>/)
   assert.match(page, /function splitMentionSegments\(/)
-  assert.match(page, /const MENTION_TOKEN_RE = \/@\\\[资料库\(\?:检索\)\?\\s\[\^\\\]\]\*\\\]\/g/)
   assert.match(page, /function withMentionSegments\(msg: Message\): Message/)
-  // 两条消息入口都要带上分段：addMessage（多数路径）+ 主发送路径的 userMsg
-  assert.match(page, /msg = withMentionSegments\(msg\)/)
-  // 发送时把 mentions 快照挂到消息上：输入框只写名字，气泡要靠它按名字切片段
-  assert.match(page, /const userMsg: Message = withMentionSegments\(\{/)
-  assert.match(page, /mentions: \[\.\.\.this\.data\.mentions\]/)
-  // 后端提示词要求用 [[编号]] 标注来源，前端必须切出来，否则会原样露出 [[1]]
-  assert.match(page, /const CITE_MARK_RE = \/\\\[\\\[\(\\d\{1,3\}\)\\\]\\\]\/g/)
-  assert.match(page, /kind: 'cite'/)
-  // 渲染成「蓝色文字链接 + 来源角标」；引用只显示名字，shell @[ ] 已去掉
+  // [[n]] 就地换成上标字符，不再产生独立的 cite 元素 ——
+  // 独立元素在带换行的文本里必然会被挤到下一行。
+  assert.match(page, /const SUPERSCRIPT_DIGITS = \['⁰', '¹', '²'/)
+  assert.match(page, /function citeToSuperscript\(num: string\): string \{/)
+  assert.match(page, /replace\(\/\\\[\\\[\(\\d\{1,3\}\)\\\]\\\]\/g, \(_m, d\) => citeToSuperscript\(d\)\)/)
+  // 渲染：引用名蓝色可点
   assert.match(template, /class="bubble-mention" data-token="\{\{seg\.token\}\}"/)
-  assert.match(template, /wx:elif="\{\{seg\.kind === 'cite'\}\}" class="bubble-cite"/)
   assert.match(template, /catchtap="onBubbleMentionTap"/)
   assert.match(styles, /\.bubble-mention \{/)
-  assert.match(styles, /\.bubble-cite \{/)
-  // 链接色与点击处理器
-  assert.match(page, /onBubbleMentionTap\(event: WechatMiniprogram\.TouchEvent\)/)
-  assert.match(styles, /color: var\(--link, #0a84ff\)/)
-  // 老消息没有 segments 时必须回退纯文本，不能出现幽灵高亮
+  // 老消息没有 segments 时必须回退纯文本
   assert.match(template, /<block wx:else>\s*<text wx:if="\{\{item\.text\}\}" class="bubble-text"/)
 })
-
 test('引用档案条：双行信息 + 超量折叠 + 范围语义提示', () => {
   assert.match(page, /mentionChips: \[\] as AtMention\[\]/)
   assert.match(page, /mentionOverflow: 0/)

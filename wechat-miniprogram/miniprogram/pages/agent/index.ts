@@ -657,25 +657,39 @@ function normalizeCiteArtifacts(text: string): string {
   return out.join('\n').replace(/\n{3,}/g, '\n\n')
 }
 
-/** 把消息文本切成「普通文字 / 引用 / 来源角标」片段，供气泡渲染。
+/** [[n]] → 上标数字（¹ ² ³ …）。用字符而不是 DOM 元素，见 splitMentionSegments 的说明。 */
+const SUPERSCRIPT_DIGITS = ['⁰', '¹', '²', '³', '⁴', '⁵', '⁶', '⁷', '⁸', '⁹']
+function citeToSuperscript(num: string): string {
+  return num
+    .split('')
+    .map(d => SUPERSCRIPT_DIGITS[Number(d)] ?? d)
+    .join('')
+}
+
+/** 把消息文本切成「普通文字 / 引用」片段，供气泡渲染。
  *  mention 片段只保留显示名（value），原始 token 另存一份供点击定位。
  *
  *  mentions：发送时随消息存下的引用快照。
  *  输入框现在只写「@名字」（没有 @[ ] 外壳），所以必须靠名字反查，
  *  否则用户消息里的引用名只能当普通文字显示（用户反馈"气泡也是纯文本"）。
+ *
+ *  来源角标 [[n]] 不再切成独立片段，而是在文本里就地换成上标字符（¹）。
+ *  原因：角标一旦是独立元素（哪怕 display:inline），只要它两侧的文本带换行，
+ *  它就会掉到下一行，出现「角标独占一行 / 角标跑到行首」等一堆排版问题。
+ *  换成字符后它与正文同属一个文本节点，物理上不可能被拆行。
  */
 function splitMentionSegments(
   rawText: string,
   mentions?: AtMention[],
-): Array<{ kind: 'text' | 'mention' | 'cite'; value: string; token?: string }> {
-  // 把「整行只有角标」的行贴到上一行末尾（只动这种行，其余字符一个都不改）
-  const text = normalizeCiteArtifacts(rawText)
-  const segments: Array<{ kind: 'text' | 'mention' | 'cite'; value: string; token?: string }> = []
+): Array<{ kind: 'text' | 'mention'; value: string; token?: string }> {
+  // 先做拆行归一，再把 [[n]] 换成上标字符（就地替换，不产生新节点）
+  const text = normalizeCiteArtifacts(rawText).replace(/\[\[(\d{1,3})\]\]/g, (_m, d) => citeToSuperscript(d))
+  const segments: Array<{ kind: 'text' | 'mention'; value: string; token?: string }> = []
   const names = (mentions || [])
     .map(m => m.name)
     .filter(n => Boolean(n && n.trim()))
     .sort((a, b) => b.length - a.length)
-  const alternatives = ['@\\[资料库(?:检索)?\\s[^\\]]*\\]', '\\[\\[\\d{1,3}\\]\\]']
+  const alternatives = ['@\\[资料库(?:检索)?\\s[^\\]]*\\]']
   if (names.length) alternatives.push(`@?(?:${names.map(escapeRe).join('|')})`)
   const re = new RegExp(alternatives.join('|'), 'g')
   let cursor = 0
@@ -685,9 +699,6 @@ function splitMentionSegments(
     const raw = match[0]
     if (raw.startsWith('@[')) {
       segments.push({ kind: 'mention', value: mentionDisplayName(raw), token: raw })
-    } else if (/^\[\[\d{1,3}\]\]$/.test(raw)) {
-      // 角标只保留编号，方括号由样式呈现
-      segments.push({ kind: 'cite', value: raw.slice(2, -2) })
     } else {
       // 纯名字（可能带一个 @ 前缀）：去掉 @ 后作为显示名
       const name = raw.replace(/^@/, '')
@@ -696,12 +707,6 @@ function splitMentionSegments(
     cursor = start + raw.length
   }
   if (cursor < text.length) segments.push({ kind: 'text', value: text.slice(cursor) })
-
-  // 重要：这里**不对文本做任何增删**。
-  // 曾经为了让角标贴到句末去修剪换行，结果把模型原本的列表排版挤乱了
-  // （角标和下一行的「5. …」并到同一行）—— 用改文本的方式修显示，是本末倒置。
-  // 角标位置上移/独占一行属于原文本排版，由后端提示词约束模型（标注跟在句末），
-  // 前端只负责把 [[n]] 换成不占位的内联角标。
   return segments
 }
 
