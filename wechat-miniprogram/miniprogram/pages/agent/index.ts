@@ -224,6 +224,10 @@ interface Message {
    *  只在发送时刻按 mentions 快照算一次并随消息存下；老消息没有这个字段时
    *  WXML 回退到整段纯文本，不会出现「半个 token 被高亮」的幽灵样式。 */
   segments?: Array<{ kind: 'text' | 'mention' | 'cite'; value: string; token?: string }>
+  /** 这条消息引用了哪些资料（发送时的快照）。
+   *  输入框现在只写名字、文本里没有 @[ ] token，所以分段要靠名字反查；
+   *  没有这个快照，用户消息里的引用名就只能显示成普通文字（用户反馈"气泡也是纯文本"）。 */
+  mentions?: AtMention[]
   /** 消息头展示时间（备案助手样式：名称 + 时间） */
   timeText?: string
   /** 发送失败标记（2026-11-19）：失败的用户消息显示「点击重发」，不再让文字默默丢掉 */
@@ -584,39 +588,60 @@ export function mentionDisplayName(token: string): string {
   return inner.trim()
 }
 
+/** 正则字面量转义（引用名里可能带括号/点号等） */
+function escapeRe(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
 /** 把消息文本切成「普通文字 / 引用 / 来源角标」片段，供气泡渲染。
- *  mention 片段只保留显示名（value），原始 token 另存一份供点击定位。 */
+ *  mention 片段只保留显示名（value），原始 token 另存一份供点击定位。
+ *
+ *  mentions：发送时随消息存下的引用快照。
+ *  输入框现在只写「@名字」（没有 @[ ] 外壳），所以必须靠名字反查，
+ *  否则用户消息里的引用名只能当普通文字显示（用户反馈"气泡也是纯文本"）。
+ */
 function splitMentionSegments(
-  text: string
+  text: string,
+  mentions?: AtMention[],
 ): Array<{ kind: 'text' | 'mention' | 'cite'; value: string; token?: string }> {
   const segments: Array<{ kind: 'text' | 'mention' | 'cite'; value: string; token?: string }> = []
+  const names = (mentions || [])
+    .map(m => m.name)
+    .filter(n => Boolean(n && n.trim()))
+    .sort((a, b) => b.length - a.length)
+  const alternatives = ['@\\[资料库(?:检索)?\\s[^\\]]*\\]', '\\[\\[\\d{1,3}\\]\\]']
+  if (names.length) alternatives.push(`@?(?:${names.map(escapeRe).join('|')})`)
+  const re = new RegExp(alternatives.join('|'), 'g')
   let cursor = 0
-  // 一次扫描同时处理 @[资料库 …] 与 [[n]]，保证顺序不乱
-  // 注意：[[ ]] 必须带捕获组，否则 match[1] 为 undefined，角标会渲染成空
-  const re = /@\[资料库(?:检索)?\s[^\]]*\]|\[\[(\d{1,3})\]\]/g
   for (const match of text.matchAll(re)) {
     const start = match.index ?? 0
     if (start > cursor) segments.push({ kind: 'text', value: text.slice(cursor, start) })
-    if (match[0].startsWith('[[')) {
+    const raw = match[0]
+    if (raw.startsWith('@[')) {
+      segments.push({ kind: 'mention', value: mentionDisplayName(raw), token: raw })
+    } else if (/^\[\[\d{1,3}\]\]$/.test(raw)) {
       // 角标只保留编号，方括号由样式呈现
-      segments.push({ kind: 'cite', value: match[1] })
+      segments.push({ kind: 'cite', value: raw.slice(2, -2) })
     } else {
-      segments.push({ kind: 'mention', value: mentionDisplayName(match[0]), token: match[0] })
+      // 纯名字（可能带一个 @ 前缀）：去掉 @ 后作为显示名
+      const name = raw.replace(/^@/, '')
+      segments.push({ kind: 'mention', value: name, token: `@[资料库 ${name}]` })
     }
-    cursor = start + match[0].length
+    cursor = start + raw.length
   }
   if (cursor < text.length) segments.push({ kind: 'text', value: text.slice(cursor) })
   return segments
 }
 
-/** 给消息补上分段快照；既不含引用 token 也不含来源角标时不写字段（保持老渲染路径）。 */
+/** 给消息补上分段快照；既不含引用也不含来源角标时不写字段（保持老渲染路径）。 */
 function withMentionSegments(msg: Message): Message {
   if (!msg.text) return msg
-  const hasMention = msg.text.includes('@[')
+  const hasMentionToken = msg.text.includes('@[')
   const hasCite = /\[\[\d{1,3}\]\]/.test(msg.text)
-  if (!hasMention && !hasCite) return msg
-  const segments = splitMentionSegments(msg.text)
-  return segments.some(s => s.kind === 'mention' || s.kind === 'cite') ? { ...msg, segments } : msg
+  const hasNamed = (msg.mentions || []).some(m => Boolean(m.name && msg.text.includes(m.name)))
+  if (!hasMentionToken && !hasCite && !hasNamed) return msg
+  const segments = splitMentionSegments(msg.text, msg.mentions)
+  return segments.some(s => s.kind !== 'text') ? { ...msg, segments } : msg
 }
 
 /** @ 选中项：随 /agent/chat 结构化传给后端，后端据此限定检索范围。
@@ -1566,7 +1591,13 @@ Page(themed({
       return
     }
 
-    const userMsg: Message = withMentionSegments({ role: 'user', text, timeText: formatMessageTime() })
+    const userMsg: Message = withMentionSegments({
+      role: 'user',
+      text,
+      // 输入框只写名字，气泡要靠 mentions 快照按名字切出引用片段
+      mentions: [...this.data.mentions],
+      timeText: formatMessageTime(),
+    })
     // 引用被真正用进对话 → 上报埋点（fire-and-forget，个性化排序的原料）
     this.reportMentionUsage()
     // 发送时收掉可能开着的 @ 面板（打字唤起后未选直接发送的场景）
@@ -6215,7 +6246,8 @@ Page(themed({
    */
   async appendToken(token: string, mention: AtMention) {
     const mentions = this.data.mentions.concat([mention])
-    const display = mention.name || mentionDisplayName(token)
+    // 输入框是纯文本，用「@名字」做可见区分：去掉 @[ ] 外壳，但保留 @ 前缀
+    const display = '@' + (mention.name || mentionDisplayName(token))
     const typed = this.atOpenedByTyping
     this.atOpenedByTyping = false
 

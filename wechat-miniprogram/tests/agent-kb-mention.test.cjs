@@ -101,7 +101,9 @@ test('气泡里引用渲染成胶囊，并支持 AI 回答的 [[n]] 来源角标
   assert.match(page, /function withMentionSegments\(msg: Message\): Message/)
   // 两条消息入口都要带上分段：addMessage（多数路径）+ 主发送路径的 userMsg
   assert.match(page, /msg = withMentionSegments\(msg\)/)
-  assert.match(page, /const userMsg: Message = withMentionSegments\(\{ role: 'user', text/)
+  // 发送时把 mentions 快照挂到消息上：输入框只写名字，气泡要靠它按名字切片段
+  assert.match(page, /const userMsg: Message = withMentionSegments\(\{/)
+  assert.match(page, /mentions: \[\.\.\.this\.data\.mentions\]/)
   // 后端提示词要求用 [[编号]] 标注来源，前端必须切出来，否则会原样露出 [[1]]
   assert.match(page, /const CITE_MARK_RE = \/\\\[\\\[\(\\d\{1,3\}\)\\\]\\\]\/g/)
   assert.match(page, /kind: 'cite'/)
