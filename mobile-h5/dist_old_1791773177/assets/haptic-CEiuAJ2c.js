@@ -1,1 +1,0 @@
-function n(){t(10)}function c(){t([10,30,10])}function o(){t([40,60,40,60,40])}function t(a){try{typeof navigator!="undefined"&&typeof navigator.vibrate=="function"&&navigator.vibrate(a)}catch(i){}}export{c as a,n as b,o as h};
