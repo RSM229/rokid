@@ -70,10 +70,29 @@ def test_same_value_keeps_all_sources_without_creating_correction():
 
 
 def test_conversation_history_is_reference_only():
-    rendered = agent_context.render_conversation_history([{"text": "在A区施工"}, {"text": "后来补充上午"}])
+    rendered = agent_context.render_conversation_history([
+        {"text": "在A区施工"},
+        {"role": "assistant", "text": "已记下A区施工，还差开始时间。"},
+        {"text": "后来补充上午"},
+    ])
     assert rendered.startswith("以下 JSON")
     assert "强行合并" in rendered
     assert "在A区施工" in rendered
+    assert "已记下A区施工" in rendered  # assistant 轮必须进引用块（指代消解）
+
+
+def test_conversation_history_assistant_turn_is_truncated():
+    long_reply = "已记下" + "很长的回执" * 100
+    rendered = agent_context.render_conversation_history([
+        {"role": "user", "text": "记一条巡视"},
+        {"role": "assistant", "text": long_reply},
+    ])
+    import json as _json
+    block = _json.loads(rendered.split("\n", 1)[1])
+    assistant_text = next(item["text"] for item in block if item["role"] == "assistant")
+    assert len(assistant_text) == 240  # 摘要上限，防长回执挤占上下文
+    user_text = next(item["text"] for item in block if item["role"] == "user")
+    assert user_text == "记一条巡视"  # 用户原话不截断
 
 
 def test_explicit_spoken_time_range_is_preserved_when_model_omits_it():

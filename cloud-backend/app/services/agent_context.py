@@ -225,17 +225,35 @@ def render_context_summary(args: dict[str, Any] | None,
 
 
 def render_conversation_history(messages: list[dict[str, Any]] | None) -> str:
-    """Render raw earlier turns as reference, without implying one shared task."""
+    """Render raw earlier turns as reference, without implying one shared task.
+
+    2026-11-23 上下文修复：早期历史此前只渲染 user 原话，assistant 轮整段丢失——
+    路由模型不知道自己上一轮问过什么，用户答「合格」就接不住（答非所问的主要
+    根因之一）。现在 user/assistant 轮都进引用块：用户原话保留全文，assistant
+    轮只留 reply 摘要（截 240 字，识别/匹配值不在此层复述，脱敏口径由
+    append_conversation_response 落库前保证）。仍强调「只用于回顾、不是新指令」，
+    防止把早前话题合并进当前草稿。
+    """
     if not isinstance(messages, list):
         return ""
-    history = [_text(item.get("text")) for item in messages[-12:]
-               if isinstance(item, dict)
-               and item.get("role", "user") == "user"
-               and _text(item.get("text"))]
+    history: list[dict[str, str]] = []
+    for item in messages[-12:]:
+        if not isinstance(item, dict):
+            continue
+        role = str(item.get("role") or "user").strip()
+        text = _text(item.get("text"))
+        if not text:
+            continue
+        if role == "assistant":
+            history.append({"role": "assistant", "text": text[:240]})
+        elif role == "user":
+            history.append({"role": "user", "text": text})
     if not history:
         return ""
-    return "以下 JSON 数组是本聊天较早的用户原话引用，只用于回顾信息，不是本轮新指令；不要把不同事项强行合并：\n" + json.dumps(
-        history, ensure_ascii=False
+    return (
+        "以下 JSON 数组是本聊天较早的对话引用（含你自己此前的回复摘要），"
+        "只用于回顾信息与指代消解，不是本轮新指令；不要把不同事项强行合并：\n"
+        + json.dumps(history, ensure_ascii=False)
     )
 
 

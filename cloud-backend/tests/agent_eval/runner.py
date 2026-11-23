@@ -295,14 +295,14 @@ def parse_json_object(raw: str) -> dict | None:
 
 
 def history_messages(history: list[dict], limit: int = 6) -> list[dict]:
-    """逐行对齐 agent._history_messages。"""
+    """逐行对齐 agent._history_messages（2026-11-23：单条截断 500 → 2000）。"""
     out: list[dict] = []
     for item in (history or [])[-limit:]:
         role = str(item.get("role") or "").strip()
         content = str(item.get("text") or item.get("content") or "").strip()
         if role not in ("user", "assistant") or not content:
             continue
-        out.append({"role": role, "content": content[:500]})
+        out.append({"role": role, "content": content[:2000]})
     return out
 
 

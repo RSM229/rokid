@@ -3746,7 +3746,31 @@ async def record_conversation_message(db: AsyncSession, user_id: Any,
     await db.commit()
     current = str(message or "").strip()
     if current and history and history[-1].get("text") == current:
-        return history[:-1]
+        history = history[:-1]
+    # 🔴 2026-11-23 上下文修复（Phase 0 配套）：此前返回值只含 AgentConversationMemory
+    # 的 user 原话 trail——assistant 轮全丢，调用方 render_conversation_history 渲染
+    # 出的引用块里模型看不到自己说过什么（「听不懂/答非所问」主根因）。返回前把
+    # 展示历史（AgentConversationMessage 全表，含 assistant 轮）读出来一起返回：
+    # 结构 [{role, text}]，调用方 render_conversation_history 按新契约处理。
+    try:
+        display_rows = (await db.execute(select(AgentConversationMessage).where(
+            AgentConversationMessage.user_id == int(user_id),
+            AgentConversationMessage.conversation_id == conversation_id,
+            _project_condition(AgentConversationMessage, project_id),
+        ).order_by(AgentConversationMessage.id.asc()))).scalars().all()
+        display = [
+            {"role": row.role, "text": _conversation_content(row).get("text", "")}
+            for row in display_rows
+            if _conversation_content(row).get("text")
+        ]
+    except Exception:  # noqa: BLE001 —— 展示历史读取失败不阻断聊天主流程
+        display = []
+    if display:
+        # 展示历史存在（新链路）：返回含 assistant 轮的完整对话；
+        # 恰好本轮 user 消息已由上面落库，剔除末尾避免调用方重复拼接。
+        if display and display[-1].get("role") == "user" and display[-1].get("text") == current:
+            display = display[:-1]
+        return display
     return history
 
 

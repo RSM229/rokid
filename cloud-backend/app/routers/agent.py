@@ -764,14 +764,19 @@ def _auto_filled_summary(filled: list[str]) -> str:
 
 
 def _history_messages(history: list[dict], limit: int = 6) -> list[dict]:
-    """把前端历史压成模型消息（只保留最近 limit 轮，忽略卡片等非文本内容）。"""
+    """把前端历史压成模型消息（只保留最近 limit 轮，忽略卡片等非文本内容）。
+
+    2026-11-23 上下文修复：单条截断 500 → 2000。监理口述经常超 500 字
+    （一段日报叙述就被拦腰斩断，模型只见半句话导致理解偏差）；2000 与
+    跑分器/前端同口径，仍足够防止单条超长挤爆上下文。
+    """
     out: list[dict] = []
     for item in (history or [])[-limit:]:
         role = str(item.get("role") or "").strip()
         content = str(item.get("text") or item.get("content") or "").strip()
         if role not in ("user", "assistant") or not content:
             continue
-        out.append({"role": role, "content": content[:500]})
+        out.append({"role": role, "content": content[:2000]})
     return out
 
 

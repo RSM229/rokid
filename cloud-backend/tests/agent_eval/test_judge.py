@@ -73,6 +73,24 @@ def test_history_limit_6():
     assert out[0]["content"] == "m14"   # 只留最近 6 轮
 
 
+def test_history_truncation_matches_production():
+    """单条截断上限必须与生产 agent._history_messages 同步（2026-11-23: 500→2000）。
+
+    跑分器与生产不同步会导致：生产被截断的口述在跑分里是全文（或反之），
+    分数失去代表性。此断言锁死两边一致。
+    """
+    import sys as _sys
+    from pathlib import Path as _Path
+    _sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
+    from app.routers import agent as _agent  # noqa: E402
+
+    long_text = "长口述" * 900  # 3600 字，超过新旧两个上限
+    prod = _agent._history_messages([{"role": "user", "text": long_text}])
+    local = history_messages([{"role": "user", "text": long_text}])
+    assert prod == local  # 两边输出逐字节一致
+    assert len(local[0]["content"]) == 2000  # 新上限生效（旧值 500 应在此失败）
+
+
 # ---------------------------------------------------------------------------
 # 三、judge —— 假阳性防线：这些**必须判失败**
 # ---------------------------------------------------------------------------

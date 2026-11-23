@@ -191,7 +191,17 @@ async def chat_completion(
     provider: str | None = None,
     model: str | None = None,
     thinking: bool | None = None,
+    tools: list[dict] | None = None,
+    tool_choice: str | dict | None = None,
 ) -> tuple[str, ModelConfig]:
+    """非流式文本模型调用。
+
+    tools/tool_choice（2026-11-23，Agent 化前置 Phase 1）：OpenAI 兼容的
+    function calling 透传——仅拼接进 payload，网关不解析、不执行工具；
+    工具目录合法性、参数校验与写边界全部留在调用方（服务端 agent 层）。
+    供应商不支持时会按其自身错误返回，由 _provider_http_error 翻译，
+    网关侧不做静默降级（调用方需要明确知道 tools 是否被接受）。
+    """
     config = await get_runtime_model_config("llm")
     override = _provider_override(provider)
     if override is not None:
@@ -213,6 +223,10 @@ async def chat_completion(
     if thinking is not None:
         # DashScope/百炼：true=开启深度思考（回答类任务更聪明），false=关闭
         payload["enable_thinking"] = bool(thinking)
+    if tools:
+        payload["tools"] = tools
+        if tool_choice is not None:
+            payload["tool_choice"] = tool_choice
     owns_client = client is None
     http_client = client or httpx.AsyncClient(timeout=httpx.Timeout(120.0))
     try:
@@ -256,6 +270,8 @@ async def stream_chat_completion(
     provider: str | None = None,
     model: str | None = None,
     thinking: bool | None = None,
+    tools: list[dict] | None = None,
+    tool_choice: str | dict | None = None,
 ):
     """流式文本模型调用（SSE）。
 
@@ -264,8 +280,13 @@ async def stream_chat_completion(
     - ``{"type": "config", "config": ModelConfig}``：仅首个事件，用于拿 model_id
     - ``{"type": "reasoning", "text": "..."}``：思考过程增量（思考模式模型才有）
     - ``{"type": "content", "text": "..."}``：正文增量
+    - ``{"type": "tool_calls", "tool_calls": [...]}``：工具调用请求增量（2026-11-23
+      新增；供应商返回 finish_reason=tool_calls 时，把增量拼到当前 tool_call 上，
+      结束时整段吐出。网关只透传不解析语义。）
 
     供应商没有 reasoning_content 字段时只会收到 content，调用方无需区分。
+    tools/tool_choice 透传语义同 chat_completion：网关不校验工具目录、
+    不执行任何工具，写边界留在服务端调用方。
     """
     config = await get_runtime_model_config("llm")
     override = _provider_override(provider)
@@ -286,6 +307,10 @@ async def stream_chat_completion(
     if thinking is not None:
         # DashScope/百炼：false=关闭思考（路由这类结构化任务更快、也不泄漏规划）
         payload["enable_thinking"] = bool(thinking)
+    if tools:
+        payload["tools"] = tools
+        if tool_choice is not None:
+            payload["tool_choice"] = tool_choice
     owns_client = client is None
     http_client = client or httpx.AsyncClient(timeout=httpx.Timeout(300.0))
     try:
@@ -299,6 +324,10 @@ async def stream_chat_completion(
             if response.status_code >= 400:
                 await response.aread()
                 raise ModelGatewayError(_provider_http_error(response))
+            # tool_calls 增量累积：OpenAI 兼容流把一次工具调用拆成多个 delta
+            # （index/id/function.name 先到，function.arguments 分片到齐）。
+            # 网关只负责拼完整块再吐出，不解释 arguments（JSON 解析留给调用方）。
+            tool_call_fragments: dict[int, dict] = {}
             async for line in response.aiter_lines():
                 if not line or not line.startswith("data:"):
                     continue
@@ -321,6 +350,31 @@ async def stream_chat_completion(
                 content = delta.get("content")
                 if isinstance(content, str) and content:
                     yield {"type": "content", "text": content}
+                deltas = delta.get("tool_calls")
+                if isinstance(deltas, list):
+                    for piece in deltas:
+                        if not isinstance(piece, dict):
+                            continue
+                        idx = int(piece.get("index") or 0)
+                        slot = tool_call_fragments.setdefault(idx, {
+                            "id": "", "type": "function", "function": {
+                                "name": "", "arguments": "",
+                            },
+                        })
+                        if piece.get("id"):
+                            slot["id"] = str(piece["id"])
+                        fn = piece.get("function") or {}
+                        if isinstance(fn, dict):
+                            if fn.get("name"):
+                                slot["function"]["name"] += str(fn["name"])
+                            args = fn.get("arguments")
+                            if isinstance(args, str):
+                                slot["function"]["arguments"] += args
+                finish_reason = choices[0].get("finish_reason")
+                if finish_reason == "tool_calls" and tool_call_fragments:
+                    merged = [tool_call_fragments[k] for k in sorted(tool_call_fragments)]
+                    yield {"type": "tool_calls", "tool_calls": merged}
+                    tool_call_fragments = {}
     except ModelGatewayError:
         raise
     except httpx.TimeoutException as exc:
