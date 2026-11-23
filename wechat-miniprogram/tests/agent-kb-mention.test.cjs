@@ -294,3 +294,15 @@ test('打 @ 唤起：editor 末尾换行与全角 ＠ 也要能触发', () => {
   // 2026-11-23：替换成「显示名」而不是整个 token，输入框里不再出现 @[ ]
   assert.match(page, /replace\(\/\[@＠\]\(\[\^\\s@＠\]\*\)\\s\*\$\/, `\$\{display\} `\)/)
 })
+test('打字选完引用后必须还能继续输入：用 deleteText 而不是 setContents 重建', () => {
+  // 踩过的坑：用 setContents 重建内容后，<editor> 失去输入能力，
+  // 用户没法在名字前后继续打字、也不能再 @ 新的东西。
+  assert.match(page, /replaceTriggerWithMention\(index: number, triggerLen: number, display: string\)/)
+  assert.match(page, /ctx\.deleteText\(\{/)
+  assert.match(page, /index,/)
+  assert.match(page, /length: triggerLen/)
+  // 触发词起点按「删除前文本长度 - 触发词长度」计算
+  assert.match(page, /replaceTriggerWithMention\(current\.length - triggerLen, triggerLen, display\)/)
+  // 这条路径不能再出现 setContents 重建
+  assert.doesNotMatch(page, /replaceEditorWithMention/)
+})

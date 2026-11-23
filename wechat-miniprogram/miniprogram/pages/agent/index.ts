@@ -6171,14 +6171,16 @@ Page(themed({
     if (this.atOpenedByTyping) {
       const current = this.data.input
       // 与 detectAtTrigger 口径一致：兼容全角 ＠ 与末尾空白
+      const trigger = /[@＠]([^\s@＠]*)\s*$/.exec(current)
+      const triggerLen = trigger ? trigger[0].trimEnd().length : 0
       const next = current.replace(/[@＠]([^\s@＠]*)\s*$/, `${display} `)
       this.atOpenedByTyping = false
       this.setData({ input: next, canSend: true })
       this.refreshMentions(mentions)
-      // 打字唤起：编辑器里还留着用户敲的「@关键词」，必须先删掉再放名字，
-      // 否则「追加插入」会和残留的 @关键词 并存 —— 表现就是"闪一下变蓝又复原成 @xxx"。
-      // editor 没有 setSelection / deleteText 的可靠语义，这里整体重建内容（名字包蓝）。
-      void this.replaceEditorWithMention(next, display)
+      // 打字唤起：编辑器里还留着用户敲的「@关键词」，必须删掉再放名字。
+      // 用 deleteText 精确删除（保留焦点与光标），不能用 setContents 重建 ——
+      // 实测重建后编辑器失去输入能力，用户没法在名字前后继续打字/再 @。
+      void this.replaceTriggerWithMention(current.length - triggerLen, triggerLen, display)
       return
     }
     const current = this.data.input
@@ -6384,54 +6386,56 @@ Page(themed({
   },
 
   /**
-   * 把纯文本里的 @[资料库 …] token 转成带内联样式的胶囊。
-   *
-   * 为什么胶囊里仍然保留完整 token 文本：editor 的 text 是纯文本，
-   * 只有文本里还有 token，mentions 才能在每次输入后从文本可靠恢复；
-   * 样式只是让它「看起来不一样」，结构不依赖 HTML 属性（属性可能被运行时清洗）。
-   */
-  /**
    * 纯文本 → editor HTML。
    *
-   * 只做转义，不再包 <span> 胶囊：实测 setContents 写入 span 后光标会落在 span 内部，
-   * 之后输入的文字全部继承胶囊样式（用户反馈"@ 后面打什么都变蓝"）。
-   * 现在改用 editor 原生的 format() 上色 —— 不给文字加外框，只改颜色。
-   *
-   * highlightTailName：打字唤起路径要整体重建内容，此时把末尾那个引用名包成蓝色
-   * （名字后面紧跟一个空格，光标会落在 span 之外，不会重现"后续输入全变蓝"的老问题）。
+   * 只做转义，不包 <span>：实测 setContents 写入 span 后光标会落在 span 内部，
+   * 之后输入的文字全部继承样式（用户反馈"@ 后面打什么都变蓝"）。
+   * 现在一律走 editor 原生 format() 上色 —— 不给文字加外框，只改颜色。
    */
-  inputToEditorHtml(text: string, highlightTailName?: string): string {
+  inputToEditorHtml(text: string): string {
     const escape = (s: string) =>
       s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    const escaped = escape(text)
-    if (!highlightTailName) return escaped + '<br/>'
-    const needle = escape(highlightTailName)
-    const idx = escaped.lastIndexOf(needle)
-    if (idx < 0) return escaped + '<br/>'
-    return (
-      escaped.slice(0, idx) +
-      `<span style="color:#0a84ff">${needle}</span>` +
-      escaped.slice(idx + needle.length) +
-      '<br/>'
-    )
+    return escape(text) + '<br/>'
   },
 
   /**
-   * 打字唤起路径专用：用完整文本重建编辑器内容，把末尾那个引用名标蓝。
+   * 打字唤起路径专用：先删掉用户敲的「@关键词」，再在原位插入蓝色引用名。
    *
-   * 为什么不能只 insertText：用户敲的「@关键词」已经在编辑器里了，
-   * 单纯追加会让「@关键词」和名字并存，下一次 onEditorInput 回写 data.input 后
-   * 看起来就是"蓝名字闪一下又变回 @xxx"。
+   * 为什么不用 setContents 重建：实测重建之后编辑器失去输入能力
+   * （用户反馈"名字后面没法继续打字、也不能再 @ 新的"）。
+   * deleteText 只动这几个字符，焦点与光标都保留，删完可以直接接着打字。
+   *
+   * 参数都按「删除前的编辑器文本」计算：
+   *   index  = 触发词起点（current.length - triggerLen）
+   *   length = 触发词长度（@ 加上关键词）
    */
-  async replaceEditorWithMention(text: string, display: string) {
+  async replaceTriggerWithMention(index: number, triggerLen: number, display: string) {
     if (!this.data.useEditor || !this.editorCtx) return
     const ctx = this.editorCtx
-    const html = this.inputToEditorHtml(text, display)
-    this.editorHtml = html
+    if (triggerLen > 0 && index >= 0) {
+      const ok = await new Promise<boolean>(resolve => {
+        ctx.deleteText({
+          index,
+          length: triggerLen,
+          success: () => resolve(true),
+          fail: () => resolve(false),
+        })
+      })
+      if (!ok) {
+        // deleteText 需要基础库 2.10.0+；老版本删不掉时至少不要把名字插到 @关键词 后面
+        return
+      }
+    }
+    ctx.format('color', '#0a84ff')
+    ctx.format('backgroundColor', 'transparent')
     await new Promise<void>(resolve => {
-      ctx.setContents({ html, success: () => resolve(), fail: () => resolve() })
+      ctx.insertText({
+        text: display + ' ',
+        success: () => resolve(),
+        fail: () => resolve(),
+      })
     })
-    // 重建后把输入样式复位成正文，避免后续输入继续是蓝色
+    // 复位样式，避免后续输入继续是蓝色
     ctx.format('backgroundColor', '#ffffff')
     ctx.format('color', '#11131a')
   },
