@@ -889,6 +889,23 @@ Page(themed({
   voiceAutoTimer: null as number | null,
 
   onLoad(options: Record<string, string>) {
+    // ===== 统一在 setData 入口给消息补「分段」 =====
+    // 气泡要按片段渲染（引用名蓝色可点、AI 来源角标 [[n]] 变成小方块），
+    // 但直接 setData({ messages: [...] }) 的写入点有十几处，逐个加必然漏 ——
+    // 用户看到的 [[2]] 裸露就是这么漏出来的。
+    // 这里包一层：任何写入 messages 的 setData 都会先过一遍 withMentionSegments（幂等）。
+    const rawSetData = this.setData.bind(this)
+    ;(this as unknown as { setData: (p: unknown, cb?: () => void) => void }).setData = (
+      patch: unknown,
+      cb?: () => void,
+    ) => {
+      const p = patch as { messages?: Message[] } | null
+      if (p && Array.isArray(p.messages)) {
+        patch = { ...p, messages: p.messages.map(m => withMentionSegments(m)) }
+      }
+      rawSetData(patch as never, cb)
+    }
+
     const sysInfo = wx.getWindowInfo()
     this.setData({
       statusBarHeight: sysInfo.statusBarHeight || 20,

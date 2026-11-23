@@ -317,3 +317,10 @@ test('引用插入只保留一个数据源，插入期间屏蔽中间态', () =>
   // 编辑完成后再显式对齐文本（防止部分基础库程序化改动不派发 bindinput）
   assert.match(page, /this\.setData\(\{ input: expected, canSend: true \}\)/)
 })
+test('消息写入统一在 setData 入口补分段，避免 [[n]] 裸露', () => {
+  // 直接 setData({messages}) 的写入点有十几处，逐个加必然漏；
+  // 漏掉一处，用户就会看到 [[2]] 原样显示。
+  assert.match(page, /const rawSetData = this\.setData\.bind\(this\)/)
+  assert.match(page, /Array\.isArray\(p\.messages\)/)
+  assert.match(page, /p\.messages\.map\(m => withMentionSegments\(m\)\)/)
+})
