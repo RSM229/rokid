@@ -183,10 +183,11 @@ test('输入框内 @ 引用用 editor 原生 format 标记（不再插 span 胶�
   // 历史坑：用 setContents 写入 <span> 胶囊后，光标会落进 span，
   // 导致其后输入的文字全部继承胶囊样式（用户反馈"@ 后面打什么都变蓝"）。
   // 所以改为 editor 原生 format()。
-  assert.match(agent, /insertMentionIntoEditor\(token: string\)/)
-  // 黑白主题下不靠颜色区分引用（主色近黑会与正文同色），改用浅灰底衬成"标签"
-  assert.match(agent, /ctx\.format\('backgroundColor', '#e9edf2'\)/)
-  // 插入后必须复位底色，否则后续输入继续带浅灰底
+  assert.match(agent, /insertMentionIntoEditor\(display: string\)/)
+  // 2026-11-23：引用只插显示名、用链接蓝，不再用浅灰底胶囊
+  assert.match(agent, /ctx\.format\('color', '#0a84ff'\)/)
+  assert.match(agent, /ctx\.format\('backgroundColor', 'transparent'\)/)
+  // 插入后必须复位底色与字色，否则后续输入继续被染色
   assert.match(agent, /ctx\.format\('backgroundColor', '#ffffff'\)/)
   // 正文色保持中性
   assert.match(agent, /ctx\.format\('color', '#11131a'\)/)

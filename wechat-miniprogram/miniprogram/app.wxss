@@ -144,6 +144,9 @@ page {
   --flat-surface: #ffffff;                   /* 唯一的一层白 */
   --flat-brand: #2f3237;
   --flat-brand-deep: #1e2229;
+  /* 链接语义色：正文里的引用/链接用蓝色（与黑白主题不冲突，iOS 链接即蓝色） */
+  --link: #0a84ff;
+  --link-press: #0060df;
   --flat-shadow: 0 2rpx 12rpx rgba(22, 38, 74, 0.06);
   --flat-shadow-btn: 0 18rpx 36rpx -18rpx rgba(17, 19, 26, 0.28);
 }

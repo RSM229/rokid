@@ -66,8 +66,8 @@
                  分段在发送时刻算好并随消息存下，所以老消息（无 segments）走下面的纯文本兜底。 -->
             <view wx:if="{{item.segments}}" class="bubble-text bubble-segments">
               <block wx:for="{{item.segments}}" wx:for-item="seg" wx:key="index">
-                <text wx:if="{{seg.kind === 'mention'}}" class="bubble-mention">{{seg.value}}</text>
-          <text wx:elif="{{seg.kind === 'cite'}}" class="bubble-cite">{{seg.value}}</text>
+                <text wx:if="{{seg.kind === 'mention'}}" class="bubble-mention" data-token="{{seg.token}}" data-name="{{seg.value}}" catchtap="onBubbleMentionTap">{{seg.value}}</text>
+                <text wx:elif="{{seg.kind === 'cite'}}" class="bubble-cite">{{seg.value}}</text>
                 <text wx:else class="bubble-plain" user-select="{{true}}">{{seg.value}}</text>
               </block>
             </view>

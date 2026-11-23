@@ -223,7 +223,7 @@ interface Message {
    *  渲染成引用块/角标而不是普通文字。
    *  只在发送时刻按 mentions 快照算一次并随消息存下；老消息没有这个字段时
    *  WXML 回退到整段纯文本，不会出现「半个 token 被高亮」的幽灵样式。 */
-  segments?: Array<{ kind: 'text' | 'mention' | 'cite'; value: string }>
+  segments?: Array<{ kind: 'text' | 'mention' | 'cite'; value: string; token?: string }>
   /** 消息头展示时间（备案助手样式：名称 + 时间） */
   timeText?: string
   /** 发送失败标记（2026-11-19）：失败的用户消息显示「点击重发」，不再让文字默默丢掉 */
@@ -577,11 +577,19 @@ const MENTION_TOKEN_RE = /@\[资料库(?:检索)?\s[^\]]*\]/g
  *  前端原本没有对应渲染，于是 [[1]] 原样露在气泡里。这里切成独立片段渲染成角标。 */
 const CITE_MARK_RE = /\[\[(\d{1,3})\]\]/g
 
-/** 把消息文本切成「普通文字 / 引用 / 来源角标」片段，供气泡渲染。 */
+/** 引用 token 的「显示名」：用户要求气泡与输入框里都只显示名字，
+ *  去掉 @[ ] 外壳（例：@[资料库 监理日志] → 监理日志）。 */
+export function mentionDisplayName(token: string): string {
+  const inner = token.replace(/^@\[资料库(?:检索)?\s*/, '').replace(/\]$/, '')
+  return inner.trim()
+}
+
+/** 把消息文本切成「普通文字 / 引用 / 来源角标」片段，供气泡渲染。
+ *  mention 片段只保留显示名（value），原始 token 另存一份供点击定位。 */
 function splitMentionSegments(
   text: string
-): Array<{ kind: 'text' | 'mention' | 'cite'; value: string }> {
-  const segments: Array<{ kind: 'text' | 'mention' | 'cite'; value: string }> = []
+): Array<{ kind: 'text' | 'mention' | 'cite'; value: string; token?: string }> {
+  const segments: Array<{ kind: 'text' | 'mention' | 'cite'; value: string; token?: string }> = []
   let cursor = 0
   // 一次扫描同时处理 @[资料库 …] 与 [[n]]，保证顺序不乱
   // 注意：[[ ]] 必须带捕获组，否则 match[1] 为 undefined，角标会渲染成空
@@ -593,7 +601,7 @@ function splitMentionSegments(
       // 角标只保留编号，方括号由样式呈现
       segments.push({ kind: 'cite', value: match[1] })
     } else {
-      segments.push({ kind: 'mention', value: match[0] })
+      segments.push({ kind: 'mention', value: mentionDisplayName(match[0]), token: match[0] })
     }
     cursor = start + match[0].length
   }
@@ -6154,26 +6162,29 @@ Page(themed({
     this.refreshMentions(mentions)
   },
 
-  /** 把 token 追加进输入框，同时登记引用；打字唤起时替换触发词而不是追加 */
+  /** 把引用追加进输入框，同时登记引用；打字唤起时替换触发词而不是追加。
+   *  2026-11-23：输入框与气泡都只显示名字（去掉 @[ ] 外壳），
+   *  引用语义仍由 mentions 数组结构化承载，不依赖这段文本。 */
   appendToken(token: string, mention: AtMention) {
     const mentions = this.data.mentions.concat([mention])
+    const display = mention.name || mentionDisplayName(token)
     if (this.atOpenedByTyping) {
       const current = this.data.input
       // 与 detectAtTrigger 口径一致：兼容全角 ＠ 与末尾空白
-      const next = current.replace(/[@＠]([^\s@＠]*)\s*$/, `${token} `)
+      const next = current.replace(/[@＠]([^\s@＠]*)\s*$/, `${display} `)
       this.atOpenedByTyping = false
       this.setData({ input: next, canSend: true })
       this.refreshMentions(mentions)
-      // editor：只把 token 插入并上色；不再整体重灌内容
+      // editor：只把名字插入并上色；不再整体重灌内容
       // （setContents 会让光标落进样式节点，导致后续输入全被染色）
-      void this.insertMentionIntoEditor(token)
+      void this.insertMentionIntoEditor(display)
       return
     }
     const current = this.data.input
-    const next = current ? `${current.replace(/\s+$/, '')} ${token} ` : `${token} `
+    const next = current ? `${current.replace(/\s+$/, '')} ${display} ` : `${display} `
     this.setData({ input: next, canSend: true })
     this.refreshMentions(mentions)
-    void this.insertMentionIntoEditor(token)
+    void this.insertMentionIntoEditor(display)
   },
 
   /**
@@ -6233,15 +6244,36 @@ Page(themed({
   },
 
   /**
-   * 用户手工删掉输入框里的 token 时，同步撤销对应引用。
+   * 用户手动删掉输入框里的引用名时，同步撤销对应引用。
    * 不做这一步会出现「界面上看不到引用、但模型仍按旧范围检索」的错位。
+   *
+   * 2026-11-23 起输入框只显示名字（不再有 @[ ] 外壳），所以同时按 name 与 token 判断，
+   * 兼容老草稿里残留的 token 文本。
    */
   syncMentionsWithInput(input: string) {
     if (!this.data.mentions.length) return
-    const kept = this.data.mentions.filter(m => input.includes(m.token))
+    const kept = this.data.mentions.filter(m => input.includes(m.token) || input.includes(m.name))
     if (kept.length !== this.data.mentions.length) {
       this.refreshMentions(kept)
     }
+  },
+
+  /**
+   * 点气泡里的蓝色引用名：优先跳到对应资料库详情，拿不到 id 就进资料库首页。
+   * 气泡里的名字来自消息文本，没有 id；按名字/token 从当前引用列表反查是唯一可用线索。
+   */
+  onBubbleMentionTap(event: WechatMiniprogram.TouchEvent) {
+    const ds = (event.currentTarget && event.currentTarget.dataset) || {}
+    const token = String(ds.token || '')
+    const name = String(ds.name || '')
+    const hit = this.data.mentions.find(
+      m => (token && m.token === token) || (name && m.name === name),
+    )
+    if (hit && hit.kb_id) {
+      wx.navigateTo({ url: `/pages/kb/detail?id=${hit.kb_id}` })
+      return
+    }
+    wx.navigateTo({ url: '/pages/kb/index' })
   },
 
   // ============ 富文本输入（<editor>）：@ 引用渲染成行内胶囊 ============
@@ -6373,23 +6405,24 @@ Page(themed({
   },
 
   /**
-   * 插入一条引用：先给插入点设样式，再插入 token 文本。
+   * 插入一条引用名：先给插入点设样式，再插入文本。
    *
    * editor 没有 setSelection，无法"插入后再选中"改样式，
    * 但 format() 设置的是「当前输入位置之后要输入的样式」，
-   * 所以「先 format 再 insertText」正好让 token 带上该样式。
+   * 所以「先 format 再 insertText」正好让这段文字带上样式。
    *
-   * 黑白主题下引用不能靠颜色区分（主色是近黑，会和正文同色），
-   * 改用浅灰底把 token 衬成"标签"：正文色 + backgroundColor 浅灰。
+   * 2026-11-23 用户要求：输入框里也只显示名字、蓝色链接观感（去掉 @[ ] 外壳）。
+   * 注意 editor 里的文字无法点击，点击能力只做在气泡里。
    */
-  async insertMentionIntoEditor(token: string) {
+  async insertMentionIntoEditor(display: string) {
     if (!this.data.useEditor || !this.editorCtx) return
     const ctx = this.editorCtx
     await new Promise<void>(resolve => {
-      ctx.format('color', '#11131a')
-      ctx.format('backgroundColor', '#e9edf2')
+      // 链接蓝（与 .bubble-mention 的 --link 对齐）
+      ctx.format('color', '#0a84ff')
+      ctx.format('backgroundColor', 'transparent')
       ctx.insertText({
-        text: token + ' ',
+        text: display + ' ',
         success: () => resolve(),
         fail: () => resolve(),
       })

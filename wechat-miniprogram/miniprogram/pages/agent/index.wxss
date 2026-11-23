@@ -142,7 +142,11 @@
 /* 气泡内的引用胶囊：@[资料库 …] 不再和普通文字混在一起 */
 .bubble-segments { white-space: pre-wrap; word-break: break-word; line-height: 1.65; }
 .bubble-plain { white-space: pre-wrap; }
-.bubble-mention { display: inline; padding: 3rpx 14rpx; margin: 0 3rpx; border-radius: var(--r-pill, 999rpx); font-size: var(--fs-sub, 24rpx); color: var(--brand-d, #0060df); background: rgba(var(--brand-rgb, 47,50,55), 0.14); border: 1rpx solid rgba(var(--brand-rgb, 47,50,55), 0.28); word-break: break-all; }
+/* 气泡里的 @ 引用：只显示名字、蓝色、像链接一样可点（外壳 @[ ] 已去掉）。
+   用户要求 2026-11-23：不要胶囊底色，做成文字链接观感。
+   蓝色是「链接」语义色，与黑白主题不冲突（iOS 里链接本身就是蓝色）。 */
+.bubble-mention { display: inline; padding: 0; margin: 0 2rpx; border: none; background: transparent; font-size: inherit; color: var(--link, #0a84ff); font-weight: 500; word-break: break-all; }
+.bubble-mention:active { color: var(--link-press, #0060df); }
 /* 搜索结果：已选中项打勾，再点一次即取消（多选比点小 × 更顺手） */
 .at-item.picked { background: rgba(var(--brand-rgb, 47,50,55), 0.08); }
 .at-item-check { flex-shrink: 0; margin-left: auto; font-size: 26rpx; font-weight: 700; color: var(--brand, #2f3237); }

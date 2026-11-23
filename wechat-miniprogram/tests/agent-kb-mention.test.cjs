@@ -57,7 +57,8 @@ test('文件夹=整棵子树、文档=单份：token 与 mentions 结构对齐�
 
 test('用户手工删掉 token 时同步撤销引用', () => {
   assert.match(page, /syncMentionsWithInput\(input: string\)/)
-  assert.match(page, /const kept = this\.data\.mentions\.filter\(m => input\.includes\(m\.token\)\)/)
+  // 输入框改为只显示名字后，必须同时按 name 判断（兼容老草稿里的 token 文本）
+  assert.match(page, /const kept = this\.data\.mentions\.filter\(m => input\.includes\(m\.token\) \|\| input\.includes\(m\.name\)\)/)
   // onInput 里必须调用，否则删除 token 后模型仍按旧范围检索
   assert.match(page, /this\.syncMentionsWithInput\(input\)/)
 })
@@ -94,7 +95,7 @@ test('模糊词：搜索框关键字本身可作为引用，随消息以 kb_quer
 
 test('气泡里引用渲染成胶囊，并支持 AI 回答的 [[n]] 来源角标', () => {
   // 分段在发送时刻算好并随消息存下（不靠渲染时正则解析文本）
-  assert.match(page, /segments\?: Array<\{ kind: 'text' \| 'mention' \| 'cite'; value: string \}>/)
+  assert.match(page, /segments\?: Array<\{ kind: 'text' \| 'mention' \| 'cite'; value: string; token\?: string \}>/)
   assert.match(page, /function splitMentionSegments\(/)
   assert.match(page, /const MENTION_TOKEN_RE = \/@\\\[资料库\(\?:检索\)\?\\s\[\^\\\]\]\*\\\]\/g/)
   assert.match(page, /function withMentionSegments\(msg: Message\): Message/)
@@ -104,11 +105,15 @@ test('气泡里引用渲染成胶囊，并支持 AI 回答的 [[n]] 来源角标
   // 后端提示词要求用 [[编号]] 标注来源，前端必须切出来，否则会原样露出 [[1]]
   assert.match(page, /const CITE_MARK_RE = \/\\\[\\\[\(\\d\{1,3\}\)\\\]\\\]\/g/)
   assert.match(page, /kind: 'cite'/)
-  // 渲染成胶囊 + 角标
-  assert.match(template, /class="bubble-mention">\{\{seg\.value\}\}<\/text>/)
+  // 渲染成「蓝色文字链接 + 来源角标」；引用只显示名字，shell @[ ] 已去掉
+  assert.match(template, /class="bubble-mention" data-token="\{\{seg\.token\}\}"/)
   assert.match(template, /wx:elif="\{\{seg\.kind === 'cite'\}\}" class="bubble-cite"/)
+  assert.match(template, /catchtap="onBubbleMentionTap"/)
   assert.match(styles, /\.bubble-mention \{/)
   assert.match(styles, /\.bubble-cite \{/)
+  // 链接色与点击处理器
+  assert.match(page, /onBubbleMentionTap\(event: WechatMiniprogram\.TouchEvent\)/)
+  assert.match(styles, /color: var\(--link, #0a84ff\)/)
   // 老消息没有 segments 时必须回退纯文本，不能出现幽灵高亮
   assert.match(template, /<block wx:else>\s*<text wx:if="\{\{item\.text\}\}" class="bubble-text"/)
 })
@@ -286,5 +291,6 @@ test('打 @ 唤起：editor 末尾换行与全角 ＠ 也要能触发', () => {
   // 真机坑 2：中文输入法可能打出全角 ＠
   assert.match(page, /replace\(\/＠\/g, '@'\)/)
   // 选中后替换触发词时，口径要与检测一致（否则关键词会残留在输入框里）
-  assert.match(page, /replace\(\/\[@＠\]\(\[\^\\s@＠\]\*\)\\s\*\$\/, `\$\{token\} `\)/)
+  // 2026-11-23：替换成「显示名」而不是整个 token，输入框里不再出现 @[ ]
+  assert.match(page, /replace\(\/\[@＠\]\(\[\^\\s@＠\]\*\)\\s\*\$\/, `\$\{display\} `\)/)
 })
