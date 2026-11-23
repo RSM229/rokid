@@ -334,3 +334,10 @@ test('气泡分段标签之间不能有模板空白（pre-wrap 会把缩进渲�
   assert.match(template, /<\/text><text wx:else class="bubble-plain"/)
   assert.doesNotMatch(template, /<\/text>\s*\r?\n\s*<text wx:elif/)
 })
+test('角标要贴住前一句：去掉它前面的换行，保留后面的', () => {
+  // 模型常把 [[n]] 单独放一行（前后都带换行），直接渲染就是
+  // 「角标独占一行 + 下面空一行」。切分后要把前一段的尾部空白收成单个空格，
+  // 后面的换行要保留（列表项仍需分行）。
+  assert.match(page, /if \(prev && prev\.kind === 'text'\) prev\.value = prev\.value\.replace\(\/\\s\+\$\/, ' '\)/)
+  assert.match(page, /segments\.filter\(s => !\(s\.kind === 'text' && s\.value === ''\)\)/)
+})

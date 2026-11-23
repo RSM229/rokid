@@ -630,7 +630,16 @@ function splitMentionSegments(
     cursor = start + raw.length
   }
   if (cursor < text.length) segments.push({ kind: 'text', value: text.slice(cursor) })
-  return segments
+
+  // 角标贴到前一句末尾：模型常把 [[n]] 单独放一行（前后都带换行），
+  // 直接渲染出来就是「角标独占一行 + 下面空一行」。
+  // 只去掉它**前面**的空白，后面的换行保留 —— 列表项还要正常分行。
+  for (let i = 0; i < segments.length; i++) {
+    if (segments[i].kind !== 'cite') continue
+    const prev = segments[i - 1]
+    if (prev && prev.kind === 'text') prev.value = prev.value.replace(/\s+$/, ' ')
+  }
+  return segments.filter(s => !(s.kind === 'text' && s.value === ''))
 }
 
 /** 给消息补上分段快照；既不含引用也不含来源角标时不写字段（保持老渲染路径）。 */
