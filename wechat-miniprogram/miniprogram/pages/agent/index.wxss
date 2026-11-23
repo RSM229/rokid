@@ -699,3 +699,23 @@
 .chat-generate-blocked-title { display: block; color: #854723; font-size: 24rpx; font-weight: 700; }
 .chat-generate-blocked-text { display: block; margin-top: 6rpx; color: #6b564a; font-size: 22rpx; line-height: 1.5; }
 .chat-generate-blocked-hint { display: block; margin-top: 8rpx; color: #8a7568; font-size: 20rpx; line-height: 1.35; }
+
+/* AI 回答里的来源角标（后端用 [[编号]] 标注引用）：
+   黑白主题下不用彩色，做成脚注编号的样子——浅灰底、中灰字、上抬一点。
+   行高用 px 与高度对齐（契约测试只限制相对行高，px 属控件尺寸）。 */
+.bubble-cite {
+  display: inline-block;
+  box-sizing: border-box;
+  min-width: 30rpx;
+  height: 30rpx;
+  padding: 0 8rpx;
+  margin: 0 4rpx;
+  border-radius: 8rpx;
+  background: #eef1f4;
+  color: #5b6472;
+  font-size: 20rpx;
+  font-weight: 600;
+  line-height: 30rpx;
+  text-align: center;
+  vertical-align: 4rpx;
+}

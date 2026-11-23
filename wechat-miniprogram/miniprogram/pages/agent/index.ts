@@ -219,10 +219,11 @@ interface HazardCandidateView {
 interface Message {
   role: 'user' | 'assistant'
   text: string
-  /** 气泡分段：把「@[资料库 …]」切成独立片段，渲染成彩色引用块而不是普通文字。
+  /** 气泡分段：把「@[资料库 …]」与 AI 回答里的「[[n]]」来源角标切成独立片段，
+   *  渲染成引用块/角标而不是普通文字。
    *  只在发送时刻按 mentions 快照算一次并随消息存下；老消息没有这个字段时
    *  WXML 回退到整段纯文本，不会出现「半个 token 被高亮」的幽灵样式。 */
-  segments?: Array<{ kind: 'text' | 'mention'; value: string }>
+  segments?: Array<{ kind: 'text' | 'mention' | 'cite'; value: string }>
   /** 消息头展示时间（备案助手样式：名称 + 时间） */
   timeText?: string
   /** 发送失败标记（2026-11-19）：失败的用户消息显示「点击重发」，不再让文字默默丢掉 */
@@ -572,25 +573,42 @@ interface AtKbItem {
  *  模糊词用「资料库检索」）。只用于把文本切成展示片段，不参与引用语义判定。 */
 const MENTION_TOKEN_RE = /@\[资料库(?:检索)?\s[^\]]*\]/g
 
-/** 把消息文本切成「普通文字 / 引用」片段，供气泡渲染彩色块。 */
-function splitMentionSegments(text: string): Array<{ kind: 'text' | 'mention'; value: string }> {
-  const segments: Array<{ kind: 'text' | 'mention'; value: string }> = []
+/** AI 回答里的来源角标：后端 agent.py 的提示词要求「用到材料就在句末标 [[编号]]」，
+ *  前端原本没有对应渲染，于是 [[1]] 原样露在气泡里。这里切成独立片段渲染成角标。 */
+const CITE_MARK_RE = /\[\[(\d{1,3})\]\]/g
+
+/** 把消息文本切成「普通文字 / 引用 / 来源角标」片段，供气泡渲染。 */
+function splitMentionSegments(
+  text: string
+): Array<{ kind: 'text' | 'mention' | 'cite'; value: string }> {
+  const segments: Array<{ kind: 'text' | 'mention' | 'cite'; value: string }> = []
   let cursor = 0
-  for (const match of text.matchAll(MENTION_TOKEN_RE)) {
+  // 一次扫描同时处理 @[资料库 …] 与 [[n]]，保证顺序不乱
+  // 注意：[[ ]] 必须带捕获组，否则 match[1] 为 undefined，角标会渲染成空
+  const re = /@\[资料库(?:检索)?\s[^\]]*\]|\[\[(\d{1,3})\]\]/g
+  for (const match of text.matchAll(re)) {
     const start = match.index ?? 0
     if (start > cursor) segments.push({ kind: 'text', value: text.slice(cursor, start) })
-    segments.push({ kind: 'mention', value: match[0] })
+    if (match[0].startsWith('[[')) {
+      // 角标只保留编号，方括号由样式呈现
+      segments.push({ kind: 'cite', value: match[1] })
+    } else {
+      segments.push({ kind: 'mention', value: match[0] })
+    }
     cursor = start + match[0].length
   }
   if (cursor < text.length) segments.push({ kind: 'text', value: text.slice(cursor) })
   return segments
 }
 
-/** 给消息补上分段快照；不含引用 token 时不写字段（保持老渲染路径）。 */
+/** 给消息补上分段快照；既不含引用 token 也不含来源角标时不写字段（保持老渲染路径）。 */
 function withMentionSegments(msg: Message): Message {
-  if (!msg.text || !msg.text.includes('@[')) return msg
+  if (!msg.text) return msg
+  const hasMention = msg.text.includes('@[')
+  const hasCite = /\[\[\d{1,3}\]\]/.test(msg.text)
+  if (!hasMention && !hasCite) return msg
   const segments = splitMentionSegments(msg.text)
-  return segments.some(s => s.kind === 'mention') ? { ...msg, segments } : msg
+  return segments.some(s => s.kind === 'mention' || s.kind === 'cite') ? { ...msg, segments } : msg
 }
 
 /** @ 选中项：随 /agent/chat 结构化传给后端，后端据此限定检索范围。
@@ -3833,7 +3851,7 @@ Page(themed({
         ).join('\n')
       }
       this.setData({
-        messages: [...this.data.messages, { role: 'assistant', text: answer || '未找到相关知识', timeText: formatMessageTime() }],
+        messages: [...this.data.messages, withMentionSegments({ role: 'assistant', text: answer || '未找到相关知识', timeText: formatMessageTime() })],
       })
     } catch (error) {
       this.setData({

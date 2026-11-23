@@ -92,18 +92,23 @@ test('模糊词：搜索框关键字本身可作为引用，随消息以 kb_quer
   assert.match(template, /item\.type === 'kb_query' \? '检索：' \+ item\.name/)
 })
 
-test('气泡里引用渲染成彩色胶囊，而不是和普通文字一样', () => {
+test('气泡里引用渲染成胶囊，并支持 AI 回答的 [[n]] 来源角标', () => {
   // 分段在发送时刻算好并随消息存下（不靠渲染时正则解析文本）
-  assert.match(page, /segments\?: Array<\{ kind: 'text' \| 'mention'; value: string \}>/)
-  assert.match(page, /function splitMentionSegments\(text: string\)/)
+  assert.match(page, /segments\?: Array<\{ kind: 'text' \| 'mention' \| 'cite'; value: string \}>/)
+  assert.match(page, /function splitMentionSegments\(/)
   assert.match(page, /const MENTION_TOKEN_RE = \/@\\\[资料库\(\?:检索\)\?\\s\[\^\\\]\]\*\\\]\/g/)
   assert.match(page, /function withMentionSegments\(msg: Message\): Message/)
   // 两条消息入口都要带上分段：addMessage（多数路径）+ 主发送路径的 userMsg
   assert.match(page, /msg = withMentionSegments\(msg\)/)
   assert.match(page, /const userMsg: Message = withMentionSegments\(\{ role: 'user', text/)
-  // 渲染成胶囊
+  // 后端提示词要求用 [[编号]] 标注来源，前端必须切出来，否则会原样露出 [[1]]
+  assert.match(page, /const CITE_MARK_RE = \/\\\[\\\[\(\\d\{1,3\}\)\\\]\\\]\/g/)
+  assert.match(page, /kind: 'cite'/)
+  // 渲染成胶囊 + 角标
   assert.match(template, /class="bubble-mention">\{\{seg\.value\}\}<\/text>/)
+  assert.match(template, /wx:elif="\{\{seg\.kind === 'cite'\}\}" class="bubble-cite"/)
   assert.match(styles, /\.bubble-mention \{/)
+  assert.match(styles, /\.bubble-cite \{/)
   // 老消息没有 segments 时必须回退纯文本，不能出现幽灵高亮
   assert.match(template, /<block wx:else>\s*<text wx:if="\{\{item\.text\}\}" class="bubble-text"/)
 })
