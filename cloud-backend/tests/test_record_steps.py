@@ -141,5 +141,20 @@ for code in sorted(rfs.FORMS):
           [s["index"] for s in data["steps"]] == list(range(data["step_count"])))
 
 
+print("\n== 8. 后端 validate_values 与前端缺项口径同源（空表提交）==")
+# 回归：字段表里 kind=auto/signoff 的派生栏、以及 SPEC_DROP 隐藏栏，
+# 前端只读/不渲染；后端不能拿 schema 的 required 把它们拦成「必填项不能为空」，
+# 否则用户按草稿缺项填完仍保存失败，且看不到是哪一栏。
+for code in sorted(pfs.known_form_codes()):
+    steps = rs.build_steps(code)
+    if steps is None:
+        continue
+    front_missing = set(steps["missing"])
+    empty_vals = {f["key"]: "" for s in steps["steps"] for f in s["fields"]}
+    back_errors = {e["key"] for e in pfs.validate_values(code, empty_vals)["errors"]
+                   if e["message"] == "必填项不能为空"}
+    check(f"{code} 后端必填 == 前端缺项", back_errors == front_missing,
+          f"仅前端={sorted(front_missing - back_errors)} 仅后端={sorted(back_errors - front_missing)}")
+
 print("\n" + ("ALL PASS" if not FAILED else f"FAILED {len(FAILED)}: {FAILED}"))
 sys.exit(0 if not FAILED else 1)

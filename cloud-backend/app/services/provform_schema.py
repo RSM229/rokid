@@ -1253,16 +1253,40 @@ def validate_values(form_code: str, values: dict) -> dict:
     if schema is None:
         return {"ok": False, "errors": [{"key": "", "label": "",
                 "message": f"表单 {form_code} 尚无字段级 schema"}]}
+    # 必填/只读口径必须与 record_steps.build_steps（→ 小程序 refreshMissing）同源。
+    # 有字段表时完全以字段表为准（与 _build_field 同一把尺子）：
+    #   - 字段表里没有的键 = 生成脚本刻意隐藏的栏（模板无此栏），前端不渲染；
+    #   - kind=auto/signoff 是系统派生/签章栏，前端只读，用户无从填写；
+    #   - required 也取字段表（schema 里可能把用户栏误标 required）。
+    # 三者若不对齐，后端就会报「必填项不能为空」却让用户找不到是哪一栏。
+    # 无字段表（schema_only）时退回原 is_system_field 判定。
+    from app.services import record_field_spec
+    all_spec = record_field_spec.fields_of(form_code)
+    spec_by_key = {str(f["key"]): f for f in all_spec if f.get("key")}
+
+    def _checkable(key: str, field: dict) -> bool:
+        """是否作为「用户应填栏」参与校验。"""
+        if spec_by_key:
+            spec = spec_by_key.get(str(key))
+            if spec is None:                      # 隐藏栏（SPEC_DROP）
+                return False
+            if str(spec.get("kind") or "ask") in ("auto", "signoff"):
+                return False
+            return True
+        return not ((form_code == "witness_record" and bool(field.get("system")))
+                    or is_system_field(form_code, field))
+
     errors: list[dict] = []
     for section in schema["sections"]:
         for field in section["fields"]:
             key = field["key"]
-            # 项目派生 system 字段由后端自填，跳过其必填/格式校验
-            if (form_code == "witness_record" and field.get("system")) or is_system_field(form_code, field):
+            if not _checkable(key, field):
                 continue
+            spec = spec_by_key.get(str(key))
+            required = bool(spec.get("required")) if spec is not None else bool(field.get("required"))
             raw = values.get(key)
             value = "" if raw is None else str(raw).strip()
-            if field.get("required") and not value:
+            if required and not value:
                 errors.append({"key": key, "label": field["label"],
                                "message": "必填项不能为空"})
                 continue
