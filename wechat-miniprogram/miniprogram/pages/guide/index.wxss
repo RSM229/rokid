@@ -107,7 +107,7 @@ page {
 
 .slide-desc {
   font-size: 28rpx;
-  line-height: 1.7;
+  line-height: 1.65;
   color: #8a94a6;
 }
 
@@ -198,7 +198,7 @@ page {
 }
 
 .help-h {
-  font-size: 30rpx;
+  font-size: 32rpx;
   font-weight: 600;
   color: #11131a;
   margin-bottom: 16rpx;
@@ -207,7 +207,7 @@ page {
 .help-li {
   font-size: 26rpx;
   color: #8a94a6;
-  line-height: 1.7;
+  line-height: 1.65;
   margin-bottom: 8rpx;
 }
 
@@ -226,7 +226,7 @@ page {
   padding: 0;
   border: none;
   border-radius: 48rpx;
-  font-size: 30rpx;
+  font-size: 32rpx;
   font-weight: 500;
   color: #ffffff;
   background: linear-gradient(160deg, #3a4046, #2f3237 55%, #1e2229);
