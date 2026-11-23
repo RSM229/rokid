@@ -633,11 +633,24 @@ function splitMentionSegments(
 
   // 角标贴到前一句末尾：模型常把 [[n]] 单独放一行（前后都带换行），
   // 直接渲染出来就是「角标独占一行 + 下面空一行」。
-  // 只去掉它**前面**的空白，后面的换行保留 —— 列表项还要正常分行。
+  // 前：去掉角标**前面**的空白（收成单个空格），让它贴住前一句。
+  // 后：角标后面紧跟的「两个以上换行」压成一个 —— 否则角标自己占一行之后
+  //     还会多出一个空行；单个换行保留，列表项照常分行。
   for (let i = 0; i < segments.length; i++) {
     if (segments[i].kind !== 'cite') continue
     const prev = segments[i - 1]
     if (prev && prev.kind === 'text') prev.value = prev.value.replace(/\s+$/, ' ')
+  }
+  for (let i = 0; i < segments.length; i++) {
+    const seg = segments[i]
+    if (seg.kind !== 'text') continue
+    // 找到前一个非空片段：连续多个角标（[[1]][[5]]）时也要判为「跟在角标后」
+    let j = i - 1
+    while (j >= 0 && segments[j].kind === 'text' && segments[j].value.trim() === '') j--
+    const prevMark = j >= 0 ? segments[j] : null
+    if (prevMark && prevMark.kind === 'cite') {
+      seg.value = seg.value.replace(/^[ \t]*\n[ \t]*\n+/, '\n')
+    }
   }
   return segments.filter(s => !(s.kind === 'text' && s.value === ''))
 }

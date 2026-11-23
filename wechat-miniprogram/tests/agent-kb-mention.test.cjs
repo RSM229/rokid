@@ -341,3 +341,9 @@ test('角标要贴住前一句：去掉它前面的换行，保留后面的', ()
   assert.match(page, /if \(prev && prev\.kind === 'text'\) prev\.value = prev\.value\.replace\(\/\\s\+\$\/, ' '\)/)
   assert.match(page, /segments\.filter\(s => !\(s\.kind === 'text' && s\.value === ''\)\)/)
 })
+test('角标后面的空行要压成一个换行（列表项仍换行）', () => {
+  // 现象：角标独占一行之后，下面还空一行。
+  // 成因：原文是 [[1]]\n[[5]]\n\n2. …，角标后跟了两个换行。
+  assert.match(page, /seg\.value = seg\.value\.replace\(\/\^\[ \\t\]\*\\n\[ \\t\]\*\\n\+\/, '\\n'\)/)
+  assert.match(page, /while \(j >= 0 && segments\[j\]\.kind === 'text' && segments\[j\]\.value\.trim\(\) === ''\) j--/)
+})
