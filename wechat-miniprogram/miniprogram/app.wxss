@@ -213,8 +213,8 @@ page {
 /* 平面次要按钮：白底 + 一根线 */
 .btn-flat-ghost {
   width: 100%;
-  height: 96rpx;
-  line-height: 96rpx;
+  height: 88rpx;
+  line-height: 88rpx;
   border-radius: 48rpx;
   border: 1rpx solid var(--flat-line, rgba(17, 19, 26, 0.08));
   background: var(--flat-surface, #ffffff);

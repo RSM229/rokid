@@ -220,8 +220,8 @@ page {
 
 .link-btn {
   width: 100%;
-  height: 96rpx;
-  line-height: 96rpx;
+  height: 88rpx;
+  line-height: 88rpx;
   margin: 0;
   padding: 0;
   border: none;
