@@ -718,7 +718,18 @@ function withMentionSegments(msg: Message): Message {
   const hasNamed = (msg.mentions || []).some(m => Boolean(m.name && msg.text.includes(m.name)))
   if (!hasMentionToken && !hasCite && !hasNamed) return msg
   const segments = splitMentionSegments(msg.text, msg.mentions)
-  return segments.some(s => s.kind !== 'text') ? { ...msg, segments } : msg
+  const out: Message =
+    segments.some(s => s.kind !== 'text') ? { ...msg, segments } : { ...msg }
+  // 关键：把 text 本身也换成渲染形态（[[n]]→上标，合并拆行）。
+  // 气泡有两条渲染路径：有 segments 走分段、没有则回退纯文本。
+  // 只在分段里做替换时，兜底路径会原样露出 [[1]]（用户截图里就是这样）。
+  // 两条路径现在用同一份文本，怎么渲染都一致。
+  if (msg.role === 'assistant' && hasCite) {
+    out.text = normalizeCiteArtifacts(msg.text).replace(/\[\[(\d{1,3})\]\]/g, (_m, d) =>
+      citeToSuperscript(d),
+    )
+  }
+  return out
 }
 
 /** @ 选中项：随 /agent/chat 结构化传给后端，后端据此限定检索范围。

@@ -380,3 +380,10 @@ test('发送时把「@名字」还原成 token 存档，历史回看才能认出
   // 只在名字后面是分隔符时替换，避免截断更长的名字
   assert.match(page, /const re = new RegExp\(`@\$\{escapeRe\(name\)\}\(\?!\[\^\\\\s/)
 })
+test('角标上标化后必须同时改写 text，否则兜底渲染会露出 [[1]]', () => {
+  // 角标改成上标字符后不再产生非文本片段 ——
+  // segments.some(kind !== 'text') 为 false，于是不写 segments，
+  // 气泡回退到原始 text，[[1]] 就原样露出来了（用户截图复现）。
+  assert.match(page, /if \(msg\.role === 'assistant' && hasCite\)/)
+  assert.match(page, /out\.text = normalizeCiteArtifacts\(msg\.text\)\.replace\(\/\\\[\\\[\(\\d\{1,3\}\)\\\]\\\]\/g,/)
+})
