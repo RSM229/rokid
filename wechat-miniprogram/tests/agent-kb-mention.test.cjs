@@ -353,17 +353,25 @@ test('角标是内联上标，不能是占位方块', () => {
   assert.doesNotMatch(rule, /height:/)
   assert.doesNotMatch(rule, /line-height:/)
 })
-test('只合并「角标独占行 / 标点独占行」，其余排版一律不动', () => {
-  // 用户反馈：修角标把列表格式弄乱了（角标和下一行并到一起）。
-  // 现在只认三种明确形态：整行只有角标、整行只有标点、行首是标点，
-  // 把它们并回最近的非空行；空行、缩进、列表项一律保持原样。
+test('角标/标点拆行统一兜底：行首不许有角标、行内不许只剩标点', () => {
+  // AI 输出不可靠，形态五花八门（角标跑行首、句号独占行、孤立小圆圈…），
+  // 逐例打补丁修不完，所以用两条硬规则统一处理：
+  //   A. 行首角标一律挪到上一行末尾
+  //   B. 只剩角标 / 只剩标点的行一律并回上一行
   assert.match(page, /function normalizeCiteArtifacts\(text: string\): string \{/)
   assert.match(page, /const CITE_ONLY = \/\^\(\?:\\\[\\\[\\d\{1,3\}\\\]\\\]\[ \\t\]\*\)\+\$\//)
   assert.match(page, /const PUNCT_ONLY = /)
   assert.match(page, /const PUNCT_START = /)
+  // 规则 A：行首角标
+  assert.match(page, /const CITE_LEADING = /)
+  assert.match(page, /const lead = CITE_LEADING\.exec\(line\)/)
+  // 孤立符号噪音
+  assert.match(page, /const ORPHAN_SYMBOL = /)
+  // 角标搬走后不能留下空行（否则列表项之间会冒空行）
+  assert.match(page, /if \(wasNonEmpty && line\.trim\(\) === ''\) continue/)
   // 往前找最近的非空行（跳过空行但不删空行）
-  assert.match(page, /while \(prev >= 0 && out\[prev\]\.trim\(\) === ''\) prev--/)
-  // 明确不再出现「压缩连续换行」那类改动
+  assert.match(page, /while \(p >= 0 && out\[p\]\.trim\(\) === ''\) p--/)
+  // 明确不再出现「压缩单个换行」那类会挤乱列表的改动（三个以上换行压成空行是允许的）
   assert.doesNotMatch(page, /replace\(\/\^\[ \\t\]\*\\n\[ \\t\]\*\\n\+\//)
 })
 

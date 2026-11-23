@@ -594,45 +594,67 @@ function escapeRe(s: string): string {
 }
 
 /**
- * 修「角标把句子拆成三行」的排版残留（只处理这两类行，其余字符原样保留）：
- *   1) 整行只有角标：[[1]]          → 贴到上一行末尾
- *   2) 整行只有标点：。             → 也并回上一行
- *   3) 行首是标点：。后续…           → 并回上一行（模型常在句中断行）
+ * 统一清理「AI 输出把角标/标点拆行」造成的排版残留。
  *
- * 用户实际遇到的是：
- *   4. …我不编造
- *   [[1]]
- *   。
- * 模型把角标和句号都拆到了独立行。这里把 2、3 两类行并回去，句子恢复成一行。
+ * AI 输出不可靠，形态五花八门（真机上都见过）：
+ *   4. …我不编造\n[[1]]\n。              ← 角标和句号各占一行
+ *   [[2]]2. 验收部位：…                 ← 角标跑到行首
+ *   4. 工作内容三项：…\n[[2]]\n。        ← 又是拆行
+ *   …\n°                                ← 孤立的小圆圈/标点
  *
- * 之前用「修剪前后空白 / 压缩连续换行」去修，会把列表结构挤乱；
- * 现在只认「整行只有角标」「整行只有标点」「行首是标点」三种明确形态。
+ * 用「逐例打补丁」是修不完的，所以改成两条硬规则做统一兜底：
+ *   A. 任何行都不许以角标开头（行首角标一律挪到上一行末尾）
+ *   B. 任何行都不许只剩标点、或只剩角标（一律并回上一行）
+ * 其余行一字不改：列表项、空行、缩进全部保留，避免再次挤乱格式。
  */
 function normalizeCiteArtifacts(text: string): string {
   const CITE_ONLY = /^(?:\[\[\d{1,3}\]\][ \t]*)+$/
-  const PUNCT_ONLY = /^[。，；：、！？…—）》】」』"']+$/
-  const PUNCT_START = /^[。，；：、！？…—）》】」』]/
+  // 只含标点的行（含全角标点、引号、小圆圈等排版残留符号）
+  const PUNCT_ONLY = /^[。，；：、！？…—－·•°º。）》】」』"'`\s]+$/
+  const PUNCT_START = /^[。，；：、！？…—－·•°º）》】」』]/
+  const CITE_LEADING = /^[ \t]*(?:\[\[\d{1,3}\]\][ \t]*)+/
+  // 孤立的小圆圈/间隔符：纯排版噪音，直接丢掉
+  const ORPHAN_SYMBOL = /^[°º·•]+$/
   const lines = text.split('\n')
   const out: string[] = []
-  const appendToPrev = (piece: string) => {
-    let prev = out.length - 1
-    while (prev >= 0 && out[prev].trim() === '') prev--
-    if (prev < 0) return false
-    // 标点紧贴，其它内容补一个空格
-    const joiner = PUNCT_START.test(piece) || PUNCT_ONLY.test(piece) ? '' : ' '
-    out[prev] = out[prev].replace(/[ \t]+$/, '') + joiner + piece
+  const lastNonEmpty = () => {
+    let p = out.length - 1
+    while (p >= 0 && out[p].trim() === '') p--
+    return p
+  }
+  const appendToPrev = (piece: string, joiner = ' ') => {
+    const p = lastNonEmpty()
+    if (p < 0) return false
+    out[p] = out[p].replace(/[ \t]+$/, '') + joiner + piece
     return true
   }
-  for (const line of lines) {
+  for (const raw of lines) {
+    let line = raw.replace(/[ \t]+$/, '')
+    const wasNonEmpty = line.trim() !== ''
+    // 规则 A：行首角标搬到上一行末尾（"[[2]]2. 验收部位" → "上一行 [[2]]" + "2. 验收部位"）
+    const lead = CITE_LEADING.exec(line)
+    if (lead) {
+      if (appendToPrev(lead[0].replace(/[ \t]+/g, ''))) {
+        line = line.slice(lead[0].length)
+      } else {
+        line = line.replace(CITE_LEADING, '') // 没有上一行可挂，直接去掉，别让行首出现角标
+      }
+    }
+    // 角标被搬走后本行如果空了，不要留一个空行（否则列表项之间会冒出空行）
+    if (wasNonEmpty && line.trim() === '') continue
     const trimmed = line.trim()
+    // 纯符号噪音（孤立的 ° º · •）：直接丢弃，不并进句子
+    if (trimmed && ORPHAN_SYMBOL.test(trimmed)) continue
+    // 规则 B：只剩角标 / 只剩标点 → 并回上一行（标点紧贴，不补空格）
     if (trimmed && CITE_ONLY.test(trimmed)) {
       if (appendToPrev(trimmed.replace(/[ \t]+/g, ''))) continue
     } else if (trimmed && (PUNCT_ONLY.test(trimmed) || PUNCT_START.test(trimmed))) {
-      if (appendToPrev(trimmed)) continue
+      if (appendToPrev(trimmed, '')) continue
     }
     out.push(line)
   }
-  return out.join('\n')
+  // 顺带把 3 个以上连续换行压成 1 个空行（超过一个空行在任何版式里都没意义）
+  return out.join('\n').replace(/\n{3,}/g, '\n\n')
 }
 
 /** 把消息文本切成「普通文字 / 引用 / 来源角标」片段，供气泡渲染。
