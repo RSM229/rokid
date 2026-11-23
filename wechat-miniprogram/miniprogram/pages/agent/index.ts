@@ -904,9 +904,19 @@ Page(themed({
       }
     } catch { /* 缓存坏了不影响功能 */ }
 
-    // 富文本输入：基础库够新就用 <editor>，@ 引用可以渲染成行内胶囊；
-    // 老版本自动回退到 textarea（纯文本 token）。
-    this.setData({ useEditor: this.supportsEditor() })
+    // 输入组件：固定使用 <textarea>（纯文本），不再启用 <editor>。
+    //
+    // 2026-11-23 结论：<editor> 的编辑 API 在真机上不可控 ——
+    //   · format() 之后光标会跳到开头、且会把刚插入的文字重新染色；
+    //   · setContents() 重建内容后编辑器失去输入能力（没有 focus API 能救回来）；
+    //   · deleteText() 的 index 语义在部分机型上也不稳定。
+    // 结果是「引用插进去闪一下又复原 / 空格后光标跑到最前 / 蓝色变黑」反复出现，
+    // 这些都是组件能力边界，不是样式能修的。
+    //
+    // textarea 的 value / focus 行为可预测：引用名直接写进文本、光标不会乱跳；
+    // 代价是输入框里无法给引用名单独上色（气泡里仍然蓝色可点，不受影响）。
+    // supportsEditor() 保留，后续组件能力稳定了再评估。
+    this.setData({ useEditor: false })
     // 键盘高度：优先用输入组件的 bindkeyboardheightchange（对齐 jl 的做法）。
     // 全局 onKeyboardHeightChange 在真机上会和 100vh 视口变化叠加计数，
     // 导致输入卡被推到屏幕上方；组件级事件只报「这个输入框被键盘顶起多少」，
@@ -6221,7 +6231,7 @@ Page(themed({
       return
     }
 
-    // textarea 回退路径：没有富文本能力，直接改文本
+    // textarea 路径（当前唯一路径）：直接改文本，然后把焦点交回输入框
     const current = this.data.input
     const next = typed
       ? current.replace(/[@＠]([^\s@＠]*)\s*$/, `${display} `)
@@ -6230,6 +6240,8 @@ Page(themed({
         : `${display} `
     this.setData({ input: next, canSend: true })
     this.refreshMentions(mentions)
+    // 选完引用要让用户能直接接着打字：把焦点交回输入框（textarea 支持 focus）
+    this.focusDraftInput()
   },
 
   /**
