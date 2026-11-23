@@ -219,10 +219,15 @@ interface HazardCandidateView {
 interface Message {
   role: 'user' | 'assistant'
   text: string
-  /** 气泡分段：把「@[资料库 …]」切成独立片段，渲染成彩色引用块而不是普通文字。
+  /** 气泡分段：把「@[资料库 …]」与 AI 回答里的「[[n]]」来源角标切成独立片段，
+   *  渲染成引用块/角标而不是普通文字。
    *  只在发送时刻按 mentions 快照算一次并随消息存下；老消息没有这个字段时
    *  WXML 回退到整段纯文本，不会出现「半个 token 被高亮」的幽灵样式。 */
-  segments?: Array<{ kind: 'text' | 'mention'; value: string }>
+  segments?: Array<{ kind: 'text' | 'mention' | 'cite'; value: string; token?: string }>
+  /** 这条消息引用了哪些资料（发送时的快照）。
+   *  输入框现在只写名字、文本里没有 @[ ] token，所以分段要靠名字反查；
+   *  没有这个快照，用户消息里的引用名就只能显示成普通文字（用户反馈"气泡也是纯文本"）。 */
+  mentions?: AtMention[]
   /** 消息头展示时间（备案助手样式：名称 + 时间） */
   timeText?: string
   /** 发送失败标记（2026-11-19）：失败的用户消息显示「点击重发」，不再让文字默默丢掉 */
@@ -572,25 +577,143 @@ interface AtKbItem {
  *  模糊词用「资料库检索」）。只用于把文本切成展示片段，不参与引用语义判定。 */
 const MENTION_TOKEN_RE = /@\[资料库(?:检索)?\s[^\]]*\]/g
 
-/** 把消息文本切成「普通文字 / 引用」片段，供气泡渲染彩色块。 */
-function splitMentionSegments(text: string): Array<{ kind: 'text' | 'mention'; value: string }> {
-  const segments: Array<{ kind: 'text' | 'mention'; value: string }> = []
+/** AI 回答里的来源角标：后端 agent.py 的提示词要求「用到材料就在句末标 [[编号]]」，
+ *  前端原本没有对应渲染，于是 [[1]] 原样露在气泡里。这里切成独立片段渲染成角标。 */
+const CITE_MARK_RE = /\[\[(\d{1,3})\]\]/g
+
+/** 引用 token 的「显示名」：用户要求气泡与输入框里都只显示名字，
+ *  去掉 @[ ] 外壳（例：@[资料库 监理日志] → 监理日志）。 */
+export function mentionDisplayName(token: string): string {
+  const inner = token.replace(/^@\[资料库(?:检索)?\s*/, '').replace(/\]$/, '')
+  return inner.trim()
+}
+
+/** 正则字面量转义（引用名里可能带括号/点号等） */
+function escapeRe(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+/**
+ * 统一清理「AI 输出把角标/标点拆行」造成的排版残留。
+ *
+ * AI 输出不可靠，形态五花八门（真机上都见过）：
+ *   4. …我不编造\n[[1]]\n。              ← 角标和句号各占一行
+ *   [[2]]2. 验收部位：…                 ← 角标跑到行首
+ *   4. 工作内容三项：…\n[[2]]\n。        ← 又是拆行
+ *   …\n°                                ← 孤立的小圆圈/标点
+ *
+ * 用「逐例打补丁」是修不完的，所以改成两条硬规则做统一兜底：
+ *   A. 任何行都不许以角标开头（行首角标一律挪到上一行末尾）
+ *   B. 任何行都不许只剩标点、或只剩角标（一律并回上一行）
+ * 其余行一字不改：列表项、空行、缩进全部保留，避免再次挤乱格式。
+ */
+function normalizeCiteArtifacts(text: string): string {
+  const CITE_ONLY = /^(?:\[\[\d{1,3}\]\][ \t]*)+$/
+  // 只含标点的行（含全角标点、引号、小圆圈等排版残留符号）
+  const PUNCT_ONLY = /^[。，；：、！？…—－·•°º。）》】」』"'`\s]+$/
+  const PUNCT_START = /^[。，；：、！？…—－·•°º）》】」』]/
+  const CITE_LEADING = /^[ \t]*(?:\[\[\d{1,3}\]\][ \t]*)+/
+  // 孤立的小圆圈/间隔符：纯排版噪音，直接丢掉
+  const ORPHAN_SYMBOL = /^[°º·•]+$/
+  const lines = text.split('\n')
+  const out: string[] = []
+  const lastNonEmpty = () => {
+    let p = out.length - 1
+    while (p >= 0 && out[p].trim() === '') p--
+    return p
+  }
+  const appendToPrev = (piece: string, joiner = ' ') => {
+    const p = lastNonEmpty()
+    if (p < 0) return false
+    out[p] = out[p].replace(/[ \t]+$/, '') + joiner + piece
+    return true
+  }
+  for (const raw of lines) {
+    let line = raw.replace(/[ \t]+$/, '')
+    const wasNonEmpty = line.trim() !== ''
+    // 规则 A：行首角标搬到上一行末尾（"[[2]]2. 验收部位" → "上一行 [[2]]" + "2. 验收部位"）
+    const lead = CITE_LEADING.exec(line)
+    if (lead) {
+      if (appendToPrev(lead[0].replace(/[ \t]+/g, ''))) {
+        line = line.slice(lead[0].length)
+      } else {
+        line = line.replace(CITE_LEADING, '') // 没有上一行可挂，直接去掉，别让行首出现角标
+      }
+    }
+    // 角标被搬走后本行如果空了，不要留一个空行（否则列表项之间会冒出空行）
+    if (wasNonEmpty && line.trim() === '') continue
+    const trimmed = line.trim()
+    // 纯符号噪音（孤立的 ° º · •）：直接丢弃，不并进句子
+    if (trimmed && ORPHAN_SYMBOL.test(trimmed)) continue
+    // 规则 B：只剩角标 / 只剩标点 → 并回上一行（标点紧贴，不补空格）
+    if (trimmed && CITE_ONLY.test(trimmed)) {
+      if (appendToPrev(trimmed.replace(/[ \t]+/g, ''))) continue
+    } else if (trimmed && (PUNCT_ONLY.test(trimmed) || PUNCT_START.test(trimmed))) {
+      if (appendToPrev(trimmed, '')) continue
+    }
+    out.push(line)
+  }
+  // 顺带把 3 个以上连续换行压成 1 个空行（超过一个空行在任何版式里都没意义）
+  return out.join('\n').replace(/\n{3,}/g, '\n\n')
+}
+
+/** 把消息文本切成「普通文字 / 引用 / 来源角标」片段，供气泡渲染。
+ *  mention 片段只保留显示名（value），原始 token 另存一份供点击定位。
+ *
+ *  mentions：发送时随消息存下的引用快照。
+ *  输入框现在只写「@名字」（没有 @[ ] 外壳），所以必须靠名字反查，
+ *  否则用户消息里的引用名只能当普通文字显示（用户反馈"气泡也是纯文本"）。
+ */
+function splitMentionSegments(
+  rawText: string,
+  mentions?: AtMention[],
+): Array<{ kind: 'text' | 'mention' | 'cite'; value: string; token?: string }> {
+  // 把「整行只有角标」的行贴到上一行末尾（只动这种行，其余字符一个都不改）
+  const text = normalizeCiteArtifacts(rawText)
+  const segments: Array<{ kind: 'text' | 'mention' | 'cite'; value: string; token?: string }> = []
+  const names = (mentions || [])
+    .map(m => m.name)
+    .filter(n => Boolean(n && n.trim()))
+    .sort((a, b) => b.length - a.length)
+  const alternatives = ['@\\[资料库(?:检索)?\\s[^\\]]*\\]', '\\[\\[\\d{1,3}\\]\\]']
+  if (names.length) alternatives.push(`@?(?:${names.map(escapeRe).join('|')})`)
+  const re = new RegExp(alternatives.join('|'), 'g')
   let cursor = 0
-  for (const match of text.matchAll(MENTION_TOKEN_RE)) {
+  for (const match of text.matchAll(re)) {
     const start = match.index ?? 0
     if (start > cursor) segments.push({ kind: 'text', value: text.slice(cursor, start) })
-    segments.push({ kind: 'mention', value: match[0] })
-    cursor = start + match[0].length
+    const raw = match[0]
+    if (raw.startsWith('@[')) {
+      segments.push({ kind: 'mention', value: mentionDisplayName(raw), token: raw })
+    } else if (/^\[\[\d{1,3}\]\]$/.test(raw)) {
+      // 角标只保留编号，方括号由样式呈现
+      segments.push({ kind: 'cite', value: raw.slice(2, -2) })
+    } else {
+      // 纯名字（可能带一个 @ 前缀）：去掉 @ 后作为显示名
+      const name = raw.replace(/^@/, '')
+      segments.push({ kind: 'mention', value: name, token: `@[资料库 ${name}]` })
+    }
+    cursor = start + raw.length
   }
   if (cursor < text.length) segments.push({ kind: 'text', value: text.slice(cursor) })
+
+  // 重要：这里**不对文本做任何增删**。
+  // 曾经为了让角标贴到句末去修剪换行，结果把模型原本的列表排版挤乱了
+  // （角标和下一行的「5. …」并到同一行）—— 用改文本的方式修显示，是本末倒置。
+  // 角标位置上移/独占一行属于原文本排版，由后端提示词约束模型（标注跟在句末），
+  // 前端只负责把 [[n]] 换成不占位的内联角标。
   return segments
 }
 
-/** 给消息补上分段快照；不含引用 token 时不写字段（保持老渲染路径）。 */
+/** 给消息补上分段快照；既不含引用也不含来源角标时不写字段（保持老渲染路径）。 */
 function withMentionSegments(msg: Message): Message {
-  if (!msg.text || !msg.text.includes('@[')) return msg
-  const segments = splitMentionSegments(msg.text)
-  return segments.some(s => s.kind === 'mention') ? { ...msg, segments } : msg
+  if (!msg.text) return msg
+  const hasMentionToken = msg.text.includes('@[')
+  const hasCite = /\[\[\d{1,3}\]\]/.test(msg.text)
+  const hasNamed = (msg.mentions || []).some(m => Boolean(m.name && msg.text.includes(m.name)))
+  if (!hasMentionToken && !hasCite && !hasNamed) return msg
+  const segments = splitMentionSegments(msg.text, msg.mentions)
+  return segments.some(s => s.kind !== 'text') ? { ...msg, segments } : msg
 }
 
 /** @ 选中项：随 /agent/chat 结构化传给后端，后端据此限定检索范围。
@@ -671,6 +794,14 @@ Page(themed({
   editorHtml: '',
   /** @ 面板本次是否由「打字打出 @」唤起（2026-11-19）：决定打字同步/删词收起行为 */
   atOpenedByTyping: false,
+  /**
+   * 正在程序化插入引用（2026-11-23）。
+   * 插入过程会产生中间的 onEditorInput（先删触发词、再插名字），
+   * 这期间必须屏蔽 syncMentionsWithInput / detectAtTrigger：
+   *  - 中途文本里还没有名字，同步会把刚登记的引用删掉；
+   *  - 中途文本以 @ 结尾的话又会重新唤起面板。
+   */
+  mentionEditing: false,
   /** 历史搜索防抖计时器（2026-11-19） */
   historySearchTimer: null as number | null,
 
@@ -855,6 +986,23 @@ Page(themed({
   voiceAutoTimer: null as number | null,
 
   onLoad(options: Record<string, string>) {
+    // ===== 统一在 setData 入口给消息补「分段」 =====
+    // 气泡要按片段渲染（引用名蓝色可点、AI 来源角标 [[n]] 变成小方块），
+    // 但直接 setData({ messages: [...] }) 的写入点有十几处，逐个加必然漏 ——
+    // 用户看到的 [[2]] 裸露就是这么漏出来的。
+    // 这里包一层：任何写入 messages 的 setData 都会先过一遍 withMentionSegments（幂等）。
+    const rawSetData = this.setData.bind(this)
+    ;(this as unknown as { setData: (p: unknown, cb?: () => void) => void }).setData = (
+      patch: unknown,
+      cb?: () => void,
+    ) => {
+      const p = patch as { messages?: Message[] } | null
+      if (p && Array.isArray(p.messages)) {
+        patch = { ...p, messages: p.messages.map(m => withMentionSegments(m)) }
+      }
+      rawSetData(patch as never, cb)
+    }
+
     const sysInfo = wx.getWindowInfo()
     this.setData({
       statusBarHeight: sysInfo.statusBarHeight || 20,
@@ -870,9 +1018,19 @@ Page(themed({
       }
     } catch { /* 缓存坏了不影响功能 */ }
 
-    // 富文本输入：基础库够新就用 <editor>，@ 引用可以渲染成行内胶囊；
-    // 老版本自动回退到 textarea（纯文本 token）。
-    this.setData({ useEditor: this.supportsEditor() })
+    // 输入组件：固定使用 <textarea>（纯文本），不再启用 <editor>。
+    //
+    // 2026-11-23 结论：<editor> 的编辑 API 在真机上不可控 ——
+    //   · format() 之后光标会跳到开头、且会把刚插入的文字重新染色；
+    //   · setContents() 重建内容后编辑器失去输入能力（没有 focus API 能救回来）；
+    //   · deleteText() 的 index 语义在部分机型上也不稳定。
+    // 结果是「引用插进去闪一下又复原 / 空格后光标跑到最前 / 蓝色变黑」反复出现，
+    // 这些都是组件能力边界，不是样式能修的。
+    //
+    // textarea 的 value / focus 行为可预测：引用名直接写进文本、光标不会乱跳；
+    // 代价是输入框里无法给引用名单独上色（气泡里仍然蓝色可点，不受影响）。
+    // supportsEditor() 保留，后续组件能力稳定了再评估。
+    this.setData({ useEditor: false })
     // 键盘高度：优先用输入组件的 bindkeyboardheightchange（对齐 jl 的做法）。
     // 全局 onKeyboardHeightChange 在真机上会和 100vh 视口变化叠加计数，
     // 导致输入卡被推到屏幕上方；组件级事件只报「这个输入框被键盘顶起多少」，
@@ -1505,7 +1663,13 @@ Page(themed({
       return
     }
 
-    const userMsg: Message = withMentionSegments({ role: 'user', text, timeText: formatMessageTime() })
+    const userMsg: Message = withMentionSegments({
+      role: 'user',
+      text,
+      // 输入框只写名字，气泡要靠 mentions 快照按名字切出引用片段
+      mentions: [...this.data.mentions],
+      timeText: formatMessageTime(),
+    })
     // 引用被真正用进对话 → 上报埋点（fire-and-forget，个性化排序的原料）
     this.reportMentionUsage()
     // 发送时收掉可能开着的 @ 面板（打字唤起后未选直接发送的场景）
@@ -3833,7 +3997,7 @@ Page(themed({
         ).join('\n')
       }
       this.setData({
-        messages: [...this.data.messages, { role: 'assistant', text: answer || '未找到相关知识', timeText: formatMessageTime() }],
+        messages: [...this.data.messages, withMentionSegments({ role: 'assistant', text: answer || '未找到相关知识', timeText: formatMessageTime() })],
       })
     } catch (error) {
       this.setData({
@@ -4803,7 +4967,10 @@ Page(themed({
   copyMessage(event: WechatMiniprogram.TouchEvent) {
     const idx = Number(event.currentTarget.dataset.index)
     const msg = this.data.messages[idx]
-    const text = (msg && msg.text ? String(msg.text) : '').trim()
+    // 复制「渲染后的形态」：先合上角标/标点被拆出的行，再把 [[n]] 换成 [n]。
+    // 否则复制出来是「…我不编造 / [[1]] / 。」三行，与界面看到的对不上。
+    const raw = msg && msg.text ? String(msg.text) : ''
+    const text = normalizeCiteArtifacts(raw).replace(/\[\[(\d{1,3})\]\]/g, '[$1]').trim()
     if (!text) {
       wx.showToast({ title: '没有可复制的文字', icon: 'none' })
       return
@@ -6136,25 +6303,69 @@ Page(themed({
     this.refreshMentions(mentions)
   },
 
-  /** 把 token 追加进输入框，同时登记引用；打字唤起时替换触发词而不是追加 */
-  appendToken(token: string, mention: AtMention) {
+  /** 把引用追加进输入框，同时登记引用；打字唤起时替换触发词而不是追加。
+   *  2026-11-23：输入框与气泡都只显示名字（去掉 @[ ] 外壳），
+   *  引用语义仍由 mentions 数组结构化承载，不依赖这段文本。 */
+  /**
+   * 把引用追加进输入框，同时登记引用；打字唤起时替换触发词而不是追加。
+   *
+   * 2026-11-23：输入框与气泡都只显示名字（去掉 @[ ] 外壳），
+   *  引用语义仍由 mentions 数组结构化承载，不依赖这段文本。
+   *
+   * 2026-11-23 修复"闪一下又复原"：
+   *  之前这里先乐观改 data.input、再去动编辑器，导致两套数据源打架 ——
+   *  data.input 已是"名字"，编辑器里还是"@关键词"，只要编辑器再触发一次
+   *  onEditorInput 就会把旧文本回写、界面退回 @xxx（中间那一下就是"闪"）。
+   *  现在 editor 模式下**不预写 data.input**，一切以编辑器为准，
+   *  由 onEditorInput 单向同步；插入期间用 mentionEditing 屏蔽中间态。
+   */
+  async appendToken(token: string, mention: AtMention) {
     const mentions = this.data.mentions.concat([mention])
-    if (this.atOpenedByTyping) {
+    // 输入框是纯文本，用「@名字」做可见区分：去掉 @[ ] 外壳，但保留 @ 前缀
+    const display = '@' + (mention.name || mentionDisplayName(token))
+    const typed = this.atOpenedByTyping
+    this.atOpenedByTyping = false
+
+    // editor 模式：只动编辑器；data.input 在编辑完成后再对齐
+    if (this.data.useEditor && this.editorCtx) {
       const current = this.data.input
-      const next = current.replace(/@([^\s@]*)$/, `${token} `)
-      this.atOpenedByTyping = false
-      this.setData({ input: next, canSend: true })
-      this.refreshMentions(mentions)
-      // editor：只把 token 插入并上色；不再整体重灌内容
-      // （setContents 会让光标落进样式节点，导致后续输入全被染色）
-      void this.insertMentionIntoEditor(token)
+      const triggerRe = /[@＠]([^\s@＠]*)\s*$/
+      // 预期的最终文本：与下面真正执行的编辑一一对应
+      const expected = typed
+        ? current.replace(triggerRe, `${display} `)
+        : current
+          ? `${current.replace(/\s+$/, '')} ${display} `
+          : `${display} `
+      this.mentionEditing = true
+      try {
+        if (typed) {
+          const trigger = triggerRe.exec(current)
+          const triggerLen = trigger ? trigger[0].trimEnd().length : 0
+          await this.replaceTriggerWithMention(current.length - triggerLen, triggerLen, display)
+        } else {
+          await this.insertMentionIntoEditor(display)
+        }
+        this.refreshMentions(mentions)
+        // 部分基础库对程序化改动不派发 bindinput，这里显式对齐一次。
+        // 此时编辑器内容已等于 expected，不属于"乐观写入"，不会造成两套数据源打架。
+        this.setData({ input: expected, canSend: true })
+      } finally {
+        this.mentionEditing = false
+      }
       return
     }
+
+    // textarea 路径（当前唯一路径）：直接改文本，然后把焦点交回输入框
     const current = this.data.input
-    const next = current ? `${current.replace(/\s+$/, '')} ${token} ` : `${token} `
+    const next = typed
+      ? current.replace(/[@＠]([^\s@＠]*)\s*$/, `${display} `)
+      : current
+        ? `${current.replace(/\s+$/, '')} ${display} `
+        : `${display} `
     this.setData({ input: next, canSend: true })
     this.refreshMentions(mentions)
-    void this.insertMentionIntoEditor(token)
+    // 选完引用要让用户能直接接着打字：把焦点交回输入框（textarea 支持 focus）
+    this.focusDraftInput()
   },
 
   /**
@@ -6214,15 +6425,36 @@ Page(themed({
   },
 
   /**
-   * 用户手工删掉输入框里的 token 时，同步撤销对应引用。
+   * 用户手动删掉输入框里的引用名时，同步撤销对应引用。
    * 不做这一步会出现「界面上看不到引用、但模型仍按旧范围检索」的错位。
+   *
+   * 2026-11-23 起输入框只显示名字（不再有 @[ ] 外壳），所以同时按 name 与 token 判断，
+   * 兼容老草稿里残留的 token 文本。
    */
   syncMentionsWithInput(input: string) {
     if (!this.data.mentions.length) return
-    const kept = this.data.mentions.filter(m => input.includes(m.token))
+    const kept = this.data.mentions.filter(m => input.includes(m.token) || input.includes(m.name))
     if (kept.length !== this.data.mentions.length) {
       this.refreshMentions(kept)
     }
+  },
+
+  /**
+   * 点气泡里的蓝色引用名：优先跳到对应资料库详情，拿不到 id 就进资料库首页。
+   * 气泡里的名字来自消息文本，没有 id；按名字/token 从当前引用列表反查是唯一可用线索。
+   */
+  onBubbleMentionTap(event: WechatMiniprogram.TouchEvent) {
+    const ds = (event.currentTarget && event.currentTarget.dataset) || {}
+    const token = String(ds.token || '')
+    const name = String(ds.name || '')
+    const hit = this.data.mentions.find(
+      m => (token && m.token === token) || (name && m.name === name),
+    )
+    if (hit && hit.kb_id) {
+      wx.navigateTo({ url: `/pages/kb/detail?id=${hit.kb_id}` })
+      return
+    }
+    wx.navigateTo({ url: '/pages/kb/index' })
   },
 
   // ============ 富文本输入（<editor>）：@ 引用渲染成行内胶囊 ============
@@ -6296,7 +6528,10 @@ Page(themed({
   onInput(event: WechatMiniprogram.Input) {
     const input = event.detail.value
     this.setData({ input, canSend: Boolean(input.trim()) || this.data.attachments.length > 0 })
-    // 用户手工删掉 token → 撤销对应引用，避免「界面没引用但模型仍在限定范围内搜」
+    // 程序化插入引用期间的中间态：先删触发词、再插名字，这中间的文本不能参与
+    // 「引用同步」（会误删刚登记的引用）和「@ 唤起」（会重新弹面板）
+    if (this.mentionEditing) return
+    // 用户手工删掉引用名 → 撤销对应引用，避免「界面没引用但模型仍在限定范围内搜」
     this.syncMentionsWithInput(input)
     this.detectAtTrigger(input)
   },
@@ -6332,45 +6567,79 @@ Page(themed({
   },
 
   /**
-   * 把纯文本里的 @[资料库 …] token 转成带内联样式的胶囊。
-   *
-   * 为什么胶囊里仍然保留完整 token 文本：editor 的 text 是纯文本，
-   * 只有文本里还有 token，mentions 才能在每次输入后从文本可靠恢复；
-   * 样式只是让它「看起来不一样」，结构不依赖 HTML 属性（属性可能被运行时清洗）。
-   */
-  /**
    * 纯文本 → editor HTML。
    *
-   * 只做转义，不再包 <span> 胶囊：实测 setContents 写入 span 后光标会落在 span 内部，
-   * 之后输入的文字全部继承胶囊样式（用户反馈"@ 后面打什么都变蓝"）。
-   * 现在改用 editor 原生的 format() 上色 —— 不给文字加外框，只改颜色。
+   * 只做转义，不包 <span>：实测 setContents 写入 span 后光标会落在 span 内部，
+   * 之后输入的文字全部继承样式（用户反馈"@ 后面打什么都变蓝"）。
+   * 现在一律走 editor 原生 format() 上色 —— 不给文字加外框，只改颜色。
    */
   inputToEditorHtml(text: string): string {
-    const escaped = text
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-    return escaped + '<br/>'
+    const escape = (s: string) =>
+      s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    return escape(text) + '<br/>'
   },
 
   /**
-   * 插入一条引用：先给插入点设样式，再插入 token 文本。
+   * 打字唤起路径专用：先删掉用户敲的「@关键词」，再在原位插入蓝色引用名。
+   *
+   * 为什么不用 setContents 重建：实测重建之后编辑器失去输入能力
+   * （用户反馈"名字后面没法继续打字、也不能再 @ 新的"）。
+   * deleteText 只动这几个字符，焦点与光标都保留，删完可以直接接着打字。
+   *
+   * 参数都按「删除前的编辑器文本」计算：
+   *   index  = 触发词起点（current.length - triggerLen）
+   *   length = 触发词长度（@ 加上关键词）
+   */
+  async replaceTriggerWithMention(index: number, triggerLen: number, display: string) {
+    if (!this.data.useEditor || !this.editorCtx) return
+    const ctx = this.editorCtx
+    if (triggerLen > 0 && index >= 0) {
+      const ok = await new Promise<boolean>(resolve => {
+        ctx.deleteText({
+          index,
+          length: triggerLen,
+          success: () => resolve(true),
+          fail: () => resolve(false),
+        })
+      })
+      if (!ok) {
+        // deleteText 需要基础库 2.10.0+；老版本删不掉时至少不要把名字插到 @关键词 后面
+        return
+      }
+    }
+    ctx.format('color', '#0a84ff')
+    ctx.format('backgroundColor', 'transparent')
+    await new Promise<void>(resolve => {
+      ctx.insertText({
+        text: display + ' ',
+        success: () => resolve(),
+        fail: () => resolve(),
+      })
+    })
+    // 复位样式，避免后续输入继续是蓝色
+    ctx.format('backgroundColor', '#ffffff')
+    ctx.format('color', '#11131a')
+  },
+
+  /**
+   * 插入一条引用名：先给插入点设样式，再插入文本。
    *
    * editor 没有 setSelection，无法"插入后再选中"改样式，
    * 但 format() 设置的是「当前输入位置之后要输入的样式」，
-   * 所以「先 format 再 insertText」正好让 token 带上该样式。
+   * 所以「先 format 再 insertText」正好让这段文字带上样式。
    *
-   * 黑白主题下引用不能靠颜色区分（主色是近黑，会和正文同色），
-   * 改用浅灰底把 token 衬成"标签"：正文色 + backgroundColor 浅灰。
+   * 2026-11-23 用户要求：输入框里也只显示名字、蓝色链接观感（去掉 @[ ] 外壳）。
+   * 注意 editor 里的文字无法点击，点击能力只做在气泡里。
    */
-  async insertMentionIntoEditor(token: string) {
+  async insertMentionIntoEditor(display: string) {
     if (!this.data.useEditor || !this.editorCtx) return
     const ctx = this.editorCtx
     await new Promise<void>(resolve => {
-      ctx.format('color', '#11131a')
-      ctx.format('backgroundColor', '#e9edf2')
+      // 链接蓝（与 .bubble-mention 的 --link 对齐）
+      ctx.format('color', '#0a84ff')
+      ctx.format('backgroundColor', 'transparent')
       ctx.insertText({
-        text: token + ' ',
+        text: display + ' ',
         success: () => resolve(),
         fail: () => resolve(),
       })
@@ -6382,8 +6651,7 @@ Page(themed({
   },
 
   /** 兼容旧调用点：把 data.input 整体重灌进 editor（仅在恢复草稿时使用） */
-  async syncEditorWithInput() {
-    if (!this.data.useEditor || !this.editorCtx) return
+  async syncEditorWithInput() {    if (!this.data.useEditor || !this.editorCtx) return
     const html = this.inputToEditorHtml(this.data.input)
     this.editorHtml = html
     this.editorCtx.setContents({ html })
@@ -6412,8 +6680,13 @@ Page(themed({
    * 只有行首或空格后的 @ 才触发，用户句中打「你好@」完全没反应。
    * 排除 [ 是为了不把已插入的「@[资料库 …]」再当成触发词（它以 [ 开头）。
    * 已点选插入的引用结尾是空格或 ]，同样不会误触发。
+   *
+   * 另外两处真机坑（2026-11-23「打 @ 还是没反应」排查出来的）：
+   * 1) <editor> 的 detail.text 末尾常带换行，正则用 $ 锚定会失配 —— 先去掉尾部空白；
+   * 2) 中文输入法可能打出全角「＠」，统一归一成半角再匹配。
    */
-  detectAtTrigger(input: string) {
+  detectAtTrigger(rawInput: string) {
+    const input = (rawInput || '').replace(/[\s\u00a0\u200b]+$/, '').replace(/＠/g, '@')
     const m = /@([^\s@\[\]]*)$/.exec(input)
     if (!m) {
       // 没有正在输入的 @：收起由打字唤起的面板

@@ -57,7 +57,8 @@ test('文件夹=整棵子树、文档=单份：token 与 mentions 结构对齐�
 
 test('用户手工删掉 token 时同步撤销引用', () => {
   assert.match(page, /syncMentionsWithInput\(input: string\)/)
-  assert.match(page, /const kept = this\.data\.mentions\.filter\(m => input\.includes\(m\.token\)\)/)
+  // 输入框改为只显示名字后，必须同时按 name 判断（兼容老草稿里的 token 文本）
+  assert.match(page, /const kept = this\.data\.mentions\.filter\(m => input\.includes\(m\.token\) \|\| input\.includes\(m\.name\)\)/)
   // onInput 里必须调用，否则删除 token 后模型仍按旧范围检索
   assert.match(page, /this\.syncMentionsWithInput\(input\)/)
 })
@@ -92,18 +93,29 @@ test('模糊词：搜索框关键字本身可作为引用，随消息以 kb_quer
   assert.match(template, /item\.type === 'kb_query' \? '检索：' \+ item\.name/)
 })
 
-test('气泡里引用渲染成彩色胶囊，而不是和普通文字一样', () => {
+test('气泡里引用渲染成胶囊，并支持 AI 回答的 [[n]] 来源角标', () => {
   // 分段在发送时刻算好并随消息存下（不靠渲染时正则解析文本）
-  assert.match(page, /segments\?: Array<\{ kind: 'text' \| 'mention'; value: string \}>/)
-  assert.match(page, /function splitMentionSegments\(text: string\)/)
+  assert.match(page, /segments\?: Array<\{ kind: 'text' \| 'mention' \| 'cite'; value: string; token\?: string \}>/)
+  assert.match(page, /function splitMentionSegments\(/)
   assert.match(page, /const MENTION_TOKEN_RE = \/@\\\[资料库\(\?:检索\)\?\\s\[\^\\\]\]\*\\\]\/g/)
   assert.match(page, /function withMentionSegments\(msg: Message\): Message/)
   // 两条消息入口都要带上分段：addMessage（多数路径）+ 主发送路径的 userMsg
   assert.match(page, /msg = withMentionSegments\(msg\)/)
-  assert.match(page, /const userMsg: Message = withMentionSegments\(\{ role: 'user', text/)
-  // 渲染成胶囊
-  assert.match(template, /class="bubble-mention">\{\{seg\.value\}\}<\/text>/)
+  // 发送时把 mentions 快照挂到消息上：输入框只写名字，气泡要靠它按名字切片段
+  assert.match(page, /const userMsg: Message = withMentionSegments\(\{/)
+  assert.match(page, /mentions: \[\.\.\.this\.data\.mentions\]/)
+  // 后端提示词要求用 [[编号]] 标注来源，前端必须切出来，否则会原样露出 [[1]]
+  assert.match(page, /const CITE_MARK_RE = \/\\\[\\\[\(\\d\{1,3\}\)\\\]\\\]\/g/)
+  assert.match(page, /kind: 'cite'/)
+  // 渲染成「蓝色文字链接 + 来源角标」；引用只显示名字，shell @[ ] 已去掉
+  assert.match(template, /class="bubble-mention" data-token="\{\{seg\.token\}\}"/)
+  assert.match(template, /wx:elif="\{\{seg\.kind === 'cite'\}\}" class="bubble-cite"/)
+  assert.match(template, /catchtap="onBubbleMentionTap"/)
   assert.match(styles, /\.bubble-mention \{/)
+  assert.match(styles, /\.bubble-cite \{/)
+  // 链接色与点击处理器
+  assert.match(page, /onBubbleMentionTap\(event: WechatMiniprogram\.TouchEvent\)/)
+  assert.match(styles, /color: var\(--link, #0a84ff\)/)
   // 老消息没有 segments 时必须回退纯文本，不能出现幽灵高亮
   assert.match(template, /<block wx:else>\s*<text wx:if="\{\{item\.text\}\}" class="bubble-text"/)
 })
@@ -274,4 +286,97 @@ test('键盘弹起不遮挡输入区：监听高度 + 布局跟着抬 + 防二�
   // 关掉微信自动顶起，避免和我们算的 --kb 叠加；cursor-spacing 保证光标不被压住
   assert.match(template, /adjust-position="\{\{true\}\}"/)
   assert.match(template, /cursor-spacing="\{\{20\}\}"/)
+})
+test('打 @ 唤起：editor 末尾换行与全角 ＠ 也要能触发', () => {
+  // 真机坑 1：<editor> 的 detail.text 末尾常带换行，正则用 $ 锚定会失配
+  assert.match(page, /replace\(\/\[\\s\\u00a0\\u200b\]\+\$\/, ''\)/)
+  // 真机坑 2：中文输入法可能打出全角 ＠
+  assert.match(page, /replace\(\/＠\/g, '@'\)/)
+  // 选中后替换触发词时，口径要与检测一致（否则关键词会残留在输入框里）
+  // 2026-11-23：替换成「显示名」而不是整个 token，输入框里不再出现 @[ ]
+  assert.match(page, /replace\(\/\[@＠\]\(\[\^\\s@＠\]\*\)\\s\*\$\/, `\$\{display\} `\)/)
+})
+test('打字选完引用后必须还能继续输入：用 deleteText 而不是 setContents 重建', () => {
+  // 踩过的坑：用 setContents 重建内容后，<editor> 失去输入能力，
+  // 用户没法在名字前后继续打字、也不能再 @ 新的东西。
+  assert.match(page, /replaceTriggerWithMention\(index: number, triggerLen: number, display: string\)/)
+  assert.match(page, /ctx\.deleteText\(\{/)
+  assert.match(page, /index,/)
+  assert.match(page, /length: triggerLen/)
+  // 触发词起点按「删除前文本长度 - 触发词长度」计算
+  assert.match(page, /replaceTriggerWithMention\(current\.length - triggerLen, triggerLen, display\)/)
+  // 这条路径不能再出现 setContents 重建
+  assert.doesNotMatch(page, /replaceEditorWithMention/)
+})
+test('引用插入只保留一个数据源，插入期间屏蔽中间态', () => {
+  // 闪一下又复原的根因：先乐观改 data.input，再动编辑器，两个真相互相覆盖。
+  // 现在 editor 模式下先改编辑器，编辑完成后再对齐 data.input。
+  assert.match(page, /mentionEditing: false/)
+  assert.match(page, /this\.mentionEditing = true/)
+  assert.match(page, /this\.mentionEditing = false/)
+  // onInput 在插入期间必须直接返回，不参与同步与 @ 唤起
+  assert.match(page, /if \(this\.mentionEditing\) return/)
+  // 编辑完成后再显式对齐文本（防止部分基础库程序化改动不派发 bindinput）
+  assert.match(page, /this\.setData\(\{ input: expected, canSend: true \}\)/)
+})
+test('消息写入统一在 setData 入口补分段，避免 [[n]] 裸露', () => {
+  // 直接 setData({messages}) 的写入点有十几处，逐个加必然漏；
+  // 漏掉一处，用户就会看到 [[2]] 原样显示。
+  assert.match(page, /const rawSetData = this\.setData\.bind\(this\)/)
+  assert.match(page, /Array\.isArray\(p\.messages\)/)
+  assert.match(page, /p\.messages\.map\(m => withMentionSegments\(m\)\)/)
+})
+test('气泡分段标签之间不能有模板空白（pre-wrap 会把缩进渲染成空行）', () => {
+  // 症状：引用角标单独占一行、下面还空一行。
+  // 原因：.bubble-segments 是 white-space: pre-wrap，模板里 <text> 之间的换行缩进
+  // 会被当成真实文本节点渲染出来。三个 <text> 必须紧挨着写。
+  assert.match(template, /<\/text><text wx:elif="\{\{seg\.kind === 'cite'\}\}"/)
+  assert.match(template, /<\/text><text wx:else class="bubble-plain"/)
+  assert.doesNotMatch(template, /<\/text>\s*\r?\n\s*<text wx:elif/)
+})
+test('分段不得改动原文空白：不能用修剪换行的方式修排版', () => {
+  // 踩过的坑：为了让角标贴住句末去修剪前后的换行，
+  // 结果把模型原本的列表排版挤乱（角标与下一行的「5. …」并到同一行）。
+  // 用改文本的方式修显示是本末倒置，前端只做「标记 → 角标」的替换。
+  assert.doesNotMatch(page, /prev\.value = prev\.value\.replace\(\/\\s\+\$\/, ' '\)/)
+  assert.doesNotMatch(page, /seg\.value = seg\.value\.replace\(\/\^\[ \\t\]\*\\n/)
+})
+
+test('角标是内联上标，不能是占位方块', () => {
+  // inline-block 有自己的高度/行高，会参与行盒计算，角标一多就把整行撑开；
+  // 改成 display: inline + vertical-align: super 后与纯文本排版一致。
+  const rule = (styles.match(/^\.bubble-cite \{[^}]*\}/m) || [''])[0]
+  assert.ok(rule, '.bubble-cite 规则缺失')
+  assert.match(rule, /display: inline;/)
+  assert.match(rule, /vertical-align: super;/)
+  assert.doesNotMatch(rule, /inline-block/)
+  assert.doesNotMatch(rule, /height:/)
+  assert.doesNotMatch(rule, /line-height:/)
+})
+test('角标/标点拆行统一兜底：行首不许有角标、行内不许只剩标点', () => {
+  // AI 输出不可靠，形态五花八门（角标跑行首、句号独占行、孤立小圆圈…），
+  // 逐例打补丁修不完，所以用两条硬规则统一处理：
+  //   A. 行首角标一律挪到上一行末尾
+  //   B. 只剩角标 / 只剩标点的行一律并回上一行
+  assert.match(page, /function normalizeCiteArtifacts\(text: string\): string \{/)
+  assert.match(page, /const CITE_ONLY = \/\^\(\?:\\\[\\\[\\d\{1,3\}\\\]\\\]\[ \\t\]\*\)\+\$\//)
+  assert.match(page, /const PUNCT_ONLY = /)
+  assert.match(page, /const PUNCT_START = /)
+  // 规则 A：行首角标
+  assert.match(page, /const CITE_LEADING = /)
+  assert.match(page, /const lead = CITE_LEADING\.exec\(line\)/)
+  // 孤立符号噪音
+  assert.match(page, /const ORPHAN_SYMBOL = /)
+  // 角标搬走后不能留下空行（否则列表项之间会冒空行）
+  assert.match(page, /if \(wasNonEmpty && line\.trim\(\) === ''\) continue/)
+  // 往前找最近的非空行（跳过空行但不删空行）
+  assert.match(page, /while \(p >= 0 && out\[p\]\.trim\(\) === ''\) p--/)
+  // 明确不再出现「压缩单个换行」那类会挤乱列表的改动（三个以上换行压成空行是允许的）
+  assert.doesNotMatch(page, /replace\(\/\^\[ \\t\]\*\\n\[ \\t\]\*\\n\+\//)
+})
+
+test('复制的是渲染后的形态：合并拆行并把 [[n]] 变成 [n]', () => {
+  // 用户复制出来是「…我不编造 / [[1]] / 。」三行，与界面不一致。
+  assert.match(page, /normalizeCiteArtifacts\(raw\)\.replace\(\/\\\[\\\[\(\\d\{1,3\}\)\\\]\\\]\/g, '\[\$1\]'\)/)
+  assert.match(page, /const raw = msg && msg\.text \? String\(msg\.text\) : ''/)
 })

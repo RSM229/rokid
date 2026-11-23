@@ -1,76 +1,145 @@
-# ===== 敏感信息（必须）=====
-*key*.txt
-*Key*.txt
-*API*.md
+# ============================================================
+# 监理通 / Rokid 眼镜项目 · Git 忽略规则
+# 原则：凭证与私钥绝不入库；构建产物、日志、缓存、本地样本一律忽略。
+# 注意：.gitignore 只对「尚未跟踪」的文件生效；已跟踪的文件需 git rm --cached。
+# ============================================================
+
+# ===== 1. 凭证 / 私钥 / 证书（最高优先级）=====
+# 私钥只留在服务器与本地，永不入库
 *.pem
 *.key
 *.p12
 *.pfx
 *.crt
-.env
-.env.*
+*.cer
+*.der
+*.jks
+*.keystore
+id_rsa*
+id_ed25519*
+*.ovpn
 **/ssl/
-**/*pwd*hash*
-**/*密码*
-**/*passwd*
+**/certs/
+.git-credentials
 
-# ===== 备份文件 =====
-*.bak
-*.bak[0-9]*
-*.bak-*
-*.orig
-*.tmp
-**/*.rootcopy.*
+# 环境变量文件（含数据库口令、第三方 API Key）
+*.env
+*.env.*
+!.env.example
+!*.env.example
+!**/local.env.example
+!**/*.env.example
+**/.local/
+**/backend.env
+**/frontend.env
 
-# ===== macOS 垃圾 =====
-__MACOSX/
-._*
-.DS_Store
+# 其它常见凭据命名
+*密码*
+*passwd*
+*pwd*hash*
 
-# ===== 第三方 SDK 二进制 =====
-**/tmp/sdk/
-*.jar
-*.aar
-*.pom
-**/gradle-wrapper.jar
+# API Key 文本（避免误提交人工整理的密钥清单）
+*key*.txt
+*Key*.txt
+*API*KEY*.md
+*API*Key*.md
 
-# ===== 构建/导出/临时目录 =====
-**/exports/
-**/uploads/
+# ===== 2. 构建产物（本地构建后上传服务器，不入库）=====
+**/dist/
+**/dist_*/
+**/dist-*/
+**/dist*/
 **/build/
+**/out/
+**/.next/
+**/.nuxt/
+**/coverage/
+**/*.tsbuildinfo
 **/node_modules/
-**/.pytest_cache/
-**/.kotlin/
-**/.workbuddy/
+**/.pnpm-store/
+
+# 前端历史备份目录（dist_old_* / dist_bak_* / dist_auto_* 等）
+**/dist_bak_*/
+**/dist_old_*/
+**/dist_prev_*/
+**/dist_stale_*/
+**/dist_try*/
+
+# ===== 3. 运行日志 / 运行时产物 =====
+logs/
+**/logs/
+*.log
+npm-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+**/_ide_open.log
+**/_upload_*.log
+**/preview.log
+
+# 数据库与本地运行状态
+*.db
+*.sqlite
+*.sqlite3
+**/local_dev.db
+**/*.sqlite-journal
+**/*.sqlite-wal
+
+# 上传 / 导出 / 输出（用户数据与生成物，不入库）
+**/uploads/
+**/exports/
+**/outputs/
 **/backups/
 **/src.bak/
 # 后端运行日志（RotatingFileHandler 落盘，不入库）
 cloud-backend/logs/
 
-# ===== 根级 tmp/：只忽略部署载荷与本地运行产物（dev_local.py 等开发脚本保留可提交）=====
-# 注：tmp/sdk/ 由上面「第三方 SDK 二进制」规则覆盖；tmp/exports、tmp/uploads 由导出规则覆盖
-/tmp/deploy_*/
-/tmp/*.b64
-/tmp/*.log
-/tmp/local_dev.db
-/tmp/*.env
-
-# ===== 语言/IDE =====
+# ===== 4. 语言 / 框架缓存 =====
 __pycache__/
 *.py[cod]
+*.pyo
+.pytest_cache/
+**/.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 .venv/
-**/cloud-backend/.local/
+**/.venv/
 venv/
+env/
+**/cloud-backend/.local/
+**/.gradle/
+**/local.properties
+**/.kotlin/
+
+# ===== 5. IDE / 编辑器 =====
 .vscode/
 .idea/
 .trae/
-**/.gradle/
-**/local.properties
-wechat-miniprogram/project.private.config.json
-Thumbs.db
+*.swp
+*.swo
+*~
 
-# ===== 大文件 / 安装包 =====
+# ===== 6. 操作系统垃圾 =====
+__MACOSX/
+._*
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ===== 7. 小程序专有 =====
+# 微信开发者工具的本地私有配置（含 appid、本地路径、编译设置）
+wechat-miniprogram/project.private.config.json
+wechat-miniprogram/project.private.config.json.*
+!wechat-miniprogram/project.private.config.json.example
+# 开发者工具缓存
+**/.miniprogram/
+**/miniprogram_npm/
+
+# ===== 8. 本地测试样本 / 大文件 =====
+# 知识库本地测试文档（导入流程产生的副本，不是源码）
+知识库/user_kb/
+# 大文件与安装包
 *.zip
+!rokid_glass/rokid_glass/glasses-app/cxrlsampe.zip
 *.deb
 *.rpm
 *.exe
@@ -79,21 +148,28 @@ Thumbs.db
 *.iso
 *.tar.gz
 *.tgz
+*.jar
+*.aar
+*.pom
+**/gradle-wrapper.jar
 **/gradle-*-all.zip
+**/tmp/sdk/
 
-# ===== 前端构建产物/备份（本地 build 后上传服务器，不入库）=====
-# web-admin 的 dist、dist_ws、dist_build、dist_ag、dist_auto_*、dist_prev_*、dist_stale_* 等全部变体
-web-admin/dist*/
-**/dist_bak_*/
-**/dist_old_*/
-
-# ===== 保留示例 zip（如不需要可删掉这行）=====
-!rokid_glass/rokid_glass/glasses-app/cxrlsampe.zip
-
-# ===== 运行日志与测试产物（本地产出，不入库）=====
-# 说明：tmp/ 不做整目录忽略——仓库约定那里可能放需要提交的开发脚本，
-# 因此只忽略下面这些确定是运行产物的目录。
-logs/
-cloud-backend/logs/
-outputs/
-*.log
+# ===== 9. 临时文件 / 备份 =====
+*.bak
+*.bak[0-9]*
+*.bak-*
+*.orig
+*.tmp
+**/*.rootcopy.*
+# 根级 tmp/：默认全部忽略（截图、一次性脚本、db 快照、部署载荷都是本地产物），
+# 只白名单保留确定要入库的开发脚本 —— 以后 tmp/ 里新增任何东西都不会误提交。
+/tmp/*
+!/tmp/dev_local.py
+!/tmp/iv_check.js
+!/tmp/launch_backend.py
+!/tmp/md2html_doc.py
+!/tmp/seed_local_users.py
+!/tmp/setup_local_backend.bat
+!/tmp/setup_local_backend.ps1
+!/tmp/verify_pz_rag.py

@@ -62,14 +62,14 @@
               <image wx:for="{{item.images}}" wx:for-item="img" wx:for-index="ii" wx:key="*this" class="msg-image-grid"
                      src="{{img}}" mode="aspectFill" data-url="{{img}}" bindtap="previewImageUrl" binderror="onMsgImgError" data-mi="{{mi}}" data-imgidx="{{ii}}" />
             </view>
-            <!-- 引用块：@[资料库 …] 渲染成彩色胶囊，与普通文字区分开。
-                 分段在发送时刻算好并随消息存下，所以老消息（无 segments）走下面的纯文本兜底。 -->
-            <view wx:if="{{item.segments}}" class="bubble-text bubble-segments">
-              <block wx:for="{{item.segments}}" wx:for-item="seg" wx:key="index">
-                <text wx:if="{{seg.kind === 'mention'}}" class="bubble-mention">{{seg.value}}</text>
-                <text wx:else class="bubble-plain" user-select="{{true}}">{{seg.value}}</text>
-              </block>
-            </view>
+            <!-- 引用块：@[资料库 …] / @名字 渲染成蓝色链接，AI 来源 [[n]] 渲染成角标。
+                 分段在发送时刻算好并随消息存下，所以老消息（无 segments）走下面的纯文本兜底。
+
+                 注意：三个 <text> 必须紧挨着写、标签之间不能有换行缩进 ——
+                 父级 .bubble-segments 是 white-space: pre-wrap，
+                 模板里的空白会被当成真实文本节点渲染，表现为
+                 「引用单独占一行、下面还空一行」。 -->
+            <view wx:if="{{item.segments}}" class="bubble-text bubble-segments"><block wx:for="{{item.segments}}" wx:for-item="seg" wx:key="index"><text wx:if="{{seg.kind === 'mention'}}" class="bubble-mention" data-token="{{seg.token}}" data-name="{{seg.value}}" catchtap="onBubbleMentionTap">{{seg.value}}</text><text wx:elif="{{seg.kind === 'cite'}}" class="bubble-cite">{{seg.value}}</text><text wx:else class="bubble-plain" user-select="{{true}}">{{seg.value}}</text></block></view>
             <block wx:else>
               <text wx:if="{{item.text}}" class="bubble-text" user-select="{{true}}">{{item.text}}</text>
             </block>

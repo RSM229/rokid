@@ -171,29 +171,24 @@ test('@ 面板搜索不会永久卡在「搜索中」：loading 由在飞计数�
   assert.match(agent, /console\.warn\('\[kb\/search\] 失败:',/)
   assert.match(wxml, /class="at-empty at-empty-error">\{\{atError\}\}/)
 })
-test('输入框内 @ 引用用 editor 原生 format 标记（不再插 span 胶囊）', () => {
+test('输入框固定用 textarea（<editor> 的编辑 API 在真机不可控）', () => {
   const agent = fs.readFileSync(path.join(root, 'pages/agent/index.ts'), 'utf8')
   const wxml = fs.readFileSync(path.join(root, 'pages/agent/index.wxml'), 'utf8')
 
-  // textarea 只能放纯文本，样式必须靠 <editor>；低版本回退
+  // 结构保留：基础库够新时 editor 分支仍在（组件能力稳定后可再评估），
+  // 但页面不再启用它 —— 2026-11-23 起固定走 textarea。
   assert.match(wxml, /<editor wx:if="\{\{useEditor && !recording\}\}"/)
   assert.match(wxml, /<textarea wx:elif="\{\{!recording\}\}"/)
   assert.match(agent, /supportsEditor\(\): boolean \{/)
+  assert.match(agent, /this\.setData\(\{ useEditor: false \}\)/)
 
-  // 历史坑：用 setContents 写入 <span> 胶囊后，光标会落进 span，
-  // 导致其后输入的文字全部继承胶囊样式（用户反馈"@ 后面打什么都变蓝"）。
-  // 所以改为 editor 原生 format()。
-  assert.match(agent, /insertMentionIntoEditor\(token: string\)/)
-  // 黑白主题下不靠颜色区分引用（主色近黑会与正文同色），改用浅灰底衬成"标签"
-  assert.match(agent, /ctx\.format\('backgroundColor', '#e9edf2'\)/)
-  // 插入后必须复位底色，否则后续输入继续带浅灰底
-  assert.match(agent, /ctx\.format\('backgroundColor', '#ffffff'\)/)
-  // 正文色保持中性
-  assert.match(agent, /ctx\.format\('color', '#11131a'\)/)
-  // HTML 里不再包裹 span 胶囊
-  assert.doesNotMatch(agent, /<span\$\{attrs\} style="color:/)
-  // 清空编辑器时也要复位底色
-  assert.match(agent, /clearEditor\(\) \{[\s\S]{0,300}format\('backgroundColor', '#ffffff'\)/)
+  // 停用理由必须写在代码里，避免以后有人"顺手"改回去再踩一遍：
+  // format 后光标跳到开头并重新染色、setContents 后失去输入能力、deleteText index 不稳定
+  assert.match(agent, /format\(\) 之后光标会跳到开头/)
+  assert.match(agent, /setContents\(\) 重建内容后编辑器失去输入能力/)
+
+  // 选完引用要把焦点交回输入框，用户才能接着打字
+  assert.match(agent, /this\.focusDraftInput\(\)/)
 })
 test('config.ts 不用可选链调用，避免关掉 ES5 转译后真机解析失败', () => {
   const cfg = fs.readFileSync(path.join(root, 'config.ts'), 'utf8')

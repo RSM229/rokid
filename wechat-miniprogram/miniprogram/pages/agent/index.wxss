@@ -142,7 +142,11 @@
 /* 气泡内的引用胶囊：@[资料库 …] 不再和普通文字混在一起 */
 .bubble-segments { white-space: pre-wrap; word-break: break-word; line-height: 1.65; }
 .bubble-plain { white-space: pre-wrap; }
-.bubble-mention { display: inline; padding: 3rpx 14rpx; margin: 0 3rpx; border-radius: var(--r-pill, 999rpx); font-size: var(--fs-sub, 24rpx); color: var(--brand-d, #0060df); background: rgba(var(--brand-rgb, 47,50,55), 0.14); border: 1rpx solid rgba(var(--brand-rgb, 47,50,55), 0.28); word-break: break-all; }
+/* 气泡里的 @ 引用：只显示名字、蓝色、像链接一样可点（外壳 @[ ] 已去掉）。
+   用户要求 2026-11-23：不要胶囊底色，做成文字链接观感。
+   蓝色是「链接」语义色，与黑白主题不冲突（iOS 里链接本身就是蓝色）。 */
+.bubble-mention { display: inline; padding: 0; margin: 0 2rpx; border: none; background: transparent; font-size: inherit; color: var(--link, #0a84ff); font-weight: 500; word-break: break-all; }
+.bubble-mention:active { color: var(--link-press, #0060df); }
 /* 搜索结果：已选中项打勾，再点一次即取消（多选比点小 × 更顺手） */
 .at-item.picked { background: rgba(var(--brand-rgb, 47,50,55), 0.08); }
 .at-item-check { flex-shrink: 0; margin-left: auto; font-size: 26rpx; font-weight: 700; color: var(--brand, #2f3237); }
@@ -699,3 +703,22 @@
 .chat-generate-blocked-title { display: block; color: #854723; font-size: 24rpx; font-weight: 700; }
 .chat-generate-blocked-text { display: block; margin-top: 6rpx; color: #6b564a; font-size: 22rpx; line-height: 1.5; }
 .chat-generate-blocked-hint { display: block; margin-top: 8rpx; color: #8a7568; font-size: 20rpx; line-height: 1.35; }
+
+/* AI 回答里的来源角标（后端用 [[编号]] 标注引用）：
+   黑白主题下不用彩色，做成脚注编号的样子。
+
+   必须是**内联**（display: inline）而不是 inline-block 方块：
+   方块有自己的高度/行高，会参与行盒计算，角标一多就把整行撑开、
+   甚至把后面的文字挤到下一行 —— 用户反馈"引用破坏了原有格式"。
+   内联 + vertical-align: super 只抬基线、不改行盒，排版与纯文本一致。 */
+.bubble-cite {
+  display: inline;
+  padding: 0 3rpx;
+  margin: 0 1rpx;
+  border-radius: 6rpx;
+  background: rgba(17, 19, 26, 0.06);
+  color: #5b6472;
+  font-size: 20rpx;
+  font-weight: 600;
+  vertical-align: super;
+}
