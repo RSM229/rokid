@@ -5,15 +5,15 @@
   flex: 1; height: 64rpx; padding: 0 24rpx; font-size: 26rpx;
   color: var(--ink-2, #243b55);
   background: rgba(255,255,255,0.9);
-  border: 1rpx solid rgba(var(--brand-rgb, 15,118,110), 0.25);
+  border: 1rpx solid rgba(var(--brand-rgb, 47,50,55), 0.25);
   border-radius: 12rpx; box-sizing: border-box;
 }
 .btn-primary {
   flex-shrink: 0; padding: 0 28rpx; height: 64rpx; line-height: 64rpx;
-  background: linear-gradient(135deg, var(--brand-l, #12766f), var(--brand-d, #0060df));
+  background: linear-gradient(135deg, var(--brand-l, #3a4046), var(--brand-d, #0060df));
   color: #fff; font-size: 26rpx; border-radius: 12rpx; border: none;
 }
-.card { padding: 24rpx; margin-bottom: 14rpx; background: #ffffff; border: 2rpx solid rgba(var(--brand-rgb, 15,118,110), 0.14); border-radius: 16rpx; box-shadow: 0 2rpx 8rpx rgba(0,0,0,0.04); }
+.card { padding: 24rpx; margin-bottom: 14rpx; background: #ffffff; border: 2rpx solid rgba(var(--brand-rgb, 47,50,55), 0.14); border-radius: 16rpx; box-shadow: 0 2rpx 8rpx rgba(0,0,0,0.04); }
 .empty { padding: 90rpx 40rpx; text-align: center; color: #999; font-size: 26rpx; }
 
 /* 记录列表 */
@@ -51,7 +51,7 @@
 .picker-value { line-height: 76rpx; color: var(--ink-2, #243b55); }
 .panel-actions { display: flex; gap: 20rpx; margin-top: 32rpx; }
 .btn-cancel { flex: 1; height: 80rpx; line-height: 80rpx; border-radius: 16rpx; font-size: 30rpx; color: #8a94a6; background: rgba(255,255,255,0.50); text-align: center; }
-.btn-submit { flex: 2; height: 80rpx; line-height: 80rpx; border-radius: 16rpx; font-size: 30rpx; color: #fff; background: linear-gradient(135deg, var(--brand, #0f766e) 0%, var(--brand, #0f766e) 100%); text-align: center; }
+.btn-submit { flex: 2; height: 80rpx; line-height: 80rpx; border-radius: 16rpx; font-size: 30rpx; color: #fff; background: linear-gradient(135deg, var(--brand, #2f3237) 0%, var(--brand, #2f3237) 100%); text-align: center; }
 .del-row { margin-top: 24rpx; }
 /* 本页 doc-btn 紧跟 panel-actions（保存/取消）之后，补一点上间距（覆盖全局 margin） */
 .doc-btn { margin-top: 24rpx; }

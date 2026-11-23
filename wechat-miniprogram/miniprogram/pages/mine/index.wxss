@@ -15,7 +15,7 @@
 /* 头部信息块：白底 + 一根细线（原来是从深蓝到亮蓝的斜向渐变）。
    渐变刷在内容块上是"装饰"，会和内容抢注意力；品牌感改由头像的环形描边承担。 */
 .hero { display: flex; align-items: center; gap: 28rpx; padding: 28rpx 34rpx 32rpx; background: transparent; border-bottom: 1rpx solid rgba(17, 19, 26, 0.08); }
-.avatar { width: 120rpx; height: 120rpx; border-radius: 50%; background: rgba(15,118,110, 0.10); color: #0f766e; border: 2rpx solid rgba(15,118,110, 0.28); text-align: center; line-height: 120rpx; font-size: 48rpx; font-weight: 700; box-sizing: border-box; }
+.avatar { width: 120rpx; height: 120rpx; border-radius: 50%; background: rgba(47,50,55, 0.10); color: #2f3237; border: 2rpx solid rgba(47,50,55, 0.28); text-align: center; line-height: 120rpx; font-size: 48rpx; font-weight: 700; box-sizing: border-box; }
 .name { font-size: 38rpx; font-weight: 700; }
 /* Hero 深底上的次要白字（卡片内的次要文字由 cell-list.wxss 的 .section .muted 覆盖成深色） */
 .muted { color: #8a94a6; font-size: 25rpx; }
@@ -34,29 +34,29 @@
 
 /* 项目看板：主题色（沿用原 tab 级入口的图标） */
 .entry-icon.ic-board::before {
-  background-color: var(--brand, #0f766e);
+  background-color: var(--brand, #2f3237);
   -webkit-mask-image: url("data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%201024%201024%22%3E%3Cpath%20fill=%22%231677ff%22%20d=%22M128%20128h352v224H128zm416%200h352v352H544zM128%20416h352v480H128zm416-64h352v544H544z%22/%3E%3C/svg%3E");
   mask-image: url("data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%201024%201024%22%3E%3Cpath%20fill=%22%231677ff%22%20d=%22M128%20128h352v224H128zm416%200h352v352H544zM128%20416h352v480H128zm416-64h352v544H544z%22/%3E%3C/svg%3E");
 }
 
 /* 加入项目：暖橙（邀请/链接），区别于看板主题色 */
 .entry-icon.ic-join {
-  background: rgba(15,118,110, 0.10);
-  border-color: rgba(15,118,110, 0.20);
+  background: rgba(47,50,55, 0.10);
+  border-color: rgba(47,50,55, 0.20);
 }
 .entry-icon.ic-join::before {
-  background-color: #0f766e;
+  background-color: #2f3237;
   -webkit-mask-image: url("data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2024%2024%22%3E%3Cpath%20fill=%22%23e8831a%22%20d=%22M14,3v2h3.59l-9.3,9.29,1.42,1.42L19,6.41V10h2V3zM5,5h5V3H5c-1.1,0-2,.9-2,2v14c0,1.1.9,2,2,2h14c1.1,0,2-.9,2-2v-5h-2v5H5z%22/%3E%3C/svg%3E");
   mask-image: url("data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2024%2024%22%3E%3Cpath%20fill=%22%23e8831a%22%20d=%22M14,3v2h3.59l-9.3,9.29,1.42,1.42L19,6.41V10h2V3zM5,5h5V3H5c-1.1,0-2,.9-2,2v14c0,1.1.9,2,2,2h14c1.1,0,2-.9,2-2v-5h-2v5H5z%22/%3E%3C/svg%3E");
 }
 
 /* 账号安全：安全绿（盾牌） */
 .entry-icon.ic-shield {
-  background: rgba(19, 121, 91, 0.10);
-  border-color: rgba(19, 121, 91, 0.20);
+  background: rgba(47,50,55, 0.06);
+  border-color: rgba(47,50,55, 0.12);
 }
 .entry-icon.ic-shield::before {
-  background-color: #0f7a55;
+  background-color: #2f3237;
   -webkit-mask-image: url("data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2024%2024%22%3E%3Cpath%20fill=%22%230f7a55%22%20d=%22M12,1L3,5v6c0,5.55,3.84,10.74,9,12c5.16-1.26,9-6.45,9-12V5l-9-4z%22/%3E%3C/svg%3E");
   mask-image: url("data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2024%2024%22%3E%3Cpath%20fill=%22%230f7a55%22%20d=%22M12,1L3,5v6c0,5.55,3.84,10.74,9,12c5.16-1.26,9-6.45,9-12V5l-9-4z%22/%3E%3C/svg%3E");
 }
@@ -74,33 +74,33 @@
 
 /* 待补全草稿：编辑蓝（铅笔），区别于看板主题色与设置灰蓝 */
 .entry-icon.ic-draft {
-  background: rgba(15,118,110,0.10);
-  border-color: rgba(15,118,110,0.20);
+  background: rgba(47,50,55,0.10);
+  border-color: rgba(47,50,55,0.20);
 }
 .entry-icon.ic-draft::before {
-  background-color: #0f766e;
+  background-color: #2f3237;
   -webkit-mask-image: url("data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2024%2024%22%3E%3Cpath%20fill=%22%231677ff%22%20d=%22M3%2017.25V21h3.75L17.81%209.94l-3.75-3.75zM20.71%207.04a1%201%200%200%200%200-1.41l-2.34-2.34a1%201%200%200%200-1.41%200l-1.83%201.83%203.75%203.75z%22/%3E%3C/svg%3E");
   mask-image: url("data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2024%2024%22%3E%3Cpath%20fill=%22%231677ff%22%20d=%22M3%2017.25V21h3.75L17.81%209.94l-3.75-3.75zM20.71%207.04a1%201%200%200%200%200-1.41l-2.34-2.34a1%201%200%200%200-1.41%200l-1.83%201.83%203.75%203.75z%22/%3E%3C/svg%3E");
 }
 
 /* AI 记忆：AI 紫（星形/规则），与看板蓝、安全绿、设置灰蓝区分开 */
 .entry-icon.ic-pref {
-  background: rgba(107, 70, 193, 0.10);
-  border-color: rgba(107, 70, 193, 0.20);
+  background: rgba(47,50,55, 0.06);
+  border-color: rgba(47,50,55, 0.12);
 }
 .entry-icon.ic-pref::before {
-  background-color: #6b46c1;
+  background-color: #2f3237;
   -webkit-mask-image: url("data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2024%2024%22%3E%3Cpath%20fill=%22%236b46c1%22%20d=%22M12 17.27 18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z%22/%3E%3C/svg%3E");
   mask-image: url("data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2024%2024%22%3E%3Cpath%20fill=%22%236b46c1%22%20d=%22M12 17.27 18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z%22/%3E%3C/svg%3E");
 }
 
 /* 派单：纸飞机（发送/指派），主题蓝，与 AI 记忆紫区分 */
 .entry-icon.ic-send {
-  background: rgba(15,118,110,0.10);
-  border-color: rgba(15,118,110,0.20);
+  background: rgba(47,50,55,0.10);
+  border-color: rgba(47,50,55,0.20);
 }
 .entry-icon.ic-send::before {
-  background-color: #0f766e;
+  background-color: #2f3237;
   -webkit-mask-image: url("data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2024%2024%22%3E%3Cpath%20fill=%22%231677ff%22%20d=%22M2.01 21 23 12 2.01 3 2 10l15 2-15 2z%22/%3E%3C/svg%3E");
   mask-image: url("data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2024%2024%22%3E%3Cpath%20fill=%22%231677ff%22%20d=%22M2.01 21 23 12 2.01 3 2 10l15 2-15 2z%22/%3E%3C/svg%3E");
 }

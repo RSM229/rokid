@@ -163,7 +163,7 @@ test('@ 面板搜索不会永久卡在「搜索中」：loading 由在飞计数�
   assert.match(agent, /console\.warn\('\[kb\/search\] 失败:',/)
   assert.match(wxml, /class="at-empty at-empty-error">\{\{atError\}\}/)
 })
-test('输入框内 @ 引用用 editor 原生 format 上色（不再插 span 胶囊）', () => {
+test('输入框内 @ 引用用 editor 原生 format 标记（不再插 span 胶囊）', () => {
   const agent = fs.readFileSync(path.join(root, 'pages/agent/index.ts'), 'utf8')
   const wxml = fs.readFileSync(path.join(root, 'pages/agent/index.wxml'), 'utf8')
 
@@ -174,15 +174,18 @@ test('输入框内 @ 引用用 editor 原生 format 上色（不再插 span 胶�
 
   // 历史坑：用 setContents 写入 <span> 胶囊后，光标会落进 span，
   // 导致其后输入的文字全部继承胶囊样式（用户反馈"@ 后面打什么都变蓝"）。
-  // 所以改为 editor 原生 format() 只改颜色。
+  // 所以改为 editor 原生 format()。
   assert.match(agent, /insertMentionIntoEditor\(token: string\)/)
-  assert.match(agent, /ctx\.format\('color', '#0a6dff'\)/)
-  // 插入后必须复位颜色，否则后续输入继续被染色
+  // 黑白主题下不靠颜色区分引用（主色近黑会与正文同色），改用浅灰底衬成"标签"
+  assert.match(agent, /ctx\.format\('backgroundColor', '#e9edf2'\)/)
+  // 插入后必须复位底色，否则后续输入继续带浅灰底
+  assert.match(agent, /ctx\.format\('backgroundColor', '#ffffff'\)/)
+  // 正文色保持中性
   assert.match(agent, /ctx\.format\('color', '#11131a'\)/)
   // HTML 里不再包裹 span 胶囊
-  assert.doesNotMatch(agent, /<span\$\{attrs\} style="color:#0a6dff/)
-  // 清空编辑器时也要复位颜色
-  assert.match(agent, /clearEditor\(\) \{[\s\S]{0,260}format\('color', '#11131a'\)/)
+  assert.doesNotMatch(agent, /<span\$\{attrs\} style="color:/)
+  // 清空编辑器时也要复位底色
+  assert.match(agent, /clearEditor\(\) \{[\s\S]{0,300}format\('backgroundColor', '#ffffff'\)/)
 })
 test('config.ts 不用可选链调用，避免关掉 ES5 转译后真机解析失败', () => {
   const cfg = fs.readFileSync(path.join(root, 'config.ts'), 'utf8')

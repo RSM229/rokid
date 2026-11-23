@@ -130,7 +130,7 @@ page {
 }
 .dot.on {
   width: 40rpx;
-  background: #0f766e;
+  background: #2f3237;
 }
 
 /* 底部操作区：主按钮用登录页的大圆角胶囊按钮 */
@@ -152,8 +152,8 @@ page {
   font-weight: 600;
   letter-spacing: 2rpx;
   color: #ffffff;
-  background: linear-gradient(160deg, #12766f, #0f766e 55%, #0b5f58);
-  box-shadow: 0 18rpx 36rpx -18rpx rgba(0, 86, 216, 0.9);
+  background: linear-gradient(160deg, #3a4046, #2f3237 55%, #1e2229);
+  box-shadow: 0 18rpx 36rpx -18rpx rgba(17,19,26,0.28);
 }
 .primary-btn::after {
   border: none;
@@ -173,8 +173,8 @@ page {
   font-weight: 600;
   letter-spacing: 2rpx;
   color: #ffffff;
-  background: linear-gradient(160deg, #12766f, #0f766e 55%, #0b5f58);
-  box-shadow: 0 18rpx 36rpx -18rpx rgba(0, 86, 216, 0.9);
+  background: linear-gradient(160deg, #3a4046, #2f3237 55%, #1e2229);
+  box-shadow: 0 18rpx 36rpx -18rpx rgba(17,19,26,0.28);
 }
 .ghost-btn::after {
   border: none;
@@ -229,7 +229,7 @@ page {
   font-size: 30rpx;
   font-weight: 500;
   color: #ffffff;
-  background: linear-gradient(160deg, #12766f, #0f766e 55%, #0b5f58);
+  background: linear-gradient(160deg, #3a4046, #2f3237 55%, #1e2229);
 }
 .link-btn::after {
   border: none;

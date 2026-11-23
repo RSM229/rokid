@@ -6354,25 +6354,29 @@ Page(themed({
   },
 
   /**
-   * 插入一条引用：先给插入点上色，再插入 token 文本。
+   * 插入一条引用：先给插入点设样式，再插入 token 文本。
    *
-   * editor 没有 setSelection，无法"插入后再选中"改色，
+   * editor 没有 setSelection，无法"插入后再选中"改样式，
    * 但 format() 设置的是「当前输入位置之后要输入的样式」，
-   * 所以「先 format 再 insertText」正好让 token 带上颜色。
-   * 插入完立刻把颜色复位成正文色，避免后续输入继续被染色。
+   * 所以「先 format 再 insertText」正好让 token 带上该样式。
+   *
+   * 黑白主题下引用不能靠颜色区分（主色是近黑，会和正文同色），
+   * 改用浅灰底把 token 衬成"标签"：正文色 + backgroundColor 浅灰。
    */
   async insertMentionIntoEditor(token: string) {
     if (!this.data.useEditor || !this.editorCtx) return
     const ctx = this.editorCtx
     await new Promise<void>(resolve => {
-      ctx.format('color', '#0a6dff')
+      ctx.format('color', '#11131a')
+      ctx.format('backgroundColor', '#e9edf2')
       ctx.insertText({
         text: token + ' ',
         success: () => resolve(),
         fail: () => resolve(),
       })
     })
-    // 复位：不然后面打的字也会是蓝色
+    // 复位：不然后面打的字也带浅灰底
+    ctx.format('backgroundColor', '#ffffff')
     ctx.format('color', '#11131a')
     this.editorHtml = ''
   },
@@ -6395,7 +6399,8 @@ Page(themed({
     if (!this.data.useEditor || !this.editorCtx) return
     this.editorHtml = ''
     this.editorCtx.clear({})
-    // 清空后把颜色复位，避免下一次输入继承上一条引用的蓝色
+    // 清空后把颜色与底色都复位，避免下一次输入继承上一条引用的样式
+    this.editorCtx.format('backgroundColor', '#ffffff')
     this.editorCtx.format('color', '#11131a')
   },
 

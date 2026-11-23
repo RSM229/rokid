@@ -30,7 +30,7 @@
   width: 10rpx;
   height: 10rpx;
   border-radius: 50%;
-  background: var(--brand-l, #12766f);
+  background: var(--brand-l, #3a4046);
   box-shadow: 0 0 0 5rpx rgba(var(--brand-rgb, 10,46,92), 0.08);
 }
 
@@ -473,7 +473,7 @@
 }
 
 .submit-btn.ready {
-  background: linear-gradient(135deg, var(--brand-l, #12766f) 0%, var(--brand, #33405a) 100%);
+  background: linear-gradient(135deg, var(--brand-l, #3a4046) 0%, var(--brand, #33405a) 100%);
   color: #fff;
   box-shadow: 0 10rpx 24rpx rgba(var(--brand-rgb, 10,46,92), 0.22);
 }

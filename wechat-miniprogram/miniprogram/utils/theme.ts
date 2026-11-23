@@ -32,12 +32,12 @@ export interface ThemePreset extends ThemeSetting {
 
 const STORAGE_KEY = 'app_theme_v1'
 
-/** 默认主题 = 墨青 #0f766e（hsl 175,77%,26%），与平面设计令牌 --flat-brand 对齐 */
-export const DEFAULT_THEME: ThemeSetting = { h: 175, s: 77, l: 26 }
+/** 默认主题 = 石墨黑 #2f3237（hsl 220,8%,20%），与平面设计令牌 --flat-brand 对齐 */
+export const DEFAULT_THEME: ThemeSetting = { h: 220, s: 8, l: 20 }
 
 /** 预设配色（点击即用，也可在预设基础上继续微调） */
 export const THEME_PRESETS: ThemePreset[] = [
-  { name: '墨青', h: 175, s: 77, l: 26 },
+  { name: '石墨黑', h: 220, s: 8, l: 20 },
   { name: '电光蓝', h: 215, s: 100, l: 54 },
   { name: '靛青', h: 248, s: 84, l: 62 },
   { name: '湖蓝', h: 190, s: 92, l: 40 },
