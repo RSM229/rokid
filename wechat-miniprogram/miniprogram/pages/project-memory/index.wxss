@@ -65,11 +65,11 @@
   padding: 8rpx 16rpx;
   border-radius: 10rpx;
   background: var(--color-background-secondary, #f3f4f6);
-  font-size: 25rpx;
+  font-size: 24rpx;
   color: var(--color-text-secondary, #666);
 }
 .cat-value {
-  font-size: 25rpx;
+  font-size: 24rpx;
 }
 .add-btn {
   min-width: 150rpx;
@@ -263,7 +263,7 @@
   align-items: center;
   justify-content: space-between;
   padding: 28rpx 34rpx;
-  font-size: 30rpx;
+  font-size: 32rpx;
   color: var(--color-text-primary, #222);
   border-bottom: 1rpx solid var(--color-border, #f0f0f0);
 }
@@ -276,7 +276,7 @@
 .cat-sheet-cancel {
   padding: 26rpx;
   text-align: center;
-  font-size: 30rpx;
+  font-size: 32rpx;
   color: var(--color-text-secondary, #666);
 }
 

@@ -18,8 +18,9 @@
   background: linear-gradient(0deg, rgba(0,0,0,0.62), rgba(0,0,0,0));
 }
 .iv-count { color: #fff; font-size: 28rpx; font-weight: 500; opacity: 0.95; }
+/* 底栏圆钮结构来自本地真机修复；字号 56rpx 吸收 origin/main 的字号阶梯（原 44rpx） */
 .iv-close {
-  color: #fff; font-size: 44rpx; line-height: 1; width: 88rpx; height: 88rpx;
+  color: #fff; font-size: 56rpx; line-height: 1; width: 88rpx; height: 88rpx;
   border-radius: 50%; display: flex; align-items: center; justify-content: center;
   background: rgba(255,255,255,0.16); border: 1rpx solid rgba(255,255,255,0.3);
 }

@@ -10,7 +10,7 @@
 }
 
 .title {
-  font-size: 44rpx;
+  font-size: 48rpx;
   font-weight: 700;
   color: #1a1a1a;
   margin-bottom: 12rpx;
@@ -83,7 +83,7 @@
   background: rgba(47,50,55, 0.06);
   border-radius: 12rpx;
   font-size: 24rpx;
-  line-height: 1.6;
+  line-height: 1.65;
   color: #666;
 }
 
@@ -117,7 +117,7 @@
   line-height: 88rpx;
   background: rgba(255, 255, 255, 0.5);
   color: #555;
-  font-size: 30rpx;
+  font-size: 32rpx;
   border-radius: 16rpx;
   border: none;
   margin-bottom: 20rpx;
@@ -139,12 +139,12 @@
   border-radius: 50%;
   margin: 0 auto 20rpx;
   color: #fff;
-  font-size: 52rpx;
+  font-size: 56rpx;
   background: linear-gradient(135deg, var(--brand-l, #3a4046), var(--brand-d, #0060df));
 }
 
 .done-text {
-  font-size: 34rpx;
+  font-size: 32rpx;
   font-weight: 600;
   color: #1a1a1a;
 }

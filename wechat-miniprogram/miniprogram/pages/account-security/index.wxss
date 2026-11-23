@@ -5,8 +5,8 @@
 .bind-tag {
   padding: 4rpx 18rpx;
   border-radius: 999rpx;
-  font-size: 23rpx;
-  line-height: 1.6;
+  font-size: 22rpx;
+  line-height: 1.65;
 }
 .bind-tag.on { color: #0f7a55; background: rgba(19,121,91,0.12); }
 .bind-tag.off { color: #8a94a6; background: rgba(20,40,60,0.08); }

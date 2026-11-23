@@ -16,18 +16,18 @@
    渐变刷在内容块上是"装饰"，会和内容抢注意力；品牌感改由头像的环形描边承担。 */
 .hero { display: flex; align-items: center; gap: 28rpx; padding: 28rpx 34rpx 32rpx; background: transparent; border-bottom: 1rpx solid rgba(17, 19, 26, 0.08); }
 .avatar { width: 120rpx; height: 120rpx; border-radius: 50%; background: rgba(47,50,55, 0.10); color: #2f3237; border: 2rpx solid rgba(47,50,55, 0.28); text-align: center; line-height: 120rpx; font-size: 48rpx; font-weight: 700; box-sizing: border-box; }
-.name { font-size: 38rpx; font-weight: 700; }
+.name { font-size: 40rpx; font-weight: 700; }
 /* Hero 深底上的次要白字（卡片内的次要文字由 cell-list.wxss 的 .section .muted 覆盖成深色） */
-.muted { color: #8a94a6; font-size: 25rpx; }
+.muted { color: #8a94a6; font-size: 24rpx; }
 .info { flex: 1; }
 
 /* ============ 待上传资料（2026-10-12 由页面最底部提到 Hero 之下） ============
    这是需要用户亲手处理的待办，埋在最后一屏等于没人看得到。 */
-.upload-item { padding: 24rpx 30rpx; color: var(--ink, #11131a); font-size: 25rpx; overflow-wrap: anywhere; }
+.upload-item { padding: 24rpx 30rpx; color: var(--ink, #11131a); font-size: 24rpx; overflow-wrap: anywhere; }
 .upload-error { margin: 12rpx 0; color: #a33b32; }
 .upload-head { align-items: flex-start; }
 
-.logout-btn { margin: 48rpx 34rpx; color: #c0392b; border: 1rpx solid rgba(192,57,43,0.55); background: #ffffff; border-radius: 18rpx; font-size: 30rpx; }
+.logout-btn { margin: 48rpx 34rpx; color: #c0392b; border: 1rpx solid rgba(192,57,43,0.55); background: #ffffff; border-radius: 18rpx; font-size: 32rpx; }
 
 /* ============ 三个同级入口：项目看板 / 账号安全 / 设置（2026-10-12） ============
    布局基元（.entry-item/.entry-icon…）已上收 cell-list.wxss；本文件只留本页三个图标。 */

@@ -32,7 +32,7 @@ page {
 }
 
 .hero-title {
-  font-size: 52rpx;
+  font-size: 48rpx;
   font-weight: 700;
   letter-spacing: 2rpx;
   color: #11131a;
@@ -55,7 +55,7 @@ page {
 
 .bind-title {
   margin-bottom: 20rpx;
-  font-size: 30rpx;
+  font-size: 32rpx;
   font-weight: 600;
   color: #11131a;
 }
@@ -73,7 +73,7 @@ page {
 .hint-flat {
   margin-top: 20rpx;
   font-size: 22rpx;
-  line-height: 1.6;
+  line-height: 1.65;
   color: #8a94a6;
 }
 
@@ -110,7 +110,7 @@ page {
 
 .foot-note {
   margin-top: 24rpx;
-  font-size: 21rpx;
+  font-size: 22rpx;
   letter-spacing: 1rpx;
   color: #a8b2c1;
   text-align: center;

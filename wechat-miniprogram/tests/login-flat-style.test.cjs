@@ -15,7 +15,7 @@ test('登录页复刻 jl 的平面形态：光晕 + 横版 logo + 大字标题',
   assert.match(loginWxml, /class="flat-glow flat-glow-b"/)
   assert.match(loginWxml, /<image class="logo" src="\/assets\/brand-logo\.png" mode="aspectFit" \/>/)
   assert.match(loginWxss, /\.logo \{[^}]*width: 420rpx;[^}]*height: 56rpx/)
-  assert.match(loginWxss, /\.hero-title \{[^}]*font-size: 52rpx;/)
+  assert.match(loginWxss, /\.hero-title \{[^}]*font-size: 48rpx;/)
   // 底色与文字色对齐 jl（#f7f9fc / #11131a / #8a94a6）
   assert.match(loginWxss, /background: #f7f9fc;|background: #f2f4f7;/)
   assert.match(loginWxss, /color: #11131a;/)

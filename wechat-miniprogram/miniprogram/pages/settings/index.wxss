@@ -44,7 +44,7 @@
 }
 
 .ts-head { margin-bottom: 26rpx; }
-.ts-title { font-size: 34rpx; font-weight: 700; color: var(--ink, #11131a); }
+.ts-title { font-size: 32rpx; font-weight: 700; color: var(--ink, #11131a); }
 .ts-sub { display: block; margin-top: 8rpx; font-size: 24rpx; color: #8a94a6; }
 
 /* 实时预览卡
@@ -98,11 +98,11 @@
 }
 .tsp-btn {
   margin-top: 22rpx;
-  height: 76rpx;
-  line-height: 76rpx;
+  height: 88rpx;
+  line-height: 88rpx;
   text-align: center;
   border-radius: 22rpx;
-  font-size: 27rpx;
+  font-size: 26rpx;
   color: var(--on-brand, #ffffff);
   background: linear-gradient(135deg, var(--brand-l, #3a4046) 0%, var(--brand-d, #0060df) 100%);
   box-shadow: inset 0 1rpx 0 rgba(255, 255, 255, 0.35), 0 8rpx 22rpx rgba(var(--brand-rgb, 47,50,55), 0.28);
@@ -146,7 +146,7 @@
 }
 
 .ts-actions { display: flex; gap: 20rpx; margin-top: 36rpx; }
-.ts-btn { flex: 1; height: 86rpx; line-height: 86rpx; text-align: center; border-radius: 22rpx; font-size: 29rpx; }
+.ts-btn { flex: 1; height: 88rpx; line-height: 88rpx; text-align: center; border-radius: 22rpx; font-size: 28rpx; }
 /* 次级按钮也走玻璃（与全站 .glass 一套语言） */
 .ts-btn.ghost {
   color: var(--ink, #11131a);
@@ -168,7 +168,7 @@
 
 /* ============ 眼镜端扫码登录弹层（2026-10-12 随本页迁出） ============ */
 .qr-panel { position: relative; width: 560rpx; padding: 40rpx 40rpx 30rpx; border-radius: 24rpx; background: #ffffff; border: 2rpx solid rgba(var(--brand-rgb, 47,50,55), 0.14); box-shadow: 0 16rpx 48rpx rgba(20,40,60,0.25); display: flex; flex-direction: column; align-items: center; }
-.qr-title { font-size: 32rpx; font-weight: 650; color: var(--ink, #11131a); }
+.qr-title { font-size: 32rpx; font-weight: 600; color: var(--ink, #11131a); }
 .qr-sub { margin-top: 12rpx; font-size: 24rpx; color: #8a94a6; }
 .qr-box { margin-top: 30rpx; padding: 20rpx; border: 1rpx solid #e8ede9; border-radius: 16rpx; position: relative; width: 260px; height: 260px; display: flex; align-items: center; justify-content: center; }
 .qr-canvas { position: absolute; left: -9999rpx; width: 220px; height: 220px; }

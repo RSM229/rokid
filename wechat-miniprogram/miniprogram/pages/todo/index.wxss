@@ -9,8 +9,8 @@
 .inbox-title {
   display: block;
   color: #0f1b2d;
-  font-size: 44rpx;
-  line-height: 1.16;
+  font-size: 48rpx;
+  line-height: 1.35;
   font-weight: 700;
   letter-spacing: -1rpx;
 }
@@ -18,8 +18,8 @@
   display: block;
   margin-top: 10rpx;
   color: #7a8797;
-  font-size: 23rpx;
-  line-height: 1.55;
+  font-size: 22rpx;
+  line-height: 1.5;
 }
 
 .view-tabs {
@@ -38,7 +38,7 @@
 }
 .view-tab.active {
   color: #0f1b2d;
-  font-weight: 650;
+  font-weight: 600;
 }
 .view-tab.active::after {
   content: '';
@@ -59,7 +59,7 @@
   text-align: center;
   color: #ffffff;
   background: #c83c35;
-  font-size: 19rpx;
+  font-size: 20rpx;
   font-weight: 600;
 }
 
@@ -82,7 +82,7 @@
 }
 .filter-key { color: #8a95a3; }
 .filter-caret { color: #98a3b0; font-size: 20rpx; }
-.list-count { flex: none; color: #8a95a3; font-size: 23rpx; }
+.list-count { flex: none; color: #8a95a3; font-size: 22rpx; }
 
 .task-row {
   padding: 26rpx 28rpx;
@@ -106,9 +106,9 @@
   flex: 1;
   min-width: 0;
   color: #142033;
-  font-size: 31rpx;
-  line-height: 1.38;
-  font-weight: 650;
+  font-size: 32rpx;
+  line-height: 1.35;
+  font-weight: 600;
   word-break: break-all;
 }
 .state {
@@ -117,8 +117,8 @@
   border-radius: 10rpx;
   color: #8a5a16;
   background: #fff4dd;
-  font-size: 21rpx;
-  line-height: 1.4;
+  font-size: 22rpx;
+  line-height: 1.35;
 }
 .state.completed { color: #176b62; background: #e8f4f1; }
 .state.canceled, .state.transferred { color: #6f7a86; background: #eef1f4; }
@@ -132,15 +132,15 @@
   gap: 8rpx;
   margin-top: 10rpx;
   color: #6f7c8b;
-  font-size: 23rpx;
+  font-size: 22rpx;
 }
 .dot { color: #c2c9d1; }
 .description {
   margin-top: 14rpx;
   margin-bottom: 0;
   color: #3b4a5c;
-  font-size: 25rpx;
-  line-height: 1.55;
+  font-size: 24rpx;
+  line-height: 1.5;
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
@@ -168,12 +168,12 @@
   border-radius: 9rpx;
   color: #5c6a79;
   background: #f2f4f7;
-  font-size: 21rpx;
+  font-size: 22rpx;
 }
 .deadline.due_today { color: #9a5b00; background: #fff2d9; font-weight: 600; }
 .deadline.overdue { color: #b73832; background: #fdecea; font-weight: 600; }
 .deadline.closed { color: #8a95a3; background: #f3f5f7; }
-.cc-line { color: #8a95a3; font-size: 21rpx; }
+.cc-line { color: #8a95a3; font-size: 22rpx; }
 .done-line {
   margin-top: 12rpx;
   padding-top: 14rpx;
@@ -187,7 +187,7 @@
 .section-label {
   margin: 36rpx 30rpx 12rpx;
   color: #8a94a6;
-  font-size: 25rpx;
+  font-size: 24rpx;
   font-weight: 600;
 }
 .tags { display: flex; flex-wrap: wrap; gap: 12rpx; margin: 18rpx 0; }
@@ -205,7 +205,7 @@
   background: rgba(255, 241, 204, 0.85);
   font-size: 22rpx;
 }
-.muted { color: #5f7489; font-size: 25rpx; }
+.muted { color: #5f7489; font-size: 24rpx; }
 .focused { outline: 4rpx solid #d9a441; }
 .task.focused { outline: 4rpx solid #d9a441; }
 
@@ -213,7 +213,7 @@
   padding: 80rpx 20rpx;
   text-align: center;
   color: #8a95a3;
-  font-size: 25rpx;
+  font-size: 24rpx;
 }
 .load-more {
   margin: 16rpx 0 8rpx;
@@ -246,12 +246,12 @@
 }
 .detail-head { display: flex; align-items: flex-start; gap: 18rpx; }
 .detail-heading { flex: 1; min-width: 0; }
-.detail-eyebrow { display: block; color: #8a95a3; font-size: 21rpx; letter-spacing: 1rpx; }
+.detail-eyebrow { display: block; color: #8a95a3; font-size: 22rpx; letter-spacing: 1rpx; }
 .detail-title {
   display: block;
   margin-top: 8rpx;
   color: #101b2b;
-  font-size: 36rpx;
+  font-size: 40rpx;
   line-height: 1.35;
   font-weight: 700;
   letter-spacing: -0.5rpx;
@@ -266,7 +266,7 @@
   border-radius: 50%;
   background: #f2f4f7;
   color: #6f7c8b;
-  font-size: 36rpx;
+  font-size: 40rpx;
 }
 .detail-chips { display: flex; flex-wrap: wrap; gap: 10rpx; margin-top: 20rpx; }
 .chip {
@@ -274,7 +274,7 @@
   border-radius: 10rpx;
   color: #5d6b7a;
   background: #f2f4f7;
-  font-size: 21rpx;
+  font-size: 22rpx;
 }
 .chip-quiet { color: #8a95a3; background: #f7f8fa; }
 .status-pending { color: #9a5b00; background: #fff2d9; }
@@ -302,7 +302,7 @@
   border-radius: 16rpx;
   background: #f7f8fa;
   color: #35465a;
-  font-size: 25rpx;
+  font-size: 24rpx;
   line-height: 1.65;
 }
 .detail-block { margin-top: 26rpx; }
@@ -310,7 +310,7 @@
   display: block;
   margin-bottom: 12rpx;
   color: #8a95a3;
-  font-size: 21rpx;
+  font-size: 22rpx;
   font-weight: 600;
   letter-spacing: 1rpx;
 }
@@ -322,7 +322,7 @@
   color: #314256;
   font-size: 24rpx;
 }
-.read-mark { color: #a0a9b3; font-size: 21rpx; }
+.read-mark { color: #a0a9b3; font-size: 22rpx; }
 .read-mark.read { color: #176b62; }
 .resolution-card {
   margin-top: 24rpx;
@@ -335,18 +335,18 @@
   display: block;
   margin-top: 6rpx;
   color: #1f3b38;
-  font-size: 25rpx;
-  line-height: 1.6;
+  font-size: 24rpx;
+  line-height: 1.65;
   white-space: pre-wrap;
 }
-.resolution-meta { display: block; margin-top: 10rpx; color: #6d8b86; font-size: 21rpx; }
+.resolution-meta { display: block; margin-top: 10rpx; color: #6d8b86; font-size: 22rpx; }
 .notice {
   margin-top: 20rpx;
   padding: 16rpx 20rpx;
   border-radius: 14rpx;
   background: #fff5e8;
   color: #8a5a16;
-  font-size: 23rpx;
+  font-size: 22rpx;
 }
 .business-summary {
   margin-top: 24rpx;
@@ -381,11 +381,11 @@
   display: block;
   margin-top: 4rpx;
   color: #5d6b7a;
-  font-size: 23rpx;
+  font-size: 22rpx;
   line-height: 1.5;
   word-break: break-all;
 }
-.history-empty { color: #9aa5b1; font-size: 23rpx; }
+.history-empty { color: #9aa5b1; font-size: 22rpx; }
 
 .actions {
   display: flex;
@@ -402,13 +402,13 @@
   background: #f2f4f7 !important;
   border: none !important;
   border-radius: 12rpx !important;
-  font-size: 23rpx !important;
+  font-size: 22rpx !important;
 }
 .action-ghost::after { border: none; }
 .danger-text { color: #b73832 !important; background: #fdecea !important; }
-.actions .primary { border-radius: 12rpx; font-size: 23rpx; }
+.actions .primary { border-radius: 12rpx; font-size: 22rpx; }
 .actions .primary::after { border: none; }
-.hint { margin-top: 14rpx; text-align: right; color: #9aa5b1; font-size: 21rpx; }
+.hint { margin-top: 14rpx; text-align: right; color: #9aa5b1; font-size: 22rpx; }
 
 /* 处理完成：先给结果，再让事项进入“处理记录”。 */
 .completion-mask { position: fixed; inset: 0; z-index: 1100; display: flex; align-items: flex-end; }
@@ -436,14 +436,14 @@
   margin: 0 auto 24rpx;
   border-radius: 50%;
   color: #ffffff;
-  font-size: 54rpx;
+  font-size: 56rpx;
   font-weight: 600;
   animation: completion-pop 0.28s cubic-bezier(0.2, 0.9, 0.3, 1.2);
 }
 .completion-icon.success { background: linear-gradient(145deg, #2d9d82, #176b62); box-shadow: 0 16rpx 40rpx rgba(23, 107, 98, 0.22); }
 .completion-icon.danger { background: linear-gradient(145deg, #d26057, #b73832); box-shadow: 0 16rpx 40rpx rgba(183, 56, 50, 0.2); }
 .completion-eyebrow { display: block; color: #8795a6; font-size: 22rpx; letter-spacing: 3rpx; }
-.completion-title { display: block; margin-top: 10rpx; color: #142b42; font-size: 42rpx; font-weight: 700; letter-spacing: -0.5rpx; }
+.completion-title { display: block; margin-top: 10rpx; color: #142b42; font-size: 48rpx; font-weight: 700; letter-spacing: -0.5rpx; }
 .completion-desc { display: block; max-width: 560rpx; margin: 18rpx auto 0; color: #5d6c7b; font-size: 26rpx; line-height: 1.65; }
 .completion-note {
   display: block;
@@ -453,7 +453,7 @@
   background: #f5f8fa;
   color: #3d5368;
   font-size: 24rpx;
-  line-height: 1.6;
+  line-height: 1.65;
   text-align: left;
   word-break: break-all;
 }
@@ -464,20 +464,20 @@
   gap: 24rpx;
   padding: 20rpx 0;
   border-bottom: 1rpx solid #eef2f5;
-  font-size: 25rpx;
+  font-size: 24rpx;
 }
 .completion-meta-row text:first-child { flex: none; color: #8a97a5; }
 .completion-meta-row text:last-child { flex: 1; color: #263e55; text-align: right; word-break: break-all; }
-.completion-status { color: #176b62 !important; font-weight: 650; }
+.completion-status { color: #176b62 !important; font-weight: 600; }
 .completion-primary {
   margin-top: 30rpx;
   border-radius: 18rpx;
   background: #176b62;
   color: #ffffff;
-  font-size: 29rpx;
+  font-size: 28rpx;
   font-weight: 600;
 }
-.completion-secondary { margin-top: 14rpx; background: transparent; color: #536273; font-size: 27rpx; }
+.completion-secondary { margin-top: 14rpx; background: transparent; color: #536273; font-size: 26rpx; }
 .completion-primary::after, .completion-secondary::after { border: none; }
 .completion-primary[disabled] { background: #dfe6e9; color: #8a97a5; }
 

@@ -27,16 +27,30 @@ page {
      这里同时承担越界区、下拉回弹、短内容页的兜底。 */
   background-color: #ffffff;
   color: var(--ink, #11131a);
-  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif;
+  /* 跨平台字体栈（2026-11-23）
+     原来只写 -apple-system + PingFang SC，iOS 上没问题，但安卓/鸿蒙/小米会掉到
+     默认 sans-serif，同一版界面在不同机型上字重、字宽都不一样。
+     按厂商各给一个"现代中文黑体"，让每台设备都用它自己最协调的中文字形：
+       iOS/macOS  → SF Pro Text + PingFang SC（苹果原生）
+       鸿蒙       → HarmonyOS Sans SC（偏圆润，接近 Google 的现代感）
+       小米       → MiSans（几何感强、字形更圆）
+       OPPO/vivo  → OPPO Sans
+       其它安卓   → 思源黑体 / Noto Sans CJK
+     注：Google 的 Product Sans / Google Sans 是专有字体不可嵌入，
+     上述几款是免费商用里最接近"圆润现代"的替代。 */
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC",
+    "HarmonyOS Sans SC", "MiSans", "OPPO Sans", "Source Han Sans SC",
+    "Noto Sans CJK SC", "Microsoft YaHei", sans-serif;
 
-  /* ===== 语义化令牌层（2026-11-20）=====
+  /* ===== 语义化令牌层（2026-11-20 建立，2026-11-23 补齐排版尺度）=====
      背景：整套 glass 设计之前只有颜色变量（--ink/--brand 等，由 utils/theme.ts 注入），
-     而圆角、间距、字号、阴影全靠各页面手写数值——agent 页 528 条规则里出现了
-     8/10/14/16/24/32rpx 七种圆角和 19/20/21/22/24/26/28/32rpx 八种字号，
-     视觉上"没有规律"就是这么来的。
+     而圆角、间距、字号、阴影全靠各页面手写数值。
+     审计结果（2026-11-23）：全站出现 30 种字号、10 种字重、7 种行高，
+     其中 19/21/23/25/27/29 这类"差 1-2rpx"的手调值占了三分之一——
+     视觉上"没有规律"就是它们造成的。
 
-     这里补一层与颜色无关的骨架令牌：页面各自仍可用数值，但新增/改造时优先引用，
-     让同一类元素在所有页面上对齐。命名沿用常见的 t-shirt 尺度。 */
+     这里定义完整尺度：字号 9 档 / 字重 4 档 / 行高 4 档 / 间距 6 档 / 控件高度 3 档。
+     迁移原则：所有数值就近吸附到阶梯值，不再出现手调中间值。 */
 
   /* 圆角：按元素角色分四档（对应原型 r-screen/r-card/r-bubble/r-pill） */
   --r-card: 24rpx;      /* 卡片、面板、弹层 */
@@ -44,20 +58,65 @@ page {
   --r-item: 16rpx;      /* 列表行、chips、按钮 */
   --r-pill: 999rpx;     /* 胶囊：标签、状态点 */
 
-  /* 间距：统一的 4 档纵向节奏 */
+  /* 间距：6 档，覆盖 4~32rpx 的常用节奏 */
+  --gap-0: 4rpx;
   --gap-1: 8rpx;
   --gap-2: 12rpx;
   --gap-3: 16rpx;
   --gap-4: 24rpx;
+  --gap-5: 32rpx;
 
-  /* 字号：正文/次要/最小 三档（原页面出现八种，收敛到语义三档 + 两个特例） */
-  --fs-body: 28rpx;     /* 正文 */
-  --fs-sub: 24rpx;      /* 次要信息、列表描述 */
-  --fs-mini: 21rpx;     /* 注释、标签、分组标题 */
+  /* 字号：9 档阶梯（取代原来的 30 种手调值） */
+  --fs-mini: 20rpx;      /* 角标、脚注 */
+  --fs-caption: 22rpx;   /* 辅助说明、分组标题 */
+  --fs-body-sm: 24rpx;   /* 次要正文、列表描述 */
+  --fs-body: 26rpx;      /* 正文默认 */
+  --fs-body-lg: 28rpx;   /* 强调正文、列表主标题 */
+  --fs-title: 32rpx;     /* 区块标题、导航标题 */
+  --fs-title-lg: 40rpx;  /* 页面级标题 */
+  --fs-display: 48rpx;   /* 大标题、空状态问候 */
+  --fs-display-lg: 56rpx;/* 品牌级大标题 */
+  /* 兼容旧语义名（部分页面仍引用） */
+  --fs-sub: var(--fs-body-sm);
+
+  /* 字重：4 档（清理 550/620/650/680/720 等非标准值） */
+  --fw-normal: 400;
+  --fw-medium: 500;
+  --fw-semibold: 600;
+  --fw-bold: 700;
+
+  /* 行高：4 档（1 只用于图标字形居中） */
+  --lh-icon: 1;
+  --lh-title: 1.35;
+  --lh-body: 1.5;
+  --lh-loose: 1.65;
+
+  /* 控件尺寸：按钮 / 输入 / 行高 / 图标 */
+  --h-control: 88rpx;      /* 常规控件高度 */
+  --h-control-lg: 104rpx;  /* 主按钮（登录、引导页） */
+  --h-row: 96rpx;          /* 列表行高度（贴近 iOS 44pt） */
+  --icon-sm: 32rpx;
+  --icon-md: 44rpx;
+  --icon-lg: 64rpx;
 
   /* 阴影：两档，避免每处手调 */
   --shadow-row: 0 2rpx 10rpx rgba(var(--shadow-rgb, 20,70,140), 0.06);
   --shadow-float: 0 14rpx 36rpx rgba(var(--deep-rgb, 10,46,92), 0.20);
+}
+
+/* 字体继承：小程序里 text/button/input 不一定继承 page 的 font-family，
+   显式链一遍，保证全站同一套字形（这是"字不统一"的常见原因）。 */
+view,
+text,
+button,
+input,
+textarea,
+scroll-view,
+editor,
+picker {
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC",
+    "HarmonyOS Sans SC", "MiSans", "OPPO Sans", "Source Han Sans SC",
+    "Noto Sans CJK SC", "Microsoft YaHei", sans-serif;
 }
 
 /* ============================================================
@@ -154,13 +213,13 @@ page {
 /* 平面次要按钮：白底 + 一根线 */
 .btn-flat-ghost {
   width: 100%;
-  height: 96rpx;
-  line-height: 96rpx;
+  height: 88rpx;
+  line-height: 88rpx;
   border-radius: 48rpx;
   border: 1rpx solid var(--flat-line, rgba(17, 19, 26, 0.08));
   background: var(--flat-surface, #ffffff);
   color: var(--flat-ink-2, #33405a);
-  font-size: 30rpx;
+  font-size: 32rpx;
   font-weight: 500;
   padding: 0;
   margin: 0;
@@ -179,7 +238,7 @@ page {
   border: 1rpx solid var(--flat-line, rgba(17, 19, 26, 0.08));
   background: var(--flat-surface, #ffffff);
   color: var(--flat-ink, #11131a);
-  font-size: 30rpx;
+  font-size: 32rpx;
 }
 
 /* 平面列表行：靠一根分隔线分隔，不用卡片包裹 */
@@ -289,7 +348,7 @@ page {
 }
 
 .title {
-  font-size: 38rpx;
+  font-size: 40rpx;
   font-weight: 700;
 }
 
@@ -351,7 +410,7 @@ page {
   height: 300rpx;
   min-height: 300rpx;
   padding: 18rpx 22rpx;
-  line-height: 1.6;
+  line-height: 1.65;
 }
 
 .empty {
@@ -375,9 +434,9 @@ page {
   border-radius: 16rpx;
   background: linear-gradient(135deg, var(--brand-l, #3a4046), var(--brand-d, #0060df));
   color: #ffffff;
-  font-size: 27rpx;
+  font-size: 26rpx;
   font-weight: 600;
-  line-height: 1.4;
+  line-height: 1.35;
   border: none;
 }
 .doc-btn::after { border: none; }
