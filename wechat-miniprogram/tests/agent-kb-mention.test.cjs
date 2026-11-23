@@ -353,14 +353,22 @@ test('角标是内联上标，不能是占位方块', () => {
   assert.doesNotMatch(rule, /height:/)
   assert.doesNotMatch(rule, /line-height:/)
 })
-test('只把「整行只有角标」贴到上一行，其余排版一律不动', () => {
+test('只合并「角标独占行 / 标点独占行」，其余排版一律不动', () => {
   // 用户反馈：修角标把列表格式弄乱了（角标和下一行并到一起）。
-  // 现在只识别「整行都是 [[n]]」的行，把它贴到最近非空行末尾；
-  // 空行、缩进、段落一律保持原样，不做任何 \n 压缩。
-  assert.match(page, /function hoistCiteOnlyLines\(text: string\): string \{/)
-  assert.match(page, /\^\(\?:\\\[\\\[\\d\{1,3\}\\\]\\\]\[ \\t\]\*\)\+\$/)
+  // 现在只认三种明确形态：整行只有角标、整行只有标点、行首是标点，
+  // 把它们并回最近的非空行；空行、缩进、列表项一律保持原样。
+  assert.match(page, /function normalizeCiteArtifacts\(text: string\): string \{/)
+  assert.match(page, /const CITE_ONLY = \/\^\(\?:\\\[\\\[\\d\{1,3\}\\\]\\\]\[ \\t\]\*\)\+\$\//)
+  assert.match(page, /const PUNCT_ONLY = /)
+  assert.match(page, /const PUNCT_START = /)
   // 往前找最近的非空行（跳过空行但不删空行）
   assert.match(page, /while \(prev >= 0 && out\[prev\]\.trim\(\) === ''\) prev--/)
   // 明确不再出现「压缩连续换行」那类改动
   assert.doesNotMatch(page, /replace\(\/\^\[ \\t\]\*\\n\[ \\t\]\*\\n\+\//)
+})
+
+test('复制的是渲染后的形态：合并拆行并把 [[n]] 变成 [n]', () => {
+  // 用户复制出来是「…我不编造 / [[1]] / 。」三行，与界面不一致。
+  assert.match(page, /normalizeCiteArtifacts\(raw\)\.replace\(\/\\\[\\\[\(\\d\{1,3\}\)\\\]\\\]\/g, '\[\$1\]'\)/)
+  assert.match(page, /const raw = msg && msg\.text \? String\(msg\.text\) : ''/)
 })

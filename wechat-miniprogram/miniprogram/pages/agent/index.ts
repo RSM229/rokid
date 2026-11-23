@@ -594,28 +594,41 @@ function escapeRe(s: string): string {
 }
 
 /**
- * 只处理「整行只有角标」的情况：把该行的角标贴到上一行末尾，并去掉这一行。
+ * 修「角标把句子拆成三行」的排版残留（只处理这两类行，其余字符原样保留）：
+ *   1) 整行只有角标：[[1]]          → 贴到上一行末尾
+ *   2) 整行只有标点：。             → 也并回上一行
+ *   3) 行首是标点：。后续…           → 并回上一行（模型常在句中断行）
  *
- * 为什么这么收敛：之前用「修剪前后空白」的办法修排版，
- * 结果把模型原本的列表结构挤乱了（角标和下一行的「5. …」并到同一行）。
- * 现在只动「整行都是 [[n]]」的行，其余字符一个都不改，
- * 列表缩进、空行、段落全部保持原样。
+ * 用户实际遇到的是：
+ *   4. …我不编造
+ *   [[1]]
+ *   。
+ * 模型把角标和句号都拆到了独立行。这里把 2、3 两类行并回去，句子恢复成一行。
+ *
+ * 之前用「修剪前后空白 / 压缩连续换行」去修，会把列表结构挤乱；
+ * 现在只认「整行只有角标」「整行只有标点」「行首是标点」三种明确形态。
  */
-function hoistCiteOnlyLines(text: string): string {
+function normalizeCiteArtifacts(text: string): string {
+  const CITE_ONLY = /^(?:\[\[\d{1,3}\]\][ \t]*)+$/
+  const PUNCT_ONLY = /^[。，；：、！？…—）》】」』"']+$/
+  const PUNCT_START = /^[。，；：、！？…—）》】」』]/
   const lines = text.split('\n')
   const out: string[] = []
+  const appendToPrev = (piece: string) => {
+    let prev = out.length - 1
+    while (prev >= 0 && out[prev].trim() === '') prev--
+    if (prev < 0) return false
+    // 标点紧贴，其它内容补一个空格
+    const joiner = PUNCT_START.test(piece) || PUNCT_ONLY.test(piece) ? '' : ' '
+    out[prev] = out[prev].replace(/[ \t]+$/, '') + joiner + piece
+    return true
+  }
   for (const line of lines) {
     const trimmed = line.trim()
-    // 整行由若干 [[n]] 组成（允许中间有空格）
-    if (trimmed && /^(?:\[\[\d{1,3}\]\][ \t]*)+$/.test(trimmed)) {
-      // 往前找最近的非空行（中间的空行原样保留，不改动段落结构）
-      let prev = out.length - 1
-      while (prev >= 0 && out[prev].trim() === '') prev--
-      if (prev >= 0) {
-        // 贴到那一行末尾；本行连同它的换行一起消失
-        out[prev] = out[prev].replace(/[ \t]+$/, '') + ' ' + trimmed.replace(/[ \t]+/g, '')
-        continue
-      }
+    if (trimmed && CITE_ONLY.test(trimmed)) {
+      if (appendToPrev(trimmed.replace(/[ \t]+/g, ''))) continue
+    } else if (trimmed && (PUNCT_ONLY.test(trimmed) || PUNCT_START.test(trimmed))) {
+      if (appendToPrev(trimmed)) continue
     }
     out.push(line)
   }
@@ -634,7 +647,7 @@ function splitMentionSegments(
   mentions?: AtMention[],
 ): Array<{ kind: 'text' | 'mention' | 'cite'; value: string; token?: string }> {
   // 把「整行只有角标」的行贴到上一行末尾（只动这种行，其余字符一个都不改）
-  const text = hoistCiteOnlyLines(rawText)
+  const text = normalizeCiteArtifacts(rawText)
   const segments: Array<{ kind: 'text' | 'mention' | 'cite'; value: string; token?: string }> = []
   const names = (mentions || [])
     .map(m => m.name)
@@ -4932,7 +4945,10 @@ Page(themed({
   copyMessage(event: WechatMiniprogram.TouchEvent) {
     const idx = Number(event.currentTarget.dataset.index)
     const msg = this.data.messages[idx]
-    const text = (msg && msg.text ? String(msg.text) : '').trim()
+    // 复制「渲染后的形态」：先合上角标/标点被拆出的行，再把 [[n]] 换成 [n]。
+    // 否则复制出来是「…我不编造 / [[1]] / 。」三行，与界面看到的对不上。
+    const raw = msg && msg.text ? String(msg.text) : ''
+    const text = normalizeCiteArtifacts(raw).replace(/\[\[(\d{1,3})\]\]/g, '[$1]').trim()
     if (!text) {
       wx.showToast({ title: '没有可复制的文字', icon: 'none' })
       return
