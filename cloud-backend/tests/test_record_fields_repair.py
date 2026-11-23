@@ -428,7 +428,12 @@ class RecordRepairTests(unittest.IsolatedAsyncioTestCase):
         await self.db.commit()
         result=await generate_aggregate_doc(self.db,self.p.id,'day','2026-10-08',supervisor=self.u,use_llm=False)
         doc=await self.db.get(Document,result['doc_id'])
-        self.assertIn('同源会议数据',doc.content['meeting_section']);self.assertTrue(result['docx_url'])
+        self.assertIn('同源会议数据',doc.content['meeting_section'])
+        # 73fa0ad + ab9539a：日志 docx 转换为 PDF 成功后删除中间产物并清空
+        # doc.docx_path（防 Word 下载 404），docx_url 恒为 None；PDF 产物才是
+        # 正式交付物。本机 Word COM 可用时 pdf_url 必须落盘。
+        self.assertIsNone(result['docx_url'])
+        self.assertTrue(result['pdf_url'])
 
     async def test_week_and_month_aggregate_render_with_period_parallel_section(self):
         """🔴 回归：周报/月报此前必然 NameError。
