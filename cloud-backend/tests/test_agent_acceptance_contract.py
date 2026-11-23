@@ -380,5 +380,100 @@ class AcceptanceInquiryGuardTest(unittest.TestCase):
         self.assertFalse(any(isinstance(r, WorkRecord) for r in ctx.db.rows))
 
 
+class AcceptanceTypeFromWatermarkTest(unittest.TestCase):
+    """验收类型水印推断（2026-11-23 用户「水印有类型了为什么还问我」）。
+
+    带图整理计划链（sendAttachments → /agent/review-plans → execute）里，
+    水印 OCR 原文行以 label='识别文字' 进 watermark_items，match_form_field
+    永远映射不到 acceptance_type → 表式合同判缺 → 反复追问「验收类型」，
+    而照片水印明明印着「检验批质量验收记录」。修复：resolve_event_form
+    在 acceptance_type 无值时，用证据文本池（水印原文/观察/请求原文）
+    调 _infer_acceptance_type（与工具层同源，只认受控枚举）。
+    """
+
+    @staticmethod
+    def _event(evidence: list[dict], content: str = "") -> dict:
+        return {
+            "id": "ev_1", "title": "验收记录", "record_type": "验收",
+            "evidence_ids": [e["id"] for e in evidence],
+            "content": content, "forms": ["YS"],
+        }
+
+    @staticmethod
+    def _plan(evidence: list[dict]) -> dict:
+        return {"request_text": "记一条验收", "evidence": evidence}
+
+    def test_watermark_ocr_line_fills_acceptance_type(self):
+        evidence = [{
+            "id": "ev1",
+            "watermark_items": [
+                {"label": "识别文字", "value": "检验批质量验收记录"},
+                {"label": "识别文字", "value": "模板安装"},
+            ],
+            "watermark_fields": {"taken_at": "2026-11-23 10:00"},
+            "observation": "现场模板安装完成",
+        }]
+        resolved = resolve_event_form(self._plan(evidence), self._event(evidence))
+        self.assertEqual(resolved["values"].get("acceptance_type"), "检验批")
+        self.assertNotIn("acceptance_type", resolved["missing_fields"])
+        self.assertNotIn("验收类型", resolved["missing_labels"])
+        self.assertEqual(
+            (resolved["sources"] or {}).get("acceptance_type"), "watermark"
+        )
+
+    def test_concealed_works_keyword_also_inferred(self):
+        evidence = [{
+            "id": "ev1",
+            "watermark_items": [{"label": "识别文字", "value": "隐蔽工程验收记录 钢筋绑扎"}],
+            "watermark_fields": {},
+            "observation": "",
+        }]
+        resolved = resolve_event_form(self._plan(evidence), self._event(evidence))
+        self.assertEqual(resolved["values"].get("acceptance_type"), "隐蔽工程")
+
+    def test_no_type_word_keeps_field_asking(self):
+        evidence = [{
+            "id": "ev1",
+            "watermark_items": [{"label": "识别文字", "value": "现场施工照片"}],
+            "watermark_fields": {},
+            "observation": "工人在作业",
+        }]
+        resolved = resolve_event_form(self._plan(evidence), self._event(evidence))
+        self.assertIsNone(resolved["values"].get("acceptance_type"))
+        self.assertIn("acceptance_type", resolved["missing_fields"])
+
+    def test_explicit_user_choice_not_overridden_by_watermark(self):
+        # 用户在 fields 里已明确 acceptance_type（显式选择通道，无条件覆盖水印）
+        evidence = [{
+            "id": "ev1",
+            "watermark_items": [{"label": "识别文字", "value": "检验批质量验收记录"}],
+            "watermark_fields": {},
+            "observation": "",
+        }]
+        event = self._event(evidence, content="做竣工验收")
+        event["fields"] = {"YS": {"acceptance_type": "竣工验收"}}
+        resolved = resolve_event_form(self._plan(evidence), event)
+        # event content 含「竣工验收」时推断源命中竣工验收，但 fields 显式值优先
+        self.assertEqual(resolved["values"].get("acceptance_type"), "竣工验收")
+
+    def test_null_plan_has_no_evidence_pool(self):
+        # plan=None（如 record-detail 路径）没有 evidence 池；推断源只剩 event
+        # 自身 content。此处无类型词 → 不推断、不臆造，也不得崩溃。
+        evidence = [{
+            "id": "ev1",
+            "watermark_items": [{"label": "识别文字", "value": "检验批质量验收"}],
+            "watermark_fields": {},
+            "observation": "",
+        }]
+        event = self._event(evidence, content="")
+        resolved = resolve_event_form(None, event)
+        self.assertIsNone(resolved["values"].get("acceptance_type"))
+        self.assertIn("acceptance_type", resolved["missing_fields"])
+        # event content 自带类型词时（record-detail 常见）仍可推断
+        event2 = self._event(evidence, content="检验批质量验收 模板安装")
+        resolved2 = resolve_event_form(None, event2)
+        self.assertEqual(resolved2["values"].get("acceptance_type"), "检验批")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

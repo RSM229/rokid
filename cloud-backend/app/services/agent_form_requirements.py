@@ -14,6 +14,11 @@ from app.services import form_contracts, form_registry, record_field_spec, recor
 from app.services.time_normalization import normalize_datetime_value, parse_local_date
 from app.services.watermark_ocr import match_form_field
 
+# 🔴 验收类型推断与工具层（agent_tools._infer_acceptance_type）必须同源：
+#    抄一份会造成生产与跑分层漂移。agent_tools 对本模块只有函数级导入，
+#    模块级反向引用不构成循环导入。
+from app.services.agent_tools import _infer_acceptance_type
+
 
 _INPUT_ALIASES: dict[str, tuple[str, ...]] = {
     "project_name": ("project_name", "project", "name", "engineering_name", "工程名称"),
@@ -249,6 +254,32 @@ def resolve_event_form(
                     add("station_start_time", _wm_clock, "watermark", "evidence_extracted")
                 else:
                     add("start_time", _wm_clock, "watermark", "evidence_extracted")
+
+    # 🔴 2026-11-23 验收类型水印推断（用户「水印有类型了为什么还问我」）：
+    #    水印 OCR 的原文行在前端以 label='识别文字' 进 watermark_items，
+    #    match_form_field 对它永远返回 None → acceptance_type 判缺 → 整理卡
+    #    反复问「验收类型」，而照片上明明印着「检验批质量验收记录」。
+    #    与工具层（agent_tools.py acc_src 推断）同源：_infer_acceptance_type
+    #    只认受控枚举词，命中即作为候选填入；用户显式选择仍无条件覆盖。
+    _acc_type_pool: list[str] = []
+    for evidence_id in event.get("evidence_ids") or []:
+        evidence = evidence_by_id.get(str(evidence_id)) or {}
+        for item in evidence.get("watermark_items") or []:
+            if isinstance(item, dict) and _usable(item.get("value")):
+                _acc_type_pool.append(_text(item.get("value")))
+        for _wv in (evidence.get("watermark_fields") or {}).values():
+            _acc_type_pool.append(_text(_wv))
+        _observation = _text(evidence.get("observation"))
+        if _observation:
+            _acc_type_pool.append(_observation)
+    _acc_type_src = " ".join(
+        [str((plan or {}).get("request_text") or ""), str(event.get("content") or "")]
+        + _acc_type_pool
+    )
+    if form_code == "acceptance_record" and not _usable(values.get("acceptance_type")):
+        _inferred = _infer_acceptance_type(_acc_type_src)
+        if _inferred:
+            add("acceptance_type", _inferred, "watermark", "evidence_extracted")
 
     # The planning model may surface candidates from context beyond literal
     # watermark labels (for example, a role inferred from the surrounding
