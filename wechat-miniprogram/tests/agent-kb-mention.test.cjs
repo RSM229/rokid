@@ -326,3 +326,11 @@ test('消息写入统一在 setData 入口补分段，避免 [[n]] 裸露', () =
   assert.match(page, /Array\.isArray\(p\.messages\)/)
   assert.match(page, /p\.messages\.map\(m => withMentionSegments\(m\)\)/)
 })
+test('气泡分段标签之间不能有模板空白（pre-wrap 会把缩进渲染成空行）', () => {
+  // 症状：引用角标单独占一行、下面还空一行。
+  // 原因：.bubble-segments 是 white-space: pre-wrap，模板里 <text> 之间的换行缩进
+  // 会被当成真实文本节点渲染出来。三个 <text> 必须紧挨着写。
+  assert.match(template, /<\/text><text wx:elif="\{\{seg\.kind === 'cite'\}\}"/)
+  assert.match(template, /<\/text><text wx:else class="bubble-plain"/)
+  assert.doesNotMatch(template, /<\/text>\s*\r?\n\s*<text wx:elif/)
+})
