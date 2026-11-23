@@ -56,7 +56,7 @@
    布局：第一行＝输入框 + 常驻发送按钮；第二行＝左（+ 面板 / 模型下拉）+ 右（麦克风）
    另加：多附件暂存条、模型下拉气泡、消息内多图九宫格、+ 面板四宫格与提示 */
 .input-card { position: relative; }
-.input-line { display: flex; align-items: center; gap: 14rpx; padding: 0 4rpx; }
+.input-line { position: relative; z-index: 1; display: flex; align-items: center; gap: 14rpx; padding: 0 4rpx; }
 
 /* 发送按钮：圆角方形 + 向上箭头（仿 Auto Mode 排版） */
 .send-fab { flex-shrink: 0; width: 68rpx; height: 68rpx; border-radius: 22rpx; display: flex; align-items: center; justify-content: center; background: linear-gradient(135deg, rgba(var(--brand-rgb, 47,50,55), 0.30), rgba(var(--brand-rgb, 47,50,55), 0.18)); border: 1rpx solid rgba(var(--brand-rgb, 47,50,55), 0.14); transition: background 0.2s ease, box-shadow 0.2s ease; }
@@ -525,7 +525,8 @@
 /* Input Card（ima 模式：一张圆角卡片，上输入下功能行） */
 /* 悬浮胶囊：两行内容（输入 + 按钮行），圆角取 44rpx 贴近胶囊；投影比卡片略强，靠浮起表达层级 */
 .input-card { flex: 1; min-width: 0; width: 100%; box-sizing: border-box; padding: 8rpx 24rpx 16rpx; border-radius: 44rpx; background: #ffffff; border: 1rpx solid rgba(17,19,26,0.06); box-shadow: 0 8rpx 28rpx rgba(17,19,26,0.10); }
-.input-card .input-wrapper { background: transparent; min-height: 72rpx; padding: 0 8rpx; border-radius: 24rpx; }
+/* overflow: hidden 让 <editor> 的画布不越出自己的容器（内置组件的点击区域可能比 CSS 盒子大） */
+.input-card .input-wrapper { background: transparent; min-height: 72rpx; padding: 0 8rpx; border-radius: 24rpx; overflow: hidden; }
 .input-card .input-wrapper.recording { background: linear-gradient(135deg, rgba(185,56,56,0.85) 0%, rgba(212,74,74,0.85) 100%); }
 .input-card .chat-input { height: 88rpx; line-height: 88rpx; }
 .input-card .chat-textarea { height: auto; min-height: 72rpx; max-height: 264rpx; line-height: 44rpx; padding: 14rpx 0; }
@@ -533,7 +534,9 @@
    editor 内部是 contenteditable，行高/内边距要显式给，否则默认样式会和 textarea 不一致。 */
 .input-card .chat-editor { width: 100%; height: auto; min-height: 72rpx; max-height: 264rpx; line-height: 44rpx; padding: 14rpx 0; font-size: 32rpx; box-sizing: border-box; overflow-y: auto; }
 .chat-editor { width: 100%; font-size: 32rpx; line-height: 44rpx; box-sizing: border-box; }
-.input-card-row { display: flex; align-items: center; gap: 14rpx; margin-top: 6rpx; }
+/* 按钮行显式抬到上层：<editor> 是内置组件，卡片圆角/投影变化后它可能越过自身盒子，
+   把下面一行的点击吃掉。用 z-index 明确层级，避免依赖内置组件的绘制顺序。 */
+.input-card-row { position: relative; z-index: 3; display: flex; align-items: center; gap: 14rpx; margin-top: 6rpx; }
 .flex-spacer { flex: 1; }
 .scope-chip { display: flex; align-items: center; gap: 8rpx; padding: 0 20rpx; height: 60rpx; border-radius: 30rpx; background: linear-gradient(135deg, rgba(255,255,255,0.62), rgba(255,255,255,0.44)); border: 1rpx solid rgba(255,255,255,0.75); box-shadow: inset 0 1rpx 0 rgba(255,255,255,0.82); transition: background 0.2s ease; }
 .scope-chip:active { background: linear-gradient(135deg, rgba(255,255,255,0.76), rgba(255,255,255,0.58)); }
