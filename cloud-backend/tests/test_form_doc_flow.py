@@ -534,7 +534,11 @@ def test_aggregate_day(ctx):
     )
     assert resp.status_code == 200, resp.text
     body = resp.json()
-    assert body["docx_url"].endswith(".docx")
+    # 73fa0ad + ab9539a：日志 docx 转换为 PDF 成功后删除中间产物并清空
+    # doc.docx_path（防 Word 下载 404），docx_url 恒为 None；PDF 产物才是
+    # 正式交付物。本机 Word COM 可用时 pdf_url 必须落盘。
+    assert body["docx_url"] is None
+    assert body["pdf_url"].endswith(".pdf")
     assert body["form_code"] == "gd_b_220_rizhi"
     assert body["summary"]["work_records"] == 1
 
