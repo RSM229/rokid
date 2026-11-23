@@ -101,9 +101,15 @@ test('工作台 agent 页已去掉玻璃叠层：核心元素全部平面化', (
     assert.ok(rule, `${sel} 规则缺失`)
     assert.doesNotMatch(rule[0], /backdrop-filter: blur/, `${sel} 仍是玻璃`)
   }
-  // 输入卡/气泡/hero 改为「一层白 + 一根线」
-  assert.match(agentWxss, /^\.input-card \{[^}]*background: #ffffff;[^}]*border: 1rpx solid rgba\(17,19,26,0\.08\)/m)
-  assert.match(agentWxss, /^\.input-bar \{[^}]*background: #f2f4f7;/m)
+  // 输入卡：内层白卡悬浮（胶囊），外层容器不再铺底色
+  assert.match(agentWxss, /^\.input-card \{[^}]*background: #ffffff;/m)
+  // 外层 input-bar 必须透明：原来是「浅灰条 + 白卡」两层卡片叠在一起（用户反馈像卡片套卡片）
+  assert.match(agentWxss, /^\.input-bar \{[^}]*position: relative;/m)
+  const barRule = (agentWxss.match(/^\.input-bar \{[^}]*\}/m) || [''])[0]
+  assert.doesNotMatch(barRule, /background:/, 'input-bar 不应再有底色')
+  assert.doesNotMatch(barRule, /border-top:/, 'input-bar 不应再有上边框')
+  // 悬浮感靠投影表达
+  assert.match(agentWxss, /^\.input-card \{[^}]*box-shadow: 0 8rpx 28rpx/m)
   // 页面底色统一为 #f2f4f7（原来是纯白，平面卡片没有层次）
   assert.match(agentWxss, /^\.page \{[^}]*background: #f2f4f7;/m)
 })
