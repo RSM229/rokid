@@ -6141,7 +6141,8 @@ Page(themed({
     const mentions = this.data.mentions.concat([mention])
     if (this.atOpenedByTyping) {
       const current = this.data.input
-      const next = current.replace(/@([^\s@]*)$/, `${token} `)
+      // 与 detectAtTrigger 口径一致：兼容全角 ＠ 与末尾空白
+      const next = current.replace(/[@＠]([^\s@＠]*)\s*$/, `${token} `)
       this.atOpenedByTyping = false
       this.setData({ input: next, canSend: true })
       this.refreshMentions(mentions)
@@ -6412,8 +6413,13 @@ Page(themed({
    * 只有行首或空格后的 @ 才触发，用户句中打「你好@」完全没反应。
    * 排除 [ 是为了不把已插入的「@[资料库 …]」再当成触发词（它以 [ 开头）。
    * 已点选插入的引用结尾是空格或 ]，同样不会误触发。
+   *
+   * 另外两处真机坑（2026-11-23「打 @ 还是没反应」排查出来的）：
+   * 1) <editor> 的 detail.text 末尾常带换行，正则用 $ 锚定会失配 —— 先去掉尾部空白；
+   * 2) 中文输入法可能打出全角「＠」，统一归一成半角再匹配。
    */
-  detectAtTrigger(input: string) {
+  detectAtTrigger(rawInput: string) {
+    const input = (rawInput || '').replace(/[\s\u00a0\u200b]+$/, '').replace(/＠/g, '@')
     const m = /@([^\s@\[\]]*)$/.exec(input)
     if (!m) {
       // 没有正在输入的 @：收起由打字唤起的面板

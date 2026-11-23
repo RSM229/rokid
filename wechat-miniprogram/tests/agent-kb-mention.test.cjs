@@ -275,3 +275,11 @@ test('键盘弹起不遮挡输入区：监听高度 + 布局跟着抬 + 防二�
   assert.match(template, /adjust-position="\{\{true\}\}"/)
   assert.match(template, /cursor-spacing="\{\{20\}\}"/)
 })
+test('打 @ 唤起：editor 末尾换行与全角 ＠ 也要能触发', () => {
+  // 真机坑 1：<editor> 的 detail.text 末尾常带换行，正则用 $ 锚定会失配
+  assert.match(page, /replace\(\/\[\\s\\u00a0\\u200b\]\+\$\/, ''\)/)
+  // 真机坑 2：中文输入法可能打出全角 ＠
+  assert.match(page, /replace\(\/＠\/g, '@'\)/)
+  // 选中后替换触发词时，口径要与检测一致（否则关键词会残留在输入框里）
+  assert.match(page, /replace\(\/\[@＠\]\(\[\^\\s@＠\]\*\)\\s\*\$\/, `\$\{token\} `\)/)
+})
