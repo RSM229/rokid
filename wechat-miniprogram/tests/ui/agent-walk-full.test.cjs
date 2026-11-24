@@ -48,6 +48,7 @@ async function readStateDeep() {
           missing: (ev.missingFields || ev.missing_fields || []).slice(0, 8),
         })),
         reviewIssues: x.reviewIssues || [],
+        reviewResult: (x.reviewResult || '').slice(0, 400),
       })),
     })
   }))
@@ -62,22 +63,31 @@ function sigOf(msg) {
     !!msg.hasReviewPlan,
     msg.reviewIssues || [],
     (msg.reviewEvents || []).map(e => e.recordType),
+    (msg.reviewResult || '').slice(0, 100),
   ])
 }
 const snap = r => ({ count: r.count, sig: sigOf(r.raw) })
 
 /** 等新 assistant 回复并返回其深结构。
- *  有效回复 = 非失败 && (text 长度>3 且非进行中文案 || 带 reviewPlan)；
- *  且相对 prev（count 或签名）有变化、连续两次读到相同内容（稳定）。 */
-async function waitReplyDeep(prev, label, maxMs = 90000) {
+ *  有效回复 = 非失败 && (text 长度>3 且非进行中文案 || 带 reviewPlan || 带 reviewResult)；
+ *  且相对 prev（count 或签名）有变化、连续两次读到相同内容（稳定）。
+ *  awaitExecuted=true（确认轮专用）：确认执行的回执原地更新在「最早带 reviewPlan
+ *  的那条消息」上（不是最后一条），等它出现 reviewResult 且与 prev 记录的不同。 */
+async function waitReplyDeep(prev, label, maxMs = 90000, awaitExecuted = false) {
   const deadline = Date.now() + maxMs
   let lastSig = null
   let stable = 0
+  const prevResult = (prev.raw && prev.raw.reviewResult) || ''
   while (Date.now() < deadline) {
     await sleep(6000)
     const s = await readStateDeep()
     const asst = (s.msgs || []).filter(x => x.role === 'assistant')
     if (!asst.length) continue
+    if (awaitExecuted) {
+      const executed = asst.find(x => x.reviewResult && String(x.reviewResult).length > 3
+        && String(x.reviewResult) !== prevResult)
+      if (executed) return { count: asst.length, text: '', raw: executed, state: s, executed: true }
+    }
     const last = asst[asst.length - 1]
     const t = last.text || ''
     const meaningful = !last.failed
@@ -156,7 +166,8 @@ function planNextMove(text, raw, askedCount, log) {
   const field = parseAskedField(text, raw)
   if (!field) {
     // 没问栏位：看是否到了确认/完成阶段
-    if (/确认生成|生成正式/.test(text)) return { done: 'confirm' }
+    // （「确认并生成工作记录」= 服务端核对通过的确认文案，2026-11-24 UI 复验）
+    if (/确认并生成|确认生成|生成正式|已通过检查/.test(text)) return { done: 'confirm' }
     if (/已写入正式记录|已记录：/.test(text)) return { done: 'written' }
     return { done: 'unknown' }
   }
@@ -236,10 +247,16 @@ async function main() {
         const sc = await driveSend('确认生成')
         if (sc !== 'SENT') throw new Error('confirm send failed: ' + sc)
         confirmed = true
-        r = await waitReplyDeep({ count: r.count, sig: sigOf(r.raw) }, 'confirm-turn', 90000)
-        log('confirm reply:', JSON.stringify((r.text || '').slice(0, 150)))
-        const no = (r.text || '').match(/#(\d+)/)
+        r = await waitReplyDeep({ count: r.count, sig: sigOf(r.raw), raw: r.raw }, 'confirm-turn', 120000, true)
+        // 确认执行的回执落在 reviewResult（原地更新），记录号在「#N」里
+        const confirmText = (r.raw && r.raw.reviewResult ? r.raw.reviewResult : '') + ' ' + (r.text || '')
+        log('confirm reply:', JSON.stringify(confirmText.slice(0, 200)))
+        const no = confirmText.match(/#(\d+)/)
         if (no) writtenRecordNo = no[1]
+        if (/已生成/.test(confirmText)) {
+          log('turn ' + i + ': 已生成正式记录 #' + writtenRecordNo)
+          break
+        }
         continue
       }
       if (move.done === 'written') {

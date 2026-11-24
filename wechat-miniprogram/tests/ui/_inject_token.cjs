@@ -1,7 +1,7 @@
 /* 注入登录态：token + user_info（生产 user 1：csm / chief_supervisor / 项目 15） */
 const automator = require('miniprogram-automator')
 const WS = 'ws://127.0.0.1:9420'
-const TOKEN = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxIiwidHlwZSI6ImFjY2VzcyIsImV4cCI6MTc5NTUyODA3MX0.gPRbttozqDzepFPQUeG2ILZZ3VhUP56AqWbBVcjDccA'
+const TOKEN = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxIiwidHlwZSI6ImFjY2VzcyIsImV4cCI6MTc5NTUzMDU2M30.FP6HxyzAn5-nP3Ys7Hl0FsRgbx5QXwZGDdpyRy9oOvo'
 
 async function main() {
   const mini = await automator.connect({ wsEndpoint: WS })

@@ -1740,6 +1740,22 @@ Page(themed({
         ? this.data.messages.findIndex(message => message.reviewPlan?.serverId === lastAssistant.reviewFollowupPlanId)
         : -1
     if (pendingReviewIndex >= 0 && !/(取消|放弃|先不记|不用记|换个话题)/.test(text)) {
+      // 🔴 2026-11-24 UI 复验断链（agent-walk-full 卡点）：带图草稿核对通过后
+      // 回执让用户「点击确认并生成」，但纯文字对话里用户只能回「确认生成」
+      // ——这句话也被 applyReviewPurposeReply 当普通补充吞进草稿，建档永远
+      // 不执行。这里给「确认生成」类收口词接上确认执行（与服务端
+      // agent_tools 的确认白名单同词表）：
+      //   只有「草稿已核对通过（无 issues）」才执行；仍有缺项时确认词照旧
+      //   走文字补充（回执会列出还差什么），不会误触建档。
+      const confirmHint = /^\s*(确认生成|确认并生成|确认创建|生成正式记录|好，?生成|就这么生成|生成吧)\s*[。！!～~]*\s*$/.test(text)
+      if (confirmHint) {
+        const plan = this.data.messages[pendingReviewIndex]?.reviewPlan
+        const canConfirm = plan && reviewIssues(plan).length === 0
+        if (canConfirm) {
+          await this.confirmAndExecuteInlineReview(pendingReviewIndex)
+          return
+        }
+      }
       await this.applyReviewPurposeReply(pendingReviewIndex, text, userMsg)
       return
     }
