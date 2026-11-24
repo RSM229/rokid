@@ -206,10 +206,16 @@ class ConfirmationUxTest(unittest.TestCase):
         self.assertNotIn('"title": f"{record_type}记录 · 最终核对"', src)
 
     def test_missing_photo_status_hint_kept_in_reply(self):
-        """建记录差必填字段（如举牌验收照片）时，模型接话后必须补真实缺项提示。"""
+        """建记录差必填字段时，模型接话后必须补真实状态提示。
+
+        2026-11-24 改版：尾巴不再复读「还差「A、B、C」」栏位清单（正文
+        已在问当前栏），只保留「还没写入正式记录」状态提示。
+        """
         src = self._agent_source()
-        self.assertIn("还没写入正式记录，还差「", src)
-        self.assertIn("回复补充一下，或发相应照片即可", src)
+        self.assertIn("还没写入正式记录", src)
+        self.assertIn('result["reply"] += "\\n\\n还没写入正式记录。"', src)
+        # 栏位清单拼接必须已删（防回归）
+        self.assertNotIn("回复补充一下，或发相应照片即可", src)
 
     def test_launch_creation_phrase_is_fake_success(self):
         """「按已确认信息直接发起这条…创建」也是一种假成功话术，必须被识别拦截。
