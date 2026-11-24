@@ -378,7 +378,12 @@ class WriteThroughMissingFieldsInteractionTest(unittest.TestCase):
         self.assertEqual(1, result["_write_through_state"]["attempts"]["验收类型"])
 
     def test_second_miss_auto_skips_and_never_loops(self):
-        """同一栏第 2 次没对上 → 自动跳过，状态单调推进，不再问这一栏。"""
+        """同一栏第 2 次没对上 → 自动跳过，状态单调推进，不再问这一栏。
+
+        2026-11-24「工作台交互太僵硬」（agent_reply_variants 引入）：自动跳过
+        尾句变体轮换（同栏同轮稳定），断言放宽为「任一留空口径 + 仍指向
+        工作记录页可补」；单调推进语义断言保持不变。
+        """
         record = self._record()
         state = {"record_id": 155,
                  "labels": ["验收类型", "施工单位自检结论"],
@@ -391,7 +396,12 @@ class WriteThroughMissingFieldsInteractionTest(unittest.TestCase):
         self.assertIn("验收类型", st["skipped"])
         self.assertNotIn("验收类型", st["labels"])
         self.assertNotIn("验收类型", list(result.get("need_more") or []))
-        self.assertIn("先按留空处理", str(result.get("reply") or ""))
+        reply = str(result.get("reply") or "")
+        self.assertTrue(
+            any(phrase in reply for phrase in ("先按留空处理", "先空着", "暂时留空")),
+            f"自动跳过尾句应为留空口径变体之一，实际：{reply}",
+        )
+        self.assertIn("「工作记录」页", reply)
 
     def test_skipped_field_never_comes_back(self):
         """写入后重新算缺栏时必须排除已跳过的栏，否则跳过又回来＝死循环。"""

@@ -39,6 +39,7 @@ from app.services import (
     agent_preference_suggest,
     agent_preferences,
     agent_project_memories,
+    agent_reply_variants,
     agent_request_plan,
     agent_refs,
     agent_runtime,
@@ -156,6 +157,9 @@ def _is_mechanical_reply(text: str) -> bool:
     """判断模型 answer 是否机械（只是标签式清单，如「还需要补充：验收类型」）。
 
     自然话术（含转述与引导，即使以「还差一项」开头）保留；纯标签清单退回工具话术。
+    🔴 2026-11-24「工作台交互太僵硬」：路由回执组装已不再调用本函数（放宽为
+    「LLM 接话为主、假成功话术才拦」）。保留定义与测试锚点用途，后续如需收紧
+    机械判定可恢复调用。
     """
     t = str(text or "").strip()
     if not t:
@@ -317,7 +321,10 @@ def _missing_record_type_reply(has_evidence: bool) -> str:
 
     只有本轮确实带了素材（图片/文件解析文本、水印预填或计划里的证据）才能
     说“已收到并保留”。否则用户明明没发照片，助手却声称保留，会让人误以为
-    上一次的图片还在上下文里。
+    上一次的图片还在上下文里（2026-10-27 回归锁死：两态措辞均为断言锚点）。
+    2026-11-24「工作台交互太僵硬」专项评估：类型选择一轮即落草稿（用户答
+    类型词后 draft 带 record_type），复读频率远低于逐栏追问/建单回执，
+    不做变体轮换，保持锚点稳定。
     """
     if has_evidence:
         return "我已收到并保留这些图片和已有信息。你想整理成巡视、旁站、验收还是见证记录？"
@@ -1688,6 +1695,10 @@ async def _apply_existing_record_write_through(
         await db.commit()
         current = missing_labels[0]
         logger.info("对话写入授权：记录 #%s 已落已确认内容，仍待补 %s", record.id, missing_labels)
+        # 2026-11-24「工作台交互太僵硬」：写入授权回执从单一硬模板改为变体轮换
+        # （同栏同轮稳定、跨轮换说法）。轮次种子取续办状态的累计 attempts——
+        # 每续办一轮至少 +1，单调递增；首次写入为 0。
+        _turn = sum(int(v) for v in _state["attempts"].values())
         return {
             "ok": True, "record_id": record.id, "fields": changed,
             "record_type": str(record.record_type or ""),
@@ -1697,9 +1708,11 @@ async def _apply_existing_record_write_through(
                 "attempts": _state["attempts"], "skipped": _state["skipped"],
             },
             "reply": (
-                f"已写入正式记录 #{record.id}（{record.record_type}）。"
+                agent_reply_variants.write_through_head(record.id, record.record_type, _turn)
                 + (f"\n本次补充：{'、'.join(changed)}。" if changed else "")
-                + f"\n还差「{current}」，{_field_fill_hint(current)}；你说一下我就补进去。"
+                + "\n"
+                + agent_reply_variants.write_through_next_ask(
+                    current, _field_fill_hint(current), _turn)
                 + (f"后面还要补：{'、'.join(missing_labels[1:])}。" if len(missing_labels) > 1 else "")
                 + "\n这些栏位都不补就说「先留空」。"
             ),
@@ -1717,7 +1730,7 @@ async def _apply_existing_record_write_through(
         "ok": True, "record_id": record.id, "fields": changed,
         "record_type": str(record.record_type or ""),
         "reply": (
-            f"已写入正式记录 #{record.id}（{record.record_type}）。"
+            agent_reply_variants.write_through_head(record.id, record.record_type, 0)
             + (f"\n本次补充：{'、'.join(changed)}。" if changed else "")
             + ("\n没提供的栏位按你的授权留空，不做臆测填写；到「工作记录」页可以继续补。"
                if missing_labels else "\n字段已齐。")
@@ -1794,13 +1807,15 @@ async def _continue_existing_record_write_through(
 
     if ask_again and not auto_skipped:
         # 用户在问「怎么填」：给通用口径，不写库、不重复那句「我没对上」。
+        # 2026-11-24：回应头变体轮换（同栏同轮稳定），口径本体不变。
         return {
             "ok": False, "record_id": record_id,
             "need_more": [current], "pending_labels": rest,
             "_write_through_state": full_state,
             "reply": (
-                f"「{current}」：{_field_fill_hint(current)}。"
-                "\n你说一下我就补进去；不想补就说「先留空」。"
+                agent_reply_variants.field_hint_head(
+                    current, _field_fill_hint(current), sum(int(v) for v in attempts.values()))
+                + "\n你说一下我就补进去；不想补就说「先留空」。"
             ),
         }
 
@@ -1821,7 +1836,9 @@ async def _continue_existing_record_write_through(
         if auto_skipped:
             result["reply"] = (
                 str(result.get("reply") or "").rstrip()
-                + f"\n「{auto_skipped}」先按留空处理，到「工作记录」页还能补。"
+                + "\n"
+                + agent_reply_variants.auto_skip_tail(
+                    auto_skipped, sum(int(v) for v in attempts.values()))
             )
     return result
 
@@ -2674,20 +2691,31 @@ async def _agent_chat_impl(
             # 无论接不接话，快捷键都出现。
             if _awaiting_final and not result.get("ask_block"):
                 result["chips"] = ["确认生成"]
+            # 2026-11-24「整体像机器人」：最终确认引导句变体轮换。轮次种子取草稿
+            # _context.version（每次 stash 递增，天然单调）；无草稿时退 0。
+            _ctx_args = draft.get("args") or {}
+            _ctx_block = _ctx_args.get("_context") \
+                if isinstance(_ctx_args.get("_context"), dict) else {}
+            _confirm_turn = int(_ctx_block.get("version") or 0)
             _result_data = result.get("data") if isinstance(result.get("data"), dict) else {}
             if result.get("ask_block") or _result_data.get("split"):
                 # 「一起询问」与「多图分组建档」回执必须完整呈现：逐类待确认内容
                 # 是确定性生成的，不能被模型自然接话盖掉（2026-11-16 真机需求）。
                 result["reply"] = _tool_reply
-            elif _model_answer and not _is_mechanical_reply(_model_answer) and not _sounds_like_success(_model_answer):
-                # 模型自然接话常说「收到，已生成」「按已确认信息直接发起这条…创建」，
-                # 会把系统的真实追问（还差哪一项 / 还需确认）盖掉，用户以为建档成功
-                # 却查不到记录（2026-11-09/11-10 生产实测）。保留自然接话，
-                # 但建记录时缺字段必须补上真实状态与下一步引导。
+            elif _model_answer and not _sounds_like_success(_model_answer):
+                # 🔴 2026-11-24「整体像机器人」：模型自然接话为主、模板只兜底。
+                # 原 _is_mechanical_reply 把「还差一项」开头但整体自然的短句也判
+                # 机械，模板盖过 LLM 接话 → 高频复读。现只拦两种情况：
+                #   1) answer 为空；
+                #   2) 假成功话术（_sounds_like_success，2026-11-09/10 生产红线：
+                #      「已创建/服务端会据此创建/按已确认信息直接发起…」——
+                #      need_more 时会把真实缺项追问盖掉，用户误以为建档成功）。
+                # 机械清单（如「还需要补充：验收类型」）由 answer 自身质量决定，
+                # 建记录时下方仍会补真实状态尾巴，不再整句退回工具模板。
                 result["reply"] = _model_answer
                 if _awaiting_final:
                     result["reply"] += (
-                        "\n\n信息已整理完毕，回复「确认生成」即可建档。"
+                        "\n\n" + agent_reply_variants.final_confirm_tail(_confirm_turn)
                     )
                 elif tool == "create_work_record":
                     _missing_labels = [str(x) for x in (result.get("need_more") or [])]

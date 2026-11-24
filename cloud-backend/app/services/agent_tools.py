@@ -42,6 +42,7 @@ from app.models.parallel import ParallelInspection
 from app.models.security_audit import SecurityAudit
 from app.models.user import Project, User
 from app.models.work_record import WorkRecord, WorkRecordStatus
+from app.services import agent_reply_variants
 from app.services import agent_request_plan, form_contracts, model_gateway, provform_schema, record_field_spec
 from app.services import multi_image_split, split_record_confirm
 from app.services.agent_context import (
@@ -170,6 +171,22 @@ def _cite(index: int, kind: str, title: str, *, sub: str = "", snippet: str = ""
             "snippet": snippet, "target": target, "ref_id": ref_id}
 
 
+def _draft_context_version(args: dict | None, orig_args: dict | None = None) -> int:
+    """从草稿 _context 取轮次种子（每次 stash_pending 递增，天然单调）。
+
+    2026-11-24「工作台交互太僵硬」：追问/确认句变体轮换的轮次种子统一取这里。
+    读取失败一律退 0（首次轮），绝不抛错阻断业务。
+    """
+    for source in (args, orig_args):
+        ctx = (source or {}).get("_context") if isinstance(source, dict) else None
+        if isinstance(ctx, dict):
+            try:
+                return int(ctx.get("version") or 0)
+            except (TypeError, ValueError):
+                return 0
+    return 0
+
+
 def _need_more(missing: list[str], reply: str = "",
                options: dict[str, list[str]] | None = None) -> dict:
     """参数不足：回纯文字追问话术。
@@ -177,11 +194,13 @@ def _need_more(missing: list[str], reply: str = "",
     2026-11-06 用户明确「我不要这些选择，我要完全交互」：无论调用方传什么
     options，一律不再下发可点选候选 chips / 表单控件；缺项只用自然语言
     一次问一栏，用户自己打字回答。options 参数保留仅为兼容既有调用签名。
+    2026-11-24「工作台交互太僵硬」：兜底句也走变体轮换，同一句不再逐字复读
+    （调用方传了 reply 的优先用调用方的，例如最终确认门的轮换文案）。
     """
     if not reply:
         labels = [str(x) for x in (missing or [])]
         if labels:
-            reply = f"还差「{labels[0]}」，你说一下就行；不方便也可以先跳过。"
+            reply = agent_reply_variants.missing_field_ask(labels[0], 0)
         else:
             reply = "请补充缺失信息。"
     return {"ok": False, "reply": reply, "card": None, "cards": [], "actions": [],
@@ -2049,10 +2068,12 @@ async def _create_work_record(ctx: ToolContext, args: dict) -> dict:
                 # 2026-11-06「完全交互」：不再把字段表 question_for 的
                 # 「还差一项：X（可直接填写…）」模板或候选 options 下发到对话，
                 # 具体校验错误仍照实说，其余统一成一句自然语言。
+                # 2026-11-24：校验兜底句也走变体轮换（同栏同轮稳定）。
                 return _need_more(
                     [field["label"]],
                     field.get("validation_error")
-                    or f"{field['label']}你说一下就行；不方便也可以先跳过。",
+                    or agent_reply_variants.missing_field_ask(
+                        str(field["label"]), _draft_context_version(args)),
                 )
         if args.get("_require_confirmation") and not args.get("_execution_confirmed"):
             return _need_more(
@@ -2269,12 +2290,16 @@ async def _create_work_record(ctx: ToolContext, args: dict) -> dict:
     if missing and not write_through and (required_missing or not _wants_skip(ctx.message)):
         labels = [str(f.get("label") or f.get("canonical") or "") for f in missing]
         current = labels[0] if labels else "信息"
+        # 2026-11-24「工作台交互太僵硬」：逐栏追问句变体轮换。轮次种子取草稿
+        # _context.version（每轮 stash 递增）——同栏同轮稳定、跨轮换说法，
+        # 不再每轮逐字复读「还差「X」，你说一下就行」。
+        _ask_turn = _draft_context_version(args, orig_args)
         if record_type == "验收" and not matched_entry:
             # 工序未知：只问这一件事，不给候选清单。用户自己说出工序名后，
             # 由 strong_match/_acceptance_query 在下一轮触发「一起询问」。
-            reply = "这次验收做的是哪个工序？你直接说就行。"
+            reply = agent_reply_variants.acceptance_procedure_ask(_ask_turn)
         else:
-            reply = f"还差「{current}」，你说一下就行；不方便也可以先跳过。"
+            reply = agent_reply_variants.missing_field_ask(current, _ask_turn)
         result = _need_more(labels, reply)
         if matched_entry:
             # 「一起询问」：把该工序全部要点一次性带出（纯文字、无复选框），
@@ -2389,10 +2414,12 @@ async def _create_work_record(ctx: ToolContext, args: dict) -> dict:
                 item = invalid or field or {}
                 label = item.get("label") or item.get("canonical") or "必填项"
                 # 同上：具体错误照实说，字段表模板/候选一律不下发到对话。
+                # 2026-11-24：校验兜底句也走变体轮换（同栏同轮稳定）。
                 return _need_more(
                     [label],
                     item.get("message") or item.get("validation_error")
-                    or f"{label}你说一下就行；不方便也可以先跳过。",
+                    or agent_reply_variants.missing_field_ask(
+                        str(label), _draft_context_version(args)),
                 )
             return _need_more(["表式字段"], str(resolved_form.get("materialization_error") or "请补全该表式字段"))
         # 合同归一后的值优先于模型参数，确保记录列、快照和后续文书看到同一份数据。
@@ -2409,11 +2436,13 @@ async def _create_work_record(ctx: ToolContext, args: dict) -> dict:
 
     # 普通聊天入口也必须先停在“待最终确认”状态；路由层会在首次尝试时注入
     # _require_confirmation。直接调用工具的旧接口/测试不带该标记，保持兼容。
+    # 2026-11-24「工作台交互太僵硬」：引导句变体轮换（「尚未写入正式工作记录」
+    # 的真实状态提示每变体都保留——假成功红线不破）。轮次种子同追问句。
     if (args.get("_require_confirmation") and not args.get("_execution_confirmed")
             and not write_through):
         return _need_more(
             ["最终确认"],
-            "字段已按当前表式合同补齐。请核对下面内容后回复“确认生成”，或继续修改任意字段；现在尚未写入正式工作记录。",
+            agent_reply_variants.final_confirm_ask(_draft_context_version(args, orig_args)),
             options={"最终确认": ["确认生成", "继续修改"]},
         )
 
@@ -2533,12 +2562,16 @@ async def _create_work_record(ctx: ToolContext, args: dict) -> dict:
         if len(brief) > 40:
             brief = brief[:40] + "…"
         reply += f"\n内容：{brief}"
-    reply += "\n可在「工作记录」页查看，或直接说「生成监理日志」。"
+    # 2026-11-24「工作台交互太僵硬」：成功尾句变体轮换，不再每次建单都复读
+    # 同一串「可在工作记录页查看/生成监理日志」口号。轮次种子取记录 id——
+    # 同一次会话内连续建单自然换说法，幂等可测。
+    reply += "\n" + agent_reply_variants.created_tail(int(record.id or 0))
     if record_type == "待定":
         # 2026-11-13 修正：旧文案承诺「可在工作记录页改成巡视/旁站/验收/见证」，
         # 但那个改类型入口在小程序/Web 后台都没接出来（只有裸 API），属误导。
         # 现用纯后端对话快捷指令「改成巡视」兜底，现网所有版本立刻可用。
-        reply += "\n这条类型还没定，先按「待定」存着；想改成巡视/旁站/验收/见证，直接回一句「改成巡视」就行。"
+        # 2026-11-24：尾句同样变体轮换（快捷指令口径不变）。
+        reply += "\n" + agent_reply_variants.tbd_tail(int(record.id or 0))
     if is_weida:
         reply += ("\n这是危大工程巡视：生成文书时选《危险性较大的分部分项工程监理巡视检查记录表》"
                   f"（GDAQ30306），检查项会按「{hazard_type or '危大类型'}」自动带出。")
