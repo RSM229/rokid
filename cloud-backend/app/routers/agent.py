@@ -16,7 +16,7 @@ import json
 import logging
 import re
 import time
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -34,6 +34,8 @@ from app.models.document import Document
 from app.models.miniprogram import MediaRecord, MediaType
 from app.routers.auth import get_current_user
 from app.routers.local_ai import _PLAINTEXT_SUFFIX
+
+CN_TZ = timezone(timedelta(hours=8))
 from app.services import (
     agent_fact_model,
     agent_preference_suggest,
@@ -275,6 +277,159 @@ def _record_form_code(tool: str, args: dict, message: str = "") -> str | None:
         record_type, agent_tools._is_weida(record_type, args, message),
     )
 
+
+def _asked_field_from_history(history: list[dict] | None) -> tuple[str, str] | None:
+    """从请求历史里解析「上一轮服务端问的是哪一栏」→ (标签, 用户本轮原话)。
+
+    request_plan 收到的 history 是前端消息切片（user/assistant 交替），
+    上一轮 assistant 回执里带「还差一项：X（可直接填写…）」或
+    reviewFollowupText 的「X：还差一项：X」句式。这是逐栏追问轮最可靠的
+    「当前问的栏」信号——拿不到时兜底不启用（宁可漏不可错）。
+
+    🔴 2026-11-24 UI 复验发现：前端 applyReviewPurposeReply 在调 request-plan
+    前会先 beginAgentProgress —— 在用户消息后 splice 一条 text='' 的 assistant
+    进度占位气泡，它必然排在 messages 末尾。若只看「最后一条 assistant」，
+    永远读到空占位 → 定位失败 → 兜底从不触发。这里从后往前找**第一条有文本**
+    的 assistant 消息（空占位跳过）。
+    """
+    items = [h for h in (history or []) if isinstance(h, dict) and str(h.get("role") or "") == "assistant"]
+    text = ""
+    for item in reversed(items):
+        candidate = str(item.get("text") or "").strip()
+        if candidate:
+            text = candidate
+            break
+    if not text:
+        return None
+    # 「X：还差一项：X（…）」或「还差一项：X（…）」。前端 reviewFollowupText
+    # 会把全部缺栏列成一串；服务端/表顺序的「当前聚焦栏」是第一个（表栏目
+    # 顺序 = 追问顺序），取第一个匹配。
+    m = None
+    for pat in (
+        r"还差一项[:：]\s*([^（；。\n]{1,60})",
+        r"还差「([^」]{1,60})」",
+        r"请先确认记录类型",
+    ):
+        found = re.findall(pat, text)
+        if found:
+            m = found[0].strip()
+            break
+    if not m:
+        return None
+    return m, text
+
+
+def _inject_missing_field_fact(
+    plan: dict[str, Any],
+    message: str,
+    history: list[dict] | None,
+) -> dict[str, Any] | None:
+    """带图评审链路的确定性兜底：把逐栏追问轮的短答直接落进 plan facts。
+
+    🔴 2026-11-24 深走测试发现的断链（agent-walk-full.test.cjs 卡点）：
+    带图草稿（review-plans 修订轮）逐栏追问不吸收答案——「自检合格」这类
+    短答在 trace 里只出现在规划模型的 reason 里，没吐成 fact；且就算吐了，
+    build_item_plan 只放行 IDENTITY/CONTEXT 字段，表式专用字段（如
+    self_check_conclusion）也会被丢弃，导致「已把X并入当前草稿」回执后
+    缺栏清单纹丝不动、同栏被无限重问（「跳过」也一样不被消费）。
+
+    纯文字链路（/agent/chat 的 refill_missing_from_message）没有此问题。
+    这里给 request-plan 补同语义的服务端兜底，但**只在能定位「上一轮问的
+    是哪一栏」时启用**（history 里最后一条 assistant 回执的追问句）：
+    不知道在问哪栏就绝不猜栏（否则「自检合格」会错注进「验收部位」）。
+    判断口径复用纯文字链路：
+      - 疑问句/指令句/超长句不当值；
+      - 照片/签章/时间类栏聊天填不了，不兜底；
+      - 枚举栏值必须落在受控选项内；
+      - 「跳过/不用补」类收口词不注入（留空由确认层处理）。
+    返回注入后的新 plan；不适用返回 None。
+    """
+    from app.services.record_field_spec import ENUM_OPTIONS, form_for_record_type, label_to_field
+
+    text = str(message or "").strip()
+    if not text:
+        return None
+    # 🔴 前端 applyReviewPurposeReply 把 plannerMessage 拼成
+    # [priorRequest, reply].join('\n')（「记录今天的工作\n验收\n自检合格」），
+    # 用户本轮真实短答是**最后一个非空行**。整段当 value 会把前文也灌进栏位。
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    if not lines:
+        return None
+    if len(text) > 400 or len(lines[-1]) > 120:
+        return None
+    text = lines[-1]
+    if not text or len(text) > 120:
+        return None
+    if agent_tools._wants_skip(text) or any(h in text for h in ("？", "?")):
+        return None
+    from app.services.record_fields import is_instruction_only
+    if is_instruction_only(text):
+        return None
+    located = _asked_field_from_history(history)
+    if located is None:
+        return None
+    asked_label = located[0]
+    if "记录类型" in asked_label:
+        return None  # 类型轮由类型识别链路处理，不在本兜底范围
+    rtype = str(plan.get("record_type") or "").strip()
+    if not rtype or rtype == "待定":
+        return None
+    form_code = form_for_record_type(rtype)
+    if not form_code:
+        return None
+    lookup = label_to_field(form_code)
+    # 追问标签 → 字段：接受完全匹配与包含匹配（回执标签可能被截短）。
+    field = lookup.get(asked_label)
+    if field is None:
+        for raw_label, candidate in lookup.items():
+            if asked_label in raw_label or raw_label in asked_label:
+                field = candidate
+                break
+    if field is None:
+        return None
+    canon = str(field.get("canonical") or "")
+    if not canon:
+        return None
+    if field.get("kind") != "ask" or not field.get("required"):
+        return None
+    if any(k in str(field.get("label") or "") for k in ("照片", "签章", "签字")):
+        return None
+    if canon in ("start_time", "end_time", "date"):
+        return None  # 时间/日期按区间解析，不吃整句兜底
+    # 模型已经吐了这一栏的 fact 时不抢。
+    from app.services.agent_form_requirements import _CANONICAL_INPUT_FIELDS
+    for f in plan.get("facts") or []:
+        if isinstance(f, dict):
+            name = _CANONICAL_INPUT_FIELDS.get(str(f.get("field") or ""), str(f.get("field") or ""))
+            if name == canon and str(f.get("value") or "").strip():
+                return None
+    options = list(ENUM_OPTIONS.get(canon) or [])
+    if options:
+        value = next((opt for opt in options if opt in text), "")
+        if not value:
+            return None  # 枚举栏没对上选项：不注入，追问层继续
+    else:
+        value = text
+    stamp = datetime.now(CN_TZ).replace(tzinfo=None).isoformat(timespec="seconds")
+    new_fact = {
+        "field": canon,
+        "value": value[:120],
+        "source": "user_message_deterministic",
+        "source_ref": text[:120],
+        "source_span": value[:120],
+        "confidence": 1.0,
+        "status": "user_stated_candidate",
+        "sources": [{
+            "source": "user_message_deterministic",
+            "source_ref": text[:120],
+            "source_span": value[:120],
+            "updated_at": stamp,
+        }],
+        "updated_at": stamp,
+    }
+    out = dict(plan)
+    out["facts"] = [*(plan.get("facts") or []), new_fact]
+    return out
 
 def _generic_field_name(label: str) -> str:
     """没有字段表时，把追问标签落回工具真正读取的参数名。"""
@@ -1261,6 +1416,30 @@ async def request_plan(
         )
         if agent_request_plan.apply_zero_required_stash(plan, message, _plan_has_images):
             logger.info("A层零必填：request-plan 改写为直达 chat 落待定")
+        # 🔴 带图评审链路确定性兜底（2026-11-24 深走测试卡点）：逐栏追问轮的
+        # 短答（「自检合格」等）规划模型常只写进 reason 不吐 fact，且
+        # build_item_plan 只放行 IDENTITY/CONTEXT 字段，表式专用字段被丢弃
+        # → 「已把X并入当前草稿」回执后缺栏清单纹丝不动、同栏无限重问。
+        # 这里把短答直接注入 facts（枚举栏校验受控选项；照片/签章/时间不兜底）。
+        _injected = _inject_missing_field_fact(plan, message, req.history)
+        if _injected is not None:
+            plan = _injected
+            # 🔴 item_plan 必须基于注入后的 facts 重建：build_item_plan 的
+            # _add_form_ask_fields 只认 facts 里的表式字段，不重建的话
+            # item.fields 仍是旧值（前端 reviewPlanFromItemPlan 拿不到，
+            # 缺栏清单纹丝不动——UI 复验第三轮发现）。
+            plan = agent_request_plan.enrich_plan_facts(
+                plan,
+                [],
+                evidence=evidence,
+                system_facts=system_facts,
+            )
+            logger.info(
+                "request-plan 短答兜底：注入 %s=%s（表式缺栏确定性回填）",
+                _injected["facts"][-1].get("field"), _injected["facts"][-1].get("value"),
+            )
+            plan["model"] = model_id
+            plan["request_id"] = request_id
         planned_facts = [
             {"field": item.get("field"), "value": item.get("value"), "source": item.get("source")}
             for item in plan.get("facts", []) if isinstance(item, dict)

@@ -14,6 +14,17 @@ CONTEXT_FIELDS = (
     "owner_unit", "construction_unit", "supervision_unit", "inspector",
     "work_content", "weather", "start_time", "end_time",
 )
+# 🔴 2026-11-24 深走测试断链（agent-walk-full 卡点）第二处：带图草稿逐栏追问的
+# 短答 fact（self_check_conclusion 等）被 item_plan 整层丢弃——IDENTITY/CONTEXT
+# 白名单之外全部不进 item.fields，前端 reviewPlanFromItemPlan 拿不到值，
+# 「已把X并入当前草稿」回执后缺栏清单纹丝不动、同栏无限重问。
+# 放行口径（宁窄勿宽）：
+#   1. 必须是当前 record_type 表式里 kind=ask 的字段 canonical（record_field_spec）；
+#   2. 必须有用户来源 fact（source 以 user_ 开头）——水印/系统/模型编造字段不进
+#      item.fields（它们仍可进 plan.facts，但分组视图只认用户明说的表栏值，
+#      防止模型幻觉字段污染分组与草稿）；
+#   3. 照片/签章类栏排除（聊天填不了，不走文字链路）。
+FORM_ASK_FIELD_SOURCES = {"user_message", "user_message_model", "user_message_deterministic"}
 # 参建单位/项目身份字段：多来源不一致时按「用户明说 > 当前项目 > 水印」裁决，
 # 不再让用户逐项勾选（2026-11-03 用户要求「少输入、智能体帮忙思考」）。
 PROJECT_PARTY_FIELDS = {"project", "owner_unit", "construction_unit", "supervision_unit", "supervision_org"}
@@ -249,6 +260,60 @@ def _add_context_fields(
             }
 
 
+def _add_form_ask_fields(
+    fields: dict[str, dict[str, Any]],
+    facts: Iterable[dict[str, Any]] | None,
+    record_type: str | None,
+) -> None:
+    """用户明说的表式专用字段（非 IDENTITY/CONTEXT）也进 item.fields。
+
+    只认「当前 record_type 表式里 kind=ask 的 canonical + fact 来源是用户」：
+    分组身份（IDENTITY/CONTEXT）继续由本模块白名单裁决，表式业务栏（验收类型/
+    自检结论等）由字段表裁决。水印/系统/低置信模型字段不进（防编造污染分组）。
+    """
+    rtype = _text(record_type)
+    if not rtype or rtype in {"待定", "chat", "未知"}:
+        return
+    from app.services import record_field_spec
+    try:
+        form_code = record_field_spec.form_for_record_type(rtype)
+    except Exception:
+        return
+    if not form_code:
+        return
+    user_sources: dict[str, dict[str, Any]] = {}
+    for item in facts or []:
+        if not isinstance(item, dict):
+            continue
+        field = _text(item.get("field"))
+        value = _text(item.get("value"))
+        source = _text(item.get("source"))
+        if not field or not _usable(value):
+            continue
+        if source not in FORM_ASK_FIELD_SOURCES:
+            continue
+        if field not in user_sources:
+            user_sources[field] = {
+                "value": value,
+                "source": source,
+                "status": str(item.get("status") or "user_stated_candidate"),
+            }
+    if not user_sources:
+        return
+    for spec in record_field_spec.fields_of(form_code):
+        canonical = _text(spec.get("canonical"))
+        label = _text(spec.get("label"))
+        if not canonical or canonical in fields:
+            continue
+        if spec.get("kind") != "ask":
+            continue
+        if any(k in label for k in ("照片", "签章", "签字")):
+            continue
+        view = user_sources.get(canonical)
+        if view is not None:
+            fields[canonical] = dict(view)
+
+
 def build_item_plan(
     *,
     facts: Iterable[dict[str, Any]] | None,
@@ -275,6 +340,7 @@ def build_item_plan(
         missing = [field for field in ("record_date", "location", "section") if not _usable(fact_map.get(field))]
         fields = _field_views({}, fact_map, system_fields=system_map)
         _add_context_fields(fields, fact_map, system_map)
+        _add_form_ask_fields(fields, facts, record_type)
         return {
             "items": [{
                 "id": "item_1",
@@ -337,6 +403,7 @@ def build_item_plan(
             identity, fact_map, group.get("sources"), context, system_map,
         )
         _add_context_fields(fields, fact_map, system_map)
+        _add_form_ask_fields(fields, facts, record_type)
         missing = [field for field in ("record_date", "location", "section") if field not in fields]
         issues = []
         for field, value in fields.items():
@@ -366,6 +433,7 @@ def build_item_plan(
     if unassigned and not groups:
         fields = _field_views({}, fact_map, system_fields=system_map)
         _add_context_fields(fields, fact_map, system_map)
+        _add_form_ask_fields(fields, facts, record_type)
         items.append({
             "id": "item_1",
             "record_type": record_type,

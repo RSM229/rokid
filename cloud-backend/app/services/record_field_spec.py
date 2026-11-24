@@ -16,7 +16,7 @@ ASK_ANYWAY = ['weather', 'wind']
 
 QUESTION_OVERRIDES = {'section': '这次的工程部位（施工区域）是哪里？例如「3号楼二层临边防护」', 'problems': '现场发现了什么问题？无异常就回复「符合要求」', 'weather': '当天天气如何？可以直接选，或回复「跳过」', 'content': '具体检查/巡视内容是什么？', 'start_time': '开始时间是几点？例如「9:00」', 'end_time': '结束时间是几点？例如「11:30」', 'worker_count': '现场施工人数大约多少？', 'station_process': '旁站的关键工序是什么？例如「混凝土浇筑」', 'hazard_name': '危大工程名称/类型是什么？例如「落地式钢管脚手架工程-一般危大工程」', 'wind': '现场风力如何？可以直接选，或回复「跳过」', 'qa_onsite': '施工单位质检员、安全员、施工员是否到岗？', 'self_check': '施工单位是否已完成自查自检并达到质量标准？', 'acceptance_type': '这是哪类验收？隐蔽工程／检验批／进场验收／分项工程验收／分部工程验收／单位工程验收／竣工验收／预验收（「分项分部」为旧值别名）', 'acceptance_content': '验收要点（验收内容）是什么？'}
 
-ENUM_OPTIONS = {'weather': ['晴', '多云', '阴', '小雨', '大雨', '大风'], 'qa_onsite': ['是', '否'], 'self_check': ['是', '否'], 'conclusion': ['合格', '不合格'], 'acceptance_result': ['合格', '不合格', '待整改'], 'hazard_category': ['深基坑', '高大模板', '起重吊装', '脚手架', '拆除', '暗挖', '其他'], 'pm_onsite': ['是', '否'], 'safety_onsite': ['是', '否'], 'test_result': ['合格', '不合格', '待检'], 'acceptance_result_cailiao': ['合格', '不合格']}
+ENUM_OPTIONS = {'weather': ['晴', '多云', '阴', '小雨', '大雨', '大风'], 'qa_onsite': ['是', '否'], 'self_check': ['是', '否'], 'conclusion': ['合格', '不合格'], 'acceptance_result': ['合格', '不合格', '待整改'], 'hazard_category': ['深基坑', '高大模板', '起重吊装', '脚手架', '拆除', '暗挖', '其他'], 'pm_onsite': ['是', '否'], 'safety_onsite': ['是', '否'], 'test_result': ['合格', '不合格', '待检'], 'acceptance_result_cailiao': ['合格', '不合格'], 'acceptance_type': ['隐蔽工程', '检验批', '进场验收', '分项工程验收', '分部工程验收', '单位工程验收', '竣工验收', '预验收', '分项分部']}
 
 RECORD_TYPE_TO_FORM = {'巡视': 'gd_b_214_xunshi', '旁站': 'gd_b_212_pangzhan', '验收': 'acceptance_record', '见证': 'witness_record', '起重机械安拆检查': 'gdaq_30305_qizhong'}
 

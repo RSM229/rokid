@@ -203,6 +203,16 @@ def resolve_event_form(
     # Evidence is the objective default. Explicit event selections are applied
     # after it, so a user's confirmed choice can replace a watermark candidate.
 
+    # 🔴 2026-11-24 带图草稿「举牌验收照片」永久卡栏（UI 复验第四轮）：
+    #    photo 栏 values 永远为空（照片是实物不是文本），事件明明挂着
+    #    evidence_ids 图片却仍判 missing → 逐栏追问推进到照片栏后死循环
+    #    （「跳过」也不消费）。与 resolve_record_form 的 inspection_photos
+    #    映射同语义：事件已挂图时 photo 视为已满足。
+    if form_code == "acceptance_record" and event.get("evidence_ids"):
+        _photo_count = len([x for x in event.get("evidence_ids") if str(x or "").strip()])
+        if _photo_count:
+            add("photo", f"已附{_photo_count}张现场照片", "evidence", "evidence_extracted")
+
     # 2026-11-03 当前项目优先于照片水印：先把参建单位/项目字段按当前项目写入，
     # 水印 add() 遇到已存在值会跳过，显式用户选择仍会无条件覆盖（用户明说优先）。
     for _pf in PROJECT_PARTY_FIELDS:
