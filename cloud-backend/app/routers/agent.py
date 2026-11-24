@@ -1557,6 +1557,73 @@ def _write_through_missing_labels(record: WorkRecord, cj: dict) -> list[str]:
     return out
 
 
+# 跨会话续办（2026-11-24 用户反馈「两轮对话重复/没记进度」）：新会话里说
+# 「记一条X」时，若同项目同类型未归档记录仍有缺栏，先问用户接哪条，不再
+# 盲目另起一条重复记录（17:04 与 17:31 两个会话各建一份验收草稿、从头追问
+# 的现场）。答「接着补」→ 转入 _apply_existing_record_write_through 续办；
+# 答「另建」→ 正常新建。查库口径与该函数一致（同项目+本人+未归档），
+# 不越权读他人记录；本会话已有草稿时不插问（同一件事已在续办）。
+_NEW_RECORD_INTENT_RE = re.compile(r"(记一(条|个|份)|新建|添加一(条|个|份)|录一(条|个|份)|建一(条|个|份))")
+_CONTINUE_RECORD_ANSWERS = ("接着补", "继续补", "接着办", "继续办", "接着填", "继续填", "接着处理", "继续处理", "接着", "继续")
+_NEW_RECORD_ANSWERS = ("另建", "新建", "新的", "新开一条", "另起一条", "再建一条")
+
+
+async def _maybe_ask_continue_existing(
+    db: AsyncSession, user: User, project_id: int | None,
+    conversation_id: str | None, message: str,
+) -> dict | None:
+    """「记一条X」且同项目同类型有缺栏未归档记录 → (record_id, rtype, labels)。
+
+    只在以下条件同时满足时触发（口径保守）：
+      1. 本轮消息是「记一条/新建一条」意图且带明确类型词（canonical）；
+      2. 同项目 + 本人创建 + 同类型 + 未归档的最近一条记录仍缺
+         聊天填不了的栏以外的必填栏（缺照片/签章不算「没填完」）。
+    本会话草稿状态由调用方检查（有草稿 = 同一件事已在续办，别插一问）。
+    """
+    text = str(message or "").strip()
+    if not text or not project_id or not conversation_id:
+        return None
+    if not _NEW_RECORD_INTENT_RE.search(text):
+        return None
+    rtype = agent_request_plan.canonical_record_type(text)
+    if not rtype:
+        return None
+    stmt = select(WorkRecord).where(
+        WorkRecord.project_id == project_id,
+        WorkRecord.creator_id == user.id,
+        WorkRecord.record_type == rtype,
+        WorkRecord.status != WorkRecordStatus.ARCHIVED.value,
+    ).order_by(WorkRecord.id.desc()).limit(1)
+    record = (await db.execute(stmt)).scalar_one_or_none()
+    if record is None:
+        return None
+    cj = dict(record.content_json or {})
+    labels = _write_through_missing_labels(record, cj)
+    if not labels:
+        return None
+    return {"record_id": record.id, "record_type": str(record.record_type or ""), "labels": labels}
+
+
+def _consume_continue_record_answer(message: str) -> str | None:
+    """上一轮问过「接着补还是另建」，本轮回答归类：continue / new / None。"""
+    text = str(message or "").strip()
+    if not text:
+        return None
+    if any(h in text for h in _CONTINUE_RECORD_ANSWERS):
+        return "continue"
+    if any(h in text for h in _NEW_RECORD_ANSWERS):
+        return "new"
+    return None
+
+
+def _continue_record_ask_reply(rtype: str) -> str:
+    """问「接着补还是另建」的一句话文案（纯文字，不带 chips，无候选卡）。"""
+    return (
+        f"上次有条{rtype}记录还没填完（还差几项必填）。接着把它补完，"
+        "还是另建一条新的？回一句「接着补」或「另建」就行。"
+    )
+
+
 async def _apply_existing_record_write_through(
     db: AsyncSession, user: User, project_id: int | None,
     conversation_id: str | None, message: str,
@@ -2151,6 +2218,76 @@ async def _agent_chat_impl(
                 "recommendations": [], "undo": None,
             }
 
+    # 🔴 跨会话续办（2026-11-24「两轮重复/没记进度」）：本会话无草稿、
+    # 用户说「记一条X」、同项目同类型未归档记录仍缺栏 → 先问接哪条。
+    # 答案态存草稿（_continue_record）一轮即消费：答「接着补」→ 转入
+    # _apply_existing_record_write_through 建续办态；答「另建」或答非所问
+    # （用户不想接就别纠缠）→ 清草稿走正常新建，绝不二次插问。
+    if not structured_submit and conversation_id and project_id:
+        _cont_draft_args = _wt_args if isinstance(_wt_args, dict) else {}
+        _cont_state = _cont_draft_args.get("_continue_record") \
+            if isinstance(_cont_draft_args.get("_continue_record"), dict) else None
+        if _cont_state is not None and not req.images:
+            _answer = _consume_continue_record_answer(message)
+            _consumed = False
+            if _answer == "continue":
+                _wt = await _apply_existing_record_write_through(
+                    db, user, project_id, conversation_id, message,
+                    _cont_draft_args, earlier_messages, req.history,
+                    record_id_hint=int(_cont_state.get("record_id") or 0) or None,
+                )
+                if _wt:
+                    _consumed = True
+                    await _persist_write_through_state(
+                        db, user, project_id, conversation_id, message, _wt, _cont_draft_args,
+                    )
+                    await report_progress(
+                        "tool_validation", "completed", "已转入上一条记录的续办",
+                        {"tool": "update_work_record", "record_id": _wt.get("record_id")},
+                    )
+                    return {
+                        "kind": "action", "tool": "update_work_record",
+                        "model": model_id, "request_plan": incoming_plan,
+                        "reply": _wt["reply"],
+                        "card": None, "cards": [], "actions": [],
+                        "need_more": [str(x) for x in (_wt.get("need_more") or [])],
+                        "options": {}, "form": None, "input_components": [],
+                        "recommendations": [], "undo": None,
+                    }
+            if not _consumed:
+                # 「另建」/ 答非所问 / 续办目标已不可用：一律清询问态，
+                # 本轮落回正常新建或普通路由（询问只问一次，绝不反复）。
+                await agent_tools.clear_pending(
+                    db, user.id, "create_work_record", conversation_id,
+                    project_id=project_id,
+                )
+        elif _cont_state is None and not pend_for_context:
+            _ask = await _maybe_ask_continue_existing(
+                db, user, project_id, conversation_id, message,
+            )
+            if _ask is not None:
+                await agent_tools.stash_pending(
+                    db, user.id, "create_work_record",
+                    {"record_type": _ask["record_type"],
+                     "_continue_record": {"record_id": _ask["record_id"]}},
+                    ["记录类型"], message=message,
+                    conversation_id=conversation_id, project_id=project_id,
+                )
+                await report_progress(
+                    "tool_validation", "completed",
+                    "发现同项目有未填完的同类型记录，先问用户接哪条",
+                    {"record_id": _ask["record_id"], "record_type": _ask["record_type"]},
+                )
+                return {
+                    "kind": "action", "tool": "update_work_record",
+                    "model": model_id, "request_plan": incoming_plan,
+                    "reply": _continue_record_ask_reply(_ask["record_type"]),
+                    "card": None, "cards": [], "actions": [],
+                    "need_more": [],
+                    "options": {}, "form": None, "input_components": [],
+                    "recommendations": [], "undo": None,
+                }
+
     if not structured_submit:
         try:
             await report_progress(
@@ -2529,13 +2666,13 @@ async def _agent_chat_impl(
         tool = "create_work_record"
         logger.info("A层零必填：request-plan 标记直达 → 无条件落待定记录（跳过逐图分组）")
     elif (not tool or tool == "create_work_record") and not _rt_known and _has_evidence:
-        # 不再追问类型：落「待定」记录，用户在「工作记录」页改标签即可。
-        # 但多图仍按逐图信号分组（跨类型时先回执「分了 X/Y」再确认建多条），
-        # 分组是「照片怎么归档」而不是「记录类型填什么」，不属于零必填要跳过的追问。
-        args["record_type"] = "待定"
-        args["_auto_tbd"] = True
-        tool = "create_work_record"
-        logger.info("A层零必填：有证据且类型不明 → 落待定记录（保留多图分组）")
+        # 2026-11-24 用户反馈「照片类型没判断出来就建成待定」：有证据但类型
+        # 不明时不再静默落「待定」，改走 L2814 的类型问句（_missing_record_type_reply，
+        # 用户答了类型再建）。证据（照片/内容/部位）先 stash 进草稿，答类型那轮
+        # 从草稿带回来，不会丢图。注意「你先记着」（_stash_pending_plan）分支
+        # 仍是用户明确要求「别问先存」，保留直达待定不动。
+        needs_record_type = True
+        logger.info("A层零必填改版：有证据且类型不明 → 先问一句类型（证据入草稿，答后建）")
 
     # 🔴 服务端接管：模型在「已带素材证据 + 已识别记录类型或存在字段冲突」时仍返回
     # 纯聊天（典型：只汇报「你描述的信息与图片证据不一致…请核对」），整轮会退化成一堵
@@ -2718,14 +2855,10 @@ async def _agent_chat_impl(
                         "\n\n" + agent_reply_variants.final_confirm_tail(_confirm_turn)
                     )
                 elif tool == "create_work_record":
-                    _missing_labels = [str(x) for x in (result.get("need_more") or [])]
-                    _missing_labels = [m for m in _missing_labels if m != "最终确认"]
-                    if _missing_labels:
-                        result["reply"] += (
-                            "\n\n还没写入正式记录，还差「"
-                            + "、".join(_missing_labels[:3])
-                            + "」；回复补充一下，或发相应照片即可。"
-                        )
+                    # 2026-11-24 用户反馈「追问尾巴整串复读栏位清单」：正文（模型
+                    # 接话/模板问句）已经在问当前栏，尾巴不再拼「还差「A、B、C」」
+                    # 清单，只保留状态提示（还没写入正式记录）。
+                    result["reply"] += "\n\n还没写入正式记录。"
             elif _tool_reply:
                 result["reply"] = _tool_reply
             # 续办动作随草稿持久化：首动作若是写操作，本轮只进确认流程就 return，
@@ -2811,12 +2944,31 @@ async def _agent_chat_impl(
     # Keep evidence context while asking the one missing business decision.
     # This is deliberately a draft, not a record: no database side effect is
     # performed until the user chooses a target type and completes the form.
-    if needs_record_type and not tool:  # 仅在无证据（未落待定）时才追问类型
+    # 2026-11-24：有证据但类型不明（A 层零必填改版）也会走到这里——先 stash
+    # 证据草稿（照片/_agent_images），用户答类型那轮从草稿带回，图片不丢。
+    if needs_record_type and not tool:
         has_evidence = bool(
             material or prefill
+            or (req.images if isinstance(req.images, list) else None)
             or (incoming_plan.get("evidence") if isinstance(incoming_plan.get("evidence"), list) else None)
             or _plan_evidence_count(incoming_plan)
         )
+        # 本轮带来的照片必须进草稿：下一轮用户答「验收」时 ctx.images 已空，
+        # 工具层靠草稿 _agent_images 把图挂进记录（agent_tools L1979 注释链路）。
+        _rt_images = [str(u).strip() for u in (req.images or []) if str(u).strip()]
+        _rt_stash_args = dict(args)
+        if _rt_images:
+            _rt_stash_args["_agent_images"] = list(_rt_images)
+        if prefill:
+            _rt_stash_args["_prefill"] = prefill
+        if _rt_images or prefill or str(args.get("work_content") or "").strip() \
+                or str(args.get("section") or "").strip() or str(args.get("location") or "").strip():
+            await agent_tools.stash_pending(
+                db, user.id, "create_work_record",
+                _rt_stash_args, ["记录类型"], message=message,
+                fact_args=turn_fact_args, conversation_id=conversation_id,
+                project_id=project_id,
+            )
         # 2026-11-06「我不要这些选择，我要完全交互」：只回一句自然语言提问，
         # 不下发记录类型下拉框 / 候选 chips / 表单卡 / 推荐项。
         return {
