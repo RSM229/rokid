@@ -2014,9 +2014,9 @@ async def _create_work_record(ctx: ToolContext, args: dict) -> dict:
     if (not content and not section and not location) and raw_type not in ("验收", "待定"):
         return _need_more(["记录内容或施工区域"], "请说明记录内容与位置，例如「3号楼二层，钢筋绑扎，天气晴」。")
 
-    # 记录类型识别（A 层·jj 零必填）：识别不出时不再必须追问。
-    # 有内容/照片就落「待定」草稿保留现场信息，后续在 work 页人工贴标签补齐
-    # （work_record.py 已有「待定→改标签」闭环，工作记录 tab 也有「待定」筛选项）。
+    # 记录类型识别（A 层·jj 零必填 → 2026-11-24 改版）：识别不出时不再
+    # 静默落「待定」。有内容/照片时先回执问一句类型（用户答了再建）；
+    # 「待定/不确定」字样与路由层直达分支（_auto_tbd）仍落待定。
     # 确认轮上用户明确说了「待定/不确定」同样落待定。
     raw_type = str(args.get("record_type") or "").strip()
     record_type = _norm_record_type(raw_type)
@@ -2025,14 +2025,26 @@ async def _create_work_record(ctx: ToolContext, args: dict) -> dict:
         has_entity = bool(content or section or location or _pending_images)
         if raw_type and ("待定" in raw_type or "不确定" in raw_type):
             record_type = "待定"
-        elif has_entity:
-            # 🔎 A 层：有现场内容/照片但类型不明 → 落「待定」草稿，不追问类型。
+        elif has_entity and (
+            args.get("_auto_tbd")
+            or agent_request_plan.wants_zero_required_stash(
+                ctx.message or "", bool(_pending_images), raw_type or None)
+        ):
+            # A 层直达分支（「你先记着」）与多图分组内部仍需落待定：
+            # 路由层 _auto_tbd 直达，或消息文本明确说「先记着」且带图
+            # （路由层漏打标时执行层兜底，如直调工具/测试链路）。
             record_type = "待定"
+        elif has_entity:
+            # 🔎 2026-11-24 用户反馈「照片类型没判断出来就建成待定」：
+            # 有现场内容/照片但类型不明 → 先问一句类型，不再直接落「待定」。
+            return _need_more(
+                ["记录类型"],
+                "照片和现场信息我先记着。这条要整理成巡视、旁站、验收还是见证记录？直接说一声就行。",
+            )
         else:
             return _need_more(
                 ["记录类型"],
-                "这条要记成哪一类？点下面选一个，或直接回复记录类型。",
-                options={"记录类型": ["巡视", "旁站", "验收", "见证", "平行检验", "起重机械安拆检查"]},
+                "这条要记成哪一类？直接回复记录类型就行。",
             )
     record_date = _parse_date(args.get("record_date")) or datetime.now().date()
 

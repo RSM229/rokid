@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
-"""A 层「零必填·类型不明落待定」执行层测试（2026-11-13）。
+"""A 层「零必填·类型不明」执行层测试（2026-11-13 建，2026-11-24 改版对齐）。
 
 改的是 agent_tools._create_work_record 的类型识别分支：
-  类型识别不出 + 有实体（内容/部位/位置/照片）→ 落「待定」草稿，不再死追问；
+  类型识别不出 + 有实体（内容/部位/位置/照片）→ 先问一句「记成哪一类」
+  （用户答了再建，照片/内容保留在回执与草稿里不丢）；
+  「你先记着」直达（_auto_tbd）与用户明确说「待定/不确定」→ 仍落「待定」；
   完全无实体 → 仍追问「记录内容或区域」「记录类型」；
   类型明确的记录 → 省统表必填仍照常追问（不因本次改动放松）。
 
@@ -80,23 +82,38 @@ class AgentTbdDraftTests(unittest.TestCase):
         )
         self.assertNotIn("记录内容或施工区域", missing)
 
-    def test_type_unknown_with_content_falls_to_tbd(self):
-        """② 【A 层核心】类型识别不出 + 有内容 → 落「待定」，不追问类型。"""
+    def test_type_unknown_with_content_asks_type(self):
+        """② 【A 层核心·2026-11-24 改版】类型识别不出 + 有内容 → 先问类型。
+
+        用户反馈「照片/内容都给了却建成待定」：有实体但类型不明时先回执
+        问一句类型（用户答了再建），不再静默落「待定」。
+        「你先记着」（_auto_tbd 直达）与明确说「待定/不确定」仍落待定。
+        """
         r, fdb = run(
             {"section": "3号楼二层", "work_content": "在浇混凝土"},
             "记录一下，3号楼二层在浇混凝土",
         )
-        self.assertEqual(r.get("need_more"), [], f"不应追问，实际={r.get('need_more')}")
-        self.assertTrue(r.get("ok") is True, f"应创建成功，实际 ok={r.get('ok')}")
-        self.assertIn("待定", r.get("reply") or "", "回执应提示已按待定存档")
-        # 落库的记录必须真的是「待定」
-        self.assertTrue(fdb.added, "应有一条记录落库")
-        self.assertEqual(fdb.added[0].record_type, "待定",
-                         f"落库类型应为待定，实际={getattr(fdb.added[0], 'record_type', None)}")
+        self.assertEqual(r.get("need_more"), ["记录类型"],
+                         f"应追问记录类型，实际={r.get('need_more')}")
+        self.assertFalse(r.get("ok"), "类型未明不应直接建库")
+        self.assertIn("记着", r.get("reply") or "", "回执应说明信息已保留")
+        self.assertFalse(fdb.added, "类型未明时不应有记录落库")
 
-    def test_type_unknown_with_images_falls_to_tbd(self):
-        """②b 类型识别不出 + 带照片 → 落「待定」，照片应挂到记录。"""
+    def test_type_unknown_with_images_asks_type(self):
+        """②b 类型识别不出 + 带照片 → 先问类型（照片已保留，答后挂上）。"""
         r, fdb = run({"section": "地下室"}, "拍了几张现场照片", images=["/uploads/a.jpg"])
+        self.assertEqual(r.get("need_more"), ["记录类型"],
+                         f"应追问记录类型，实际={r.get('need_more')}")
+        self.assertFalse(r.get("ok"), "类型未明不应直接建库")
+        self.assertIn("记着", r.get("reply") or "", "回执应说明照片已保留")
+        self.assertFalse(fdb.added, "类型未明时不应有记录落库")
+
+    def test_auto_tbd_direct_still_falls_to_tbd(self):
+        """②c 路由层直达（_auto_tbd：「你先记着」）→ 仍落待定，不问。"""
+        r, fdb = run(
+            {"section": "3号楼二层", "record_type": "待定", "_auto_tbd": True},
+            "拍了几张照片，你先记着",
+        )
         self.assertEqual(r.get("need_more"), [], f"不应追问，实际={r.get('need_more')}")
         self.assertTrue(r.get("ok") is True, f"应创建成功，实际 ok={r.get('ok')}")
         self.assertTrue(fdb.added, "应有一条记录落库")
