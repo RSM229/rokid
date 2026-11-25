@@ -352,10 +352,12 @@ def test_catalog_shape_matches_production():
 
 def test_all_agent_tools_extracted():
     tools = extract_tools()
-    assert len(tools) == 15, f"应提取到 15 个工具，实际 {len(tools)}"
+    # 2026-11-25 核对：dispatch_task（新建派单）为第 16 个工具，此前测试断言
+    # 15 个是存量缺口（工具已上线、断言未同步）——每加工具必须更新这里。
+    assert len(tools) == 16, f"应提取到 16 个工具，实际 {len(tools)}"
     names = {t["name"] for t in tools}
     assert names == {"create_work_record", "create_hazard", "create_hazard_rectification_doc", "create_hazard_reply_doc",
-                     "recheck_hazard", "create_provform_doc",
+                     "recheck_hazard", "create_provform_doc", "dispatch_task",
                      "generate_document", "undo_last_action", "query_work_records",
                      "query_hazards", "query_documents", "query_regulation",
                      "query_weather", "navigate", "review_plan_doc"}
@@ -366,10 +368,13 @@ def test_create_work_record_has_30_params():
 
     2026-10-16 实测 = 30 个（不是先前口头估的 27）。一个工具挂 30 个参数、
     还要模型在其中按 record_type 挑对 5~8 个，是意图路由出错的主要结构性原因。
+    2026-11-25 = 31 个：补声明 image_groups（multi_image_split 上线时漏声明，
+    提示词在教模型传它、参数表却没列，模型看到的是自相矛盾的教学——见
+    test_expected_args_all_declared 元防线报 K06）。
     """
     t = next(x for x in extract_tools() if x["name"] == "create_work_record")
-    assert len(t["params"]) == 30, f"create_work_record 参数数变了：{len(t['params'])}"
-    # 只有 1 个必填（work_content），其余 29 个全靠模型自己判断该不该传
+    assert len(t["params"]) == 31, f"create_work_record 参数数变了：{len(t['params'])}"
+    # 只有 1 个必填（work_content），其余 30 个全靠模型自己判断该不该传
     required = [k for k in t["params"] if k.startswith("*")]
     assert required == ["*work_content"], f"必填参数变了：{required}"
 
@@ -421,7 +426,13 @@ def test_expected_args_all_declared():
             for key in (c["expect"].get("args_required") or {}):
                 assert key in declared, \
                     f"{c['id']}：{want} 没有声明参数 {key}（现有：{sorted(declared)}）"
+            # args_forbidden 里被禁的参数分两类：声明过的（真禁止模型传）与
+            # _agent_pending_split 这类服务端内部键（参数表故意不声明——声明
+            # 等于教模型传它）。后者放 args_forbidden_undeclared 豁免。
+            undeclared_ok = set(c["expect"].get("args_forbidden_undeclared") or [])
             for key in c["expect"].get("args_forbidden") or []:
+                if key in undeclared_ok:
+                    continue
                 assert key in declared, f"{c['id']}：{want} 没有声明参数 {key}"
             for grp in c["expect"].get("args_any_of") or []:
                 for key in grp:

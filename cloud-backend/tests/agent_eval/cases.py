@@ -831,9 +831,12 @@ CASES: tuple[dict, ...] = (
         "expect": {
             # 🔴 多类照片「识别」：不要逼用户选单一类别，应返回 record_work 并带 image_groups
             # （模型按水印文字分组，前端未传视觉信号 → 走 Path 1 模型分组）。
+            # _agent_pending_split 是服务端内部状态（首轮分组后服务端写进 draft、
+            # 确认轮自动合并），模型禁传——不声明进工具参数表（声明=教模型传）。
             "tool": "create_work_record",
             "args_required": {"image_groups": ["验收", "巡视"]},
             "args_forbidden": ["_agent_pending_split"],
+            "args_forbidden_undeclared": ["_agent_pending_split"],
             "answer_forbidden": ["无法识别图片", "接收不到图片", "经图片识别", "照片显示"],
         },
         "note": "多类水印照片 + 「请识别」→ 模型应跨类型分组、返回 record_work 带 image_groups"
