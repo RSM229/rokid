@@ -3536,6 +3536,27 @@ async def _query_documents(ctx: ToolContext, args: dict) -> dict:
     } for d in rows], actions=[{"type": "navigate", "label": "查看文书", "url": "/pages/documents/index"}])
 
 
+# 🔧 表式/项目业务文书判定（query_regulation 的检索过滤口径）：
+# 归到「其他资料」的验收记录/填写示例/操作指引同样是表式文件，按名称+正文特征剔除。
+# 2026-11-25 生产实测（user 1 消息 717-718）：用户问「查一下规范」，返回的却是
+# 本项目自己生成的《安全隐患整改通知单》全文（GDAQ30308，从隐患创建的项目文书
+# 存进知识库、被 RAG 索引收录）。这类「用户项目生成的业务文书」不是规范条文：
+# 补「整改通知/回复单/隐患整改/复工」等词，最后一道防线拦住。
+_FORM_LIKE_HINTS = (
+    "验收记录", "检查记录", "旁站记录", "记录表", "表格模板", "表式",
+    "填写示例", "操作指引", "台账", "本表一式", "工程项目名称",
+    "验收部位", "编号：", "填表", "监理通知单", "监理日志", "举牌验收照片",
+    "整改通知", "整改回复", "回复单", "隐患整改", "整改通知单",
+    "GDAQ30308", "GDAQ20309", "复工",
+)
+
+
+def is_form_like_doc(hit: dict) -> bool:
+    """知识库命中是否属于表式/项目业务文书（不是规范条文）。"""
+    blob = " ".join(str(hit.get(k) or "") for k in ("name", "filename", "snippet"))
+    return any(hint in blob for hint in _FORM_LIKE_HINTS)
+
+
 async def _query_regulation(ctx: ToolContext, args: dict) -> dict:
     keyword = str(args.get("keyword") or args.get("question") or ctx.message or "").strip()
     if not keyword:
@@ -3552,17 +3573,6 @@ async def _query_regulation(ctx: ToolContext, args: dict) -> dict:
         logger.warning("验收指引获取失败: %s", type(exc).__name__)
 
     FORM_CATEGORIES = {"省统表", "安全监理用表"}
-    # 归到「其他资料」的验收记录/填写示例/操作指引同样是表式文件，按名称+正文特征一并剔除。
-    FORM_LIKE_HINTS = (
-        "验收记录", "检查记录", "旁站记录", "记录表", "表格模板", "表式",
-        "填写示例", "操作指引", "台账", "本表一式", "工程项目名称",
-        "验收部位", "编号：", "填表", "监理通知单", "监理日志", "举牌验收照片",
-    )
-
-    def _is_form_like(hit: dict) -> bool:
-        blob = " ".join(str(hit.get(k) or "") for k in ("name", "filename", "snippet"))
-        return any(hint in blob for hint in FORM_LIKE_HINTS)
-
     try:
         hits = knowledge_service.search_by_content(keyword) or []
     except Exception as exc:  # noqa: BLE001
@@ -3570,11 +3580,11 @@ async def _query_regulation(ctx: ToolContext, args: dict) -> dict:
         hits = []
     regulation_hits = [
         h for h in hits
-        if h.get("category") not in FORM_CATEGORIES and not _is_form_like(h)
+        if h.get("category") not in FORM_CATEGORIES and not is_form_like_doc(h)
     ]
     form_hits = [
         h for h in hits
-        if h.get("category") in FORM_CATEGORIES or _is_form_like(h)
+        if h.get("category") in FORM_CATEGORIES or is_form_like_doc(h)
     ]
 
     topic_hit = bool(
