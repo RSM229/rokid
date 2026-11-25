@@ -789,17 +789,28 @@ def _collect_knowledge_files(session: Session) -> list[dict]:
         entity_notes.setdefault(_doc_key(doc), []).append(note)
 
     sources: list[dict] = []
+    # user_kb 是「用户上传/系统归档」的落盘区：只有**已登记且未软删**的文件才进索引。
+    # rglob 不看登记表，三类文件会被无条件收进索引并兜底挂到默认库（kb=3，内置
+    # 规范库）——用户业务文书（含软删的、归档格式从 docx 切到 pdf 后残留的旧版本，
+    # 实测 2026-11-25 生产有 18 个孤儿文件、124 个分块挂错库）就混进了公共规范库，
+    # 全局知识检索（不带 kb_id 的 knowledge_doc 查询）能直接召回用户文书，
+    # 这是「规范检索返回整改通知单」类污染的第一层根因。
+    # 顶层目录（省统表/填写示例等内置语料）没有登记行，维持默认库归属不变。
     for path in sorted(root.rglob("*")):
         if not path.is_file() or path.suffix.lower() not in SUPPORTED_EXTS:
             continue
         hit = registered.get(os.path.normpath(str(path)))
+        relative = path.relative_to(root)
+        rel_posix = relative.as_posix()
+        # 用户库孤儿（未登记/软删/旧版本残留）：不索引。
+        if rel_posix.startswith("user_kb/") and hit is None:
+            continue
         kb_id = hit[0] if hit else default_kb_id
         display_name = (hit[1] if hit else "").strip()
-        relative = path.relative_to(root)
         notes = entity_notes.get(_doc_key(str(relative)))
         sources.append({
             "source_type": SOURCE_TYPE_KNOWLEDGE,
-            "source_id": str(relative),
+            "source_id": rel_posix,
             "source_name": display_name or path.stem,
             "path": path,
             "kb_id": kb_id,
