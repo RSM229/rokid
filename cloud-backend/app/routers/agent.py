@@ -2286,12 +2286,21 @@ async def _agent_chat_impl(
     else:
         messages.append({"role": "user", "content": message})
 
+    # 🔴 2026-11-25 修复：前端没传 request_plan（req.request_plan 为空 dict/None）时
+    # 不得把空壳 normalize 成「外部计划」。此前空 plan 也会走 normalize——建记录
+    # 兜底（2026-11-25 96fe586）会凭空注入 record_work，has_external_plan 变真，
+    # 外部计划权威分支直接丢弃 semantic_plan（模型路由真给的 record_type），
+    # 用户明确说了「记一条验收」却被回问「整理成哪一类」（multiturn 回归实测）。
+    # 外部计划只在前端真的传了 request_plan 时才生效。
+    _raw_request_plan = req.request_plan if isinstance(req.request_plan, dict) else None
+    if _raw_request_plan is not None and not _raw_request_plan:
+        _raw_request_plan = None  # 空 dict 等同没传
     external_plan = agent_request_plan.normalize_candidate(
-        req.request_plan,
+        _raw_request_plan,
         message=message,
         attachment_count=1 if material else 0,
         evidence_count=1 if material else 0,
-    )
+    ) if _raw_request_plan is not None else {}
     has_external_plan = bool(external_plan.get("actions"))
     incoming_plan = external_plan
 
