@@ -106,11 +106,20 @@ class MultiTurnContextTests(unittest.IsolatedAsyncioTestCase):
         self.router_calls: list[list[dict]] = []
 
     def _extra_tables(self):
+        tables = []
+        # 2026-11-25 口述落待定：create_work_record 真正执行（写安全审计），
+        # 测试库必须建 security_audit，否则工具执行撞表缺失误报失败。
+        try:
+            from app.models.security_audit import SecurityAudit
+            tables.append(SecurityAudit.__table__)
+        except ImportError:
+            pass
         try:
             from app.models.agent_draft import AgentReviewPlan
-            return [AgentReviewPlan.__table__]
+            tables.append(AgentReviewPlan.__table__)
         except ImportError:
-            return []
+            pass
+        return tables
 
     async def asyncTearDown(self):
         await self.engine.dispose()

@@ -2822,6 +2822,22 @@ async def _agent_chat_impl(
             str((draft.get("args") or {}).get("record_type") or args.get("record_type") or "")
         )
     )
+    # 口述建记录兜底（2026-11-25）：判定不依赖路由模型是否抽出 work_content。
+    # 生产实测 qwen3.7-plus 路由 facts 恒空（qwen3.8-flash 会抽）——若靠
+    # work_content 判「有内容」，模型一换口述场景就退回问类型。用户口述
+    # 「记录现场工作/记录今天的工作」本身就是内容：意图明确 + 有口述 =
+    # 落待定的充分条件。work_content 从消息兜底提取（去口述动词后的宾语）。
+    # 🔴 必须在 _has_evidence 计算之前：提取出的 work_content 要计入证据，
+    # 否则消息无图无素材时 _has_evidence=False，口述落待定分支进不去。
+    _spoken_record = agent_request_plan._record_intent_hinted(message)
+    if _spoken_record and not str(args.get("work_content") or "").strip():
+        _spoken_content = agent_request_plan.spoken_record_content(message)
+        if _spoken_content:
+            args["work_content"] = _spoken_content
+    elif _spoken_record and pending_tool == "create_work_record":
+        _draft_wc = str(((draft.get("args") or {}).get("work_content") or "")).strip()
+        if _draft_wc and not str(args.get("work_content") or "").strip():
+            args["work_content"] = _draft_wc
     _has_evidence = bool(
         (req.images if isinstance(req.images, list) else None)
         or material or prefill
@@ -2859,8 +2875,20 @@ async def _agent_chat_impl(
         # 用户答了类型再建）。证据（照片/内容/部位）先 stash 进草稿，答类型那轮
         # 从草稿带回来，不会丢图。注意「你先记着」（_stash_pending_plan）分支
         # 仍是用户明确要求「别问先存」，保留直达待定不动。
-        needs_record_type = True
-        logger.info("A层零必填改版：有证据且类型不明 → 先问一句类型（证据入草稿，答后建）")
+        # 🔴 2026-11-25 修正（生产实测 11 次类型问句仅 2 次走通、5 次用户直接
+        # 流失）：用户**主动口述**要记录（「记录现场工作」「记录今天的工作」，
+        # _record_intent_hinted 命中）时，落「待定」正是用户想要的——先留痕
+        # 回头再分类。口述即证据（不依赖模型抽 work_content：qwen3.7-plus
+        # 路由 facts 恒空，qwen3.8-flash 会抽，行为随模型漂移不可靠）。
+        # 只发照片没说话（无口述）仍走问句防误归档，11-24 的反馈场景保持不变。
+        if _spoken_record:
+            args["record_type"] = "待定"
+            args["_auto_tbd"] = True
+            tool = "create_work_record"
+            logger.info("A层零必填：口述建记录+类型不明 → 落待定（先留痕，回头分类）")
+        else:
+            needs_record_type = True
+            logger.info("A层零必填改版：有证据且类型不明 → 先问一句类型（证据入草稿，答后建）")
 
     # 🔴 服务端接管：模型在「已带素材证据 + 已识别记录类型或存在字段冲突」时仍返回
     # 纯聊天（典型：只汇报「你描述的信息与图片证据不一致…请核对」），整轮会退化成一堵

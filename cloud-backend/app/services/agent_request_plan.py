@@ -185,6 +185,37 @@ def _record_intent_hinted(message: str) -> bool:
         return False
     return bool(_RECORD_INTENT_RE.search(text))
 
+
+_SPOKEN_SKELETON = (
+    "我要", "我要帮你", "帮我", "请你", "麻烦你", "麻烦", "给我", "先", "顺便",
+    "拍照", "拍张照", "拍个照", "用照片", "以照片",
+    "记录", "记一条", "记一下", "记个", "登记", "留痕",
+    "现场", "今天", "今日", "当天", "这", "的", "一下", "做个",
+)
+
+
+def spoken_record_content(message: str) -> str:
+    """从口述建记录短句提取工作内容（确定性，不依赖路由模型抽 facts）。
+
+    「记录现场工作」→「工作」（内容语义弱，返回空由调用方决定）；
+    「我要拍照记录工序」→「工序」；「记录今天的工作」→「工作」。
+    骨架词（动词/助词/时间地点泛称）剔除后剩余的实词才是内容。
+    剔完为空 → 返回空串（调用方保持原 args.work_content 不动）。
+    生产实测（2026-11-25）：qwen3.7-plus 路由 facts 恒空、qwen3.8-flash
+    会抽 work_content——口述落待定分支不能依赖模型抽取行为，由这里兜底。
+    """
+    text = str(message or "").strip()
+    if not text or len(text) > 60:
+        return ""
+    if not _record_intent_hinted(text):
+        return ""
+    content = text
+    for word in _SPOKEN_SKELETON:
+        content = content.replace(word, "")
+    content = content.strip()
+    # 剩余不足两个字符（纯骨架，如「帮我记」）：无实际内容
+    return content if len(content) >= 2 else ""
+
 ACTION_BY_TOOL = {
     str(spec["tool"]): action_id
     for action_id, spec in ACTIONS.items()
