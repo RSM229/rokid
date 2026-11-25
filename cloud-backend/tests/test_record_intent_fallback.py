@@ -94,7 +94,7 @@ def main():
     p9 = plan_for("楼面积水还有碎石，有滑倒风险", ["chat"], "chat")
     assert "record_work" not in action_ids(p9), "隐患描述不该注入 record_work"
 
-    print("\nALL OK")
+    print("\nALL PASS")
 
 
 if __name__ == "__main__":
