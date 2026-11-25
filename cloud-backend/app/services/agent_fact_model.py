@@ -44,6 +44,43 @@ _FACT_ALIASES = {
     "inspection_person": "inspector",
     "work_area": "section",
     "part": "section",
+    # 🔴 2026-11-25（qwen3.7-plus 路由实测）：模型会把 facts/args 的字段名
+    # 写成**中文标签**（「施工内容」「开始时间」「部位」「结论」……）而非
+    # 提示词要求的英文参数名——中文名不在白名单，normalize_model_facts
+    # 全部丢弃，facts 恒空（生产统计：qwen3.7-plus 15 轮 0 次模型抽取，
+    # deepseek-flash 75%、qwen3.8-flash 82%）。这里补中文标签 → canonical
+    # 映射（_FACT_FIELD_LABELS 的反向表 + 模型实测出现的变体），
+    # 与 deepseek/flash 时代的英文输出兼容并存。
+    "日期": "record_date",
+    "时间": "start_time",
+    "开始时间": "start_time",
+    "结束时间": "end_time",
+    "项目": "project",
+    "工程名称": "project",
+    "地点": "location",
+    "位置": "location",
+    "部位": "section",
+    "工程部位": "section",
+    "施工部位": "section",
+    "天气": "weather",
+    "施工内容": "station_process",
+    "工作内容": "work_content",
+    "验收内容": "work_content",
+    "巡视内容": "work_content",
+    "旁站内容": "work_content",
+    "人数": "worker_count",
+    "施工人数": "worker_count",
+    "结论": "acceptance_result",
+    "验收结论": "acceptance_result",
+    "旁站结论": "station_conclusion",
+    "检查人员": "inspector",
+    "监理人员": "inspector",
+    "施工单位": "construction_unit",
+    "建设单位": "owner_unit",
+    "监理单位": "supervision_unit",
+    "问题": "problems",
+    "问题描述": "problems",
+    "处理情况": "treatment",
 }
 # Facts are intentionally narrower than arbitrary tool arguments. They cover
 # cross-cutting business fields used for merging and conflict handling; all
