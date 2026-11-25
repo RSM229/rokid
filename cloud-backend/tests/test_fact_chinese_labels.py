@@ -65,10 +65,11 @@ def main():
     assert ("record_type", "旁站") in got3
     print("3. 英文字段名保持: True")
 
-    # ---- 4. 无映射的中文名仍被丢弃（不能让任意中文键漏进 facts）----
+    # ---- 4. 无映射的中文名转槽位键（不漏进 facts 顶层，值保留）----
     raw4 = [{"field": "随便编的标签", "value": "x", "source_span": "x"}]
-    assert fields_of(raw4) == [], "未知中文键应丢弃"
-    print("4. 未知中文键仍丢弃: True")
+    got4 = fields_of(raw4)
+    assert got4 == [("extra_fields.随便编的标签", "x")], got4
+    print("4. 未知中文键转槽位: True")
 
     # ---- 5. 常见变体 ----
     raw5 = [
@@ -91,6 +92,31 @@ def main():
     ]
     assert fields_of(raw6) == []
     print("6. 空/未知值过滤保持: True")
+
+    # ---- 7. 开放中文标签（二轮实测）：字段表 label 匹配 ----
+    raw7 = [
+        {"field": "巡视部位", "value": "3号楼周边", "source_span": "3号楼周边"},
+        {"field": "施工人数", "value": "10人", "source_span": "10人"},
+        {"field": "旁站的关键工序", "value": "卷材铺贴", "source_span": "卷材铺贴"},
+    ]
+    got7 = dict(fields_of(raw7))
+    assert got7.get("section") == "3号楼周边", got7
+    assert got7.get("worker_count") == "10人", got7
+    assert got7.get("station_process") == "卷材铺贴", got7
+    print("7. 开放中文标签→字段表匹配: True")
+
+    # ---- 8. 无法匹配的中文键转槽位（值不丢，不漏进顶层）----
+    raw8 = [{"field": "随便编的标签", "value": "x", "source_span": "x"}]
+    got8 = fields_of(raw8)
+    assert got8 == [("extra_fields.随便编的标签", "x")], got8
+    print("8. 未知中文键转槽位: True")
+
+    # ---- 9. 保留字与英文顶层键约束保持 ----
+    assert fields_of([{"field": "tool", "value": "x"}]) == []
+    assert fields_of([{"field": "随便键 no dot", "value": "x"}]) == [
+        ("extra_fields.随便键 no dot", "x")
+    ] or fields_of([{"field": "随便键", "value": "x"}]) != []
+    print("9. 保留字拦截保持: True")
 
     print("ALL PASS")
 

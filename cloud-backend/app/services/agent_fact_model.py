@@ -22,6 +22,9 @@ USER_FACT_SOURCES = {
 USER_FACT_STATUSES = {"user_stated_candidate", "user_confirmed"}
 OBJECTIVE_EVIDENCE_SOURCES = {"watermark", "exif", "watermark_or_exif"}
 _FIELD_RE = re.compile(r"^(?:extra_fields\.)?[A-Za-z][A-Za-z0-9_.-]{0,95}$")
+# extra_fields 槽位键允许中文（模型输出「巡视部位」类开放中文标签时兜底
+# 转槽位键，值不丢；正文键仍只认英文字符，防任意中文键漏进 facts 顶层）
+_EXTRA_FIELD_RE = re.compile(r"^extra_fields\.\S{1,95}$")
 _EMPTY_VALUES = {"", "null", "none", "unknown", "未知", "未识别", "待定", "n/a"}
 _FACT_ALIASES = {
     "date": "record_date",
@@ -124,6 +127,67 @@ _FACT_FIELD_LABELS = {
     "inspector": "检查人员",
 }
 
+# 🔴 2026-11-25（qwen3.7-plus 二轮）：模型输出中文字段名是**开放集合**
+# （实测「巡视部位」「施工人数」不在静态别名表）。字段表 label 是权威对照
+# （「旁站的关键工序」↔ station_process）——这里把全部表单的 label→canonical
+# 收敛成查找表：中文键先查静态别名，不中再查本表（含去括号包含匹配），
+# 仍未命中转 extra_fields.<原中文名>（槽位填充路径），不再整体丢弃。
+_LABEL_ALIASES: dict[str, str] = {}
+_LABEL_SUFFIX_STRIP = ("部位", "时间", "内容", "人数", "结论", "情况", "单位", "人员")
+
+
+def _build_label_aliases() -> None:
+    from app.services import record_field_spec
+
+    for form in record_field_spec.FORMS.values():
+        for field in form.get("fields") or []:
+            label = _text(field.get("label"))
+            canon = _text(field.get("canonical") or field.get("key"))
+            if not label or not canon:
+                continue
+            existing = _LABEL_ALIASES.get(label)
+            # 同名 label 不同 canonical（跨表冲突）：以先注册为准，避免抖动
+            if existing and existing != canon:
+                continue
+            _LABEL_ALIASES[label] = canon
+    # 白名单字段的中文标签（_FACT_FIELD_LABELS 反向）优先级更高
+    for canon, label in _FACT_FIELD_LABELS.items():
+        _LABEL_ALIASES[label] = canon
+
+
+def _match_zh_label_field(raw_field: str) -> str:
+    """中文标签 → canonical；命中返回归一名，未命中返回 extra_fields 形式。"""
+    field = _text(raw_field)
+    if not field:
+        return ""
+    if not _LABEL_ALIASES:
+        _build_label_aliases()
+    # 1) 全等匹配
+    hit = _LABEL_ALIASES.get(field)
+    if hit:
+        return hit
+    # 2) 去常见后缀再匹配（「巡视部位」→「巡视」、「施工人数」→「施工」）
+    for suffix in _LABEL_SUFFIX_STRIP:
+        if field.endswith(suffix) and len(field) > len(suffix):
+            stem = field[: -len(suffix)]
+            for cand in (stem, stem + "部位", stem + "内容", stem + "时间"):
+                hit = _LABEL_ALIASES.get(cand)
+                if hit:
+                    return hit
+    # 3) 表 label 包含匹配（「巡视部位」命中「巡视的部位及情况」等长标签）
+    for label, canon in _LABEL_ALIASES.items():
+        if len(field) >= 2 and (field in label or label in field):
+            return canon
+    # 4) 兜底：转槽位键（值不丢，进 extra_fields 由表单层消化）
+    return f"extra_fields.{field}"
+
+
+def _zh_key_needs_label_match(field: str) -> bool:
+    """是否是中文键且静态别名没覆盖（需要标签表匹配）。"""
+    if _FACT_ALIASES.get(field):
+        return False
+    return bool(field) and not re.fullmatch(r"[A-Za-z][A-Za-z0-9_.\-]*", field)
+
 
 def _text(value: Any) -> str:
     return str(value if value is not None else "").strip()
@@ -174,12 +238,18 @@ def normalize_model_facts(
     now = datetime.now().isoformat(timespec="seconds")
     for field, value, source_item in items:
         field = _FACT_ALIASES.get(field, field)
+        if _zh_key_needs_label_match(field):
+            # 中文键（静态别名未覆盖）：字段表 label 匹配 → canonical，
+            # 未命中转 extra_fields 槽位键——值不再因键名是中文而丢弃。
+            field = _match_zh_label_field(field)
         if not (
             field in _ALLOWED_FACT_FIELDS
             or field.startswith("extra_fields.")
         ):
             continue
-        if not _FIELD_RE.fullmatch(field) or field in seen or not _usable_value(value):
+        if not _FIELD_RE.fullmatch(field) and not _EXTRA_FIELD_RE.fullmatch(field):
+            continue
+        if field in seen or not _usable_value(value):
             continue
         if field.split(".", 1)[0] in {"tool", "action", "actions", "intent"}:
             continue
