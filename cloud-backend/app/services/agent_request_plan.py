@@ -162,6 +162,29 @@ def _dispatch_hinted(message: str) -> bool:
     import re as _re
     return bool(_re.search(r"[让叫]\S{2,4}去", text))
 
+
+# 🔴 建记录意图确定性兜底（2026-11-25，生产 user 34 现场消息 127-134）：
+# 「记录今天的工作 / 记一条 / 记一下今天…」这类口述，消息里同时挂着文档附件
+# （方案、交底、报告全文）时，语义计划器会被素材带偏判成 chat（reason 甚至
+# 写成「用户重复要求识别文件」），三轮原话重复都没进 record_work——服务端的
+# 缺栏一问一答兜底从未接管，用户被卡死。这里照 dispatch 兜底同款「只补不换」
+# 模式：口述命中建记录句式 + 模型没选任何写动作时，注入 record_work 候选，
+# 类型澄清由已有 clarification 链路一次问一栏。
+_RECORD_INTENT_RE = re.compile(
+    r"(记录|记一[条下点]|登记|留痕).{0,12}(今天|今日|当天|工作|现场|巡视|"
+    r"旁站|验收|见证|工序|监理)|(今天|今日).{0,6}(的工作|做了什么|干了什么)"
+    r"|^(记一[条下点]|记录一下|帮我记)$"
+)
+
+
+def _record_intent_hinted(message: str) -> bool:
+    """口述命中建记录句式（动词在前、宾语是当天/现场/工作类）。"""
+    text = str(message or "").strip()
+    if not text or len(text) > 60:
+        # 长句是叙述性日报（走 generate_document），不该靠关键词硬拦
+        return False
+    return bool(_RECORD_INTENT_RE.search(text))
+
 ACTION_BY_TOOL = {
     str(spec["tool"]): action_id
     for action_id, spec in ACTIONS.items()
@@ -542,6 +565,34 @@ def normalize_candidate(
         })
         action_ids.add("dispatch_task")
 
+    # 🔴 建记录确定性兜底（2026-11-25 user 34 现场）：口述命中建记录句式、
+    # 但模型被文档素材带偏没选任何写动作时注入 record_work 候选——后续走
+    # 常规 create_record 链路（类型不明由 clarification 一次问一栏）。
+    # 抢跑保护（照 dispatch 兜底口径）：模型已明确选了写动作/文书生成时不补。
+    # dispatch_task 例外：「记录+派单」复合句两个意图都要落（各有兜底、互不抢）。
+    write_like_ids = {aid for aid in action_ids
+                      if ACTIONS.get(aid, {}).get("kind") in {"write", "destructive", "draft"}
+                      and aid != "dispatch_task"}
+    if ("record_work" not in action_ids
+            and not write_like_ids
+            and _record_intent_hinted(message)):
+        actions.append({
+            "id": "record_work", "confidence": 0.85,
+            "reason": "口述命中建记录句式（确定性兜底，防文档附件把意图带偏成 chat）",
+        })
+        action_ids.add("record_work")
+        # 兜底注入的 record_work 没带类型 → 同步补类型澄清（一次只问一栏），
+        # 与模型原生 record_work 的澄清链路一致（L532 早于本注入，需在此补）
+        if not record_type and not any(
+            c.get("field") == "record_type" for c in clarifications
+        ):
+            clarifications.append(_clarification(
+                "record_type",
+                "这次要整理成哪一类工作记录？",
+                list(RECORD_TYPES),
+                "select",
+            ))
+
     if not actions:
         if attachment_count or evidence_count:
             clarifications.append(_clarification(
@@ -563,6 +614,10 @@ def normalize_candidate(
     # 派单兜底注入了动作时，intent 同步归位（避免上游被判 clarify 引发重复追问）
     if "dispatch_task" in action_ids and intent == "clarify":
         intent = "dispatch"
+    # 建记录兜底注入了动作时，intent 同步归位（chat → create_record，
+    # 否则上游执行层会按 chat 意图放行自由文本、不走缺栏追问链路）
+    if "record_work" in action_ids and intent in {"chat", "clarify", ""}:
+        intent = "create_record"
 
     write_actions = [
         item for item in actions
