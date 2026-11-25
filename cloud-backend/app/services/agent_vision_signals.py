@@ -21,7 +21,7 @@ from app.services.image_classification import (
     _hazard_hit,
 )
 # 尾巴解析：切掉水印尾巴「摄时间/天气/监理」并把它们解析成字段回填（内容侧同时清洗）
-from app.services.multi_image_split import split_hint
+from app.services.multi_image_split import clean_location, split_hint
 
 # 逐图块切分：material 形如「【图片 1】\n【水印】…\n【图片内容观察】…\n\n【图片 2】…」
 _IMG_HEADER = re.compile(r"【图片\s*(\d+)\s*】")
@@ -52,6 +52,23 @@ _NEG_PREFIX = ("未", "无", "没", "不", "没有", "未见", "未举", "未持
 _CONTENT_KW = re.compile(r"(?:内容|工序|对象|施工内容|检验批|隐蔽)[:：]\s*([^\n；;，,]{2,240})")
 _SECTION_KW = re.compile(r"(?:单位工程|施工区域|部位|桩号|施工部位)[:：]\s*([^\n；;，,]{1,40})")
 _TAKEN_AT_KW = re.compile(r"(?:拍摄时间|拍照时间|记录时间|时间|日期)[:：]\s*([^\n；;，,]{1,30})")
+
+# 具体位置优先取「【水印】」结构化字段，而不是从「【水印识别原文】」的通用
+# 标签兜底里捞。真机 2026-11-25 公示牌照片：原文里十几个「标签：值」被
+# _parse_tail_fields 误判成地址，写进记录后整栏不可读；结构化字段是干净的
+# 「地点：天头路」。下一个字段标签出现即停，避免空格分隔的水印把多字段吃进来。
+_LOC_LABEL = r"(?:具体位置|施工地点|项目地点|工程地点|位置|地点|地址)"
+_LOC_NEXT = (r"(?:具体位置|施工地点|项目地点|工程地点|位置|地点|地址|拍摄时间|拍照时间|"
+             r"记录时间|时间|日期|天气|气温|气|部位|施工部位|施工区域|单位工程|桩号|"
+             r"人员|监理|项目|工程名称|施工内容|内容|【)")
+_LOCATION_KW = re.compile(
+    rf"{_LOC_LABEL}\s*[:：]\s*([^\n；;，,]+?)(?=\s*(?:[；;，,]|{_LOC_NEXT}|$))"
+)
+
+
+def _extract_location(wm_text: str) -> str:
+    m = _LOCATION_KW.search(str(wm_text or ""))
+    return clean_location(m.group(1)) if m else ""
 
 
 def _block_parts(block: str) -> tuple[str, str, str]:
@@ -243,6 +260,10 @@ def parse_material_signals(material: str, n_images: int) -> list[dict]:
         # 随 dict 带出（水印模板的企业落款不能因为清洗工作内容就被丢掉）
         if weather:
             d["weather"] = weather
+        # 结构化水印地点优先；原文兜底也要过 clean_location，表单 OCR 不许进地址栏。
+        location = _extract_location(wm_text) or clean_location(tail.get("location", ""))
+        if location:
+            d["location"] = location
         for extra in ("weather", "contact", "location", "org", "postcode"):
             if tail.get(extra):
                 d.setdefault(extra, tail[extra])

@@ -1590,6 +1590,11 @@ def _split_watermark_fields(wms: list) -> tuple:
             persons.append(ps)
         for bucket, key in ((contacts, "contact"), (locations, "location"), (orgs, "org")):
             val = str(w.get(key) or "").strip()
+            # 具体位置最后一闸：表单 OCR 整段（公示牌/发货单）不写进记录地址栏。
+            # 真机 2026-11-25 #231：结构化地点是「天头路」，原文兜底把 100+ 字
+            # 勾选/质检文本塞进 location，导致详情地点栏不可读。
+            if key == "location":
+                val = multi_image_split.clean_location(val)
             if val and val not in bucket:
                 bucket.append(val)
     section = " / ".join(sections) if sections else None

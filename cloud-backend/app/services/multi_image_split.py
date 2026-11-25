@@ -169,7 +169,7 @@ def group_images(images: list[str], signals: list[dict]) -> list[ImageGroup]:
                 # 水印模板的企业落款（调度电话/公司传真/地址）：从工作内容里切出来了，
                 # 但必须原样带到 content_json，否则就是「改一样丢一样」
                 "contact": str(raw.get("contact") or "").strip(),
-                "location": str(raw.get("location") or "").strip(),
+                "location": clean_location(raw.get("location")),
                 "org": str(raw.get("org") or "").strip(),
             })
         else:
@@ -436,6 +436,34 @@ def _classify_tail_value(key: str, value: str) -> str:
     return key
 
 
+# 表单类照片（验收公示牌 / 混凝土发货单）的 OCR 原文是一整张表：
+# 「客户满意度及签收：（非常好 质检：… 区域：… 司名称：（非常差」。
+# 这些勾选/质检词一旦混进地址栏，记录详情整栏不可读（2026-11-25 真机 #231）。
+_FORM_NOISE = re.compile(
+    r"(?:非常好|非常差|满意度|签收|质检|客户|公示牌|验收牌|勾|选项|nbsp)"
+)
+
+
+def clean_location(value: str) -> str:
+    """水印位置的统一收口：只放行可读短地址，表单 OCR 整段一律判无效。
+
+    真机 2026-11-25：公示牌/发货单的 OCR 原文被通用标签兜底
+    ``_classify_tail_value`` 按「含市/路即地址」判成 location，100+ 字的表单
+    文本整段写进 work_records.location。真实水印结构化字段（天头路）反而被
+    这段垃圾盖掉。这里按两个确定性条件过滤，不依赖模型：
+    ① 最多一个「中文标签：」片段（表单整段必有十几个）；
+    ② 不含表单勾选/质检噪声。长度不设限，沿用列宽 256 的既有截断口径。
+    """
+    s = re.sub(r"\s+", " ", str(value or "")).strip(_HINT_TRIM)
+    if not s:
+        return ""
+    if len(_GENERIC_SEG.findall(s)) > 1:
+        return ""
+    if _FORM_NOISE.search(s):
+        return ""
+    return s
+
+
 def _normalize_tail_label(label: str) -> str:
     """把正则命中的标签还原成表里的键（去空白、折叠 OCR 重复末字）。"""
     s = re.sub(r"\s+", "", label or "")
@@ -482,6 +510,10 @@ def _parse_tail_fields(tail: str) -> dict[str, str]:
                 break
         if value:
             key = _classify_tail_value(key, value)
+            if key == "location":
+                value = clean_location(value)
+                if not value:
+                    continue
             out.setdefault(key, value)
     return out
 

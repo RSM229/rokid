@@ -7,6 +7,7 @@ import unittest
 
 from app.services.agent_vision_signals import parse_material_signals, watermark_lines
 from app.services import multi_image_split as ms
+from app.services.agent_tools import _split_watermark_fields
 
 
 def _one_block(n, wm_raw, obs):
@@ -112,6 +113,52 @@ class TestRealBatchClassification(unittest.TestCase):
         # 记录次序仍按 _RECORD_ORDER（巡视 → 旁站 → 验收）
         self.assertEqual([g.record_type for g in groups],
                          ["巡视"] + ["旁站"] * 4 + ["验收"] * 2)
+
+
+class TestFormPhotoLocationNotPolluted(unittest.TestCase):
+    """公示牌/发货单类照片：OCR 表单整段不得进「具体位置」（真机 #231）。"""
+
+    FORM_OCR = (
+        "项目名称：沙盛四路等4条道路工程 分部工程：45X2-90 "
+        "匝工区域：dxw7-9段污水管道 施工内容：9m钢板桩收方 "
+        "建设单位：肇庆市安强建设有限公司 设计单位：中航施工程设计研究限有原责任公司 "
+        "质检：提望地为保征购销效房权益溃存编阅读发科面相关事项。谢谢！ "
+        "客户满意度及签收：（非常好 司名称：（非常差 拍摄时间：2026.10.27 09:30"
+    )
+
+    def _material(self) -> str:
+        return (
+            "【图片 1】\n"
+            "【水印】拍摄时间：2026-10-27 09:30；地点：天头路；项目：沙盛四路等4条道路工程；"
+            "部位：大兴路；天气：晴 26℃\n"
+            f"【水印识别原文】{self.FORM_OCR}\n"
+            "【图片内容观察】隐蔽工程验收公示牌，牌面显示验收部位及内容\n\n"
+        )
+
+    def test_structured_location_wins_over_form_ocr(self):
+        sigs = parse_material_signals(self._material(), 1)
+        self.assertEqual(sigs[0].get("location"), "天头路")
+        self.assertNotIn("非常好", str(sigs[0].get("location") or ""))
+        self.assertNotIn("质检", str(sigs[0].get("location") or ""))
+
+    def test_split_watermark_fields_blocks_garbage_location(self):
+        garbage = (
+            "肇庆市安强建设有限公司 / 中航施工程设计研究限有原责任公司 合格 月27 "
+            "匝工区域：dxw7-9段污水管道 施工内容：9m钢板桩收方"
+        )
+        self.assertEqual(_split_watermark_fields([{"location": garbage}])["locations"], [])
+        self.assertEqual(
+            _split_watermark_fields([{"location": "天头路"}])["locations"], ["天头路"]
+        )
+
+    def test_group_images_keeps_clean_location(self):
+        sigs = parse_material_signals(self._material(), 1)
+        groups = ms.group_images(["https://cdn/form.jpg"], sigs)
+        self.assertTrue(groups)
+        self.assertTrue(all(
+            "非常好" not in str(w.get("location") or "")
+            for g in groups for w in (g.wm or [])
+        ))
 
 
 class TestWatermarkLines(unittest.TestCase):
