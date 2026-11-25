@@ -3699,7 +3699,29 @@ async def _navigate(ctx: ToolContext, args: dict) -> dict:
                 break
     if not url:
         return _ok("要打开哪个页面？可以说「打开工作记录」「打开隐患识别」「打开文书」「打开台账」「打开省统表录入」。")
-    return _ok(f"已为你打开「{raw}」。", actions=[{"type": "navigate", "label": raw, "url": url}])
+    # 🔴 2026-11-25 生产真实卡点（user 32，无项目 inspector）：用户说「我要拍照
+    # 记录工序」→ 前端 pickImages 对无项目用户先 guideJoinProject 拦死（点不出
+    # 拍照选择）→ 用户改问对话 → navigate 回「已为你打开拍照识别」+一个可点
+    # 按钮，但拍完上传撞 require_project_id，3 轮全失败。无项目时对写业务类
+    # 页面直接引导加入项目，不再把用户导向必撞墙的入口。
+    _NO_PROJECT_BLOCKED_PAGES = {
+        "/pages/capture/index",
+        "/pages/work/index",
+        "/pages/hazards/index",
+        "/pages/record-form/choose",
+        "/pages/parallel/index",
+    }
+    if url in _NO_PROJECT_BLOCKED_PAGES and not getattr(ctx, "project_id", None):
+        return _ok(
+            "拍照和记录工序要先加入一个项目（记录必须挂在项目下）。"
+            "点左上角「加入项目」填邀请码，加入后就能拍照记录了。"
+        )
+    # 🔴 2026-11-25 文案对齐真实行为：回执只插入一个可点的「打开」按钮，
+    # 并不会自动切页面（前端 agentReplyToMessage 把 actions 映射成
+    # navigate command，等用户点击才跳）。原文案「已为你打开」让用户以为
+    # 页面已切走、原地干等（user 32 现场：等不到拍照界面又重新描述需求，
+    # 进入「还没收到照片」死循环）。
+    return _ok(f"点下面「{raw}」按钮即可进入{raw}页面。", actions=[{"type": "navigate", "label": raw, "url": url}])
 
 
 # ---------------------------------------------------------------------------
@@ -4296,7 +4318,8 @@ TOOLS: tuple[ToolSpec, ...] = (
          "hazard_type": "危大工程名称/类型（危大巡视，如「落地式钢管脚手架工程-一般危大工程」；含类型名会据此带出检查表）",
          "wind": "风力（危大巡视表，如 无风/微风/和风）",
          "subcontract_unit": "专业分包单位（危大巡视表）",
-         "extra_fields": "字段表栏目（对象，键=字段 key 如 1_13、10_14；上面没单列参数的栏目都放这里，值填用户原话）"},
+         "extra_fields": "字段表栏目（对象，键=字段 key 如 1_13、10_14；上面没单列参数的栏目都放这里，值填用户原话）",
+         "image_groups": "多类照片分组（列表，仅当这批照片确实跨多种记录类型才传）：每项 {record_type: 巡视/旁站/验收/见证/平行检验/待定, image_indices: [图在消息里的 1-based 序号]}；单一类型多图不要传（直接建一条、多图挂同一条）。确认轮不必重传，系统已记住分组。"},
         "work_record", "write", _create_work_record,
         ("3号楼二层临边防护，9:00 到 11:00，符合要求，记一条巡视",
          "记一条旁站：屋面防水卷材铺贴，9:00 到 12:00，10人"),
