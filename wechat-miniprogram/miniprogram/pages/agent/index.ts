@@ -838,14 +838,18 @@ Page(themed({
     //    卡片不是跳转页面的功能入口，也不替用户一键执行 —— 点开后在当前聊天里
     //    先讲清步骤、给可点选项，由智能体带用户一步步完成（startVoiceWorkFromChat
     //    / askScopeFromChat）。「拍照识别安全隐患」「生成今日监理日志」已下架。
-    // needProject：会产生项目级业务数据的入口对无项目用户隐藏，改由 refreshHeroActions
-    //    补「加入项目」引导，避免点一个被拦一个。
+    // 🔴 2026-11-25 无项目卡点补全（生产 user 32 现场）：语音记录卡对无项目用户
+    //    不再直接隐藏（无项目=首页只剩「查规范」，用户不知道记现场要项目）。
+    //    改为可见 + 文案带「（需先加入项目）」后缀；点击不再是被静默滤掉，而是
+    //    走 guideJoinProject 弹窗讲清原因并一键直达。功能本身仍需项目（写库约束），
+    //    只是入口从「藏着」改成「带着原因引导」。
     heroActions: [
       { icon: 'ic-mic', text: '开启语音，记录现场工作', command: '工作记录', needProject: true },
       { icon: 'ic-book', text: '查询规范资料库', command: '知识库', needProject: false },
       { icon: 'ic-doc', text: '加入项目（填邀请码）', command: 'join-project', needProject: false, onlyNoProject: true },
     ] as { icon: string; text: string; command: string; needProject: boolean; onlyNoProject?: boolean }[],
-    /** 实际渲染的快捷动作：无项目时滤掉写业务的、并补一个「加入项目」入口 */
+    /** 实际渲染的快捷动作：无项目时写业务的卡**降级展示**（加后缀、点击引导
+     *  加项目），读类的照常，并补一个「加入项目」入口——入口可见性 ≠ 权限。 */
     visibleHeroActions: [] as { icon: string; text: string; command: string }[],
     input: '',
     loading: false,
@@ -5652,15 +5656,25 @@ Page(themed({
   /**
    * 按「有没有项目」重算 Hero 区展示的快捷动作。
    *
-   * 无项目时：滤掉会产生业务数据的（语音记录），只留「查询规范资料库」
-   * 这类真能用的，并补一个「加入项目」入口 ——
-   * 让用户第一眼就知道现在能干什么、下一步该干什么，而不是点一个被拦一个。
+   * 无项目时：写业务的卡（语音记录）**降级展示**——保留卡片但文案加
+   * 「（需先加入项目）」后缀，点击时由 startVoiceWorkFromChat 弹
+   * guideJoinProject 讲清原因并一键直达；读类的（查规范）照常；另补一个
+   * 「加入项目」入口。
+   *
+   * 2026-11-25 改动原因（生产 user 32 现场）：原先 needProject 卡直接隐藏，
+   * 无项目用户首页只剩「查规范」，不知道「记现场工作」要项目——直到在对话里
+   * 3 轮碰壁（消息 935-940）。入口可见 + 带原因引导，比藏着更符合
+   * 「点一个被拦一个 → 至少知道为什么」的产品纪律。
    */
   refreshHeroActions() {
     const hasProject = this.data.projectCreated
     const visible = this.data.heroActions
-      .filter((a) => hasProject ? !a.onlyNoProject : (!a.needProject || a.onlyNoProject))
-      .map(({ icon, text, command }) => ({ icon, text, command }))
+      .filter((a) => hasProject ? !a.onlyNoProject : true)
+      .map(({ icon, text, command, needProject }) => ({
+        icon,
+        text: (!hasProject && needProject) ? text + '（需先加入项目）' : text,
+        command,
+      }))
     this.setData({ visibleHeroActions: visible })
   },
 

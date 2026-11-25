@@ -1,7 +1,8 @@
-/* 注入登录态：token + user_info（生产 user 1：csm / chief_supervisor / 项目 15） */
+/* 注入登录态：token + user_info（生成 user 1：csm / chief_supervisor / 项目 15） */
 const automator = require('miniprogram-automator')
 const WS = 'ws://127.0.0.1:9420'
-const TOKEN = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxIiwidHlwZSI6ImFjY2VzcyIsImV4cCI6MTc5NTUzMDU2M30.FP6HxyzAn5-nP3Ys7Hl0FsRgbx5QXwZGDdpyRy9oOvo'
+// 2026-11-25 10:55 远端签发的新 token（ rokide-deploy 容器 create_access_token，6h 有效）
+const TOKEN = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxIiwiZXhwIjoxNzk1NjU3ODE0fQ.mow5YnaptDqpErs8qlsCGgKYg_uPr6Nn-Jo1ClScgGM'
 
 async function main() {
   const mini = await automator.connect({ wsEndpoint: WS })
@@ -28,16 +29,10 @@ async function main() {
       new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 20000)),
     ])
     console.log('result:', out)
-    // 等页面切过去再读一次栈
-    await new Promise(r => setTimeout(r, 4000))
-    const pages = await Promise.race([
-      mini.evaluate(() => JSON.stringify(getCurrentPages().map(p => p.route))),
-      new Promise((_, rej) => setTimeout(() => rej(new Error('timeout2')), 15000)),
-    ])
-    console.log('pages:', pages)
-    process.exit(0)
+    const pages = await mini.pageStack().then(ps => ps.map(p => p.path)).catch(() => ['?'])
+    console.log('pages:', JSON.stringify(pages))
   } finally {
     await mini.disconnect().catch(() => {})
   }
 }
-main().catch(e => { console.error('ERR:', e.message); process.exit(1) })
+main().then(() => process.exit(0)).catch(e => { console.error('ERR:', e.message); process.exit(1) })

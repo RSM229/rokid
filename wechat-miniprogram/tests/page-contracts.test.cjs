@@ -33,6 +33,17 @@ test('blocked review plans explain that no formal record was generated', () => {
   assert.match(agentPage, /尚未生成正式工作记录/)
 })
 
+test('hero actions degrade instead of hiding for projectless users', () => {
+  // 2026-11-25 无项目卡点（生产 user 32 现场）：写业务入口（语音记录）不再
+  // 静默隐藏——无项目时降级展示（文案加「（需先加入项目）」后缀），点击走
+  // guideJoinProject 弹窗讲原因并一键直达。入口可见性 ≠ 权限。
+  assert.match(agentPage, /text \+ '（需先加入项目）'/)
+  // 过滤条件必须是无项目时全保留（降级而非滤除）
+  assert.match(agentPage, /filter\(\(a\) => hasProject \? !a\.onlyNoProject : true\)/)
+  // 点击拦截仍在（防御性）：startVoiceWorkFromChat 开头先弹「需要先加入项目」
+  assert.match(agentPage, /startVoiceWorkFromChat\(\) \{[\s\S]{0,120}guideJoinProject\('语音记录会生成现场工作记录'\)/)
+})
+
 test('history restores the latest unfinished review plan instead of orphaning it', () => {
   assert.match(agentPage, /restorePendingReviewPlan\(detail\.conversation_id\)/)
   assert.match(agentPage, /listReviewPlans\(conversationId\)/)
