@@ -13,9 +13,9 @@
  *  - badges      角标（截图里的 New / 限时夜间5折 之类）
  *  - capabilities 能力标签（截图右侧：文本生成、推理模型、视觉理解…）
  *
- * ⚠️ 只放后端实际支持的模型。所有模型走默认端点（provider=''）= 阿里云 token-plan
- * 的 chat/completions，前端用 model 字段覆盖具体模型名——只要是同一 API 的模型
- * （如通义千问、DeepSeek），填对 model id 即可，无需额外后端配置。
+ * ⚠️ 只放后端实际支持的模型。所有模型走默认端点（provider=''），具体端点由服务端
+ * 部署环境决定（当前为本地 DeepSeek 网关），前端用 model 字段覆盖具体模型名。
+ * 各选项保留自己的 model id，不做静默归一；新增模型请单独加一条，不要改写旧项。
  *
  * 注：安全工识别（隐患识别）不在这份目录里——它由后端 detect_hazard 固定走华工
  * VLM 专用通道，与文本选择器无关（见 model_gateway._hazard_vlm_config）。
@@ -69,6 +69,18 @@ export const MODEL_CATALOG: ModelItem[] = [
     temperature: 0.7,
     badges: [],
     capabilities: ['文本生成', '推理模型', '视觉理解'],
+  },
+  {
+    id: 'deepseek-v4.1-flash',
+    provider: '',
+    providerName: 'DeepSeek',
+    model: 'deepseek-v4.1-flash',
+    name: 'DeepSeek V4.1 Flash（本地）',
+    shortName: 'DS V4.1 本地',
+    desc: '本地部署，纯文本高速推理',
+    temperature: 0.7,
+    badges: ['本地部署'],
+    capabilities: ['文本生成', '推理模型'],
   },
 ]
 
