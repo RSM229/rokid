@@ -47,25 +47,6 @@ def _require_available(config: ModelConfig) -> None:
         raise ModelGatewayError(f"{label} 模型 API Key 未配置")
 
 
-# 小程序 modelCatalog 曾硬编码这些旧名，本地 DeepSeek 网关只放行
-# DEFAULT_LLM_MODEL_ID（deepseek-v4.1-flash）；旧名直传会 400 model_not_allowed。
-# 只归一这批已知失效名，其他模型名（含未来新增的合法名）原样透传。
-_LEGACY_LLM_MODEL_ALIASES = frozenset({
-    "deepseek-v4.1-flash-1017",
-    "qwen3.7-plus",
-    "qwen3.8-flash",
-})
-
-
-def _normalize_requested_model(model: str | None, default_model_id: str) -> str | None:
-    """把前端旧模型名映射到运行时默认模型，未知名字保持不变。"""
-    if not model or not model.strip():
-        return model
-    if model.strip().lower() in _LEGACY_LLM_MODEL_ALIASES:
-        return default_model_id
-    return model
-
-
 def _provider_override(provider: str | None) -> ModelConfig | None:
     """按前端选择的模型供应商切换文本模型配置（2026-10-09）。
 
@@ -227,9 +208,8 @@ async def chat_completion(
         config = override
     # 默认端点下，允许前端指定具体模型名（如 qwen3.7-max / glm-5.3）。
     # 仅当未走独立供应商（huagong）时生效，避免把模型名错发给华工端点。
-    # 已知失效的旧名（小程序目录硬编码）归一到运行时默认模型。
     if override is None and model:
-        config.model_id = _normalize_requested_model(model, config.model_id)
+        config.model_id = model
     _require_available(config)
     payload: dict = {
         "model": config.model_id,
@@ -313,7 +293,7 @@ async def stream_chat_completion(
     if override is not None:
         config = override
     if override is None and model:
-        config.model_id = _normalize_requested_model(model, config.model_id)
+        config.model_id = model
     _require_available(config)
     payload: dict = {
         "model": config.model_id,
