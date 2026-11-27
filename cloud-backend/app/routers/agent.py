@@ -4155,6 +4155,21 @@ async def confirm_review_plan(
     await _validate_review_plan_media(db, user, plan)
     issues = agent_review_plan.review_issues(plan)
     if issues:
+        # 2026-11-27：格式类问题交给模型按字段合同改写一次（斜杠日期/17.57分这类
+        # 人类写法，不再往解析器里堆正则；改完再校验，仍不行才回 422）。
+        try:
+            from app.services import agent_form_repair
+
+            if agent_form_repair.collect_invalid(plan):
+                repaired, issues = await agent_form_repair.repair_plan(plan)
+                if not issues:
+                    plan = repaired
+                    row.plan_json = json.dumps(plan, ensure_ascii=False)
+                    row.updated_at = datetime.now()
+                    await db.commit()
+        except Exception:  # noqa: BLE001
+            logger.warning("计划字段修复失败，按原校验结果返回", exc_info=True)
+    if issues:
         raise HTTPException(422, {"message": "整理计划仍有待确认项", "issues": issues})
     stored_request_plan = plan.get("request_plan") if isinstance(plan.get("request_plan"), dict) else {}
     request_id = agent_runtime.normalize_request_id(

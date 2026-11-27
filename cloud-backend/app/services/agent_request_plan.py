@@ -390,8 +390,20 @@ def field_contract_text() -> str:
             canonical = field.get("canonical")
             if not canonical or field.get("kind") != "ask":
                 continue
+            table_type = str(field.get("table_type") or "文本")
+            hint = ""
+            if "日期时间" in table_type:
+                hint = "，格式 YYYY-MM-DD HH:MM，如 2026-11-27 17:57"
+            elif "日期" in table_type:
+                hint = "，格式 YYYY-MM-DD，如 2026-11-27"
+            elif "数字" in table_type or "序号" in table_type:
+                hint = "，填数字，如 10"
+            elif "枚举" in table_type:
+                options = record_field_spec.options_for(field)
+                if options:
+                    hint = "，取值 " + "/".join(str(option) for option in options[:8])
             note = f"（落库参数 {field['arg']}）" if field.get("arg") and field["arg"] != canonical else ""
-            parts.append(f"{canonical}={field.get('label')}{note}")
+            parts.append(f"{canonical}={field.get('label')}（{table_type}{hint}）{note}")
         if parts:
             lines.append(f"{name}: " + "、".join(parts))
     return "\n".join(lines)
