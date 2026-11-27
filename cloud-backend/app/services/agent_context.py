@@ -102,19 +102,14 @@ def extract_explicit_message_facts(message: str, *, message_ref: str = "") -> li
             if event_date:
                 values.append(("record_date", event_date.isoformat()))
     values.extend(extract_explicit_time_range(text, event_date).items())
-    # 2026-11-27：用户常写成「2026/11/27 16:41 日常巡视 内围排水沟」——
-    # 日期后面跟一个裸时刻，既不是区间也没有「开始时间」字样，之前整条被丢掉，
-    # 于是草稿一直缺「巡视开始时间」并反复追问（真机实测）。
+    # 2026-11-27：用户常写成「2026/11/27 16:41 …」——日期后面跟一个裸时刻，
+    # 既不是区间也没有「开始时间」字样。这里只做时间解析（不猜业务字段），
+    # 具体落到哪个参数（inspection_start_time / station_start_time）由
+    # ``map_facts_to_record_type`` 按当前记录类型的字段表决定。
     if not any(field == "start_time" for field, _ in values) and (full or short):
         clock = re.search(r"(?<!\d)([01]?\d|2[0-3])\s*[:：]\s*([0-5]\d)(?!\d)", text)
         if clock:
             values.append(("start_time", f"{int(clock.group(1)):02d}:{clock.group(2)}"))
-    # 「巡视/旁站/验收/见证 + 空格 + 部位」：把部位一起带进草稿，别让模型漏掉。
-    section = re.search(r"(?:巡视|旁站|验收|见证)\s*([^\s，。；,;]{2,20})", text)
-    if section:
-        value = section.group(1).strip()
-        if value and not value.startswith(("记录", "开始", "结束", "时间", "内容", "页面", "的")):
-            values.append(("section", value))
     location = re.search(
         r"(?:在|位于|地点为|位置为)\s*([^，。；,;\n]{2,80}?)(?=(?:进行|开展|完成|做了|做|干了|检查|施工|浇筑|验收|旁站|巡视|巡查|记录)|[，。；,;\n]|$)",
         text,
@@ -139,28 +134,29 @@ def extract_explicit_message_facts(message: str, *, message_ref: str = "") -> li
 
 
 def infer_record_type_from_text(text: str) -> str:
-    """从用户原话里认出明确的记录类型（用于纠正计划里的「待定」）。
+    """从用户原话里认出记录类型（用 RECORD_TYPES 的名称与 aliases，不写死词表）。
 
-    只认带类型词的说法，导航/提问句（打开、进入、页面、怎么填）不认，
-    避免「打开旁站记录页」被当成要建一条旁站。
+    新增记录类型只改 ``agent_request_plan.RECORD_TYPES`` 就会自动生效；
+    导航/提问句（打开、进入、页面、怎么填）不识别，避免「打开旁站记录页」
+    被当成要建一条旁站。
     """
     value = _text(text)
     if not value:
         return ""
     if any(word in value for word in ("打开", "进入", "页面", "按钮", "怎么填", "是什么", "在哪")):
         return ""
-    for word, record_type in (
-        ("旁站", "旁站"),
-        ("见证取样", "见证"),
-        ("见证", "见证"),
-        ("巡视", "巡视"),
-        ("验收", "验收"),
-        ("平行检验", "平行检验"),
-        ("起重机械", "起重机械安拆检查"),
-    ):
-        if word in value:
-            return record_type
-    return ""
+    from app.services.agent_request_plan import RECORD_TYPES
+
+    best_alias = ""
+    matched = ""
+    for name, config in RECORD_TYPES.items():
+        aliases = (name, *(config.get("aliases") or ()))
+        for alias in aliases:
+            alias = _text(alias)
+            if alias and alias in value and len(alias) > len(best_alias):
+                best_alias = alias
+                matched = name
+    return matched
 
 
 def merge_user_facts(existing: list[dict[str, Any]] | None,

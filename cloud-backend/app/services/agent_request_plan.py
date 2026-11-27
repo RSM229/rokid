@@ -371,6 +371,32 @@ def action_catalog() -> list[dict[str, Any]]:
     return [{"id": action_id, **spec} for action_id, spec in ACTIONS.items()]
 
 
+def field_contract_text() -> str:
+    """记录类型 → 字段 canonical / 标签，供计划器按字段表输出 facts。
+
+    数据全部来自 ``record_field_spec``：新增类型/字段不用改提示词。``facts.field``
+    用 canonical（事项计划按 canonical 匹配），落库参数名不同时在括号里注明，
+    避免模型把 arg 当成 facts 字段。
+    """
+    from app.services import record_field_spec
+
+    lines: list[str] = []
+    for name, config in RECORD_TYPES.items():
+        form = config.get("form") or record_field_spec.form_for_record_type(name)
+        if not form:
+            continue
+        parts: list[str] = []
+        for field in record_field_spec.fields_of(form):
+            canonical = field.get("canonical")
+            if not canonical or field.get("kind") != "ask":
+                continue
+            note = f"（落库参数 {field['arg']}）" if field.get("arg") and field["arg"] != canonical else ""
+            parts.append(f"{canonical}={field.get('label')}{note}")
+        if parts:
+            lines.append(f"{name}: " + "、".join(parts))
+    return "\n".join(lines)
+
+
 def build_prompt(
     message: str,
     evidence_summary: str,
@@ -408,6 +434,12 @@ def build_prompt(
         "不要声称已经保存、创建、发送或签发任何内容。\n\n"
         f"可用动作目录：{json.dumps(action_catalog(), ensure_ascii=False)}\n"
         f"记录类型目录：{json.dumps(RECORD_TYPES, ensure_ascii=False)}\n"
+        f"记录字段目录（facts.field 必须用这里的参数名，不要用中文标签）：\n"
+        f"{field_contract_text()}\n"
+        "用户原话里明确出现的日期、时间、部位、施工内容、结论，必须按上表填进 facts；"
+        "不要因为图片证据里已经有值就省略用户明说的字段。\n"
+        "用户明确说到「巡视/旁站/验收/见证」等类型词时，record_type 必须给出该类型，"
+        "不要留 null（只有确实看不出来时才留空）。\n"
         f"用户原话：{_text(message)[:4000]}\n"
         f"证据摘要：{_text(evidence_summary)[:8000]}\n"
         f"结构化证据：{json.dumps(compact_evidence, ensure_ascii=False)[:12000]}\n"
