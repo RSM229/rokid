@@ -2718,14 +2718,25 @@ Page(themed({
     )
     try {
       const saved = await saveReviewPlan(revisedPlan, current.serverRevision || current.revision)
+      const issueList = reviewIssues(saved)
+      // 计划卡片跟着「最新一条回复」走：之前只更新旧消息，用户滚到底部看不到
+      // 卡片和「生成工作记录」按钮，重进会话才在底部重新出现（2026-11-27 实测）。
       messages[index] = { ...message,
-        reviewPlan: saved, reviewEvents: this.inlineReviewEvents(saved), reviewUnassignedEvidence: this.inlineReviewUnassignedEvidence(saved), reviewEventOptions: this.inlineReviewEventOptions(saved),
-        reviewIssues: reviewIssues(saved), reviewProgress: this.reviewProgress(saved), reviewPurposeOptions: saved.events.length ? undefined : message.reviewPurposeOptions }
-      messages[index].reviewCanConfirm = reviewIssues(saved).length === 0
+        reviewPlan: undefined, reviewEvents: undefined, reviewUnassignedEvidence: undefined,
+        reviewEventOptions: undefined, reviewIssues: undefined, reviewProgress: undefined,
+        reviewCanConfirm: false, reviewPurposeOptions: undefined }
       this.setData({ messages })
       this.addMessage({ role: 'assistant', text: archiveOnly
         ? '已保留图片及识别到的证据，不创建工作记录。之后也可以继续补充文字、语音或图片。'
-        : `已把“${reply}”并入当前草稿。${saved.events.length ? `由服务端重新核对 ${saved.events.length} 个工作事项。` : ''}${this.reviewFollowupText(saved)}`, reviewFollowupPlanId: saved.serverId })
+        : `已把“${reply}”并入当前草稿。${saved.events.length ? `由服务端重新核对 ${saved.events.length} 个工作事项。` : ''}${this.reviewFollowupText(saved)}`,
+        reviewPlan: saved,
+        reviewEvents: this.inlineReviewEvents(saved),
+        reviewUnassignedEvidence: this.inlineReviewUnassignedEvidence(saved),
+        reviewEventOptions: this.inlineReviewEventOptions(saved),
+        reviewIssues: issueList,
+        reviewCanConfirm: issueList.length === 0,
+        reviewProgress: this.reviewProgress(saved),
+        reviewFollowupPlanId: saved.serverId })
       await this.finishAgentProgress(requestId, archiveOnly ? 'completed' : 'waiting',
         archiveOnly ? '已更新归档整理结果，不创建工作记录' : '草稿修订及服务端字段合同复核已完成，等待继续补充或确认',
         { plan_id: saved.serverId || '', revision: saved.serverRevision || saved.revision,

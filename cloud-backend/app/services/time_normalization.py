@@ -35,6 +35,12 @@ _CHINESE_DATE = re.compile(
     r"(?P<year>20\d{2})\s*年\s*(?P<month>\d{1,2})\s*月\s*"
     r"(?P<day>\d{1,2})\s*日?"
 )
+# 2026/11/27、2026.11.27、2026-11-27 都要认：计划里用户原话经常是斜杠格式，
+# 之前只认 ISO 和「年月日」，斜杠直接判成「日期时间格式无法识别」。
+_DATE_ANY = re.compile(
+    r"(?P<year>20\d{2})\s*[-/.年]\s*(?P<month>\d{1,2})\s*[-/.月]\s*"
+    r"(?P<day>\d{1,2})\s*日?"
+)
 
 
 def _number(value: str) -> int:
@@ -144,7 +150,7 @@ def parse_local_datetime(value: Any, event_date: Any = None) -> datetime | None:
         pass
 
     base_date = parse_local_date(event_date)
-    chinese_date = _CHINESE_DATE.search(text)
+    chinese_date = _DATE_ANY.search(text)
     if chinese_date:
         try:
             base_date = date(
