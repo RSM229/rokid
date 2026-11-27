@@ -55,6 +55,7 @@ from app.services import (
 from app.services.record_fields import project_context
 from app.services.agent_context import (
     extract_explicit_message_facts,
+    infer_record_type_from_text,
     render_context_summary,
     render_conversation_history,
 )
@@ -1250,9 +1251,11 @@ _SUPPLEMENT_SYSTEM = (
     "不要编造，不要输出其它文字。"
 )
 
-# 命中即不把这句话当「补充回答」（提问 / 找页面 / 闲聊）——避免中途问规范被当成补字段
+# 命中即不把这句话当「补充回答」（提问 / 找页面 / 闲聊 / 抱怨）——避免中途问规范
+# 被当成补字段，也避免把「我不是已经说了吗」塞进草稿（2026-11-27 真机实测）。
 _SUPPLEMENT_SKIP_HINTS = ("？", "?", "吗", "怎么", "如何", "为什么", "是什么", "多少",
-                          "打开", "你好", "谢谢")
+                          "打开", "你好", "谢谢",
+                          "已经说", "说过了", "不是说了", "怎么又", "又问", "没听")
 
 
 async def _extract_supplement(message: str, tool: str, draft: dict,
@@ -1335,6 +1338,16 @@ async def _generate_request_plan(
             evidence=evidence_items,
             system_facts=system_facts,
         )
+        # 计划器常把类型留成「待定」，即使用户原话已经写明「日常巡视」。
+        # 这里按原话补一次确定性识别，再交给 enrich 重建事项/表单字段，
+        # 否则类型定了、缺栏却仍按「待定」追问（真机实测）。
+        if not plan.get("record_type"):
+            inferred_type = infer_record_type_from_text(message)
+            if inferred_type:
+                plan["record_type"] = inferred_type
+                plan["record_type_confidence"] = max(
+                    float(plan.get("record_type_confidence") or 0), 0.9
+                )
         plan = agent_request_plan.enrich_plan_facts(
             plan,
             extract_explicit_message_facts(message, message_ref=message),

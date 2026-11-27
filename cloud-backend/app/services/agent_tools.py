@@ -1242,6 +1242,10 @@ def refill_missing_from_message(args: dict, missing_labels: list | None,
     text = (message or "").strip()
     if not text or _wants_skip(text) or any(h in text for h in ("？", "?")):
         return None
+    # 抱怨/追问「我不是已经说了吗」不是任何字段的值，整句兜底只会污染草稿，
+    # 还会让回执说「已把…并入草稿」（2026-11-27 真机实测）。
+    if any(h in text for h in ("已经说", "说过了", "不是说了", "怎么又", "又问")):
+        return None
     # 🔧 整句是「指令词」（生成记录/确认生成/帮我记录…）时，不是任何字段的值，
     # 绝不能兜底填进缺的字段（2026-11-09 生产实测：缺「举牌验收照片」时
     # 路由层把用户那句「生成记录」原话填进了 photo 栏，合同层 is_instruction_only

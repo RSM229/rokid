@@ -2579,6 +2579,21 @@ Page(themed({
     if (!current) return
     const requestId = newOperationId('agent-turn')
     const userMessageIndex = userMessage ? this.addMessage(userMessage) : -1
+    // 用户在抱怨「我不是已经说了吗」时，别再把这句话当补充内容写进草稿、
+    // 更别回「已把…并入草稿」。先如实复述已经记下的字段，再列出真正还缺的。
+    if (/(已经说|说过了|不是说了|怎么又|又问|没听)/.test(reply)) {
+      const kept = (current.events || [])
+        .flatMap(event => event.formFields || [])
+        .filter(field => !field.missing && String((field as { value?: unknown }).value ?? '').trim())
+        .slice(0, 6)
+        .map(field => `${field.label}：${String((field as { value?: unknown }).value)}`)
+      this.addMessage({
+        role: 'assistant',
+        text: `${kept.length ? `已记下的信息：${kept.join('；')}。` : ''}${this.reviewFollowupText(current)}`,
+      })
+      this.setData({ loading: false })
+      return
+    }
     this.setData({ loading: true })
     this.beginAgentProgress(requestId, userMessageIndex,
       `收到你的补充，我核对一下草稿`,
