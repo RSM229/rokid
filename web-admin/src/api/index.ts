@@ -447,10 +447,13 @@ export const workRecordApi = {
   createStation: (data: any) => http.post('/work-record/station', data),
   endStation: (recordId: number) => http.put(`/work-record/station/${recordId}`),
   // 通用
-  list: (params?: any) => http.get('/work-record/list', { params }),
+  // 2026-11-27：工作记录默认只看本人（个人台账），Web 后台的巡视/验收/旁站/见证
+  // 审核页需要项目全量，这里显式声明 scope=project（后端按审核类权限放行）。
+  list: (params?: any) => http.get('/work-record/list', { params: { scope: 'project', ...params } }),
   detail: (id: number) => http.get(`/work-record/${id}`),
   update: (id: number, data: any) => http.put(`/work-record/${id}`, data),
-  stats: () => http.get('/work-record/stats'),
+  // 后台首页看板是项目汇总口径，同样显式申请（只返回条数，不含记录内容）
+  stats: () => http.get('/work-record/stats', { params: { scope: 'project' } }),
   markViewed: (id: number) => http.put(`/work-record/${id}/viewed`),
   // 巡检指引（知识图谱）
   listGuides: (params?: any) => http.get('/work-record/guides', { params }),

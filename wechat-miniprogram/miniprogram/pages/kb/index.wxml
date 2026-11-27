@@ -6,6 +6,29 @@
   <view wx:if="{{resolving}}" class="empty">正在加载资料库…</view>
 
   <block wx:else>
+    <!-- 项目资料（项目在岗成员全员可见）/ 我的资料（仅本人） -->
+    <view wx:if="{{libraries.length > 1}}" class="lib-switch">
+      <view
+        wx:for="{{libraries}}"
+        wx:key="key"
+        class="lib-chip {{activeLibKey === item.key ? 'on' : ''}}"
+        data-key="{{item.key}}"
+        bindtap="switchLibrary"
+      >{{item.label}}</view>
+    </view>
+    <view wx:if="{{libraries.length > 1}}" class="lib-hint">
+      {{activeLibKey === 'project' ? '项目在岗成员都可见' : '我的成员文件夹 · 与项目资料是同一份'}}
+    </view>
+
+    <!-- 历史文书补归档：归档目标切到项目库后，老文书还在个人库里 -->
+    <view
+      wx:if="{{activeLibKey === 'project' && archivePending > 0 && !searchKeyword}}"
+      class="archive-tip"
+    >
+      <view class="archive-tip-text">有 {{archivePending}} 份历史文书还在个人库，同步后归到各成员文件夹</view>
+      <view class="archive-tip-btn {{backfilling ? 'off' : ''}}" bindtap="syncArchiveBackfill">{{backfilling ? '同步中' : '同步'}}</view>
+    </view>
+
     <!-- 面包屑：非根层显示，可点「全部」回到根 -->
     <view wx:if="{{currentFolderId !== 0}}" class="breadcrumb">
       <text class="crumb root" data-id="0" bindtap="goBreadcrumb">根目录</text>
@@ -58,6 +81,23 @@
       </view>
     </view>
 
+    <!-- 我的资料 = 项目库里我的成员文件夹；根上给一个私有区入口（仅自己可见） -->
+    <view
+      wx:if="{{showPrivateEntry && !searchKeyword && !tagFilterId && !selectMode && !showTrash}}"
+      class="sec"
+    >
+      <view class="folder-list">
+        <view class="frow" bindtap="openPrivateLibrary">
+          <view class="fico"><view class="fico-shape fico-private" /></view>
+          <view class="fmain">
+            <view class="fname">我的私有文件</view>
+            <view class="fsub">监理日记与私有上传 · 仅自己可见</view>
+          </view>
+          <view class="fchev">›</view>
+        </view>
+      </view>
+    </view>
+
     <!-- 文件夹：竖排列表（文件管理器式）。根目录只列文件夹，文档只在文件夹内部出现；搜索/标签筛选时隐藏。
          多选模式下点行只切换勾选不进入，行首显示圆形勾选框 -->
     <view wx:if="{{!searchKeyword && !tagFilterId && currentSubfolders.length}}" class="sec">
@@ -84,7 +124,7 @@
     <!-- 监理日记：入口就在资料库对应的归档文件夹内，生成后自动落入本目录 -->
     <view wx:if="{{inDiaryFolder && !searchKeyword && !tagFilterId && !selectMode && !showTrash}}" class="diary-gen">
       <view class="diary-gen-title">📔 生成我的监理日记</view>
-      <view class="diary-gen-sub">按所选日期汇总我个人提交的工作记录、隐患与发文，生成后自动归档到「监理日记」文件夹。</view>
+      <view class="diary-gen-sub">按所选日期汇总我个人提交的工作记录、隐患与发文，生成后存入「我的私有文件 · 监理日记」，仅自己可见。</view>
       <view class="diary-gen-row">
         <picker mode="date" value="{{diaryDate}}" bindchange="onDiaryDateChange">
           <view class="diary-date">日期：{{diaryDate}}</view>

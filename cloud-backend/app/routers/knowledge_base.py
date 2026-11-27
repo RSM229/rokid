@@ -438,6 +438,7 @@ async def project_archive_library(
     )
     if not member_exists:
         raise HTTPException(status_code=403, detail="您不是该项目在岗成员")
+    from app.models.knowledge_base import ensure_member_folder
     from app.services.project_archive import (
         count_archive_candidates,
         ensure_project_archive_library,
@@ -445,6 +446,9 @@ async def project_archive_library(
 
     try:
         kb = await ensure_project_archive_library(db, project_id, user.id)
+        # 每个在岗成员一个根文件夹：生成的文书落在 <成员>/工作记录与表单/类型，
+        # 「我的资料」直接定位到这里（同一份数据，不复制）。
+        my_folder = await ensure_member_folder(db, kb.id, user)
         await db.commit()
     except RuntimeError as exc:
         await db.rollback()
@@ -466,6 +470,8 @@ async def project_archive_library(
         "project_id": kb.project_id,
         "role": member.role if member else "viewer",
         "is_project_archive": True,
+        "my_folder_id": my_folder.id,
+        "my_folder_name": my_folder.name,
         "document_count": int(document_count),
         "archive_pending_count": pending_count,
     }

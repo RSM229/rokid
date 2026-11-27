@@ -117,10 +117,16 @@ test('compose separates responsibility, signoff and non-blocking CC semantics', 
   assert.match(composeTemplate, /membersError/)
 })
 
-test('kb home no longer exposes a separate project archive library', () => {
-  assert.doesNotMatch(kbPage, /kb\/project-archive/)
-  assert.doesNotMatch(kbTemplate, /项目资料库|projectArchiveKbId/)
-  assert.match(agentPage, /request<\{ id: number \}>\('\/kb\/mine'\)/)
+test('kb home switches between project archive and personal library', () => {
+  // 2026-11-27 口径变更：资料库分「项目资料 / 我的资料」两个库。
+  // 项目资料 = 项目档案库（在岗成员全员可见，由后端按 ProjectMember 同步）；
+  // 我的资料 = 个人库（仅本人）。旧断言「首页不得出现项目档案库」已作废。
+  assert.match(kbPage, /kb\/project-archive/)
+  assert.match(kbPage, /kb\/mine/)
+  assert.match(kbTemplate, /项目资料/)
+  assert.match(kbTemplate, /我的资料/)
+  // 默认仍停在个人库，避免老用户打开资料库看到空的项目库
+  assert.match(kbPage, /key: 'personal'/)
 })
 
 test('work-record page no longer exposes a separate document-management entry', () => {

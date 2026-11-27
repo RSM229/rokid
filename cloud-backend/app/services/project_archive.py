@@ -1,4 +1,4 @@
-"""Synchronize generated business documents into the owner's personal KB."""
+"""Synchronize generated business documents into the project knowledge base."""
 from __future__ import annotations
 
 import asyncio
@@ -13,13 +13,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.models.document import Document
+from app.models.document import Document, DocType
 from app.models.knowledge_base import (
     KbFolder,
     KnowledgeBase,
     KnowledgeBaseMember,
     KnowledgeDocument,
     ensure_kb_folder_tree,
+    ensure_member_folder,
 )
 from app.models.project_archive import ProjectArchiveLibrary
 from app.models.project_member import ProjectMember
@@ -258,7 +259,7 @@ async def ensure_personal_archive_library(
     """Return the owner's home KB, creating it with the preset tree if needed.
 
     Business-document archiving intentionally targets the creator's personal
-    library (我的资料库 / 项目文件夹 / 工作记录与表单). There is exactly one
+    library (我的资料库 / 工作记录与表单). There is exactly one
     home library per user, so the lookup only uses owner_id + kb_type and never
     a library name.
     """
@@ -330,8 +331,19 @@ async def sync_project_archive_members(
 
 
 async def _target_folder_id(
-    db: AsyncSession, kb_id: int, doc_type: str, form_code: str | None = None
+    db: AsyncSession,
+    kb_id: int,
+    doc_type: str,
+    form_code: str | None = None,
+    parent_id: int | None = None,
 ) -> int:
+    """定位归档目录。
+
+    2026-11-27 起结构是「<成员文件夹> / 工作记录与表单 / <类型>」：
+    项目资料库根下每个在岗成员一个文件夹，文书只存一份落在创建人自己的
+    文件夹里；``parent_id`` 传成员文件夹 id。旧库根上的
+    「工作记录与表单 / 类型」（无 parent_id 约束）仍可命中。
+    """
     folders = (
         await db.execute(select(KbFolder).where(KbFolder.kb_id == kb_id))
     ).scalars().all()
@@ -340,9 +352,11 @@ async def _target_folder_id(
     candidates = [row for row in folders if row.name == target_name]
     for row in candidates:
         parent = by_id.get(row.parent_id or 0)
-        grand = by_id.get(parent.parent_id or 0) if parent else None
-        if parent and parent.name == "工作记录与表单" and grand and grand.name == "项目文件夹":
-            return row.id
+        if not parent or parent.name != "工作记录与表单":
+            continue
+        if parent_id is not None and parent.parent_id != parent_id:
+            continue
+        return row.id
     raise RuntimeError(f"资料库缺少归档目录：{target_name}")
 
 
@@ -374,9 +388,25 @@ async def _ensure_document_file(
         return None
 
 
+def _is_personal_only_doc(doc: Document) -> bool:
+    """监理日记是个人工作记录（原型「仅个人可见」），不进项目资料库。"""
+    return (
+        doc.doc_type == DocType.SUPERVISION_DIARY.value
+        or doc.form_code == "jianli_riji"
+    )
+
+
 async def sync_document_to_project_archive(
     db: AsyncSession, doc: Document, actor: User
 ) -> KnowledgeDocument | None:
+    """把业务文书同步成资料库里的一份文档（**只写一份**）。
+
+    2026-11-27 口径：
+      * 普通文书 → 项目资料库 / <创建人文件夹> / 工作记录与表单 / <类型>，
+        项目在岗成员都看得到；
+      * 监理日记（个人工作记录）仍只进创建人的个人库，不进项目库。
+    文档不复制：项目资料库是唯一存储，「我的资料」只是定位到创建人文件夹。
+    """
     source = await _ensure_document_file(db, doc)
     if source is None:
         doc.archive_sync_status = "pending"
@@ -386,13 +416,21 @@ async def sync_document_to_project_archive(
     previous_path: Path | None = None
     try:
         async with db.begin_nested():
-            # New archives live in the creator's own library so they show up
-            # directly under 我的资料库 / 项目文件夹 / 工作记录与表单.
             owner_id = doc.creator_id or actor.id
-            kb = await ensure_personal_archive_library(db, owner_id)
-            folder_id = await _target_folder_id(
-                db, kb.id, doc.doc_type, doc.form_code
-            )
+            if _is_personal_only_doc(doc) or not doc.project_id:
+                # 个人文书：仍落创建人自己的库（只有本人可见）
+                kb = await ensure_personal_archive_library(db, owner_id)
+                folder_id = await _target_folder_id(
+                    db, kb.id, doc.doc_type, doc.form_code
+                )
+            else:
+                # 项目文书：落项目库 / 创建人文件夹 / 工作记录与表单 / 类型
+                kb = await ensure_project_archive_library(db, doc.project_id, actor.id)
+                creator = actor if actor.id == owner_id else await db.get(User, owner_id)
+                member = await ensure_member_folder(db, kb.id, creator or actor)
+                folder_id = await _target_folder_id(
+                    db, kb.id, doc.doc_type, doc.form_code, parent_id=member.id
+                )
             extension = source.suffix.lower() or ".docx"
             revision = doc.content_revision or 1
             directory = _kb_root() / str(kb.id)
@@ -417,7 +455,8 @@ async def sync_document_to_project_archive(
             if archived is None:
                 archived = KnowledgeDocument(
                     kb_id=kb.id,
-                    uploader_id=kb.owner_id,
+                    # 上传人 = 文书的创建人（列表里显示「谁生成的」）
+                    uploader_id=owner_id,
                     folder_id=folder_id,
                     name=doc.title,
                     filename=filename,
@@ -432,7 +471,7 @@ async def sync_document_to_project_archive(
                 await db.flush()
             else:
                 archived.kb_id = kb.id
-                archived.uploader_id = kb.owner_id
+                archived.uploader_id = owner_id
                 archived.folder_id = folder_id
                 archived.name = doc.title
                 archived.filename = filename
@@ -449,6 +488,17 @@ async def sync_document_to_project_archive(
             doc.archive_sync_error = None
             doc.archive_synced_revision = revision
             doc.archive_kb_document_id = archived.id
+            # 归档位置从「个人库」迁到「项目库/成员文件夹」时，旧目录里的文件
+            # 不再被任何行引用，直接清掉，避免 user_kb 里堆孤儿。
+            if (
+                previous_path is not None
+                and previous_path != target
+                and previous_path.parent != directory
+            ):
+                try:
+                    previous_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
         return archived
     except Exception as exc:  # Archive failure must not lose the business document.
         # A revision filename is unique, so a failed database transaction cannot
@@ -487,14 +537,24 @@ async def list_archive_candidates(
 ) -> list[Document]:
     """Documents whose current file still needs a project-archive copy.
 
-    A document is considered up to date only when its stable archive row exists
-    and the archived revision equals the business document's current revision.
-    Documents with a known form template are included even when invalidation
-    cleared their file paths, because the sync can render the current content.
+    只有「已同步 + 版本一致 + 归档行确实在本项目的共享库、且未进回收站」才算
+    已归档。2026-11-27 归档目标从个人库改成项目库后，历史行仍留在创建人的
+    个人库里（kb_type=personal）——这些必须视为待同步，否则永远迁不过来，
+    不同账号看到的份数就会对不上。
     """
     rows = (
         await db.execute(
-            select(Document)
+            select(
+                Document,
+                KnowledgeBase.kb_type,
+                KnowledgeBase.project_id,
+                KnowledgeDocument.is_deleted,
+            )
+            .outerjoin(
+                KnowledgeDocument,
+                KnowledgeDocument.id == Document.archive_kb_document_id,
+            )
+            .outerjoin(KnowledgeBase, KnowledgeBase.id == KnowledgeDocument.kb_id)
             .where(
                 Document.project_id == project_id,
                 (Document.docx_path.is_not(None))
@@ -505,14 +565,24 @@ async def list_archive_candidates(
             )
             .order_by(Document.id)
         )
-    ).scalars().all()
+    ).all()
     candidates: list[Document] = []
-    for doc in rows:
+    for doc, kb_type, kb_project_id, archived_deleted in rows:
+        # 监理日记本来就只进个人库，不存在「迁到项目库」这回事；
+        # 否则它会被永远判成待同步，每次回填都重试一遍。
+        if _is_personal_only_doc(doc):
+            continue
         revision = doc.content_revision or 1
+        archived_in_project = (
+            kb_type == "shared"
+            and kb_project_id == project_id
+            and not archived_deleted
+        )
         if (
             doc.archive_sync_status == "synced"
             and doc.archive_kb_document_id
             and doc.archive_synced_revision == revision
+            and archived_in_project
         ):
             continue
         if _current_source_path(doc) is None and not doc.form_code:

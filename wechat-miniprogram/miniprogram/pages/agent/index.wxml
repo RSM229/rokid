@@ -101,6 +101,9 @@
               <view wx:for="{{item.progressEvents}}" wx:for-item="progress" wx:key="eventId" class="agent-progress-event {{progress.status}}">
                 <view class="agent-progress-mark"></view>
                 <view class="agent-progress-body">
+                  <view wx:if="{{progress.chainLabel}}" class="agent-progress-chain">
+                    <text class="agent-progress-chip {{progress.chainKind}}">{{progress.chainLabel}}</text>
+                  </view>
                   <text class="agent-progress-event-title">{{progress.title}}</text>
                   <text wx:if="{{progress.detailText}}" class="agent-progress-detail">{{progress.detailText}}</text>
                   <text class="agent-progress-time">{{progress.createdAt}}</text>
