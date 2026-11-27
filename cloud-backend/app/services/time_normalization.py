@@ -41,6 +41,12 @@ _DATE_ANY = re.compile(
     r"(?P<year>20\d{2})\s*[-/.年]\s*(?P<month>\d{1,2})\s*[-/.月]\s*"
     r"(?P<day>\d{1,2})\s*日?"
 )
+# 「17.57分」「17．57分」：点号当时间分隔符（只在后面跟「分」时才认，避免误伤小数）
+_DOT_TIME = re.compile(r"(?<!\d)([01]?\d|2[0-3])\s*[.．]\s*([0-5]\d)(?=\s*分)")
+
+
+def _fix_dot_time(text: str) -> str:
+    return _DOT_TIME.sub(r"\1:\2", str(text or ""))
 
 
 def _number(value: str) -> int:
@@ -75,7 +81,10 @@ def _period_hour(hour: int, period: str | None) -> int | None:
     if period in {"下午", "傍晚", "晚上", "夜间"}:
         if hour == 12:
             return 12
-        return hour + 12 if 1 <= hour <= 11 else None
+        if 1 <= hour <= 11:
+            return hour + 12
+        # 「下午17:57」这种已经是 24 小时制的说法，不能再加 12
+        return hour if 13 <= hour <= 23 else None
     return hour if hour <= 23 else None
 
 
@@ -133,6 +142,7 @@ def parse_local_datetime(value: Any, event_date: Any = None) -> datetime | None:
     text = str(value or "").strip()
     if not text:
         return None
+    text = _fix_dot_time(text)
     if not _TIME_MARKER.search(text):
         return None
 
@@ -194,13 +204,15 @@ def extract_clock(text: str) -> str | None:
     只做时间识别，不判断它属于哪个业务字段；字段归属由调用方/模型决定。
     """
     match = re.search(
-        r"(上午|下午|晚上|中午|凌晨|早上)?\s*(?<!\d)([01]?\d|2[0-3])"
+        r"(上午|下午|晚上|中午|凌晨|早上|今晚|今夜)?\s*(?<!\d)([01]?\d|2[0-3])"
         r"\s*(?:[:：]|时|点)\s*([0-5]?\d)?\s*分?",
-        str(text or ""),
+        _fix_dot_time(text),
     )
     if not match:
         return None
     period = match.group(1) or ""
+    if period in {"今晚", "今夜"}:
+        period = "晚上"
     hour = int(match.group(2))
     minute = int(match.group(3) or 0)
     if period in {"下午", "晚上"} and hour < 12:

@@ -2268,7 +2268,7 @@ Page(themed({
       const messageIndex = this.addMessage({
         role: 'assistant',
         text: issueList.length
-          ? `已整理 ${evidence.length} 张图片${saved.events.length ? `，形成 ${saved.events.length} 个候选事项` : '，还没有确定记录用途'}。当前已保存为待确认草稿，尚未生成正式工作记录。${this.reviewFollowupText(saved)}`
+          ? `已整理 ${evidence.length} 张图片${saved.events.length ? `，形成 ${saved.events.length} 个候选事项` : '，还没有确定记录用途'}。当前已保存为待确认草稿，尚未生成正式工作记录。${this.recognizedFieldsText(saved)}${this.reviewFollowupText(saved)}`
           : `已整理 ${evidence.length} 张图片${saved.events.length ? `，形成 ${saved.events.length} 个候选事项` : '，还没有确定记录用途'}。信息已准备好，确认后才会写入正式工作记录。`,
         reviewPlan: saved,
         reviewEvents: this.inlineReviewEvents(saved, []),
@@ -2542,6 +2542,16 @@ Page(themed({
     }))
   },
 
+  /** 回显已经识别到的字段，别让用户觉得「说这么清楚还是没识别」 */
+  recognizedFieldsText(plan: ReviewPlan): string {
+    const items = (plan.events || [])
+      .flatMap(event => event.formFields || [])
+      .filter(field => !field.missing && String((field as { value?: unknown }).value ?? '').trim())
+      .slice(0, 6)
+      .map(field => `${field.label}：${String((field as { value?: unknown }).value)}`)
+    return items.length ? `已识别：${items.join('；')}。` : ''
+  },
+
   reviewFollowupText(plan: ReviewPlan): string {
     const needs: string[] = []
     if (!plan.events.length) needs.push('还没有确定要创建的工作事项，请补充工作内容或选择“记录工作”用途')
@@ -2728,7 +2738,7 @@ Page(themed({
       this.setData({ messages })
       this.addMessage({ role: 'assistant', text: archiveOnly
         ? '已保留图片及识别到的证据，不创建工作记录。之后也可以继续补充文字、语音或图片。'
-        : `已把“${reply}”并入当前草稿。${saved.events.length ? `由服务端重新核对 ${saved.events.length} 个工作事项。` : ''}${this.reviewFollowupText(saved)}`,
+        : `已把“${reply}”并入当前草稿。${this.recognizedFieldsText(saved)}${saved.events.length ? `由服务端重新核对 ${saved.events.length} 个工作事项。` : ''}${this.reviewFollowupText(saved)}`,
         reviewPlan: saved,
         reviewEvents: this.inlineReviewEvents(saved),
         reviewUnassignedEvidence: this.inlineReviewUnassignedEvidence(saved),
