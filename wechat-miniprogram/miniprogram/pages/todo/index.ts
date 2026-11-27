@@ -578,13 +578,13 @@ Page(themed({
     })
   },
   capture(event: WechatMiniprogram.TouchEvent) {
-    // user 维度 key（2026-11-18）：A 写入后未消费、B 登录直接进拍照页时，
-    // 不把 A 的任务关联带给 B（后端还有 project/uploader 双闸，此处纯防串扰）。
+    // 现场采集页已下线：派单取证改为在工作台对话里拍照，走附件识别链路。
+    // 把派单上下文写进 storage，供 agent 页拍照后关联任务（后端仍有 project/uploader 双闸）。
     wx.setStorageSync(`gdjl_capture_context_u${session.storageUid()}`, {
       businessType: 'task',
       businessId: Number(event.currentTarget.dataset.id),
     })
-    wx.navigateTo({ url: '/pages/capture/index' })
+    wx.redirectTo({ url: '/pages/agent/index' })
   },
   onShareAppMessage(event: WechatMiniprogram.Page.IShareAppMessageOption) {
     const taskId = Number(event.target?.dataset.id || 0)

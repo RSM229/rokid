@@ -103,9 +103,17 @@ async def subscribe_notice(
 async def list_templates(
     user: User = Depends(get_current_user),
 ):
-    """获取当前配置的微信服务通知模板ID列表"""
+    """获取当前配置的微信服务通知模板ID列表。
+
+    2026-11-26 修复：只返回**实际非空**的模板 ID，并附 configured 标志。
+    原实现把 5 个空串键也返回，前端曾按「keys 数量>0」误判为已配置，
+    提示「稍后重试」而非「模板未配置」。现在空配置时 templates={} 且
+    configured=false，前端 noticeUnavailableReason() 可准确判定为 'empty'。
+    """
     from app.config import settings
-    return {"templates": settings.wechat_template_ids}
+    raw = settings.wechat_template_ids or {}
+    templates = {k: v for k, v in raw.items() if isinstance(v, str) and v.strip()}
+    return {"templates": templates, "configured": bool(templates)}
 
 
 @router.get("/notice/status")

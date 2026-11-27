@@ -788,6 +788,16 @@ async def delete_hazard(
     if not hazard:
         raise HTTPException(status_code=404, detail="隐患记录不存在")
 
+    # 🔴 归属校验（2026-11-26 补）：删除是**物理删除且不可恢复**（连带整改记录、
+    # 影像行与磁盘文件），因此必须限定「记录人本人，或持审批权/管理权者」。
+    # 与工作记录删除（work_record.py: creator_id != user.id → 无权操作）、
+    # 文书协作发起（collaboration.py: document_approve）保持同一口径。
+    # 修复前仅要求 hazard_ai，任何成员都能删他人隐患（实测 DELETE 返回 200）。
+    if hazard.reporter_id != user.id and not (
+        user.has_permission("document_approve") or user.has_permission("task_manage")
+    ):
+        raise HTTPException(status_code=403, detail="仅记录人或审批人可删除该隐患")
+
     # 1) 收集该隐患名下所有影像路径（隐患自查证图 + 整改图 + image_records 上登记的路径）
     image_rows = (
         await db.execute(select(ImageRecord).where(ImageRecord.hazard_id == hazard_id))

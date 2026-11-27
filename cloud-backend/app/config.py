@@ -149,6 +149,25 @@ class Settings(BaseSettings):
     )
     vlm_input_name: str = os.getenv("VLM_INPUT_NAME", "image")
 
+    # ============ 百炼文本端点（2026-11-26：多供应商共存） ============
+    # 小程序模型下拉里「千问 / DeepSeek1017」走这里；「DeepSeek V4.1（本地）」走
+    # DEFAULT_LLM_* 指向的本地网关。两套端点互不覆盖，选哪个走哪个。
+    # 默认值与生产 docker-compose 的 DASHSCOPE_* 保持一致（token-plan 套餐端点）；
+    # sk-sp- 前缀 key 只认这个端点，打到 dashscope.aliyuncs.com 会 401。
+    bailian_llm_provider: str = os.getenv("BAILIAN_LLM_PROVIDER", "阿里云百炼")
+    bailian_llm_api_key: str = os.getenv(
+        "BAILIAN_LLM_API_KEY", os.getenv("DASHSCOPE_API_KEY", "")
+    )
+    bailian_llm_base_url: str = os.getenv(
+        "BAILIAN_LLM_BASE_URL",
+        os.getenv(
+            "DASHSCOPE_BASE_URL",
+            "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+        ),
+    )
+    # 选百炼时若前端没给具体模型名，用这个兜底。
+    bailian_llm_model_id: str = os.getenv("BAILIAN_LLM_MODEL_ID", "qwen3.7-plus")
+
     # 华工文本模型（小程序工作台「千问 / 华工」下拉的第二项）。
     # 未配置时前端选「华工」会自动回退默认文本模型，不会报错。
     huagong_llm_provider: str = os.getenv("HUAGONG_LLM_PROVIDER", "华工")

@@ -183,6 +183,11 @@ _FAKE_SUCCESS_MARKERS = (
     # 2026-11-16 真机录屏：模型说「好，就按现在已确认的内容提交…其余栏位先留空」，
     # 系统兜底又追加「还没写入正式记录，还差…」→ 同一气泡自相矛盾。
     "按现在已确认的内容提交", "按已确认内容提交", "就按现在已确认",
+    # 2026-11-26 实测：我删掉「还没写入正式记录」尾巴后，模型在缺必填字段时
+    # 仍回「我这就整理（成工作记录）」——用户以为已建档，实际服务端 need_more
+    # 一直在追问「记录内容或施工区域」。这类「即将整理」措辞必须拦截，
+    # 让 need_more 时退回工具话术（显示真实缺项）。
+    "我这就整理", "这就整理成", "这就整理为", "马上整理", "这就建档", "这就生成",
 )
 
 
@@ -727,6 +732,15 @@ args 可以放你已确认的工具参数，但服务端仍会重新抽取、校
 没听到的一律省略。缺失栏目由服务端用**一句自然语言一次只问一栏**，界面上没有任何候选按钮、表单或清单，你不需要逐栏代劳。
 - 🔴 回答的行文：answer 必须先**自然接住用户这句**——把本句已确认的事实（如「验收结论=合格」）简短转述，再用一句话引到下面要问的那一栏；**不要**在 answer 里手列候选值、不要列填空清单、不要逐栏盘问、更不要复述「还差 X、还差 Y」清单。**严禁**出现「点一下」「点下方选项」「可点选」「候选」「chips」「表单」这类字样——本产品是纯文字一问一答，界面上没有任何可点选项。例：用户答「合格」→ answer：「收到，验收结论记『合格』。验收类型你说一下是哪一类就行；不方便也能先跳过。」。
 - 🔴 你的 answer 是这条消息的**主角**，服务端兜底文案只在没有可用 answer 时才出现；不要把机械的「还需要补充：XX」塞进 answer。
+
+🔴🔴 对话风格铁律（2026-11-26 用户「交互很奇怪、不智能」，最高优先级）
+----------------------------------------------------
+1. **一句话原则**：answer 控制在 1~2 句、最多 50 字。自然接话 + 只问「当前最该补的那一栏」，绝不列清单、绝不逐条报字段。
+2. **绝不重复问已确认的**：用户已经说过的字段（在 facts/args 或上下文摘要里出现过的），直接当已知，转述一遍就过，禁止再问第二次。同一个字段被历史问过 2 次以上时，改为「这个字段你跳过也行，我先按已有信息整理」。
+3. **禁公文腔/模板长文**：不许输出「XX（完整版·逐条填写）一、… 二、…」这类整段模板/目录式罗列。用户要文书时返回 generate_document 动作，文书由服务端生成，answer 只说一句「我按这个整理成文书，稍等」。
+4. **禁状态旁白**：不要说「还没写入正式记录」「尚未生成正式工作记录」「请核对后生成」这类系统内部状态话术；进度由界面自己展示，你只管像人一样接着聊。
+5. **接话要像人**：短、自然、有承接词（「好」「收到」「行」），一次只推进一件事。例：用户答「三层梁板」→「好，部位记三层梁板。旁站开始时间大概几点？」。
+违规示例（一律禁止）：「已恢复上次未完成的记录草稿，尚未生成正式工作记录。请先处理：事项 1 还需补充：旁站结束时间、各专业作业人数、材料品牌规格数量、施工单位质检员…」。
 
 错误示范（严禁）：用户说「记一条旁站：屋面防水卷材铺贴，9:00 到 12:00，10人」，
 你因为「没有旁站结论」而返回 chat 动作去追问结论 —— 这是错的。
@@ -1701,6 +1715,12 @@ def _looks_like_field_answer(label: str, message: str) -> bool:
             "隐蔽", "检验批", "进场", "分项", "分部", "单位工程",
             "竣工", "预验收", "验收",
         ))
+    # 🔴 2026-11-27：天气栏不能吃任意句子。用户答"9点开始，11:30结束"（其实是
+    # 时间）被当成天气值填了进去。只有真正给天气/温度才算有效回答。
+    if "天气" in str(label or "") or "气温" in str(label or "") or "温度" in str(label or ""):
+        return any(k in text for k in (
+            "晴", "阴", "雨", "雪", "雾", "多云", "风", "℃", "度", "气温", "天气",
+        ))
     return True
 
 
@@ -1819,26 +1839,17 @@ async def _apply_existing_record_write_through(
     """
     if not project_id:
         return None
-    # 续办轮用户只回「隐蔽工程」，消息里没有 #编号 → 用草稿里的写入态定位
+    # 🔴 2026-11-27 修复：去掉「按 record_type 找最近同类型记录」的兜底。
+    # 原逻辑在没有 #编号时，会按类型找最近一条未归档记录（如 #234）来更新，
+    # 导致新对话说「整理到工作记录」时反复覆盖旧记录，而新建路径的字段提取
+    # 逻辑（人数/材料/坍落度等）根本没执行，值落不了库。
+    # 现在只有明确带 #编号（_record_id_from_text）或显式 record_id_hint
+    # （「接着补 #N」确认态）才更新；否则返回 None 交回新建流程。
     record_id = record_id_hint or _record_id_from_text(message, *contexts)
-    if record_id:
-        record = await db.get(WorkRecord, record_id)
-        if record is None or record.project_id != project_id:
-            return None
-    else:
-        args = draft_args if isinstance(draft_args, dict) else {}
-        rtype = agent_tools._norm_record_type(str(args.get("record_type") or "")) or ""
-        # 没有编号且草稿类型不明时不猜目标，交回原流程（避免误改无关记录）。
-        if not rtype or rtype == "待定":
-            return None
-        stmt = select(WorkRecord).where(
-            WorkRecord.project_id == project_id,
-            WorkRecord.creator_id == user.id,
-            WorkRecord.record_type == rtype,
-            WorkRecord.status != WorkRecordStatus.ARCHIVED.value,
-        ).order_by(WorkRecord.id.desc()).limit(1)
-        record = (await db.execute(stmt)).scalar_one_or_none()
-    if record is None:
+    if not record_id:
+        return None
+    record = await db.get(WorkRecord, record_id)
+    if record is None or record.project_id != project_id:
         return None
     if record.creator_id != user.id and not user.has_permission("task_manage"):
         return None
@@ -2375,13 +2386,15 @@ async def _agent_chat_impl(
 
     # 🔴 显式写入已建记录（2026-11-16 真机录屏）：先于模型路由确定性处理，
     # 避免「写入正式记录 / 请写入验收记录」又被路由成一份新的待确认草稿。
+    # 🔴 2026-11-27 修复：原条件含 `or bool(pend_for_context)`——只要同一会话里
+    # 有待确认草稿，就把「整理到工作记录」判定成「续写旧记录」→ 更新了 11-25 的
+    # 旧图片草稿 #230，而不是新建今天这条旁站记录。用户实测「生成工作记录」明明
+    # 是新内容却覆盖了旧草稿。现在只认**明确指代已有记录**（_refers_to_existing_record：
+    # 带「这条/接着补/#编号」或从历史里找到记录号）才更新；否则一律新建。
     if (
         not structured_submit
         and agent_tools.wants_write_through(message)
-        and (
-            _refers_to_existing_record(message, earlier_messages, req.history)
-            or bool(pend_for_context)   # 有待确认草稿 = 延续同一件事
-        )
+        and _refers_to_existing_record(message, earlier_messages, req.history)
     ):
         _wt = await _apply_existing_record_write_through(
             db, user, project_id, conversation_id, message,
@@ -3071,10 +3084,11 @@ async def _agent_chat_impl(
                         "\n\n" + agent_reply_variants.final_confirm_tail(_confirm_turn)
                     )
                 elif tool == "create_work_record":
-                    # 2026-11-24 用户反馈「追问尾巴整串复读栏位清单」：正文（模型
-                    # 接话/模板问句）已经在问当前栏，尾巴不再拼「还差「A、B、C」」
-                    # 清单，只保留状态提示（还没写入正式记录）。
-                    result["reply"] += "\n\n还没写入正式记录。"
+                    # 🔴 2026-11-26 用户「机械尾巴不智能」：删掉「还没写入正式记录」
+                    # 硬拼尾巴。模型 answer 已是主角；状态由界面卡片/草稿计数自己展示，
+                    # 文字里再补一句系统状态话术只会像机器人。追问字段时模型自己会
+                    # 用自然语言接话（见 _AGENT_SYSTEM 风格铁律），无需模板兜底。
+                    pass
             elif _tool_reply:
                 result["reply"] = _tool_reply
             # 续办动作随草稿持久化：首动作若是写操作，本轮只进确认流程就 return，
@@ -3099,9 +3113,13 @@ async def _agent_chat_impl(
                 result["form"] = None
                 result["input_components"] = []
             else:
-                form = _agent_form(tool, args, result, message, str(getattr(project, "name", "") or ""))
-                result["form"] = form
-                result["input_components"] = _agent_input_components(form)
+                # 🔴 2026-11-27 用户「问完怎么出现填写或核对信息」：纯文字一问一答，
+                # 追问气泡本身就是主角（result.reply 已自然语言接话并问当前栏），
+                # 不再下发表单卡/摊平字段——那会渲染出"填写或核对信息"卡片，
+                # 把对话拉回逐栏填表观感（违反 11-06 纯文字铁律）。
+                # 字段校验/追问仍由 need_more + reply 驱动，信息不丢。
+                result["form"] = None
+                result["input_components"] = []
             result["input_channels"] = ["text", "voice", "image", "file"]
         elif result.get("ok"):
             # 首动作确认成功：若草稿里留有续办动作（上一轮多步编排存下的

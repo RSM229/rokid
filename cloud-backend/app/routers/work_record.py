@@ -1511,6 +1511,10 @@ async def list_work_records(
             "section": r.section,
             "location": r.location,
             "work_content": r.work_content,
+            # 🔴 2026-11-27：列表页展示对话提取的现场值（C30/坍落度等）需要这个字段，
+            # 否则前端 decorateRecord 拿不到【现场已确认】块，列表只显示工序名。
+            "station_content": r.station_content,
+            "station_supervision_status": r.station_supervision_status,
             "weather": r.weather,
             "inspection_remark": r.inspection_remark,
             "acceptance_guide_ref": r.acceptance_guide_ref,

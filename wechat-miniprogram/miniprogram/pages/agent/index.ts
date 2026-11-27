@@ -547,7 +547,8 @@ function sessionIdFromConversationId(conversationId: string): number {
 
 /** 工作台「模型」下拉可选的大模型清单。
  * 统一从 services/modelCatalog 引入（与"智能助手"页共用同一份目录与选择器组件）：
- *  - provider='' 走默认文本大模型端点（阿里云 token-plan），用 model 字段覆盖具体模型名；
+ *  - provider='' 走默认文本端点（生产 = 本地 DeepSeek 网关），model 覆盖具体模型名；
+ *  - provider='bailian' 走阿里云百炼 token-plan 端点（千问 / DeepSeek1017）；
  *  - provider='huagong' 走华南理工独立供应商（未配置则后端自动回退默认模型）。 */
 const CHAT_MODELS = MODEL_CATALOG_UNIQUE
 
@@ -844,8 +845,9 @@ Page(themed({
     //    走 guideJoinProject 弹窗讲清原因并一键直达。功能本身仍需项目（写库约束），
     //    只是入口从「藏着」改成「带着原因引导」。
     heroActions: [
-      { icon: 'ic-mic', text: '开启语音，记录现场工作', command: '工作记录', needProject: true },
-      { icon: 'ic-book', text: '查询规范资料库', command: '知识库', needProject: false },
+      { icon: 'ic-mic', text: '说一句，记一条现场工作', command: '工作记录', needProject: true },
+      { icon: 'ic-book', text: '查规范、问施工要求', command: '知识库', needProject: false },
+      { icon: 'ic-camera', text: '拍照识别安全隐患', command: 'hazard-capture', needProject: true },
       { icon: 'ic-doc', text: '加入项目（填邀请码）', command: 'join-project', needProject: false, onlyNoProject: true },
     ] as { icon: string; text: string; command: string; needProject: boolean; onlyNoProject?: boolean }[],
     /** 实际渲染的快捷动作：无项目时写业务的卡**降级展示**（加后缀、点击引导
@@ -1137,19 +1139,25 @@ Page(themed({
     this.refreshHeroGreeting()
   },
 
-  /** 空态问候语按时间与待办动态生成（纯文案，不引入任何选择器/候选，守 11-06 铁律） */
+  /** 空态问候语：按时间 + 待办/草稿/项目动态生成，一句具体的话而不是泛泛问候
+   *  （2026-11-26 用户「引导语太泛不智能」：从「今天有什么需要帮您处理」改成
+   *   有具体对象的一句话，让用户一眼知道能让它干什么）。 */
   refreshHeroGreeting() {
     const h = new Date().getHours()
     const part = h < 6 ? '凌晨好' : h < 9 ? '早上好' : h < 12 ? '上午好' : h < 14 ? '中午好' : h < 18 ? '下午好' : '晚上好'
-    let greeting = `${part}！`
     const todo = this.data.todoPendingCount || 0
     const drafts = this.data.pendingDrafts || []
+    const project = (this.data.projectName || '').trim()
+    let greeting = `${part}，`
     if (todo > 0) {
-      greeting += `你有 ${todo} 项待办没处理，查一下？`
+      greeting += `你有 ${todo} 项待办等着处理，要不要我先帮你看看？`
     } else if (drafts.length > 0) {
-      greeting += `还有一笔「${drafts[0].label}」没记完，要接着写吗？`
+      greeting += `「${drafts[0].label}」还差几项没记完，接着写？`
+    } else if (project) {
+      // 有项目：给具体的现场动作引导，而不是空泛提问
+      greeting += `在${project}，现场干了什么直接说，我给你记成工作记录。`
     } else {
-      greeting += '今天有什么工作需要我帮您处理?'
+      greeting += '还没加入项目，先告诉我邀请码，或查规范资料也行。'
     }
     this.setData({ heroGreeting: greeting })
   },
@@ -1551,9 +1559,10 @@ Page(themed({
       const issueList = reviewIssues(saved)
       this.addMessage({
         role: 'assistant',
-        text: issueList.length
-          ? `已恢复上次未完成的记录草稿，尚未生成正式工作记录。请先处理：${issueList.join('；')}。`
-          : '已恢复上次未完成的记录草稿。请核对后生成正式工作记录。',
+        // 🔴 2026-11-26 用户「恢复草稿吐一长串缺项不智能」：
+        // 不再把 issueList.join('；') 整串塞进气泡（字段清单只有内部判定用）。
+        // 每条issue会由下方 reviewPlan 卡片的「待确认」区逐项呈现，文字只做自然承接。
+        text: '接着上次那笔记录继续写，我把已经记好的都留着了。你把卡片里标出来的项补一下就行，不方便也可以先跳过。',
         reviewPlan: saved,
         reviewEvents: this.inlineReviewEvents(saved),
         reviewUnassignedEvidence: this.inlineReviewUnassignedEvidence(saved),
@@ -4571,6 +4580,11 @@ Page(themed({
       return
     }
     switch (command) {
+      // 🔴 2026-11-26 恢复「拍照识别安全隐患」快捷卡：分发到固定隐患采集入口
+      // （该入口原本只在模型下拉菜单里，用户不容易发现）
+      case 'hazard-capture':
+        this.openHazardCapture()
+        return
       case '工作记录':
         this.startVoiceWorkFromChat()
         return
@@ -6147,10 +6161,11 @@ Page(themed({
     this.addMessage({ role: 'assistant', text: `已切换为「${model.name}」模型。` })
   },
 
-  // 模型下拉菜单里的「隐患识别」入口：底部 tab 第 1 格改为待办事项后，这里是隐患识别的固定入口
+  // 模型下拉菜单里的「隐患识别」入口：现场采集页已下线，改为在对话里拍照识别——
+  // 直接调相机拍照，拍完作为图片附件进入对话，用户说「看看有没有安全隐患」即可识别。
   openHazardCapture() {
     this.setData({ showModelMenu: false })
-    wx.navigateTo({ url: '/pages/capture/index?mode=hazard' })
+    this.pickImages('camera')
   },
 
   // ============ @ 提及面板 ============

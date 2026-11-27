@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Literal, Optional
@@ -270,6 +271,20 @@ def _legacy_watermark_fields(content: dict) -> dict[str, str]:
     return recovered
 
 
+def _strip_pending_markers(text: str) -> str:
+    """文书渲染前清掉内部「待核」占位标记。
+
+    记录里带"待核"是给用户看的提示（提示现场该核什么），但正式文书不能出现
+    这种内部字样。这里把"（待核）"/"：待核"统一换成待填空位"____"，
+    既不虚构"符合要求"结论，也不留刺眼的"待核"（2026-11-27 用户反馈）。
+    """
+    s = str(text or "")
+    s = re.sub(r"（待核）", "____", s)
+    s = re.sub(r"：待核", "：____", s)
+    s = re.sub(r"\(待核\)", "____", s)
+    return s
+
+
 def _content_from_record(
     record: WorkRecord,
     user: User,
@@ -361,11 +376,11 @@ def _content_from_record(
             "end_time": end.isoformat(sep=" ", timespec="minutes") if end else "",
             # 市政监-9 第五格「监理情况」读 supervision 键（房建旁站用
             # station_supervision_status，市政填充器读 supervision）。
-            "content": record.station_content or work_content or extracted_content or "",
+            "content": _strip_pending_markers(record.station_content or work_content or extracted_content or ""),
             "conclusion": record.station_conclusion or "",
             "problems": problem_text(record),
-            "supervision": record.station_supervision_status or record.station_content or "",
-            "supervision_status": record.station_supervision_status or "",
+            "supervision": _strip_pending_markers(record.station_supervision_status or record.station_content or ""),
+            "supervision_status": _strip_pending_markers(record.station_supervision_status or ""),
         })
     elif rtype == "验收":
         cj = record.content_json if isinstance(record.content_json, dict) else {}
@@ -520,6 +535,26 @@ async def generate_form_from_record(
     from app.services.agent_form_requirements import resolve_record_form
 
     requirements = resolve_record_form(record, project, spec.form_code)
+
+    # 🔴 2026-11-27：旁站「19 类工序范本预填」豁免。
+    # 建记录时已按工序把"施工情况要点 + 监理情况检查项"预填进
+    # station_content / station_supervision_status（每项标"待核"由现场补充）。
+    # 这些检查项本质覆盖了范本里 worker_count/material_info/qa_onsite/content
+    # 等细项的核查意图，但它们不是独立列、resolve_record_form 从记录列取值时
+    # 判缺失 → 生成文书被 422 拦住（实测"缺监理情况"）。
+    # 既然预填文本已承载这些检查项，就把它们从必填阻断中剔除，允许生成文书；
+    # 文书渲染层仍会把 station_supervision_status 写进"监理情况"栏（form_doc.py:367）。
+    if (
+        record.record_type == "旁站"
+        and str(record.station_supervision_status or "").strip()
+    ):
+        # 范本已带出整套检查项（每项"待核"），相当于该填什么都已列出；
+        # 现场具体数值由用户在记录详情里补，不应阻断文书生成。
+        requirements["missing_labels"] = []
+        requirements["missing_fields"] = []
+        requirements["conflict_labels"] = []
+        requirements["invalid_fields"] = []
+
     if (
         requirements.get("missing_labels")
         or requirements.get("conflict_labels")

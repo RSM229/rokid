@@ -54,7 +54,23 @@ function decorateRecord(r: WorkRecordItem): WorkRecordItem {
   const part = (r.section || r.location || '').trim()
   const place = (r.location || '').trim()
   const project = (r.project_name || r.system_project_name || '').trim()
-  const summary = cleanSummary(r.work_content)
+  const workText = (r.work_content || '').trim()
+  // 🔴 2026-11-27：列表页摘要——对话自动提取的现场值（C30/振捣器/坍落度等）落在
+  // station_content 的【现场已确认】块里，而 work_content 常只有工序名（"混凝土浇筑"）
+  // → 列表页看不到这些值、详情和文书却能看到，三处不一致。这里在 work_content 过短时，
+  // 把【现场已确认】的实际值接进摘要（只取实际值，不带"待核"检查项清单）。
+  let summaryRaw = workText
+  let summaryOverride: string | null = null
+  const stationText = String((r as any).station_content || '')
+  // 现场值已在用户原话里（station_content 首段），去掉范本检查项块后直接展示，
+  // 不再依赖【现场已确认】/现场核查 这类内部标记。
+  if (stationText.trim()) {
+    const userPart = stationText.split(/[。\n]/)[0].replace(/【[^】]*】[\s\S]*$/, '').trim()
+    if (userPart && userPart.length > workText.length) {
+      summaryOverride = userPart.replace(/\s+/g, ' ').trim()
+    }
+  }
+  const summary = summaryOverride !== null ? summaryOverride : cleanSummary(summaryRaw)
   const partLabel = part || '未填写部位'
 
   // 事项：项目不一致是明确待办，优先当标题后半段；否则取清洗后首句的第一个短语

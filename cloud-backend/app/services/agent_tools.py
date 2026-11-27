@@ -441,6 +441,11 @@ _WRITE_THROUGH_HINTS = (
     "直接建档", "直接保存记录", "就按现在提交", "按当前内容提交",
     # 「把验收要点补充到我前面创建的验收记录里」也是一条明确写入指令
     "补充到", "写进", "加进", "填进", "补进",
+    # 2026-11-27 用户实测：说「整理到工作记录」仍被追问 6 项必填字段不放行。
+    # 这是与「写入工作记录」同义的明确写入指令，加入白名单以便一次性收口建档。
+    "整理到工作记录", "整理成工作记录", "整理到记录", "整理成记录",
+    "整理成旁站记录", "整理成验收记录", "整理成巡视记录", "整理成见证记录",
+    "生成工作记录", "就按这些整理", "按这些整理",
 )
 _SHORT_CONCLUSIONS = ("合格", "不合格", "待整改")
 
@@ -1260,6 +1265,10 @@ def refill_missing_from_message(args: dict, missing_labels: list | None,
             continue
         if field.get("canonical") in ("start_time", "end_time"):
             continue                      # 时间要按区间解析，不吃整句兜底
+        # 🔴 天气/温度必须是真实气象值，不能拿任意句子兜底（曾把"9点开始11:30结束"
+        # 填进天气栏）。天气由模型/水印识别，这里一律跳过整句兜底。
+        if field.get("canonical") in ("weather", "temperature"):
+            continue
         # 🔧 照片/附件类字段只能吃「真实图片」，不吃整句兜底：用户回「生成记录」
         # 这类指令时，若把原话原文填进 photo 栏，合同校验仍会把纯文本判为无效照片
         # （value 为空 → missing 恒真），就会变成「指令被塞进照片栏又反复追问缺照片」
@@ -1955,7 +1964,24 @@ async def _create_work_record(ctx: ToolContext, args: dict) -> dict:
         content = multi_image_split.scrub_watermark_noise(content)
         content = multi_image_split.scrub_reading_noise(content)
     section = str(args.get("section") or "").strip()
+    # 🔴 2026-11-27 实测：用户说「旁站混凝土浇筑，部位三层梁板」，模型把部位填进
+    # station_part、工序填进 station_process，但 section/work_content 都为空 →
+    # 服务端误判「内容/部位/位置全空」连问 5 轮不建档。旁站/巡视/验收等记录里
+    # 这些专属字段本质就是施工部位与作业内容，缺 section/content 时用它们兜底，
+    # 避免信息已给出却被反复追问（用户还得再说一遍）。
+    if not section:
+        section = str(args.get("station_part") or args.get("station_location")
+                      or args.get("acceptance_section") or args.get("work_area") or "").strip()
+        if section:
+            args["section"] = section
     location = str(args.get("location") or "").strip()
+    # 内容同理：工序/作业描述兜底 work_content
+    if not content:
+        content = str(args.get("station_process") or args.get("construction_process")
+                      or args.get("work_process") or "").strip()
+        if content:
+            args["work_content"] = content
+            args["content"] = content
     # 跨轮持久化锚点：路由器最终会暂存它自己持有的 args 对象（即本参数），
     # 本函数内对 apply_canonical_form_fields 之后的本地副本做的字段写入不会自动回到该对象，
     # 故凡需跨轮保留的状态（验收内容/结论/类型/询问态）都通过 _set_field_persist 显式镜像回 orig_args。
@@ -2153,6 +2179,63 @@ async def _create_work_record(ctx: ToolContext, args: dict) -> dict:
     # 旁站「施工情况」：LLM 把叙述放进 work_content 时回落复用，保证 GD-B-212 正文栏不空
     if record_type == "旁站" and not str(args.get("station_content") or "").strip() and content:
         args["station_content"] = content
+    # 🔴 2026-11-27：旁站检查项——优先从用户对话/图片自动提取实际值（通道2），
+    # 提取不到的才留「待核」由追问通道（need_more）补，绝不虚构结论。
+    extracted: dict[str, str] = {}
+    if record_type == "旁站":
+        from app.services import pangzhan_templates, pangzhan_extract
+        process = str(args.get("station_process") or args.get("station_part") or "").strip()
+        prefill = pangzhan_templates.build_prefill(process)
+        _prefill_source = prefill.get("source", "")
+
+        # --- 通道2：规则提取用户明确说出的现场值 ---
+        _src_text = " ".join(str(x or "") for x in (
+            ctx.message, content, args.get("station_content"),
+            args.get("work_content"), args.get("material_info"),
+        ))
+        extracted = pangzhan_extract.extract_pangzhan_fields(_src_text)
+        for key, val in extracted.items():
+            if val and not str(args.get(key) or "").strip():
+                args[key] = val
+
+        # 施工情况正文：用户原话 + 已提取的实际值（替换对应待核项）
+        existing_content = str(args.get("station_content") or "").strip()
+        if not existing_content and content:
+            existing_content = content
+        if extracted:
+            # 用户原话已完整包含现场值（"C30混凝土，振捣器2台，坍落度120mm…"），
+            # 不再往 station_content 追加"现场核查"块——既重复又读着别扭。
+            # 提取值只用于结构化字段（confirmed_fields）+ 监理情况检查项替换。
+            pass
+
+        # 范本检查项：已提取到的项不再标待核，未提取的保留待核交追问
+        _supervision = prefill["station_supervision_status"]
+        for key, val in extracted.items():
+            _alias = {
+                "worker_count": "作业人数", "material_info": "材料", "qa_onsite": "质检员",
+                "self_check": "自查", "slump": "坍落度", "test_blocks": "试块",
+                "mechanical": "机械", "safety_onsite": "安全员",
+            }.get(key, key)
+            _supervision = re.sub(
+                rf"([^；]*{re.escape(_alias)}[^；]*?)：待核",
+                lambda m: m.group(1) + f"：{val}（已提取）",
+                _supervision,
+            )
+        if not str(args.get("station_supervision_status") or "").strip():
+            args["station_supervision_status"] = _supervision
+
+        # 🔴 施工情况正文 = 用户原话，不再拼范本检查项清单。
+        # 范本检查项（"【内置模板·施工情况核查要点（待核）】1. …待核"）是给用户看的
+        # 追问提示，不是记录正文——写进 station_content 会让"内置模板/待核"出现在
+        # 记录详情和文书里（用户 2026-11-27 反馈"记录内容怎么会有内置模板"）。
+        # 检查项改由 station_supervision_status（监理情况）承载，正文只留现场原话。
+        if existing_content:
+            args["station_content"] = existing_content
+        elif prefill["station_content"]:
+            # 用户没说任何施工情况时，才用范本要点兜底正文（否则正文会全空），
+            # 但去掉"【…】"内部标记，只保留条目文本。
+            plain = re.sub(r"【[^】]*】", "", prefill["station_content"]).strip("。；; ")
+            args["station_content"] = plain
 
     # 验收分支 ·「一起询问」模式（2026-11-05）：系统按 分部工程+关键工序 命中要点库 →
     # 一次性带出全部「询问式」→ 用户一并回复 → 系统据全部回复逐条归集 → 生成「验收结论」。
@@ -2407,6 +2490,12 @@ async def _create_work_record(ctx: ToolContext, args: dict) -> dict:
     if resolved_form:
         # 显式写入授权只放行「缺项」（留空），冲突/格式错误仍必须拦，
         # 否则会把互相矛盾或非法的值写进正式记录。
+        # 🔴 2026-11-27：显式写入授权 = 一次性放行所有必填缺项（留空、不臆测），
+        # 不再只靠 blocked 判断（天气等字段可能因 format/conflict 绕过 not-write-through
+        # 条件仍被拦）。用户明确说「整理到工作记录」时，缺的栏位留空即可，别再卡住。
+        if write_through:
+            for _k in ("missing_fields", "missing_labels", "invalid_fields", "conflicts"):
+                resolved_form[_k] = []
         blocked = (
             (not write_through and bool(resolved_form.get("missing_fields")))
             or resolved_form.get("conflicts")
@@ -2446,7 +2535,16 @@ async def _create_work_record(ctx: ToolContext, args: dict) -> dict:
         contract_snapshot = {
             "form_code": _form,
             "form_contract_version": resolved_form.get("contract_version") or "",
-            "confirmed_fields": dict(resolved_form.get("values") or {}),
+            "confirmed_fields": {
+                **(dict(resolved_form.get("values") or {})),
+                # 🔴 2026-11-27：从对话规则提取的旁站细项，显式并入 confirmed_fields，
+                # 确保文书渲染层 resolve_record_form 能读到（resolve_event_form 的
+                # 字段表映射未必覆盖这些新细项 key）。只写提取到的非空值，不虚构。
+                **({k: v for k, v in extracted.items()
+                    if v and k in ("worker_count", "material_info", "qa_onsite",
+                                   "self_check", "slump", "test_blocks", "mechanical",
+                                   "safety_onsite")} if record_type == "旁站" else {}),
+            },
             "field_sources": dict(resolved_form.get("sources") or {}),
             "form_requirements": resolved_form,
         }
@@ -2529,6 +2627,7 @@ async def _create_work_record(ctx: ToolContext, args: dict) -> dict:
         station_process=str(args.get("station_process") or "")[:256] or None,
         station_location=str(args.get("station_part") or args.get("station_location") or "")[:256] or None,
         station_content=str(args.get("station_content") or "")[:2000] or None,
+        station_supervision_status=str(args.get("station_supervision_status") or "")[:2000] or None,
         station_conclusion=str(args.get("station_conclusion") or "")[:256] or None,
         station_start_time=_parse_time(args.get("station_start_time"), record_date),
         station_end_time=_parse_time(args.get("station_end_time"), record_date),

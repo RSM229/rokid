@@ -26,7 +26,12 @@ let _templateCache: Record<string, string> | null = null
  */
 export function noticeUnavailableReason(): 'not-loaded' | 'empty' | null {
   if (!_templateCache) return 'not-loaded'
-  return Object.keys(_templateCache).length === 0 ? 'empty' : null
+  // 🔴 2026-11-26 修复：后端可能返回 5 个模板键但值全为空串（模板未在微信后台申请/
+  // 未配置到 env），此时 Object.keys 非空但没有任何可用 tmplId。原实现只判 keys
+  // 数量 → 返回 null → 页面落入「稍后重试」分支，误导用户反复重试。
+  // 现在按「是否存在非空 tmplId」判定，全空视为 'empty'（需管理员配置，重试无用）。
+  const hasId = Object.values(_templateCache).some((v) => Boolean(v))
+  return hasId ? null : 'empty'
 }
 
 /**

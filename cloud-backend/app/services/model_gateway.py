@@ -48,13 +48,27 @@ def _require_available(config: ModelConfig) -> None:
 
 
 def _provider_override(provider: str | None) -> ModelConfig | None:
-    """按前端选择的模型供应商切换文本模型配置（2026-10-09）。
+    """按前端选择的模型供应商切换文本模型配置（2026-10-09，2026-11-26 扩百炼）。
 
-    - qwen / 千问：使用默认文本模型（DEFAULT_LLM_*），返回 None 表示不覆盖；
+    - 空 / qwen / 千问 / local / deepseek-local / default：使用默认文本模型
+      （DEFAULT_LLM_*，生产指向本地 DeepSeek 网关），返回 None 表示不覆盖；
+    - bailian / aliyun / dashscope / 阿里云：使用 BAILIAN_LLM_*，前端仍可用
+      model 字段选具体模型名（qwen3.7-plus / qwen3.8-flash / deepseek-v4.1-flash-1017）；
     - huagong / 华工：使用 HUAGONG_LLM_* ；未配置时返回 None → 自动回退默认模型，
       保证前端下拉永远可用，不因供应商缺配置而报错。
+
+    🔴 不降级铁律（2026-11-26 用户「各自走各自的，选择哪个就走哪个」）：
+    bailian 是**显式选定**的供应商，配置缺失或额度用尽时必须如实报错，
+    绝不静默回退到默认端点——否则用户以为在用千问，实际在烧本地模型。
     """
     key = (provider or "").strip().lower()
+    if key in ("bailian", "aliyun", "dashscope", "阿里云", "阿里云百炼", "百炼"):
+        config = ModelConfig("llm")
+        config.provider = getattr(settings, "bailian_llm_provider", "") or "阿里云百炼"
+        config.api_key = getattr(settings, "bailian_llm_api_key", "") or ""
+        config.base_url = getattr(settings, "bailian_llm_base_url", "") or ""
+        config.model_id = getattr(settings, "bailian_llm_model_id", "") or ""
+        return config
     if key in ("huagong", "hg", "华工"):
         api_key = getattr(settings, "huagong_llm_api_key", "") or ""
         base_url = getattr(settings, "huagong_llm_base_url", "") or ""
@@ -67,6 +81,30 @@ def _provider_override(provider: str | None) -> ModelConfig | None:
             config.model_id = model_id
             return config
     return None
+
+
+_BAILIAN_PROVIDER_KEYS = frozenset(
+    ("bailian", "aliyun", "dashscope", "阿里云", "阿里云百炼", "百炼")
+)
+
+
+def _apply_model_override(
+    config: ModelConfig,
+    override: ModelConfig | None,
+    provider: str | None,
+    model: str | None,
+) -> None:
+    """把前端选的模型名写进 config.model_id（默认端点与百炼端点均生效）。
+
+    华工等独立供应商的模型名由后端写死，忽略前端 model；只有默认端点 /
+    百炼端点允许覆盖。空 model 时保留供应商自己的默认模型名。
+    """
+    if not model:
+        return
+    key = (provider or "").strip().lower()
+    if override is not None and key not in _BAILIAN_PROVIDER_KEYS:
+        return
+    config.model_id = model
 
 
 _QUOTA_RESET_RE = re.compile(
@@ -206,10 +244,9 @@ async def chat_completion(
     override = _provider_override(provider)
     if override is not None:
         config = override
-    # 默认端点下，允许前端指定具体模型名（如 qwen3.7-max / glm-5.3）。
-    # 仅当未走独立供应商（huagong）时生效，避免把模型名错发给华工端点。
-    if override is None and model:
-        config.model_id = model
+    # 默认端点与百炼端点都允许前端指定具体模型名（如 qwen3.7-max / deepseek-v4.1-flash-1017）；
+    # 华工等独立供应商忽略 model，避免把模型名错发给其端点。
+    _apply_model_override(config, override, provider, model)
     _require_available(config)
     payload: dict = {
         "model": config.model_id,
@@ -292,8 +329,7 @@ async def stream_chat_completion(
     override = _provider_override(provider)
     if override is not None:
         config = override
-    if override is None and model:
-        config.model_id = model
+    _apply_model_override(config, override, provider, model)
     _require_available(config)
     payload: dict = {
         "model": config.model_id,

@@ -37,7 +37,12 @@
     "wxext14566970e7e9f62": "2.27.3"
   },
   "packOptions": {
-    "ignore": [],
+    "ignore": [
+      {
+        "type": "folder",
+        "value": "assets/work-review"
+      }
+    ],
     "include": []
   },
   "editorSetting": {},

@@ -1086,7 +1086,7 @@ async def create_folder(
 ):
     """在资料库内新建文件夹（可指定父文件夹，不指定则为根）。"""
     kb = await _get_kb(db, kb_id)
-    await _require_role(db, kb, user, "editor")
+    await _require_role(db, kb, user, "admin")
     _reject_builtin(kb, "新建文件夹")
     if req.parent_id is not None:
         await _get_folder(db, kb_id, req.parent_id)
@@ -1119,7 +1119,7 @@ async def pin_folder(
 ):
     """置顶/取消置顶文件夹：置顶的排在同级最前，多个置顶按置顶时间倒序。"""
     kb = await _get_kb(db, kb_id)
-    await _require_role(db, kb, user, "editor")
+    await _require_role(db, kb, user, "admin")
     _reject_builtin(kb, "置顶文件夹")
     folder = await _get_folder(db, kb_id, folder_id)
     folder.is_pinned = req.pinned
@@ -1138,7 +1138,7 @@ async def delete_folder(
 ):
     """删除文件夹（连同全部子文件夹）；其中的文档移到上层文件夹，不会丢失。"""
     kb = await _get_kb(db, kb_id)
-    await _require_role(db, kb, user, "editor")
+    await _require_role(db, kb, user, "admin")
     _reject_builtin(kb, "删除文件夹")
     folder = await _get_folder(db, kb_id, folder_id)
 
@@ -1189,7 +1189,7 @@ async def rename_folder(
 ):
     """重命名文件夹（仅改名称，不影响层级与文档归属）。"""
     kb = await _get_kb(db, kb_id)
-    await _require_role(db, kb, user, "editor")
+    await _require_role(db, kb, user, "admin")
     _reject_builtin(kb, "重命名文件夹")
     folder = await _get_folder(db, kb_id, folder_id)
     folder.name = req.name.strip()

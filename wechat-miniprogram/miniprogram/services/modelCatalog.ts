@@ -3,7 +3,9 @@
  *
  * 字段说明：
  *  - id          选择键（唯一）
- *  - provider    后端 provider 键（''=默认文本端点，仅此一种；华工无文本端点，不列入）
+ *  - provider    后端 provider 键（决定真实供应商，选哪个走哪个，不降级）：
+ *                  ''       默认文本端点（生产 = 本地 DeepSeek 网关 100.126.198.2）
+ *                  'bailian' 阿里云百炼 token-plan 端点（与本地端点共存）
  *  - providerName 展示用供应商名（截图左侧那列，如 DeepSeek / 通义千问）
  *  - model       传给后端的 model id
  *  - name        友好名称
@@ -13,8 +15,10 @@
  *  - badges      角标（截图里的 New / 限时夜间5折 之类）
  *  - capabilities 能力标签（截图右侧：文本生成、推理模型、视觉理解…）
  *
- * ⚠️ 只放后端实际支持的模型。所有模型走默认端点（provider=''），具体端点由服务端
- * 部署环境决定（当前为本地 DeepSeek 网关），前端用 model 字段覆盖具体模型名。
+ * ⚠️ 2026-11-26（用户「各自走各自的，选择哪个模型就走哪个」）：
+ * 千问两条 + DeepSeek1017 走阿里云百炼（provider='bailian'），
+ * DeepSeek V4.1（本地）走本地网关（provider=''）。两条链路共存，互不覆盖；
+ * 百炼配额用尽时后端如实报错，不会自动降级到本地模型。
  * 各选项保留自己的 model id，不做静默归一；新增模型请单独加一条，不要改写旧项。
  *
  * 注：安全工识别（隐患识别）不在这份目录里——它由后端 detect_hazard 固定走华工
@@ -36,7 +40,7 @@ export interface ModelItem {
 export const MODEL_CATALOG: ModelItem[] = [
   {
     id: 'deepseek-v4.1-flash-1017',
-    provider: '',
+    provider: 'bailian',
     providerName: 'DeepSeek',
     model: 'deepseek-v4.1-flash-1017',
     name: 'DeepSeek V4.1 Flash',
@@ -48,7 +52,7 @@ export const MODEL_CATALOG: ModelItem[] = [
   },
   {
     id: 'qwen3.7-plus',
-    provider: '',
+    provider: 'bailian',
     providerName: '通义千问',
     model: 'qwen3.7-plus',
     name: '通义千问 3.7 Plus',
@@ -60,7 +64,7 @@ export const MODEL_CATALOG: ModelItem[] = [
   },
   {
     id: 'qwen3.8-flash',
-    provider: '',
+    provider: 'bailian',
     providerName: '通义千问',
     model: 'qwen3.8-flash',
     name: '通义千问 3.8 Flash',

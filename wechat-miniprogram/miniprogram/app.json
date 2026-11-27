@@ -7,7 +7,6 @@
     "pages/register/index",
     "pages/join-project/index",
     "pages/agent/index",
-    "pages/capture/index",
     "pages/mine/index",
     "pages/drafts/index",
     "pages/settings/index",
