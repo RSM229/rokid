@@ -187,6 +187,26 @@ def _draft_context_version(args: dict | None, orig_args: dict | None = None) -> 
     return 0
 
 
+_PURPOSE_ONLY_WORDS = (
+    "工作记录", "记录工作", "记录一下", "记一下", "一条", "记录", "工作",
+    "帮我", "给我", "请", "整理", "生成", "创建", "新建", "今天", "现场", "的", "吧",
+)
+
+
+def is_purpose_only(text: str) -> bool:
+    """整句只是「记录工作 / 工作」这类目的词，不是工作内容。
+
+    2026-11-27 真机：点快捷入口「记录工作」被模型当成 work_content，建出一条
+    「内容：工作」的空记录。宁可判成没内容去追问，也不要把目的词写进记录。
+    """
+    rest = str(text or "").strip()
+    if not rest:
+        return False
+    for word in sorted(_PURPOSE_ONLY_WORDS, key=len, reverse=True):
+        rest = rest.replace(word, "")
+    return not rest.strip()
+
+
 def _need_more(missing: list[str], reply: str = "",
                options: dict[str, list[str]] | None = None) -> dict:
     """参数不足：回纯文字追问话术。
@@ -1967,6 +1987,12 @@ async def _create_work_record(ctx: ToolContext, args: dict) -> dict:
     if content:
         content = multi_image_split.scrub_watermark_noise(content)
         content = multi_image_split.scrub_reading_noise(content)
+    # 用户只说了「记录工作 / 工作」这类目的词时，不能当成工作内容落库
+    # （2026-11-27 真机：点「记录工作」生成了一条「待定｜未填写区域 内容：工作」的空记录）。
+    if content and is_purpose_only(content):
+        content = ""
+        args["work_content"] = ""
+        args["content"] = ""
     section = str(args.get("section") or "").strip()
     # 🔴 2026-11-27 实测：用户说「旁站混凝土浇筑，部位三层梁板」，模型把部位填进
     # station_part、工序填进 station_process，但 section/work_content 都为空 →

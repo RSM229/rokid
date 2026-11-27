@@ -57,3 +57,14 @@ def test_complaints_are_not_treated_as_field_values():
     assert refill_missing_from_message(
         {"record_type": "巡视", "section": ""}, ["巡视的工程部位"], "我不是已经说了吗"
     ) is None
+
+
+def test_purpose_only_text_is_not_a_record_content():
+    """点「记录工作」入口时，不能把目的词当成工作内容建出一条空记录。"""
+    from app.services.agent_tools import is_purpose_only
+
+    assert is_purpose_only("记录工作")
+    assert is_purpose_only("工作")
+    assert is_purpose_only("记录今天工作")
+    assert not is_purpose_only("三层梁板钢筋绑扎")
+    assert not is_purpose_only("沟槽开挖，10 个工人")

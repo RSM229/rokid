@@ -34,6 +34,8 @@ interface AgentProgressTraceResponse {
 
 let progressPollTimer: number | null = null
 let progressClockTimer: number | null = null
+/** 用户主动「新建对话」后，页面重建时不要自动把上一次会话拉回来（2026-11-27 实测）。 */
+let skipRestoreOnce = false
 let progressWriteQueue: Promise<void> = Promise.resolve()
 let activeProgressRequestId = ''
 let activeProgressMessageIndex = -1
@@ -1118,6 +1120,9 @@ Page(themed({
       } else {
         this.beginDispatchConversation()
       }
+    } else if (skipRestoreOnce) {
+      // 刚点过「新建对话」：这次进入保持空态，不去拉上一次会话
+      skipRestoreOnce = false
     } else {
       void this.restoreLatestConversation(openingSessionId)
     }
@@ -1773,7 +1778,11 @@ Page(themed({
       // agent_tools 的确认白名单同词表）：
       //   只有「草稿已核对通过（无 issues）」才执行；仍有缺项时确认词照旧
       //   走文字补充（回执会列出还差什么），不会误触建档。
+      // 「确认生成工作记录」是按钮上的完整说法，之前只认「确认生成」，于是这句
+      // 被当成补充内容写进草稿（2026-11-27 真机截图：回执「已把‘确认生成工作记录’
+      // 并入当前草稿」）。这里放宽成「确认/生成 + 记录」的句式。
       const confirmHint = /^\s*(确认生成|确认并生成|确认创建|生成正式记录|好，?生成|就这么生成|生成吧)\s*[。！!～~]*\s*$/.test(text)
+        || /^\s*(确认|确定)?\s*(并)?\s*(生成|创建|保存)\s*(正式)?\s*(工作)?\s*记录\s*[。！!～~]*\s*$/.test(text)
       if (confirmHint) {
         const plan = this.data.messages[pendingReviewIndex]?.reviewPlan
         const canConfirm = plan && reviewIssues(plan).length === 0
@@ -6148,6 +6157,7 @@ Page(themed({
   newChat() {
     this.saveCurrentSession()
     this.currentSessionId = 0
+    skipRestoreOnce = true
     this.setData({ showHistory: false })
     this.initMessages()
     void this.loadPendingDrafts()
