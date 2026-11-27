@@ -647,6 +647,12 @@
 .agent-progress-event.failed .agent-progress-mark { background: #c54d4d; }
 .agent-progress-event.waiting .agent-progress-mark { background: #c58a35; }
 .agent-progress-body { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 2rpx; }
+/* 思维链徽标：思维链=蓝、工具调用=灰、调用结果=浅蓝（对应 2026-11-27 链路图） */
+.agent-progress-chain { display: flex; margin-bottom: 2rpx; }
+.agent-progress-chip { display: inline-block; padding: 2rpx 10rpx; border-radius: 6rpx; font-size: 20rpx; line-height: 1.5; }
+.agent-progress-chip.think { background: #e6efff; color: #2f6bff; }
+.agent-progress-chip.tool { background: #eceff2; color: #5b6b78; }
+.agent-progress-chip.result { background: #e8f1fb; color: #3d6f9e; }
 .agent-progress-event-title { color: #354651; font-size: 22rpx; line-height: 1.5; word-break: break-word; }
 .agent-progress-event.completed .agent-progress-event-title { color: #65737d; }
 .agent-progress-detail { color: #8a94a6; font-size: 20rpx; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }

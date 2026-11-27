@@ -80,6 +80,8 @@ Page(themed({
   data: {
     kbId: 0,
     kb: {} as KbDetail,
+    // 私有库从资料库页跳进来时用真实库名，别再显示「知识详情」
+    kbTitle: '资料库',
     roleLabel: ROLE_LABEL,
     canUpload: false,
     canManage: false,
@@ -249,6 +251,7 @@ Page(themed({
       const builtin = !!kb.is_builtin
       this.setData({
         kb,
+        kbTitle: kb.name || '资料库',
         canUpload: !builtin && level >= 2,
         canManage: !builtin && level >= 3,
         archivePending: kb.archive_pending_count || 0,

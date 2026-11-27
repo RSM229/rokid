@@ -21,6 +21,9 @@ interface AgentProgressEventView {
   title: string
   detailText: string
   createdAt: string
+  /** 思维链标记：think / tool / result（2026-11-27 材料收集链路） */
+  chainKind?: string
+  chainLabel?: string
 }
 
 interface AgentProgressTraceResponse {
@@ -99,7 +102,12 @@ function progressDetailText(detail: unknown): string {
     const value = progressScalar(data[key])
     if (value && !parts.some(part => part.includes(`${label}：`))) parts.push(`${label}：${value}`)
   }
-  if (!parts.length) return JSON.stringify(data).slice(0, 900)
+  if (!parts.length) {
+    const rest = Object.fromEntries(
+      Object.entries(data).filter(([key]) => !key.startsWith('chain_')),
+    )
+    return JSON.stringify(rest).slice(0, 900)
+  }
   return parts.join(' · ').slice(0, 1200)
 }
 
@@ -111,6 +119,9 @@ function progressEventView(raw: Record<string, unknown>): AgentProgressEventView
   const createdAt = Number.isNaN(parsed.getTime())
     ? created
     : `${String(parsed.getHours()).padStart(2, '0')}:${String(parsed.getMinutes()).padStart(2, '0')}:${String(parsed.getSeconds()).padStart(2, '0')}`
+  const detail = (raw.detail && typeof raw.detail === 'object' && !Array.isArray(raw.detail))
+    ? raw.detail as Record<string, unknown>
+    : {}
   return {
     eventId,
     sequence: Number(raw.sequence || 0),
@@ -118,6 +129,8 @@ function progressEventView(raw: Record<string, unknown>): AgentProgressEventView
     title: String(raw.title || raw.name || '处理事件'),
     detailText: progressDetailText(raw.detail),
     createdAt,
+    chainKind: String(detail.chain_kind || ''),
+    chainLabel: String(detail.chain_label || ''),
   }
 }
 

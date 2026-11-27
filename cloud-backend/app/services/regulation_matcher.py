@@ -274,6 +274,11 @@ def _match_from_rag_index(
 
     results: list[dict] = []
     for hit in hits:
+        # 2026-11-27：只取内置语料。user_kb/ 下是用户个人库与项目档案库，
+        # 这个匹配器是公共入口（隐患识别时调用，没有用户上下文），
+        # 混进来会把别人的资料当规范条款展示。
+        if str(hit.get("source_id") or "").startswith("user_kb/"):
+            continue
         haystack = f"{hit['source_name']}{hit['content']}"
         # 类别词出现在结果里，说明专业方向对得上，给一点加权
         bonus = 0.15 if hazard_category and hazard_category in haystack else 0.0

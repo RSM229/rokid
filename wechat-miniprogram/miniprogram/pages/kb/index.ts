@@ -42,6 +42,20 @@ let activeError: Parameters<typeof recorder.onError>[0] | null = null
 recorder.onStop((result) => activeStop?.(result))
 recorder.onError((error) => activeError?.(error))
 
+/** 资料库角色：viewer 只读，editor/admin/owner 可上传与整理 */
+function canWriteRole(role?: string): boolean {
+  return role === 'owner' || role === 'admin' || role === 'editor'
+}
+
+interface LibraryEntry {
+  key: 'project' | 'personal'
+  kbId: number
+  /** 打开这个库时定位到的文件夹：项目资料=根(0)，我的资料=我的成员文件夹 */
+  folderId: number
+  label: string
+  role: string
+}
+
 Page(themed({
   recTimer: null as number | null,
   recorderStopHandler: null as Parameters<typeof recorder.onStop>[0] | null,
@@ -57,6 +71,28 @@ Page(themed({
     kbName: '资料库',
     canUpload: false,
     resolving: true,
+
+    /**
+     * 资料库分两个口径（2026-11-27 用户确认）：
+     *   项目资料 = 项目资料库的根，加入该项目且在岗的成员都能看；
+     *   我的资料 = **同一个库**里我的成员文件夹（同一份数据，不复制）。
+     * 生成的文书只写一份，落在「项目资料库 / <创建人> / 工作记录与表单 / 类型」，
+     * 所以两个入口看到的是同一批文档，只是定位不同。
+     */
+    libraries: [] as LibraryEntry[],
+    activeLibKey: 'personal' as 'project' | 'personal',
+    /** 我在项目库里的成员文件夹 id（0 = 当前没有项目库） */
+    myFolderId: 0,
+    /** 个人私有库（监理日记 / 私有上传，仅本人可见）id */
+    privateKbId: 0,
+    /** 「我的资料」根上显示「私有文件」入口 */
+    showPrivateEntry: false,
+    /** 历史文书待同步份数（归档目标从个人库切到项目库后，老文书要迁一次） */
+    archivePending: 0,
+    backfilling: false,
+    /** 解析两库时所在的项目 id：切换项目后项目资料库必须重新解析，
+     *  否则会继续显示上一个项目的档案库（跨项目串库）。 */
+    resolvedProjectId: 0,
 
     docs: [] as Array<KbDoc & { sizeText: string }>,
     docsLoading: false,
@@ -143,8 +179,13 @@ Page(themed({
       wx.reLaunch({ url: '/pages/login/index' })
       return
     }
-    if (!this.data.kbId) this.resolveHome()
-    else this.loadFolders()
+    // 项目切换后（工作台切项目）两库都要重解析：项目资料库跟着项目变。
+    const currentProjectId = Number(session.getUser()?.project_id || 0)
+    if (!this.data.kbId || currentProjectId !== this.data.resolvedProjectId) {
+      this.resolveHome()
+      return
+    }
+    this.loadFolders()
   },
 
   onHide() {
@@ -209,9 +250,60 @@ Page(themed({
   async resolveHome() {
     this.setData({ resolving: true })
     try {
-      const home = await request<{ id: number; name: string; role: string }>('/kb/mine')
-      this.setData({ kbId: home.id, kbName: home.name, canUpload: true })
-      wx.setNavigationBarTitle({ title: home.name || '资料库' })
+      // 个人库（私有：日记/私有上传）必取；项目库取不到（无项目 / 非在岗成员）
+      // 时只显示个人库，不报错。
+      const [home, projectLib] = await Promise.all([
+        request<{ id: number; name: string; role: string }>('/kb/mine'),
+        request<{
+          id: number
+          name: string
+          role: string
+          my_folder_id?: number
+          my_folder_name?: string
+          archive_pending_count?: number
+        }>('/kb/project-archive').catch(() => null),
+      ])
+      const libraries: LibraryEntry[] = []
+      if (projectLib && projectLib.id && projectLib.my_folder_id) {
+        // 同一个库，两个入口：根（全项目） / 我的成员文件夹（同一份数据）
+        libraries.push({
+          key: 'project',
+          kbId: projectLib.id,
+          folderId: 0,
+          label: '项目资料',
+          role: projectLib.role || 'viewer',
+        })
+        libraries.push({
+          key: 'personal',
+          kbId: projectLib.id,
+          folderId: projectLib.my_folder_id,
+          label: '我的资料',
+          role: projectLib.role || 'viewer',
+        })
+      } else {
+        // 没有项目库时，「我的资料」退回个人库（老口径，仍可用）
+        libraries.push({
+          key: 'personal',
+          kbId: home.id,
+          folderId: 0,
+          label: '我的资料',
+          role: home.role || 'owner',
+        })
+      }
+      const active = libraries.find((lib) => lib.key === 'personal') || libraries[0]
+      this.setData({
+        libraries,
+        activeLibKey: active.key,
+        kbId: active.kbId,
+        currentFolderId: active.folderId,
+        kbName: '资料库',
+        canUpload: canWriteRole(active.role),
+        myFolderId: projectLib?.my_folder_id || 0,
+        privateKbId: home.id,
+        archivePending: projectLib?.archive_pending_count || 0,
+        resolvedProjectId: Number(session.getUser()?.project_id || 0),
+      })
+      wx.setNavigationBarTitle({ title: '资料库' })
       await this.loadFolders()
       await this.loadTags()
     } catch (error) {
@@ -219,7 +311,13 @@ Page(themed({
       // 保证文档、上传、录音仍可用，不把整页留成空白。
       const kb = await this.resolveHomeFallback()
       if (kb) {
-        this.setData({ kbId: kb.id, kbName: kb.name, canUpload: true, treeUnavailable: true })
+        this.setData({
+          kbId: kb.id,
+          kbName: kb.name,
+          canUpload: true,
+          treeUnavailable: true,
+          resolvedProjectId: Number(session.getUser()?.project_id || 0),
+        })
         wx.setNavigationBarTitle({ title: kb.name || '资料库' })
         await this.loadDocs(0)
       } else {
@@ -228,6 +326,42 @@ Page(themed({
     } finally {
       this.setData({ resolving: false })
     }
+  },
+
+  /** 切换「项目资料 / 我的资料」：清空上一库的视图状态再重新拉取 */
+  async switchLibrary(event: WechatMiniprogram.TouchEvent) {
+    const key = event.currentTarget.dataset.key as 'project' | 'personal'
+    if (!key || key === this.data.activeLibKey) return
+    const lib = this.data.libraries.find((item) => item.key === key)
+    if (!lib) return
+    this.setData({
+      activeLibKey: lib.key,
+      kbId: lib.kbId,
+      canUpload: canWriteRole(lib.role),
+      // 上一个库的目录/文档/标签/搜索态全部清掉，避免串库显示
+      docs: [],
+      folders: [],
+      folderMap: {},
+      folderOptions: [],
+      // 项目资料 → 根；我的资料 → 我的成员文件夹（同一个库）
+      currentFolderId: lib.folderId,
+      breadcrumb: [],
+      currentSubfolders: [],
+      tags: [],
+      tagFilterId: 0,
+      tagFilterName: '',
+      inDiaryFolder: false,
+      searchKeyword: '',
+      treeUnavailable: false,
+      docsLoading: true,
+      showPrivateEntry: false,
+      // 回收站/标签管理等弹层状态也归零，否则会看到上一库的软删列表
+      showTrash: false,
+      trashDocs: [],
+      showTagManage: false,
+    })
+    await this.loadFolders()
+    await this.loadTags()
   },
 
   async resolveHomeFallback(): Promise<{ id: number; name: string } | null> {
@@ -350,20 +484,73 @@ Page(themed({
       const node = map[folderId]
       subs = node && node.children ? node.children : []
     }
-    // 监理日记生成入口：仅位于「监理日记」文件夹时显示（按目录名判定，不依赖 kb 详情时序）
-    const node = folderId ? map[folderId] : undefined
-    const inDiary = !!node && node.name === '监理日记'
+    // 「我的资料」= 项目库里的我的成员文件夹：根上放两个个人入口
+    //   1) 私有文件（监理日记 / 私有上传，仅自己可见，走个人库）
+    //   2) 生成我的监理日记（写个人库，不进项目共享）
+    const atMyFolder =
+      this.data.activeLibKey === 'personal' &&
+      this.data.myFolderId > 0 &&
+      folderId === this.data.myFolderId
     this.setData({
       breadcrumb: crumb,
       currentSubfolders: subs,
-      inDiaryFolder: inDiary,
+      inDiaryFolder: atMyFolder,
+      showPrivateEntry: atMyFolder,
     })
-    if (inDiary && !this.data.diaryDate) {
+    if (atMyFolder && !this.data.diaryDate) {
       const now = new Date()
       const pad = (n: number) => String(n).padStart(2, '0')
       this.setData({ diaryDate: `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}` })
     }
     this.loadDocs(folderId)
+  },
+
+  /** 打开个人私有库（监理日记 / 私有上传，仅本人可见） */
+  openPrivateLibrary() {
+    if (!this.data.privateKbId) return
+    wx.navigateTo({ url: `/pages/kb/detail?id=${this.data.privateKbId}` })
+  },
+
+  /**
+   * 历史文书补归档。
+   * 归档目标 2026-11-27 从「创建人个人库」改成「项目库 / 成员文件夹」，
+   * 之前已归档的文书还留在个人库里，需要迁一次（移动，不复制）。
+   */
+  syncArchiveBackfill() {
+    if (this.data.backfilling || !this.data.archivePending) return
+    wx.showModal({
+      title: '同步历史文书',
+      content: `项目里还有 ${this.data.archivePending} 份历史文书留在个人库，同步后会归到各成员的文件夹（移动，不复制）。`,
+      confirmText: '开始同步',
+      success: (result) => {
+        if (result.confirm) void this.runArchiveBackfill()
+      },
+    })
+  },
+
+  async runArchiveBackfill() {
+    this.setData({ backfilling: true })
+    wx.showLoading({ title: '正在同步…', mask: true })
+    try {
+      const res = await request<{
+        total: number
+        synced: number
+        failed: number
+        remaining: number
+      }>('/kb/project-archive/backfill', { method: 'POST', data: {}, timeout: 180000 })
+      wx.hideLoading()
+      const parts = [`已同步 ${res.synced} 份`]
+      if (res.failed) parts.push(`${res.failed} 份失败`)
+      if (res.remaining) parts.push(`还剩 ${res.remaining} 份，可再点一次`)
+      wx.showToast({ title: parts.join('，'), icon: 'none' })
+      this.setData({ archivePending: res.remaining || 0 })
+      await this.loadFolders()
+    } catch (error) {
+      wx.hideLoading()
+      wx.showToast({ title: (error as Error).message, icon: 'none' })
+    } finally {
+      this.setData({ backfilling: false })
+    }
   },
 
   /** 监理日记：在资料库「监理日记」文件夹内选日期 */

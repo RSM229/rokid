@@ -1,6 +1,20 @@
 /* 资料库首页：直接渲染分类树（去掉多库列表） */
 .page { padding: 0 24rpx calc(180rpx + env(safe-area-inset-bottom)); box-sizing: border-box; }
 
+/* 项目资料 / 我的资料：胶囊分段控件（项目库全员可见，个人库仅本人） */
+.lib-switch { display: flex; gap: 8rpx; margin: 18rpx 0 4rpx; padding: 6rpx; background: rgba(255,255,255,0.60); border: 2rpx solid rgba(var(--brand-rgb, 47,50,55), 0.12); border-radius: 999rpx; }
+.lib-chip { flex: 1; height: 60rpx; line-height: 60rpx; text-align: center; border-radius: 999rpx; font-size: 26rpx; color: #6b7a8d; font-weight: 500; }
+.lib-chip.on { background: var(--brand, #33405a); color: #fff; }
+.lib-chip:active { opacity: 0.85; }
+/* 权限说明：讲清两个库的差别，避免用户以为是同一份资料的两种入口 */
+.lib-hint { margin: 8rpx 0 2rpx; padding-left: 16rpx; font-size: 22rpx; color: #8a94a6; line-height: 1.5; }
+
+/* 历史文书补归档提示条 */
+.archive-tip { display: flex; align-items: center; gap: 16rpx; margin: 16rpx 0 8rpx; padding: 16rpx 20rpx; background: rgba(255,193,7,0.10); border: 2rpx solid rgba(255,193,7,0.32); border-radius: 16rpx; }
+.archive-tip-text { flex: 1; font-size: 22rpx; color: #8a6100; line-height: 1.5; }
+.archive-tip-btn { flex: none; padding: 8rpx 24rpx; border-radius: 999rpx; background: var(--brand, #33405a); color: #fff; font-size: 22rpx; }
+.archive-tip-btn.off { opacity: 0.5; }
+
 
 /* 搜索栏：输入即搜（300ms 防抖），清空恢复文件夹视图 */
 .search-bar { position: relative; display: flex; align-items: center; margin: 16rpx 0 20rpx; }
@@ -54,6 +68,9 @@
 /* 纯 CSS 文件夹图形，替代 emoji（emoji 各机型渲染差异大、显廉价） */
 .fico-shape { position: relative; width: 38rpx; height: 28rpx; border-radius: 5rpx; background: linear-gradient(145deg, #8fbaff 0%, #3b7bf0 100%); }
 .fico-shape::before { content: ""; position: absolute; left: 0; top: -6rpx; width: 17rpx; height: 9rpx; border-radius: 4rpx 4rpx 0 0; background: #8fbaff; }
+/* 私有文件夹用中性灰，和项目共享目录区分开 */
+.fico-shape.fico-private { background: linear-gradient(145deg, #b9c3d1 0%, #7b8798 100%); }
+.fico-shape.fico-private::before { background: #b9c3d1; }
 .fmain { flex: 1; min-width: 0; }
 .fname { font-size: 28rpx; font-weight: 600; color: var(--ink-2, #243b55); line-height: 1.35; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fsub { margin-top: 4rpx; font-size: 22rpx; color: #8a94a6; }

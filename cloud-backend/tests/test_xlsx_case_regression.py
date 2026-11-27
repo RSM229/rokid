@@ -166,29 +166,52 @@ def outsider_headers() -> dict:
 
 
 # ---------------------------------------------------------------------------
-# TC029 按人筛选-基本流：?creator_id=X 只剩该人记录，items 带 creator_id/name
+# TC029 工作记录可见范围：默认只看本人；项目全量需显式 scope=project
+# 2026-11-27 口径变更——工作记录是个人台账，不再「同项目所有人可见」。
 # ---------------------------------------------------------------------------
 
 def test_TC029_creator_filter(ctx):
     c = ctx["client"]
     ids = ctx["ids"]
-    # 不带 creator_id：两条都在（同项目可见）
+
+    # 默认个人视角：监理员只看到自己那条
     r_all = c.get("/api/work-record/list", headers=inspector_headers())
     assert r_all.status_code == 200, r_all.text
     # 响应结构：{"total": N, "records": [...]}（list_work_records 真实口径）
     ids_all = {i["id"] for i in r_all.json()["records"]}
-    assert {ids["rec_chief"], ids["rec_ins"]} <= ids_all
+    assert ids["rec_ins"] in ids_all
+    assert ids["rec_chief"] not in ids_all, "默认口径不得返回他人创建的工作记录"
 
-    # 勾选总监一人：只剩总监那条
-    r = c.get(
+    # 传别人的 creator_id 试图窥视 → 拒绝（前端旧版「按人筛选」参数）
+    r_peek = c.get(
         f"/api/work-record/list?creator_id={ids['chief']}",
         headers=inspector_headers(),
+    )
+    assert r_peek.status_code == 403, r_peek.text
+
+    # 无审核权限时申请 scope=project → 降级为本人视角（不 403，后台审核页不至于报错）
+    r_deny = c.get("/api/work-record/list?scope=project", headers=inspector_headers())
+    assert r_deny.status_code == 200, r_deny.text
+    ids_deny = {i["id"] for i in r_deny.json()["records"]}
+    assert ids["rec_ins"] in ids_deny
+    assert ids["rec_chief"] not in ids_deny, "无 task_manage 时不得拿到项目全量"
+
+    # Web 后台审核口径：显式 scope=project 且持审核类权限 → 项目全量
+    chief_audit = _auth_header(ids["chief"], "chief_supervisor", ["task_manage"])
+    r_project = c.get("/api/work-record/list?scope=project", headers=chief_audit)
+    assert r_project.status_code == 200, r_project.text
+    ids_project = {i["id"] for i in r_project.json()["records"]}
+    assert {ids["rec_chief"], ids["rec_ins"]} <= ids_project
+
+    # 按人筛选只在项目口径下成立：items 带 creator_id/name 供后台回显
+    r = c.get(
+        f"/api/work-record/list?scope=project&creator_id={ids['chief']}",
+        headers=chief_audit,
     )
     assert r.status_code == 200, r.text
     items = r.json()["records"]
     assert items, "按人筛选结果不应为空"
     assert all(i["creator_id"] == ids["chief"] for i in items)
-    # 列表行回显记录人（卡脚显示用）
     assert items[0]["creator_name"] == "总监甲"
 
 

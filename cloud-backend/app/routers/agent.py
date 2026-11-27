@@ -1543,13 +1543,17 @@ async def _apply_pending_type_change(
     """
     if not project_id or new_type not in {t.value for t in WorkRecordType}:
         return None
+    conditions = [
+        WorkRecord.project_id == project_id,
+        WorkRecord.record_type == "待定",
+        WorkRecord.status != WorkRecordStatus.ARCHIVED.value,
+    ]
+    # 工作记录是个人台账（2026-11-27）：普通用户只改自己的；总监复核时才跨人。
+    if not user.has_permission("task_manage"):
+        conditions.append(WorkRecord.creator_id == user.id)
     res = await db.execute(
         select(WorkRecord)
-        .where(
-            WorkRecord.project_id == project_id,
-            WorkRecord.record_type == "待定",
-            WorkRecord.status != WorkRecordStatus.ARCHIVED.value,
-        )
+        .where(*conditions)
         .order_by(WorkRecord.id.desc())
         .limit(1)
     )
@@ -2259,6 +2263,28 @@ async def _agent_chat_impl(
         },
     )
 
+    material = (req.material or "").strip()
+    # 2026-11-27：回答前先收集材料（最近对话 / 附件 / 资料库 / 待办 / 记忆 /
+    # 近期记录）。收集过程按「思维链 → 工具调用 → 调用结果」写进进度轨迹，
+    # 材料块作为 system 注入；收集失败只记日志，不影响下面的路由与回答。
+    materials_block = ""
+    try:
+        from app.services import agent_materials
+
+        collected = await agent_materials.collect(
+            db, user, project_id, conversation_id, message,
+            images=req.images or [],
+            material=material,
+            earlier_messages=earlier_messages or [],
+            project_memories=project_memories,
+            personal_memories=personal_memories,
+            has_pending=bool(pend_for_context),
+            report=report_progress,
+        )
+        materials_block = collected.block
+    except Exception:  # noqa: BLE001
+        logger.warning("材料收集失败，本轮按现有上下文继续", exc_info=True)
+
     system = _AGENT_SYSTEM.format(
         catalog=agent_tools.catalog_for_prompt(),
         actions=json.dumps(agent_request_plan.action_catalog(), ensure_ascii=False),
@@ -2272,6 +2298,8 @@ async def _agent_chat_impl(
         messages.append({"role": "system", "content": project_memory_block})
     if personal_memory_block:
         messages.append({"role": "system", "content": personal_memory_block})
+    if materials_block:
+        messages.append({"role": "system", "content": materials_block})
     if ref_context:
         # 加显式抬头：这些是用户主动 @ 指定、并要求「以它为准」的材料，
         # 与普通检索上下文区分开，否则模型会把它们当成泛泛的背景信息。
@@ -2288,7 +2316,6 @@ async def _agent_chat_impl(
         if history_summary:
             messages.append({"role": "user", "content": history_summary})
     messages.extend(_history_messages(req.history))
-    material = (req.material or "").strip()
     if material:
         # 图/文件已由前端交给视觉模型/文档解析，这里只把文字素材挂到用户消息后面。
         # 不挂的话模型会以为「用户只发了一句话」，既抓不到现场情况，也容易编造。
@@ -3226,6 +3253,10 @@ async def _agent_chat_impl(
     context_hint, query_extra = await _last_result_context(
         db, user.id, conversation_id, project_id,
     )
+    # 2026-11-27：把本轮收集到的材料接到问答上下文最前面（项目记忆/资料库/待办/
+    # 近期记录都在里面），否则「先收集再回答」只停留在进度条上、答案用不到。
+    if materials_block:
+        context_hint = (materials_block + "\n\n" + context_hint).strip()
     require_context = bool(_FOLLOWUP_REFERENCE_RE.search(message)) and not context_hint
     if not answer or _streaming_enabled():
         try:

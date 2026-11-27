@@ -3335,6 +3335,8 @@ async def _generate_document(ctx: ToolContext, args: dict) -> dict:
         )
 
     # 单条记录 → 省统表文书
+    # 工作记录是个人台账（2026-11-27 口径）：不指定编号时只用本人最近的记录；
+    # 指定了别人的编号，只有持任务管理权限（总监复核场景）才放行。
     record_id = args.get("record_id")
     stmt = select(WorkRecord).where(WorkRecord.project_id == ctx.project_id)
     if record_id not in (None, ""):
@@ -3343,10 +3345,12 @@ async def _generate_document(ctx: ToolContext, args: dict) -> dict:
         except (TypeError, ValueError):
             return _need_more(["记录编号"], f"没看懂记录编号「{record_id}」，请换成数字或说「生成监理日志」。")
     else:
-        stmt = stmt.order_by(WorkRecord.id.desc())
+        stmt = stmt.where(WorkRecord.creator_id == ctx.user.id).order_by(WorkRecord.id.desc())
     record = (await ctx.db.execute(stmt.limit(1))).scalar_one_or_none()
+    if record is not None and record.creator_id != ctx.user.id and not ctx.user.has_permission("task_manage"):
+        record = None
     if record is None:
-        return _ok("当前项目还没有工作记录，先在「工作记录 → +新建」建一条，再说「生成监理日志」。")
+        return _ok("你还没有工作记录，先在「工作记录 → +新建」建一条，再说「生成监理日志」。")
 
     from app.routers.form_doc import generate_form_from_record
     try:
@@ -3571,7 +3575,11 @@ async def _undo_last_action(ctx: ToolContext, args: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 async def _query_work_records(ctx: ToolContext, args: dict) -> dict:
-    stmt = select(WorkRecord).where(WorkRecord.project_id == ctx.project_id)
+    # 工作记录是个人台账（2026-11-27 口径）：只查本人创建的，不跨人。
+    stmt = select(WorkRecord).where(
+        WorkRecord.project_id == ctx.project_id,
+        WorkRecord.creator_id == ctx.user.id,
+    )
     section = str(args.get("section") or "").strip()
     if section:
         stmt = stmt.where(WorkRecord.section.like(f"%{section}%"))

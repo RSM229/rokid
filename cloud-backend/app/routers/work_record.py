@@ -34,6 +34,41 @@ from app.services import acceptance_ask_together, work_record_field_view, split_
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
+# ---- 工作记录的可见范围 ----------------------------------------------------
+# 业务口径（2026-11-27 用户确认）：工作记录是**个人台账**，默认只有创建人本人
+# 能看。项目内共享的是文书与项目资料库，不是工作记录。
+#
+# 「看项目内全部工作记录」只留给 Web 后台的审核页，且只认 ``task_manage``
+# （总监/副总监）。不能用 inspection / acceptance 这类键当门槛——它们本来就
+# 发给每个现场监理，等于人人可看全项目。
+# 小程序端从不申请 scope=project，所以在小程序里任何人（含总监）都只看自己。
+_PROJECT_RECORD_PERMISSION = "task_manage"
+
+
+def _can_read_project_records(user: User) -> bool:
+    """是否可显式申请「项目内全部工作记录」（仅 Web 后台审核页使用）。"""
+    return user.has_permission(_PROJECT_RECORD_PERMISSION)
+
+
+def _record_visibility_filter(user: User, scope: str, creator_id: Optional[int]):
+    """返回工作记录查询的可见性条件。
+
+    ``scope="mine"``（默认）= 只看本人；``scope="project"`` = 项目内全部，
+    需持 ``task_manage``。无权限时**降级为本人视角**而不是 403：Web 后台的
+    审核页会固定带 scope=project，普通岗位打开时应看到自己的记录，而不是报错。
+    ``creator_id`` 只能在可见范围内进一步收窄，不能越权放大。
+    """
+    if scope == "project" and _can_read_project_records(user):
+        if creator_id is not None:
+            return WorkRecord.creator_id == creator_id
+        return None
+    # 个人视角：本人创建。显式传了别人的 creator_id 视为越权，直接拒绝，
+    # 避免旧版前端（带「按人筛选」参数）静默拿到别人的数据。
+    if creator_id is not None and int(creator_id) != int(user.id):
+        raise HTTPException(status_code=403, detail="工作记录仅本人可见")
+    return WorkRecord.creator_id == user.id
+
+
 # 工作记录类型 -> 文书类型（「待定」不在其中：类型未定，套不了统表）
 RECORD_DOC_TYPES = {
     WorkRecordType.INSPECTION.value: DocType.INSPECTION.value,
@@ -1453,27 +1488,36 @@ async def list_work_records(
     status: Optional[str] = None,
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
-    creator_id: Optional[int] = Query(None, description="按创建人过滤（前端「按人筛选」）"),
+    creator_id: Optional[int] = Query(None, description="按创建人过滤（仅 Web 后台审核页可用）"),
+    scope: str = Query(
+        "mine",
+        pattern="^(mine|project)$",
+        description="mine=只看本人（默认，小程序口径）；project=项目内全部（需审核类权限）",
+    ),
     all_projects: bool = Query(False, description="公司级账号：跨项目汇总（仅读）"),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """查询工作记录列表（按项目返回，同一项目内所有用户可见，支持眼镜端记录同步到小程序）
+    """查询工作记录列表。
 
-    支持按创建日期范围过滤（start_date/end_date，含端点），与小程序端时间范围筛选对应。
-    creator_id 按创建人过滤（2026-11-18 小程序「按人筛选」），与类型/时间筛选同一位置叠加。
-    公司级账号带 ``all_projects=1`` 时不限项目（顶部「全部项目」视角）。
+    业务口径（2026-11-27）：工作记录是**个人台账**，默认只看本人创建的记录。
+    项目内共享的是文书与项目资料库，不是工作记录。
+
+    ``scope=project`` 仅供 Web 后台审核页显式申请（巡视/验收/旁站/见证/审批），
+    需持有对应权限；小程序端不申请，因此小程序内任何人（含总监）都只看自己。
+    公司级账号带 ``all_projects=1`` 时只放宽「跨项目」，不改变「本人」口径。
     """
-    scope = project_scope_id(user, all_projects)
+    project_scope = project_scope_id(user, all_projects)
     query = select(WorkRecord)
-    if scope is not None:
-        query = query.where(WorkRecord.project_id == scope)
+    if project_scope is not None:
+        query = query.where(WorkRecord.project_id == project_scope)
+    visibility = _record_visibility_filter(user, scope, creator_id)
+    if visibility is not None:
+        query = query.where(visibility)
     if record_type:
         query = query.where(WorkRecord.record_type == record_type)
     if status:
         query = query.where(WorkRecord.status == status)
-    if creator_id is not None:
-        query = query.where(WorkRecord.creator_id == creator_id)
     if start_date:
         query = query.where(WorkRecord.created_at >= datetime.combine(start_date, datetime.min.time()))
     if end_date:
@@ -1540,6 +1584,11 @@ async def list_work_records(
 
 @router.get("/stats")
 async def work_record_stats(
+    scope: str = Query(
+        "mine",
+        pattern="^(mine|project)$",
+        description="mine=只看本人（默认，小程序口径）；project=项目汇总计数（Web 后台看板）",
+    ),
     all_projects: bool = Query(False, description="公司级账号：跨项目汇总（仅读）"),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -1548,12 +1597,19 @@ async def work_record_stats(
 
     工作记录：未查看(viewed=false) 或 未处理(status=草稿/已提交)
     安全隐患：未处理(status != 已闭环 且 status != 驳回整改)
+
+    口径同列表：默认只统计**本人**创建的工作记录（工作记录是个人台账）。
+    ``scope=project`` 供 Web 后台看板取项目汇总，只返回条数、不含记录内容。
+    隐患仍按项目统计（隐患是项目级安全事项，不属于个人台账）。
     """
-    scope = project_scope_id(user, all_projects)
-    # scope 为 None = 「全部项目」视角：where 里不加项目过滤
-    wr_scope = WorkRecord.project_id == scope if scope is not None else True
+    project_scope = project_scope_id(user, all_projects)
+    # project_scope 为 None = 「全部项目」视角：where 里不加项目过滤
+    base_conditions = [WorkRecord.project_id == project_scope] if project_scope is not None else []
+    if scope != "project":
+        base_conditions.append(WorkRecord.creator_id == user.id)
+    wr_scope = and_(*base_conditions) if base_conditions else True
     from app.models.hazard import Hazard, HazardStatus
-    hz_scope = Hazard.project_id == scope if scope is not None else True
+    hz_scope = Hazard.project_id == project_scope if project_scope is not None else True
 
     # 工作记录 - 未查看
     unviewed_by_type = {}

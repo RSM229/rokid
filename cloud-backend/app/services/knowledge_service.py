@@ -226,7 +226,15 @@ def _search_by_content_rag(
 
     grouped: dict[str, dict] = {}
     for hit in hits:
-        filename = Path(hit["source_id"]).name
+        source_id = str(hit.get("source_id") or "")
+        # 🔴 2026-11-27：规范检索只允许命中**内置语料**。
+        # user_kb/ 下是用户个人库与项目档案库的文件，索引里带 kb_id，但本函数
+        # 是「查规范」的公共入口（无用户上下文、不传 kb 白名单）：一旦命中，
+        # 会走下面的 fallback 分支被当成「其他资料」返回给**任何用户**，
+        # 等于把别人的个人资料片段串进规范问答。这里按路径直接排除。
+        if source_id.startswith("user_kb/") or "/user_kb/" in source_id:
+            continue
+        filename = Path(source_id).name
         doc = known.get(filename)
         if doc is None:
             relative = Path(hit["source_id"])

@@ -23,7 +23,7 @@ from app.routers.form_doc import export_form_doc
 from app.services import project_archive
 
 
-def test_archive_sync_uses_creator_personal_library_and_is_retryable(tmp_path, monkeypatch):
+def test_archive_sync_uses_project_library_member_folder_and_is_retryable(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "knowledge_base_path", tmp_path / "knowledge")
     monkeypatch.setattr(settings, "export_dir", tmp_path / "exports")
     settings.export_dir.mkdir(parents=True)
@@ -76,26 +76,30 @@ def test_archive_sync_uses_creator_personal_library_and_is_retryable(tmp_path, m
             assert archived.source_revision == 1
             assert open(archived.path, "rb").read() == b"revision one"
 
-            # New archives live in the creator's own home library, not in a
-            # newly-created shared project library.
-            assert (await db.execute(select(ProjectArchiveLibrary))).scalars().all() == []
+            # 2026-11-27 口径：项目文书只写一份，落在项目资料库里
+            #   <创建人文件夹> / 工作记录与表单 / 巡视记录
+            # 不再写进个人库，也不做双写。
+            mappings = (await db.execute(select(ProjectArchiveLibrary))).scalars().all()
+            assert len(mappings) == 1
             kb = await db.get(KnowledgeBase, kb_id)
-            assert kb.kb_type == "personal"
-            assert kb.owner_id == owner.id
-            assert kb.project_id is None
+            assert kb.kb_type == "shared"
+            assert kb.project_id == project.id
+            # 上传人 = 文书创建人（列表里回显「谁生成的」）
+            assert archived.uploader_id == owner.id
             members = set((await db.execute(select(KnowledgeBaseMember.user_id).where(
                 KnowledgeBaseMember.kb_id == kb_id
             ))).scalars().all())
-            assert members == {owner.id}
+            assert {owner.id, colleague.id} <= members
             assert outsider.id not in members
             libraries = await list_knowledge_bases(colleague, db)
-            assert not any(item["id"] == kb_id for item in libraries["items"])
+            assert any(item["id"] == kb_id for item in libraries["items"])
             folder = await db.get(KbFolder, archived.folder_id)
             parent = await db.get(KbFolder, folder.parent_id)
-            grandparent = await db.get(KbFolder, parent.parent_id)
-            assert (grandparent.name, parent.name, folder.name) == (
-                "项目文件夹", "工作记录与表单", "巡视记录"
-            )
+            assert (parent.name, folder.name) == ("工作记录与表单", "巡视记录")
+            member_folder = await db.get(KbFolder, parent.parent_id)
+            assert member_folder.name == "档案员"
+            assert member_folder.owner_id == owner.id
+            assert member_folder.parent_id is None
 
             source_file.write_bytes(b"revision two")
             doc.content_revision = 2
@@ -137,7 +141,7 @@ def test_archive_sync_uses_creator_personal_library_and_is_retryable(tmp_path, m
             assert failed is None
             assert doc.archive_sync_status == "failed"
             # The DB session remains usable after the archive savepoint rolls back.
-            assert (await db.execute(select(ProjectArchiveLibrary))).scalars().all() == []
+            assert len((await db.execute(select(ProjectArchiveLibrary))).scalars().all()) == 1
 
             monkeypatch.setattr(project_archive.shutil, "copy2", original_copy)
             retried = await project_archive.sync_document_to_project_archive(db, doc, owner)
@@ -146,8 +150,7 @@ def test_archive_sync_uses_creator_personal_library_and_is_retryable(tmp_path, m
             assert retried.source_revision == 3
             assert doc.archive_sync_status == "synced"
 
-            # Archiving as another user still targets the creator's library and
-            # cannot redirect the copy into their own home library.
+            # 由他人触发归档时，仍然落在**创建人**的成员文件夹，不会串到操作人名下。
             colleague_synced = await project_archive.sync_document_to_project_archive(
                 db, doc, colleague
             )
