@@ -2298,6 +2298,24 @@ async def _agent_chat_impl(
     except Exception:  # noqa: BLE001
         logger.warning("材料收集失败，本轮按现有上下文继续", exc_info=True)
 
+    # 2026-11-27：材料够不够由 agent 自己判断。它可以主动调用 view_image /
+    # search_kb / read_document，看完再把观察结果回灌到回答上下文（读循环）。
+    research_block = ""
+    try:
+        from app.services import agent_research
+
+        research_block = await agent_research.research(
+            db, user, project_id, message,
+            images=req.images or [],
+            material=material,
+            mentions=req.mentions or [],
+            provider=req.provider,
+            model=req.model,
+            report=report_progress,
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning("读取循环失败，本轮按现有材料继续", exc_info=True)
+
     system = _AGENT_SYSTEM.format(
         catalog=agent_tools.catalog_for_prompt(),
         actions=json.dumps(agent_request_plan.action_catalog(), ensure_ascii=False),
@@ -2313,6 +2331,8 @@ async def _agent_chat_impl(
         messages.append({"role": "system", "content": personal_memory_block})
     if materials_block:
         messages.append({"role": "system", "content": materials_block})
+    if research_block:
+        messages.append({"role": "system", "content": research_block})
     if ref_context:
         # 加显式抬头：这些是用户主动 @ 指定、并要求「以它为准」的材料，
         # 与普通检索上下文区分开，否则模型会把它们当成泛泛的背景信息。
@@ -2812,6 +2832,7 @@ async def _agent_chat_impl(
             turn = await agent_loop.run_draft_agent(
                 db, message=message, draft=draft,
                 provider=req.provider, model=req.model,
+                context=research_block,
             )
         except Exception:  # noqa: BLE001 —— 循环失败退回一次性抽参
             logger.warning("草稿 agent 循环失败，退回一次性抽参", exc_info=True)

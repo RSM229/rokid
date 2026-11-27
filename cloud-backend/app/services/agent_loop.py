@@ -117,6 +117,7 @@ def _state_prompt(
     args: dict[str, Any],
     missing: list[str],
     fields: dict[str, dict[str, Any]],
+    context: str = "",
 ) -> str:
     field_lines = [
         f"- {canonical}（{spec.get('label')}）" for canonical, spec in fields.items()
@@ -127,6 +128,7 @@ def _state_prompt(
         f"已填字段：{json.dumps(args, ensure_ascii=False)[:1200]}\n"
         f"仍缺字段：{json.dumps(missing[:12], ensure_ascii=False)}\n"
         f"可填字段表：\n" + "\n".join(field_lines)
+        + (f"\n\n本轮已查阅到的材料（可直接使用，不要重复去查）：\n{context[:4000]}" if context else "")
     )
 
 
@@ -137,6 +139,7 @@ async def run_draft_agent(
     draft: dict[str, Any],
     provider: str | None = None,
     model: str | None = None,
+    context: str = "",
 ) -> AgentTurn:
     """让模型用工具补草稿；失败返回空 turn，调用方回退原有逻辑。"""
     args = dict(draft.get("args") or {})
@@ -153,6 +156,7 @@ async def run_draft_agent(
                 args=args,
                 missing=missing,
                 fields=_ask_field_map(record_type, args),
+                context=context,
             ) + f"\n用户这句话：{message}",
         },
     ]
