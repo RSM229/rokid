@@ -182,6 +182,43 @@ def normalize_datetime_value(value: Any, event_date: Any = None) -> str | None:
     return parsed.isoformat(sep=" ", timespec="minutes") if parsed else None
 
 
+def extract_clock(text: str) -> str | None:
+    """从任意文本里取第一个钟点（16:41 / 16时41分 / 下午4点41）。
+
+    只做时间识别，不判断它属于哪个业务字段；字段归属由调用方/模型决定。
+    """
+    match = re.search(
+        r"(上午|下午|晚上|中午|凌晨|早上)?\s*(?<!\d)([01]?\d|2[0-3])"
+        r"\s*(?:[:：]|时|点)\s*([0-5]?\d)?\s*分?",
+        str(text or ""),
+    )
+    if not match:
+        return None
+    period = match.group(1) or ""
+    hour = int(match.group(2))
+    minute = int(match.group(3) or 0)
+    if period in {"下午", "晚上"} and hour < 12:
+        hour += 12
+    elif period == "凌晨" and hour == 12:
+        hour = 0
+    return f"{hour:02d}:{minute:02d}"
+
+
+def normalize_time_value(value: Any, event_date: date | None = None) -> str | None:
+    """把一个时间表达统一成 ``HH:MM``（区间取开始时刻）。"""
+    text = str(value or "").strip()
+    if not text:
+        return None
+    ranged = extract_explicit_time_range(text, event_date)
+    if ranged.get("start_time"):
+        return ranged["start_time"]
+    clock = extract_clock(text)
+    if clock:
+        return clock
+    parsed = parse_local_datetime(text, event_date)
+    return parsed.strftime("%H:%M") if parsed else None
+
+
 def extract_explicit_time_range(text: str, event_date: date | None = None) -> dict[str, str]:
     """Extract explicit time ranges and explicitly-labelled single endpoints."""
     if not text:

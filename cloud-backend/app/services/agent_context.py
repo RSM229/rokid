@@ -13,7 +13,11 @@ from datetime import datetime, timedelta, timezone
 import re
 from typing import Any
 
-from app.services.time_normalization import extract_explicit_time_range, parse_local_date
+from app.services.time_normalization import (
+    extract_clock,
+    extract_explicit_time_range,
+    parse_local_date,
+)
 
 
 FACTS_KEY = "_user_facts"
@@ -107,9 +111,9 @@ def extract_explicit_message_facts(message: str, *, message_ref: str = "") -> li
     # 具体落到哪个参数（inspection_start_time / station_start_time）由
     # ``map_facts_to_record_type`` 按当前记录类型的字段表决定。
     if not any(field == "start_time" for field, _ in values) and (full or short):
-        clock = re.search(r"(?<!\d)([01]?\d|2[0-3])\s*[:：]\s*([0-5]\d)(?!\d)", text)
+        clock = extract_clock(text)
         if clock:
-            values.append(("start_time", f"{int(clock.group(1)):02d}:{clock.group(2)}"))
+            values.append(("start_time", clock))
     location = re.search(
         r"(?:在|位于|地点为|位置为)\s*([^，。；,;\n]{2,80}?)(?=(?:进行|开展|完成|做了|做|干了|检查|施工|浇筑|验收|旁站|巡视|巡查|记录)|[，。；,;\n]|$)",
         text,

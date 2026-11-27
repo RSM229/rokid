@@ -2798,14 +2798,41 @@ async def _agent_chat_impl(
     draft_prefill = (draft.get("args") or {}).get("_prefill")
     if not prefill and isinstance(draft_prefill, dict):
         prefill = draft_prefill
-    # 模型没选工具、但草稿未完成：把这句当「补充回答」单独抽一次参数
-    # （明显是提问/找页面的话不抽，避免「用户中途问规范」被当成补字段）
+    # 模型没选工具、但草稿未完成：交给 agent 循环自己决定填哪些字段、要不要反问。
+    # 服务端只做校验（字段必须在当前表式里、类型在目录里、时间做归一化）。
     if not tool and pending_tool and not any(h in message for h in _SUPPLEMENT_SKIP_HINTS):
         await report_progress(
-            "extract_supplement", "running", "正在把你说的内容，对照草稿里还缺的字段提取出来",
+            "extract_supplement", "running", "正在对照草稿逐项核对这句话里的信息",
             {"pending_tool": pending_tool, "missing_fields": list(draft.get("missing") or [])[:24]},
         )
-        extra = await _extract_supplement(message, pending_tool, draft, req.provider, req.model)
+        turn = None
+        try:
+            from app.services import agent_loop
+
+            turn = await agent_loop.run_draft_agent(
+                db, message=message, draft=draft,
+                provider=req.provider, model=req.model,
+            )
+        except Exception:  # noqa: BLE001 —— 循环失败退回一次性抽参
+            logger.warning("草稿 agent 循环失败，退回一次性抽参", exc_info=True)
+        extra = dict(turn.fields) if turn else {}
+        if turn and turn.record_type and not extra.get("record_type"):
+            extra["record_type"] = turn.record_type
+        if turn and turn.question and not extra:
+            await report_progress(
+                "extract_supplement", "completed", "模型判断还需要向你确认",
+                {"question": turn.question, "steps": [step.get("tool") for step in turn.steps][:6]},
+            )
+            return {
+                "kind": "action", "tool": pending_tool,
+                "model": model_id, "request_plan": incoming_plan,
+                "reply": turn.question,
+                "card": None, "cards": [], "actions": [],
+                "need_more": [], "options": {}, "form": None, "input_components": [],
+                "recommendations": [], "undo": None,
+            }
+        if not extra and turn is None:
+            extra = await _extract_supplement(message, pending_tool, draft, req.provider, req.model)
         # 命中「仍缺字段」才当补充回答：标签、extra_fields 槽位、或仍缺字段对应的参数名
         if agent_tools.supplement_hits(extra, draft.get("args") or {}, draft.get("missing")):
             tool = pending_tool
